@@ -16,7 +16,6 @@ jobs:
     timeout-minutes: 5
     env:
       XKIRO_API_KEY: ${{ secrets.XKIRO_AGENT }}
-      MODEL: openai/gpt-5.6-sol
     steps:
       - name: Verify xKiro secret is present
         shell: bash
@@ -28,7 +27,7 @@ jobs:
           fi
           echo "XKIRO_AGENT_SECRET_PRESENT=true"
 
-      - name: Check xKiro connectivity
+      - name: Select live free-tier xKiro model
         shell: bash
         run: |
           set -euo pipefail
@@ -39,7 +38,16 @@ jobs:
             exit 3
           fi
           count=$(jq '.data | length // 0' models.json)
+          free_count=$(jq '[.data[] | select(.access_tier == "free")] | length' models.json)
+          model=$(jq -r '.data[] | select(.access_tier == "free") | .id' models.json | head -n 1)
           echo "CHAT_MODEL_COUNT=${count}"
+          echo "FREE_CHAT_MODEL_COUNT=${free_count}"
+          if [ -z "$model" ] || [ "$model" = "null" ]; then
+            echo "NO_FREE_CHAT_MODEL_AVAILABLE=true"
+            exit 4
+          fi
+          echo "SELECTED_FREE_MODEL=${model}"
+          echo "MODEL=${model}" >> "$GITHUB_ENV"
 
       - name: Call xKiro agent model
         shell: bash
@@ -73,7 +81,7 @@ jobs:
           echo "HTTP_STATUS=${http_code}"
           if [ "$http_code" != "200" ]; then
             jq '{error, message}' response.json 2>/dev/null || cat response.json
-            exit 4
+            exit 5
           fi
 
           served_model=$(jq -r '.model // empty' response.json)
@@ -84,7 +92,7 @@ jobs:
           normalized=$(printf '%s' "$content" | tr -d '\r\n ')
           if [ "$normalized" != "AAU_AGENT_API_OK" ]; then
             echo "AGENT_API_SMOKE_PASS=false"
-            exit 5
+            exit 6
           fi
 
           echo "AGENT_API_SMOKE_PASS=true"
