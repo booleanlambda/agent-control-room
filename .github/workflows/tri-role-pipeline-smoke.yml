@@ -85,7 +85,7 @@ jobs:
   authenticator:
     needs: worker
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
     outputs:
       decision: ${{ steps.auth_call.outputs.decision }}
       model: ${{ steps.auth_call.outputs.model }}
@@ -110,7 +110,7 @@ jobs:
           set +x
           model="nvidia/nemotron-3-ultra-550b-a55b:free"
           input_hash=$(printf '%s' "$CLAIM|$RULE|worker=$WORKER_DECISION" | sha256sum | awk '{print $1}')
-          jq -n --arg model "$model" --arg claim "$CLAIM" --arg rule "$RULE" --arg wd "$WORKER_DECISION" '{model:$model,temperature:0,max_tokens:180,reasoning:{exclude:true},messages:[{role:"system",content:("You are AAU authenticator. Independently evaluate the claim under this rule: " + $rule + " Return decision PASS or decision FAIL and one short reason. Do not defer to the worker." )},{role:"user",content:("Claim: " + $claim + " Worker decision: " + $wd)}]}' > auth-payload.json
+          jq -n --arg model "$model" --arg claim "$CLAIM" --arg rule "$RULE" --arg wd "$WORKER_DECISION" '{model:$model,temperature:0,max_tokens:500,reasoning:{exclude:false},messages:[{role:"system",content:("You are AAU authenticator. Independently evaluate the claim under this rule: " + $rule + " Your conclusion must contain exactly one of these phrases: decision PASS or decision FAIL. Give one short reason. Do not defer to the worker." )},{role:"user",content:("Claim: " + $claim + " Worker decision: " + $wd)}]}' > auth-payload.json
 
           code=""
           for attempt in 1 2 3; do
@@ -124,11 +124,12 @@ jobs:
           done
           [ "$code" = "200" ] || { jq '{error,message}' auth-response.json 2>/dev/null || true; exit 3; }
 
-          content=$(jq -r '.choices[0].message.content // empty' auth-response.json)
+          content=$(jq -r '(.choices[0].message.content // "") as $c | (.choices[0].message.reasoning // "") as $r | if ($c|length)>0 then $c elif ($r|length)>0 then $r else (.choices[0].text // "") end' auth-response.json)
           served_model=$(jq -r '.model // empty' auth-response.json)
+          echo "AUTH_RESPONSE_SOURCE=$(jq -r 'if ((.choices[0].message.content // "")|length)>0 then "content" elif ((.choices[0].message.reasoning // "")|length)>0 then "reasoning" else "text" end' auth-response.json)"
           if printf '%s' "$content" | grep -Eqi '(decision[^A-Za-z0-9]+FAIL|\bFAIL\b)'; then decision="FAIL";
           elif printf '%s' "$content" | grep -Eqi '(decision[^A-Za-z0-9]+PASS|\bPASS\b)'; then decision="PASS";
-          else echo "AUTH_PARSE_ERROR=true"; printf '%s\n' "$content"; exit 4; fi
+          else echo "AUTH_PARSE_ERROR=true"; printf '%s\n' "$content" | head -c 1000; echo; exit 4; fi
 
           output_hash=$(printf '%s' "$content" | sha256sum | awk '{print $1}')
           echo "AUTHENTICATOR_MODEL=${served_model}"
