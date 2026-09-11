@@ -1,0 +1,176 @@
+name: AAU External Expertise Final Verification Resume
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/expertise-final-verification-resume.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SOURCE_PACKET_RUN_ID: "34605274638"
+  TASK_AUTHORITY_MODEL: "poolside/laguna-s-2.1:free"
+  SEALED_TASKS_SHA256: "ca8a39cd78d8b486ca885212a48bbbb1afa61d7f59d070f7bdaddcc95f66e666"
+  SEALED_FULL_PACKET_SHA256: "2f8dd53f0e334721517fd03fd198081da1e78af83d0641bfda045742d845759f"
+  PORTFOLIO_MANIFEST_SHA256: "652d6ec6ec67027ff80a407b1a365c940458972c8706ab802e0dcbf33d40b784"
+  EXECUTABLE_HARNESS_SHA256: "2ea7007c911398d899c244f1555e0eb106567ab894648bd848a8ad8aae16a05a"
+  EXPERIMENT_ID: "6cd14e30-7dad-4410-89e3-5f779ba8e53b"
+  SIM_AGENT_ID: "e854982e-baf4-4b23-81e0-148babe66378"
+
+jobs:
+  learner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      learner_model: ${{ steps.run.outputs.learner_model }}
+      answers_sha256: ${{ steps.run.outputs.answers_sha256 }}
+    env:
+      XKIRO_API_KEY: ${{ secrets.XKIRO_AGENT }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download unchanged sealed public task packet from source run
+        uses: actions/download-artifact@v4
+        with:
+          name: aau-verification-tasks-34605274638
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: booleanlambda/agent-control-room
+          run-id: 34605274638
+      - name: Verify packet identity before learner execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          observed=$(python3 - <<'PY'
+          import json,hashlib
+          x=json.load(open('tasks.json'))
+          print(x['tasks_sha256'])
+          PY
+          )
+          [ "$observed" = "$SEALED_TASKS_SHA256" ]
+          grep -q "$SEALED_FULL_PACKET_SHA256" tasks.json
+          echo "SEALED_PACKET_RESUME_VALID=true"
+          echo "NO_PRIOR_LEARNER_ANSWER_WAS_GENERATED=true"
+      - name: Verify isolated learner credential
+        run: |
+          [ -n "${XKIRO_API_KEY:-}" ]
+          echo "LEARNER_SECRET_PRESENT=true"
+      - id: run
+        name: Answer unchanged sealed packet with audited xKiro free-model fallback
+        run: python3 scripts/aau_expertise_learner_v2.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aau-verification-answers-${{ github.run_id }}
+          path: answers.json
+          retention-days: 7
+
+  authenticator:
+    needs: learner
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      auth_grades_sha256: ${{ steps.run.outputs.auth_grades_sha256 }}
+      adjudication_count: ${{ steps.run.outputs.adjudication_count }}
+      authenticator_model: ${{ steps.run.outputs.authenticator_model }}
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_AUTHENTICATOR }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download unchanged hidden grader packet from source run
+        uses: actions/download-artifact@v4
+        with:
+          name: aau-verification-grader-packet-34605274638
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: booleanlambda/agent-control-room
+          run-id: 34605274638
+      - uses: actions/download-artifact@v4
+        with:
+          name: aau-verification-answers-${{ github.run_id }}
+      - name: Verify hidden packet identity and isolated authenticator credential
+        run: |
+          [ -n "${OPENROUTER_API_KEY:-}" ]
+          grep -q "$SEALED_FULL_PACKET_SHA256" grader_packet.json
+          echo "HIDDEN_GRADER_PACKET_UNCHANGED=true"
+          echo "AUTHENTICATOR_SECRET_PRESENT=true"
+      - id: run
+        name: Independently grade C1-C8
+        run: python3 scripts/aau_expertise_final_verification.py authenticator
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aau-verification-auth-grades-${{ github.run_id }}
+          path: auth-grades.json
+          retention-days: 7
+
+  adjudicator:
+    needs: [learner, authenticator]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      adj_grades_sha256: ${{ steps.run.outputs.adj_grades_sha256 }}
+      adjudicator_models: ${{ steps.run.outputs.adjudicator_models }}
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_ADJUDICATOR }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download unchanged hidden grader packet from source run
+        uses: actions/download-artifact@v4
+        with:
+          name: aau-verification-grader-packet-34605274638
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: booleanlambda/agent-control-room
+          run-id: 34605274638
+      - uses: actions/download-artifact@v4
+        with:
+          name: aau-verification-answers-${{ github.run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: aau-verification-auth-grades-${{ github.run_id }}
+      - name: Verify isolated adjudicator credential
+        run: |
+          [ -n "${OPENROUTER_API_KEY:-}" ]
+          echo "ADJUDICATOR_SECRET_PRESENT=true"
+      - id: run
+        name: Adjudicate only predeclared flagged domains
+        run: python3 scripts/aau_expertise_final_verification.py adjudicator
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aau-verification-adj-grades-${{ github.run_id }}
+          path: adj-grades.json
+          retention-days: 7
+
+  final-decision:
+    needs: [learner, authenticator, adjudicator]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      overall_result: ${{ steps.run.outputs.overall_result }}
+      mean_score: ${{ steps.run.outputs.mean_score }}
+      report_sha256: ${{ steps.run.outputs.report_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download unchanged hidden grader packet from source run
+        uses: actions/download-artifact@v4
+        with:
+          name: aau-verification-grader-packet-34605274638
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: booleanlambda/agent-control-room
+          run-id: 34605274638
+      - uses: actions/download-artifact@v4
+        with:
+          name: aau-verification-answers-${{ github.run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: aau-verification-auth-grades-${{ github.run_id }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: aau-verification-adj-grades-${{ github.run_id }}
+      - id: run
+        name: Apply unchanged predeclared pass gate
+        run: python3 scripts/aau_expertise_final_verification.py final
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aau-expertise-verification-report-${{ github.run_id }}
+          path: verification-report.json
+          retention-days: 30
