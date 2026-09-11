@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/expertise-final-verification-resume.yml'
+      - 'scripts/aau_expertise_learner_v2.py'
   workflow_dispatch:
 
 permissions:
@@ -44,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           observed=$(python3 - <<'PY'
-          import json,hashlib
+          import json
           x=json.load(open('tasks.json'))
           print(x['tasks_sha256'])
           PY
