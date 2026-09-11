@@ -3,6 +3,7 @@ import os, json, time, hashlib, urllib.request, urllib.error
 from pathlib import Path
 
 PORTFOLIO_MANIFEST_SHA256 = os.environ.get("PORTFOLIO_MANIFEST_SHA256", "652d6ec6ec67027ff80a407b1a365c940458972c8706ab802e0dcbf33d40b784")
+USER_AGENT = "curl/8.5.0"
 
 EVIDENCE = {
     "C1": [["c26aee52-7744-4b10-8ddc-e687329416ea", "workflow discovery/process requirements artifact"], ["73d8ce03-01ca-469d-8b37-62d62b46eccb", "source-clean defended whole-client C1/C8 artifact"]],
@@ -32,7 +33,7 @@ def gh_output(name, value):
             f.write(f"{name}={value}\n")
 
 def get_free_models():
-    req = urllib.request.Request("https://api.xkiro.com/v1/models")
+    req = urllib.request.Request("https://api.xkiro.com/v1/models", headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=60) as r:
         data = json.loads(r.read().decode())
     models = []
@@ -47,8 +48,6 @@ def get_free_models():
                 return (i, mid)
         return (len(preferred_prefixes), mid)
     models = sorted(set(models), key=rank)
-    # The previously working DeepSeek endpoint returned 403 in the first final-assessment run.
-    # Keep it available as a fallback but do not make it first choice on this retry.
     models = [m for m in models if m != "deepseek/deepseek-v4-flash"] + (["deepseek/deepseek-v4-flash"] if "deepseek/deepseek-v4-flash" in models else [])
     return models
 
@@ -62,7 +61,7 @@ def call_model(key, model, system, user, timeout=180):
     req = urllib.request.Request(
         "https://api.xkiro.com/v1/chat/completions",
         data=json.dumps(body).encode(),
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json", "Accept": "application/json", "User-Agent": USER_AGENT},
     )
     with urllib.request.urlopen(req, timeout=timeout) as r:
         obj = json.loads(r.read().decode())
