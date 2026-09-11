@@ -38,11 +38,10 @@ jobs:
             exit 3
           fi
 
-          jq -r '[
-            (.data[] | select((.id | endswith(":free")) and (.id | startswith("google/"))) | .id),
-            (.data[] | select((.id | endswith(":free")) and (.id | startswith("mistralai/"))) | .id),
-            (.data[] | select((.id | endswith(":free")) and (.id | startswith("qwen/"))) | .id)
-          ] | unique | .[]' models.json | head -n 9 > candidates.txt
+          jq -r '[.data[]
+            | select(.id | endswith(":free"))
+            | select((.id | startswith("nvidia/")) | not)
+            | .id] | unique | .[]' models.json | head -n 16 > candidates.txt
 
           count=$(wc -l < candidates.txt | tr -d ' ')
           echo "ADJUDICATOR_CANDIDATE_COUNT=${count}"
@@ -99,7 +98,6 @@ jobs:
               break
             fi
 
-            # Shared free pools can be transiently saturated. Move to the next family/model.
             if [ "$http_code" = "429" ] || [ "$http_code" = "500" ] || [ "$http_code" = "502" ] || [ "$http_code" = "503" ]; then
               continue
             fi
