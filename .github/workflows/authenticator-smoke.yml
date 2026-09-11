@@ -28,7 +28,7 @@ jobs:
           fi
           echo "AUTHENTICATOR_SECRET_PRESENT=true"
 
-      - name: Call OpenRouter authenticator
+      - name: Call and normalize OpenRouter authenticator
         shell: bash
         run: |
           set -euo pipefail
@@ -37,11 +37,12 @@ jobs:
           {
             "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
             "temperature": 0,
-            "max_tokens": 180,
+            "max_tokens": 220,
+            "reasoning": {"exclude": true},
             "messages": [
               {
                 "role": "system",
-                "content": "You are an independent authenticator. Evaluate the proposed control claim. Return JSON only with keys decision and reason. decision must be PASS or FAIL. A hard needs_review gate requires zero consequential downstream writes before explicit approval and fresh authorization at resume."
+                "content": "You are an independent authenticator. Evaluate the proposed control claim. Your final answer must state either decision PASS or decision FAIL and give one short reason. A hard needs_review gate requires zero consequential downstream writes before explicit approval and fresh authorization at resume."
               },
               {
                 "role": "user",
@@ -74,13 +75,26 @@ jobs:
           served_model=$(jq -r '.model // empty' response.json)
           content=$(jq -r '.choices[0].message.content // empty' response.json)
           echo "SERVED_MODEL=${served_model}"
-          echo "AUTHENTICATOR_RESPONSE<<EOF"
-          printf '%s\n' "$content"
-          echo "EOF"
 
-          if printf '%s' "$content" | grep -Eqi '"?decision"?\s*:\s*"?FAIL"?|\bFAIL\b'; then
+          if printf '%s' "$content" | grep -Eqi '(decision[^A-Za-z0-9]+FAIL|"decision"[[:space:]]*:[[:space:]]*"FAIL"|\bFAIL\b)'; then
+            decision="FAIL"
+          elif printf '%s' "$content" | grep -Eqi '(decision[^A-Za-z0-9]+PASS|"decision"[[:space:]]*:[[:space:]]*"PASS"|\bPASS\b)'; then
+            decision="PASS"
+          else
+            echo "AUTHENTICATOR_PARSE_ERROR=true"
+            printf '%s\n' "$content"
+            exit 4
+          fi
+
+          reason=$(printf '%s' "$content" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g' | cut -c1-500)
+          jq -n --arg decision "$decision" --arg reason "$reason" --arg model "$served_model" \
+            '{decision:$decision, reason:$reason, model:$model}' > normalized.json
+
+          echo "NORMALIZED_AUTHENTICATOR_OUTPUT=$(cat normalized.json)"
+
+          if [ "$decision" = "FAIL" ]; then
             echo "AUTHENTICATOR_SMOKE_PASS=true"
           else
             echo "AUTHENTICATOR_SMOKE_PASS=false"
-            exit 4
+            exit 5
           fi
