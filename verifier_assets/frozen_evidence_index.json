@@ -1,0 +1,41 @@
+{
+  "experiment_id": "6cd14e30-7dad-4410-89e3-5f779ba8e53b",
+  "sim_agent_id": "e854982e-baf4-4b23-81e0-148babe66378",
+  "portfolio_freeze_cutoff_wake": 46,
+  "portfolio_manifest_sha256": "652d6ec6ec67027ff80a407b1a365c940458972c8706ab802e0dcbf33d40b784",
+  "scope": "AI workflow integration and automation for SMB operational workflows",
+  "competencies": {
+    "C1": "Workflow discovery, process modeling, value definition",
+    "C2": "API, event and data-contract integration",
+    "C3": "Authentication, authorization, secrets, privacy and AI security",
+    "C4": "LLM/tool orchestration and structured interaction",
+    "C5": "Reliable workflow execution, state and recovery",
+    "C6": "Testing, evaluation, guardrails and human oversight",
+    "C7": "Observability, monitoring, cost and incident handling",
+    "C8": "End-to-end delivery, documentation and professional judgment"
+  },
+  "selected_frozen_evidence": [
+    {"artifact_id":"73d8ce03-01ca-469d-8b37-62d62b46eccb","wake":41,"domains":"C1-C8","title":"Source-Clean Defended Client Boundary and Handoff — Support Workflow"},
+    {"artifact_id":"93b9b352-4517-4e67-a251-bfdcd64e51a1","wake":41,"domains":"C4-C7","title":"Wake 41 Executable Audit Repair — Hard Review Gate and Complete Path Telemetry"},
+    {"artifact_id":"fdaa026e-3558-40af-8c42-6f0f8b3f3d56","wake":41,"domains":"C5","title":"C5 Source-Clean Reliability Revalidation"},
+    {"artifact_id":"a765a3c8-1fb7-4612-9231-018086a99ca9","wake":41,"domains":"C7","title":"C7 Source-Clean Observability Revalidation"},
+    {"artifact_id":"e9c41627-52bb-47ff-9dfe-54faf2200f74","wake":42,"domains":"C4-C8","title":"Source-Clean Changed-Case Transfer — B2B SaaS Onboarding and Entitlement Provisioning"},
+    {"artifact_id":"7b72f67e-eb75-4fb3-af92-fd29dcea7b2f","wake":43,"domains":"C4-C8","title":"Source-Clean Executable Adversarial Rebuild — Access Provisioning, Recovery, Evaluation and Claim Pressure"},
+    {"artifact_id":"c5b29d52-965f-4337-9418-7bae770f81f5","wake":44,"domains":"C4-C8","title":"Source-Clean Reproduction Bridge — Corrected Control Reconstruction"},
+    {"artifact_id":"1764be1a-c7ac-4fb4-9920-dd9a8b0c26d1","wake":32,"domains":"C1-C8","title":"Whole-Client Capstone — Multi-Site Equipment Rental Workflow"},
+    {"artifact_id":"8d9cca5d-3070-42f4-90b2-1de6ccf19362","wake":33,"domains":"C5-C8","title":"Whole-Client Capstone Stress Repair — Evidence, Recovery, Operations and Claims"},
+    {"artifact_id":"0e312a2a-ba21-4d5e-8870-437106ff81f6","wake":36,"domains":"C6","title":"C6 Weak-Domain Retest Synthesis — Statistical Release Evidence"}
+  ],
+  "external_execution_evidence": {
+    "wake41_harness_sha256": "2ea7007c911398d899c244f1555e0eb106567ab894648bd848a8ad8aae16a05a",
+    "independent_rerun_runtime": "Vercel external serverless runtime",
+    "hash_match": true,
+    "rerun_passed": true,
+    "external_dependencies": "mocked; not production/live-provider validation"
+  },
+  "caveats": [
+    "Historical raw progress telemetry is not readiness-valid after provenance quarantine.",
+    "Mocked executable evidence must not be represented as live production validation.",
+    "This index is a read-only mirror of pre-freeze evidence; it grants no new expertise credit."
+  ]
+}
