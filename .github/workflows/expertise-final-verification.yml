@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/expertise-final-verification.yml'
+      - 'scripts/aau_expertise_final_verification.py'
+      - 'scripts/aau_expertise_learner_v2.py'
   workflow_dispatch:
 
 permissions:
@@ -49,7 +51,7 @@ jobs:
   learner:
     needs: task-authority
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     outputs:
       learner_model: ${{ steps.run.outputs.learner_model }}
       answers_sha256: ${{ steps.run.outputs.answers_sha256 }}
@@ -65,8 +67,8 @@ jobs:
           [ -n "${XKIRO_API_KEY:-}" ]
           echo "LEARNER_SECRET_PRESENT=true"
       - id: run
-        name: Answer fresh packet
-        run: python3 scripts/aau_expertise_final_verification.py learner
+        name: Answer fresh packet with audited free-model fallback
+        run: python3 scripts/aau_expertise_learner_v2.py
       - uses: actions/upload-artifact@v4
         with:
           name: aau-verification-answers-${{ github.run_id }}
