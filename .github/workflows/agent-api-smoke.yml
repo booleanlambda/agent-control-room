@@ -1,0 +1,90 @@
+name: Agent API Smoke Test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/agent-api-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  agent-api-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      XKIRO_API_KEY: ${{ secrets.XKIRO_AGENT }}
+      MODEL: openai/gpt-5.6-sol
+    steps:
+      - name: Verify xKiro secret is present
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${XKIRO_API_KEY:-}" ]; then
+            echo "XKIRO_AGENT_SECRET_PRESENT=false"
+            exit 2
+          fi
+          echo "XKIRO_AGENT_SECRET_PRESENT=true"
+
+      - name: Check xKiro connectivity
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o models.json -w '%{http_code}' https://api.xkiro.com/v1/models)
+          echo "MODELS_HTTP_STATUS=${code}"
+          if [ "$code" != "200" ]; then
+            cat models.json
+            exit 3
+          fi
+          count=$(jq '.data | length // 0' models.json)
+          echo "CHAT_MODEL_COUNT=${count}"
+
+      - name: Call xKiro agent model
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          jq -n \
+            --arg model "$MODEL" \
+            '{
+              model:$model,
+              temperature:0,
+              max_tokens:120,
+              messages:[
+                {role:"system",content:"You are the AAU worker-agent API smoke test. Follow the instruction exactly and answer concisely."},
+                {role:"user",content:"Return exactly this token and nothing else: AAU_AGENT_API_OK"}
+              ]
+            }' > payload.json
+
+          http_code=""
+          for attempt in 1 2 3; do
+            http_code=$(curl -sS -o response.json -w '%{http_code}' \
+              https://api.xkiro.com/v1/chat/completions \
+              -H "Authorization: Bearer ${XKIRO_API_KEY}" \
+              -H 'Content-Type: application/json' \
+              --data-binary @payload.json || true)
+            if [ "$http_code" = "200" ]; then break; fi
+            echo "ATTEMPT_${attempt}_HTTP=${http_code}"
+            sleep $((attempt * 2))
+          done
+
+          echo "HTTP_STATUS=${http_code}"
+          if [ "$http_code" != "200" ]; then
+            jq '{error, message}' response.json 2>/dev/null || cat response.json
+            exit 4
+          fi
+
+          served_model=$(jq -r '.model // empty' response.json)
+          content=$(jq -r '.choices[0].message.content // empty' response.json)
+          echo "SERVED_MODEL=${served_model}"
+          echo "AGENT_RESPONSE=${content}"
+
+          normalized=$(printf '%s' "$content" | tr -d '\r\n ')
+          if [ "$normalized" != "AAU_AGENT_API_OK" ]; then
+            echo "AGENT_API_SMOKE_PASS=false"
+            exit 5
+          fi
+
+          echo "AGENT_API_SMOKE_PASS=true"
