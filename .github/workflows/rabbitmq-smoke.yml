@@ -1,0 +1,123 @@
+name: RabbitMQ AMQP Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/rabbitmq-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      AMQP_URL: ${{ secrets.AMQP }}
+
+    steps:
+      - name: Check secret is available
+        shell: bash
+        run: |
+          if [ -z "$AMQP_URL" ]; then
+            echo "AMQP_SECRET_PRESENT=false"
+            exit 1
+          fi
+          case "$AMQP_URL" in
+            amqps://*) echo "AMQP_SECRET_PRESENT=true"; echo "AMQP_SCHEME_OK=true" ;;
+            *) echo "AMQP_SECRET_PRESENT=true"; echo "AMQP_SCHEME_OK=false"; exit 1 ;;
+          esac
+
+      - name: Install AMQP client
+        shell: bash
+        run: |
+          npm install --no-save --ignore-scripts amqplib@0.10.9
+
+      - name: Connect, publish, consume, acknowledge
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import amqp from 'amqplib';
+          import { randomUUID } from 'node:crypto';
+
+          const url = process.env.AMQP_URL;
+          const queue = `agent-control-room.rabbitmq-smoke.${process.env.GITHUB_RUN_ID}.${Date.now()}`;
+          const payload = `RABBITMQ_SMOKE_OK:${randomUUID()}`;
+
+          let connection;
+          let channel;
+
+          const withTimeout = (promise, ms, label) =>
+            Promise.race([
+              promise,
+              new Promise((_, reject) =>
+                setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+              ),
+            ]);
+
+          try {
+            connection = await withTimeout(amqp.connect(url, { timeout: 10000 }), 15000, 'AMQP connection');
+            console.log('RABBITMQ_CONNECT_OK=true');
+
+            connection.on('error', (err) => {
+              console.error(`RABBITMQ_CONNECTION_ERROR=${err?.message ?? 'unknown'}`);
+            });
+
+            channel = await connection.createConfirmChannel();
+            await channel.assertQueue(queue, {
+              durable: false,
+              exclusive: true,
+              autoDelete: true,
+            });
+            console.log('RABBITMQ_QUEUE_OK=true');
+
+            let consumerTag;
+            const received = new Promise(async (resolve, reject) => {
+              try {
+                const result = await channel.consume(
+                  queue,
+                  (msg) => {
+                    if (!msg) return;
+                    const body = msg.content.toString('utf8');
+                    if (body !== payload) {
+                      channel.nack(msg, false, false);
+                      reject(new Error('Consumed payload did not match published payload'));
+                      return;
+                    }
+                    console.log('RABBITMQ_CONSUME_OK=true');
+                    channel.ack(msg);
+                    console.log('RABBITMQ_ACK_OK=true');
+                    resolve(true);
+                  },
+                  { noAck: false }
+                );
+                consumerTag = result.consumerTag;
+              } catch (err) {
+                reject(err);
+              }
+            });
+
+            channel.sendToQueue(queue, Buffer.from(payload), {
+              persistent: false,
+              contentType: 'text/plain',
+            });
+            await channel.waitForConfirms();
+            console.log('RABBITMQ_PUBLISH_OK=true');
+
+            await withTimeout(received, 15000, 'RabbitMQ consume');
+
+            if (consumerTag) {
+              await channel.cancel(consumerTag);
+            }
+
+            console.log('RABBITMQ_SMOKE_PASS=true');
+          } catch (err) {
+            console.error(`RABBITMQ_SMOKE_PASS=false`);
+            console.error(`RABBITMQ_SMOKE_ERROR=${err?.message ?? err}`);
+            process.exitCode = 1;
+          } finally {
+            try { if (channel) await channel.close(); } catch {}
+            try { if (connection) await connection.close(); } catch {}
+          }
+          NODE
