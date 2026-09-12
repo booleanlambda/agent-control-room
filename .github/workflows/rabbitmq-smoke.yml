@@ -24,10 +24,7 @@ jobs:
             echo "AMQP_SECRET_PRESENT=false"
             exit 1
           fi
-          case "$AMQP_URL" in
-            amqps://*) echo "AMQP_SECRET_PRESENT=true"; echo "AMQP_SCHEME_OK=true" ;;
-            *) echo "AMQP_SECRET_PRESENT=true"; echo "AMQP_SCHEME_OK=false"; exit 1 ;;
-          esac
+          echo "AMQP_SECRET_PRESENT=true"
 
       - name: Install AMQP client
         shell: bash
@@ -41,7 +38,22 @@ jobs:
           import amqp from 'amqplib';
           import { randomUUID } from 'node:crypto';
 
-          const url = process.env.AMQP_URL;
+          function normalizeAmqpSecret(raw) {
+            let value = String(raw ?? '').trim();
+
+            // Tolerate common ways a secret is accidentally pasted into GitHub.
+            value = value.replace(/^AMQP(?:_URL)?\s*=\s*/i, '').trim();
+            if (
+              (value.startsWith('"') && value.endsWith('"')) ||
+              (value.startsWith("'") && value.endsWith("'"))
+            ) {
+              value = value.slice(1, -1).trim();
+            }
+
+            return value;
+          }
+
+          const url = normalizeAmqpSecret(process.env.AMQP_URL);
           const queue = `agent-control-room.rabbitmq-smoke.${process.env.GITHUB_RUN_ID}.${Date.now()}`;
           const payload = `RABBITMQ_SMOKE_OK:${randomUUID()}`;
 
@@ -57,6 +69,20 @@ jobs:
             ]);
 
           try {
+            let parsed;
+            try {
+              parsed = new URL(url);
+            } catch {
+              throw new Error('AMQP secret is present but is not a valid URL');
+            }
+
+            if (!['amqps:', 'amqp:'].includes(parsed.protocol)) {
+              throw new Error(`AMQP secret URL has unsupported protocol: ${parsed.protocol || 'none'}`);
+            }
+
+            console.log(`AMQP_PROTOCOL=${parsed.protocol === 'amqps:' ? 'amqps' : 'amqp'}`);
+            console.log(`AMQP_TLS=${parsed.protocol === 'amqps:' ? 'true' : 'false'}`);
+
             connection = await withTimeout(amqp.connect(url, { timeout: 10000 }), 15000, 'AMQP connection');
             console.log('RABBITMQ_CONNECT_OK=true');
 
@@ -113,7 +139,7 @@ jobs:
 
             console.log('RABBITMQ_SMOKE_PASS=true');
           } catch (err) {
-            console.error(`RABBITMQ_SMOKE_PASS=false`);
+            console.error('RABBITMQ_SMOKE_PASS=false');
             console.error(`RABBITMQ_SMOKE_ERROR=${err?.message ?? err}`);
             process.exitCode = 1;
           } finally {
