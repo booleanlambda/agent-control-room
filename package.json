@@ -2,7 +2,11 @@
   "name": "agent-control-room",
   "private": true,
   "type": "module",
+  "scripts": {
+    "broker-bridge": "node workers/broker-bridge.js"
+  },
   "dependencies": {
-    "ai": "latest"
+    "ai": "latest",
+    "amqplib": "0.10.9"
   }
 }
