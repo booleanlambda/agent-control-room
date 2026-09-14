@@ -107,4 +107,5 @@ if (process.env.AAU_GITHUB_TOKEN) {
   }
 }
 
+await import('./embodiment-bootstrap.js');
 await import('./broker-bridge-embodiment-wrapper.js');
