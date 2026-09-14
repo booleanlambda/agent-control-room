@@ -1,0 +1,55 @@
+name: Upgrade Broker React Template
+
+on:
+  push:
+    paths:
+      - '.github/workflows/upgrade-broker-react-template.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Patch broker worker
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('workers/broker-bridge-render.js')
+          s=p.read_text()
+          marker="async function ensureRepo(c){"
+          helper=r'''async function putRepoFile(owner,repo,path,content,branch){const api=`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path.split('/').map(encodeURIComponent).join('/')}`;const q=await http(`${GH}${api}`,{headers:{accept:'application/vnd.github+json',authorization:`Bearer ${cfg.gh}`,'x-github-api-version':'2022-11-28'}});if(q.r.ok)return{created:false};if(q.r.status!==404){const e=new Error(`github_file_lookup:${q.r.status}`);e.retryable=q.r.status===429||q.r.status>=500;throw e}await gh(api,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({message:`AAU: seed React Hello World (${path})`,content:Buffer.from(content,'utf8').toString('base64'),branch})});return{created:true}}
+async function seedReactHelloWorld(owner,repo,branch){const files={
+'package.json':`{\n  \"name\": \"aau-react-hello-world\",\n  \"private\": true,\n  \"version\": \"0.0.0\",\n  \"type\": \"module\",\n  \"scripts\": {\"dev\": \"vite\", \"build\": \"vite build\", \"preview\": \"vite preview\"},\n  \"dependencies\": {\"react\": \"^19.1.1\", \"react-dom\": \"^19.1.1\"},\n  \"devDependencies\": {\"@vitejs/plugin-react\": \"^5.0.2\", \"vite\": \"^7.1.5\"}\n}\n`,
+'vite.config.js':`import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({ plugins: [react()] })\n`,
+'index.html':`<!doctype html>\n<html lang=\"en\">\n  <head><meta charset=\"UTF-8\" /><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" /><title>AAU Hello World</title></head>\n  <body><div id=\"root\"></div><script type=\"module\" src=\"/src/main.jsx\"></script></body>\n</html>\n`,
+'src/main.jsx':`import React from 'react'\nimport { createRoot } from 'react-dom/client'\nimport App from './App.jsx'\nimport './index.css'\n\ncreateRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>)\n`,
+'src/App.jsx':`export default function App() {\n  return (\n    <main className=\"shell\">\n      <section className=\"card\">\n        <p className=\"eyebrow\">Autonomous Agent Universe</p>\n        <h1>Hello World</h1>\n        <p>Built with React and deployed through an AAU Agent Construct.</p>\n      </section>\n    </main>\n  )\n}\n`,
+'src/index.css':`:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #111827; background: #f8fafc; }\n* { box-sizing: border-box; }\nbody { margin: 0; min-width: 320px; min-height: 100vh; }\n.shell { min-height: 100vh; display: grid; place-items: center; padding: 2rem; }\n.card { width: min(680px, 100%); background: white; border: 1px solid #e5e7eb; border-radius: 24px; padding: 3rem; box-shadow: 0 24px 60px rgba(15, 23, 42, .08); }\n.eyebrow { font-size: .8rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #64748b; }\nh1 { margin: .5rem 0 1rem; font-size: clamp(3rem, 10vw, 6rem); line-height: .95; }\np { line-height: 1.6; }\n`};let created=0;for(const [path,content] of Object.entries(files)){const r=await putRepoFile(owner,repo,path,content,branch);if(r.created)created++}return{template:'react_hello_world',files_created:created}}
+'''
+          if helper not in s:
+              s=s.replace(marker,helper+marker)
+          old="if(String(info?.owner?.login||'').toLowerCase()!==owner.toLowerCase())throw new Error('github_owner_mismatch');created=true}else{const e=new Error(`github_lookup:${q.r.status}`);e.retryable=q.r.status===429||q.r.status>=500;throw e}return{created,repo_id:String(info.id),repo_full_name:info.full_name,repo_url:info.html_url,default_branch:info.default_branch,private:Boolean(info.private)}}"
+          new="if(String(info?.owner?.login||'').toLowerCase()!==owner.toLowerCase())throw new Error('github_owner_mismatch');created=true}else{const e=new Error(`github_lookup:${q.r.status}`);e.retryable=q.r.status===429||q.r.status>=500;throw e}let seed=null;if(x.template==='react_hello_world')seed=await seedReactHelloWorld(owner,name,info.default_branch||'main');return{created,repo_id:String(info.id),repo_full_name:info.full_name,repo_url:info.html_url,default_branch:info.default_branch,private:Boolean(info.private),seed}}"
+          if old not in s:
+              raise SystemExit('ensureRepo patch target not found')
+          s=s.replace(old,new)
+          old2="if(!repo.includes('/'))throw new Error('github_repository_required');"
+          new2="if(!repo.includes('/')){const e=new Error('github_repository_required');e.retryable=true;throw e}"
+          if old2 not in s:
+              raise SystemExit('vercel retry patch target not found')
+          s=s.replace(old2,new2)
+          p.write_text(s)
+          PY
+          node --check workers/broker-bridge-render.js
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add workers/broker-bridge-render.js
+          git commit -m 'feat: seed React Hello World through AAU broker' || exit 0
+          git push
