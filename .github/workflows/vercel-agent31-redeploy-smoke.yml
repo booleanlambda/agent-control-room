@@ -30,29 +30,35 @@ jobs:
           test -n "$AAU_VERCEL_TOKEN" || { echo 'AAU_VERCEL_TOKEN_MISSING'; exit 1; }
           echo 'AAU_VERCEL_TOKEN_PRESENT=true'
 
+      - name: Probe token and project access
+        shell: bash
+        run: |
+          user_code=$(curl -sS -o /tmp/user.json -w '%{http_code}' -H "Authorization: Bearer $AAU_VERCEL_TOKEN" 'https://api.vercel.com/v2/user')
+          project_code=$(curl -sS -o /tmp/project.json -w '%{http_code}' -H "Authorization: Bearer $AAU_VERCEL_TOKEN" "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID?teamId=$VERCEL_ORG_ID")
+          deployments_code=$(curl -sS -o /tmp/deployments.json -w '%{http_code}' -H "Authorization: Bearer $AAU_VERCEL_TOKEN" "https://api.vercel.com/v6/deployments?projectId=$VERCEL_PROJECT_ID&teamId=$VERCEL_ORG_ID&limit=1")
+          echo "VERCEL_USER_HTTP=$user_code"
+          echo "VERCEL_PROJECT_HTTP=$project_code"
+          echo "VERCEL_DEPLOYMENT_LIST_HTTP=$deployments_code"
+
       - name: Bind existing Vercel project
         shell: bash
         run: |
           mkdir -p .vercel
           printf '{"orgId":"%s","projectId":"%s"}\n' "$VERCEL_ORG_ID" "$VERCEL_PROJECT_ID" > .vercel/project.json
 
-      - name: Probe deployment-list scope
-        shell: bash
-        run: |
-          code=$(curl -sS -o /tmp/deployments.json -w '%{http_code}' \
-            -H "Authorization: Bearer $AAU_VERCEL_TOKEN" \
-            "https://api.vercel.com/v6/deployments?projectId=$VERCEL_PROJECT_ID&teamId=$VERCEL_ORG_ID&limit=1")
-          echo "VERCEL_DEPLOYMENT_LIST_HTTP=$code"
-          if [ "$code" != "200" ]; then
-            echo 'Deployment listing remains unavailable; proceeding to direct deploy test.'
-          fi
-
       - name: Redeploy production
         id: deploy
         shell: bash
         run: |
-          set -o pipefail
-          url=$(npx --yes vercel@latest deploy --prod --yes --token="$AAU_VERCEL_TOKEN" 2>&1 | tee /tmp/vercel-deploy.log | tail -n 1 | tr -d '\r')
+          set +e
+          npx --yes vercel@latest deploy --prod --yes --token="$AAU_VERCEL_TOKEN" 2>&1 | tee /tmp/vercel-deploy.log
+          rc=${PIPESTATUS[0]}
+          echo "VERCEL_DEPLOY_EXIT=$rc"
+          if [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
+          url=$(grep -Eo 'https://[^[:space:]]+\.vercel\.app' /tmp/vercel-deploy.log | tail -n 1)
+          test -n "$url"
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "VERCEL_REDEPLOY_URL=$url"
 
