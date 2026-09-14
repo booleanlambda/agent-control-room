@@ -66,10 +66,6 @@ console.log('AAU_S3_CONFIG_STATUS', JSON.stringify({
   secret_key_present: Boolean(String(process.env.SUPABASE_S3_SECRET_ACCESS_KEY || '').trim()),
 }));
 
-console.log('AAU_EMBODIMENT_UPLOAD_CONFIG', JSON.stringify({
-  enabled: Boolean(String(process.env.AAU_EMBODIMENT_UPLOAD_TOKEN || '').trim()),
-}));
-
 if (s3Missing.length === 0) {
   try {
     const s3 = new S3Client({
@@ -134,5 +130,4 @@ if (process.env.AAU_GITHUB_TOKEN) {
   }
 }
 
-await import('./embodiment-bootstrap.js');
-await import('./broker-bridge-embodiment-wrapper.js');
+await import('./broker-bridge-render.js');
