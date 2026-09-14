@@ -1,0 +1,43 @@
+name: Broker Bridge Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'workers/broker-bridge.js'
+      - 'sql/aau-broker-bridge-v0.1.sql'
+      - 'package.json'
+      - '.github/workflows/broker-bridge-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Syntax check
+        run: node --check workers/broker-bridge.js
+      - name: Health endpoint without secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          PORT=10000 node workers/broker-bridge.js > broker-bridge.log 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for i in {1..20}; do
+            code=$(curl -sS -o health.json -w '%{http_code}' http://127.0.0.1:10000/healthz || true)
+            if [ "$code" = "503" ]; then break; fi
+            sleep 0.5
+          done
+          test "$code" = "503"
+          jq -e '.service == "AAU Broker Bridge" and .version == "v0_1" and .config_ready == false' health.json
+          grep -q 'BROKER_BRIDGE_CONFIG_MISSING' broker-bridge.log
+          echo 'BROKER_BRIDGE_STATIC_SMOKE_PASS=true'
