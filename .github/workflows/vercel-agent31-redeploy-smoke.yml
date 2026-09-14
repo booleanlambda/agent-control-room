@@ -1,0 +1,65 @@
+name: Vercel Agent31 Redeploy Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/vercel-agent31-redeploy-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  redeploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      AAU_VERCEL_TOKEN: ${{ secrets.AAU_VERCEL_TOKEN }}
+      VERCEL_ORG_ID: team_d82M41qYtobaJHxnc5jp9T54
+      VERCEL_PROJECT_ID: prj_sVdZR3JhzGnNdQFauOMUzImn7UYn
+    steps:
+      - name: Checkout Agent 31 construct
+        uses: actions/checkout@v4
+        with:
+          repository: booleanlambda/agent31-react-hello-world
+          ref: main
+
+      - name: Validate secret is present
+        shell: bash
+        run: |
+          test -n "$AAU_VERCEL_TOKEN" || { echo 'AAU_VERCEL_TOKEN_MISSING'; exit 1; }
+          echo 'AAU_VERCEL_TOKEN_PRESENT=true'
+
+      - name: Bind existing Vercel project
+        shell: bash
+        run: |
+          mkdir -p .vercel
+          printf '{"orgId":"%s","projectId":"%s"}\n' "$VERCEL_ORG_ID" "$VERCEL_PROJECT_ID" > .vercel/project.json
+
+      - name: Verify deployment API scope
+        shell: bash
+        run: |
+          code=$(curl -sS -o /tmp/deployments.json -w '%{http_code}' \
+            -H "Authorization: Bearer $AAU_VERCEL_TOKEN" \
+            "https://api.vercel.com/v6/deployments?projectId=$VERCEL_PROJECT_ID&teamId=$VERCEL_ORG_ID&limit=1")
+          echo "VERCEL_DEPLOYMENT_LIST_HTTP=$code"
+          test "$code" = "200"
+
+      - name: Redeploy production
+        id: deploy
+        shell: bash
+        run: |
+          url=$(npx --yes vercel@latest deploy --prod --yes --token="$AAU_VERCEL_TOKEN" | tail -n 1 | tr -d '\r')
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "VERCEL_REDEPLOY_URL=$url"
+
+      - name: Test deployed website
+        shell: bash
+        env:
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          code=$(curl -L -sS -o /tmp/site.html -w '%{http_code}' "$DEPLOY_URL")
+          echo "SITE_HTTP=$code"
+          test "$code" = "200"
+          grep -Eiq 'hello|agent|react' /tmp/site.html
+          echo 'AAU_VERCEL_REDEPLOY_SMOKE_PASS=true'
