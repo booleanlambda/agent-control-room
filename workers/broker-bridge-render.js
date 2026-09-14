@@ -402,14 +402,29 @@ async function runGithub(job) {
     });
     return { ok: true };
   } catch (error) {
+    const safeGithubError = {
+      status: error.status || null,
+      message: error.details?.message || null,
+      documentation_url: error.details?.documentation_url || null,
+      errors: Array.isArray(error.details?.errors)
+        ? error.details.errors.slice(0, 5).map((item) => ({
+            resource: item?.resource || null,
+            field: item?.field || null,
+            code: item?.code || null,
+            message: item?.message || null,
+          }))
+        : null,
+    };
+    console.log('AAU_GITHUB_ERROR', JSON.stringify(safeGithubError));
+    const safeMessage = [String(error.message || error), safeGithubError.message].filter(Boolean).join(': ');
     await rpc('aau_bridge_fail_github_construct_job', {
       p_broker_job_id: job,
       p_error_code: 'github_bridge_error',
-      p_error_message: String(error.message || error),
+      p_error_message: safeMessage,
       p_retryable: Boolean(error.retryable),
-      p_partial_result: partial,
+      p_partial_result: { ...partial, github_error: safeGithubError },
     }).catch(() => {});
-    return { ok: false, retryable: Boolean(error.retryable), reason: String(error.message || error) };
+    return { ok: false, retryable: Boolean(error.retryable), reason: safeMessage };
   }
 }
 
