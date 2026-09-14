@@ -1,0 +1,31 @@
+name: Patch safe GitHub error details
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-safe-github-error-details.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch broker GitHub error logging
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('workers/broker-bridge-render.js')
+          s = p.read_text()
+          old = """  } catch (error) {\n    await rpc('aau_bridge_fail_github_construct_job', {\n      p_broker_job_id: job,\n      p_error_code: 'github_bridge_error',\n      p_error_message: String(error.message || error),\n      p_retryable: Boolean(error.retryable),\n      p_partial_result: partial,\n    }).catch(() => {});\n    return { ok: false, retryable: Boolean(error.retryable), reason: String(error.message || error) };\n  }\n}\n\nasync function vc"
+          new = """  } catch (error) {\n    const safeGithubError = {\n      status: error.status || null,\n      message: error.details?.message || null,\n      documentation_url: error.details?.documentation_url || null,\n      errors: Array.isArray(error.details?.errors)\n        ? error.details.errors.slice(0, 5).map((item) => ({\n            resource: item?.resource || null,\n            field: item?.field || null,\n            code: item?.code || null,\n            message: item?.message || null,\n          }))\n        : null,\n    };\n    console.log('AAU_GITHUB_ERROR', JSON.stringify(safeGithubError));\n    const safeMessage = [String(error.message || error), safeGithubError.message].filter(Boolean).join(': ');\n    await rpc('aau_bridge_fail_github_construct_job', {\n      p_broker_job_id: job,\n      p_error_code: 'github_bridge_error',\n      p_error_message: safeMessage,\n      p_retryable: Boolean(error.retryable),\n      p_partial_result: { ...partial, github_error: safeGithubError },\n    }).catch(() => {});\n    return { ok: false, retryable: Boolean(error.retryable), reason: safeMessage };\n  }\n}\n\nasync function vc"
+          if old not in s:
+              raise SystemExit('target block not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "AAU Infrastructure Bot"
+          git config user.email "aau-infra@users.noreply.github.com"
+          git add workers/broker-bridge-render.js
+          git commit -m "fix: log sanitized GitHub API error details"
+          git push
