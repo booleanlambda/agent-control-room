@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "broker-bridge": "node workers/broker-bridge-render.js"
+    "broker-bridge": "node workers/broker-bridge-envcheck.js"
   },
   "dependencies": {
     "ai": "latest",
