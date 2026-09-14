@@ -515,6 +515,170 @@ async function ensureProject(context) {
   };
 }
 
+async function ensureDeployment(context) {
+  const x = context.requested_config || {};
+  const projectId = String(context.vercel_project_id || '');
+  const projectName = String(context.vercel_project_name || context.construct_slug || '');
+  const repoFullName = String(context.github_repo_full_name || '');
+  const ref = String(x.ref || context.github_default_branch || 'main');
+  const target = String(x.target || 'production');
+
+  if (!projectId) throw new Error('vercel_project_id_required');
+  if (!projectName) throw new Error('vercel_project_name_required');
+  if (!repoFullName.includes('/')) throw new Error('github_repository_required');
+  if (target !== 'production') throw new Error('deployment_target_not_supported_v0_1');
+
+  const [org, ...repoParts] = repoFullName.split('/');
+  const repo = repoParts.join('/');
+  if (!org || !repo) throw new Error('github_repository_invalid');
+
+  const query = `?teamId=${encodeURIComponent(cfg.vcTeam)}`;
+  const body = {
+    name: projectName,
+    project: projectId,
+    target: 'production',
+    gitSource: {
+      type: 'github',
+      org,
+      repo,
+      ref,
+    },
+    meta: {
+      aauConstructId: String(context.construct_id || ''),
+      aauBrokerJobId: String(context.broker_job_id || ''),
+    },
+  };
+
+  const created = await vc(`/v13/deployments${query}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  const deploymentId = String(created?.id || created?.uid || '');
+  if (!deploymentId) throw new Error('vercel_deployment_id_missing');
+
+  let current = created;
+  let status = String(current?.status || current?.readyState || '').toUpperCase();
+  const terminalFailure = new Set(['ERROR', 'CANCELED', 'CANCELLED']);
+
+  for (let i = 0; i < 120 && !['READY', ...terminalFailure].includes(status); i += 1) {
+    await sleep(3000);
+    current = await vc(`/v13/deployments/${encodeURIComponent(deploymentId)}${query}`);
+    status = String(current?.status || current?.readyState || '').toUpperCase();
+  }
+
+  if (status !== 'READY') {
+    const error = new Error(status ? `vercel_deployment_terminal_status:${status}` : 'vercel_deployment_poll_timeout');
+    error.retryable = !terminalFailure.has(status);
+    error.details = current;
+    throw error;
+  }
+
+  const rawDeploymentHost = String(current?.url || created?.url || '');
+  const deploymentUrl = rawDeploymentHost
+    ? (rawDeploymentHost.startsWith('http') ? rawDeploymentHost : `https://${rawDeploymentHost}`)
+    : null;
+  if (!deploymentUrl) throw new Error('vercel_deployment_url_missing');
+
+  let aliases = [];
+  try {
+    const aliasBody = await vc(`/v2/deployments/${encodeURIComponent(deploymentId)}/aliases${query}`);
+    aliases = Array.isArray(aliasBody?.aliases) ? aliasBody.aliases : [];
+  } catch (error) {
+    console.log('AAU_VERCEL_ALIAS_LOOKUP_WARN', String(error.message || error));
+  }
+
+  const preferredAlias = aliases.find((item) => String(item?.alias || '').toLowerCase() === `${projectName}.vercel.app`.toLowerCase())
+    || aliases.find((item) => String(item?.alias || '').endsWith('.vercel.app'))
+    || aliases[0]
+    || null;
+  const aliasHost = String(preferredAlias?.alias || '');
+  const productionUrl = aliasHost
+    ? (aliasHost.startsWith('http') ? aliasHost : `https://${aliasHost}`)
+    : deploymentUrl;
+
+  let siteHttpStatus = null;
+  if (x.verify_http !== false) {
+    for (let i = 0; i < 12; i += 1) {
+      try {
+        const probe = await fetch(productionUrl, { redirect: 'follow' });
+        siteHttpStatus = probe.status;
+        if (probe.status >= 200 && probe.status < 400) break;
+      } catch {
+        siteHttpStatus = 0;
+      }
+      await sleep(2500);
+    }
+  }
+
+  if (context.construct_visibility === 'public' && x.verify_http !== false && !(siteHttpStatus >= 200 && siteHttpStatus < 400)) {
+    const error = new Error(`deployment_http_verification_failed:${siteHttpStatus}`);
+    error.retryable = siteHttpStatus === 0 || siteHttpStatus === 404 || siteHttpStatus >= 500;
+    throw error;
+  }
+
+  const gitSha = String(
+    current?.meta?.githubCommitSha
+    || current?.gitSource?.sha
+    || created?.meta?.githubCommitSha
+    || created?.gitSource?.sha
+    || ''
+  ) || null;
+
+  return {
+    deployment_id: deploymentId,
+    deployment_url: deploymentUrl,
+    production_url: productionUrl,
+    deployment_status: status,
+    production_alias: aliasHost || null,
+    git_ref: ref,
+    git_sha: gitSha,
+    site_http_status: siteHttpStatus,
+    vercel_project_id: projectId,
+    vercel_project_name: projectName,
+    github_repo_full_name: repoFullName,
+  };
+}
+
+async function runVercelDeployment(job) {
+  const context = await rpc('aau_bridge_claim_vercel_deployment_job', {
+    p_broker_job_id: job,
+    p_executor_id: cfg.id,
+  });
+  let partial = {};
+  try {
+    partial = await ensureDeployment(context);
+    await rpc('aau_bridge_complete_vercel_deployment_job', {
+      p_broker_job_id: job,
+      p_deployment_id: partial.deployment_id,
+      p_deployment_url: partial.deployment_url,
+      p_production_url: partial.production_url,
+      p_deployment_status: partial.deployment_status,
+      p_git_ref: partial.git_ref,
+      p_git_sha: partial.git_sha,
+      p_result: { ...partial, adapter: 'broker_bridge_render_v0_4', executor_id: cfg.id },
+    });
+    return { ok: true };
+  } catch (error) {
+    const providerError = error?.details?.error || null;
+    const safeMessage = [
+      String(error.message || error),
+      providerError?.code ? `code=${providerError.code}` : null,
+      providerError?.message || null,
+    ].filter(Boolean).join(': ');
+    console.log('AAU_VERCEL_DEPLOYMENT_ERROR', safeMessage);
+    await rpc('aau_bridge_fail_vercel_deployment_job', {
+      p_broker_job_id: job,
+      p_error_code: 'vercel_deployment_bridge_error',
+      p_error_message: safeMessage,
+      p_retryable: Boolean(error.retryable),
+      p_partial_result: partial,
+    }).catch(() => {});
+    return { ok: false, retryable: Boolean(error.retryable), reason: safeMessage };
+  }
+}
+
 async function runVercel(job) {
   const context = await rpc('aau_bridge_claim_vercel_construct_job', {
     p_broker_job_id: job,
@@ -630,7 +794,9 @@ async function handle(channel, queue, message) {
   const outcome = materialized.provider === 'github'
     ? await runGithub(materialized.broker_job_id)
     : materialized.provider === 'vercel'
-      ? await runVercel(materialized.broker_job_id)
+      ? materialized.capability_code === 'vercel.deployment.create'
+        ? await runVercelDeployment(materialized.broker_job_id)
+        : await runVercel(materialized.broker_job_id)
       : { ok: false, retryable: false, reason: 'unsupported_provider' };
 
   if (outcome.ok) {
@@ -708,7 +874,7 @@ function server() {
     res.end(JSON.stringify({
       ok,
       service: 'AAU Broker Bridge',
-      version: 'v0_3_render',
+      version: 'v0_4_render',
       rabbit_connected: st.rabbit,
       core_config_ready: !missing.length,
       missing_core_config: missing,
