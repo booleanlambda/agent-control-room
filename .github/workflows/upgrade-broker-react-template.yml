@@ -1,6 +1,7 @@
-name: Upgrade Broker React Template
+name: Upgrade Broker Vercel Deployment
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - '.github/workflows/upgrade-broker-react-template.yml'
@@ -15,41 +16,210 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Patch broker worker
+
+      - name: Patch broker worker for Vercel deployments
+        shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
-          p=Path('workers/broker-bridge-render.js')
-          s=p.read_text()
-          marker="async function ensureRepo(c){"
-          helper=r'''async function putRepoFile(owner,repo,path,content,branch){const api=`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path.split('/').map(encodeURIComponent).join('/')}`;const q=await http(`${GH}${api}`,{headers:{accept:'application/vnd.github+json',authorization:`Bearer ${cfg.gh}`,'x-github-api-version':'2022-11-28'}});if(q.r.ok)return{created:false};if(q.r.status!==404){const e=new Error(`github_file_lookup:${q.r.status}`);e.retryable=q.r.status===429||q.r.status>=500;throw e}await gh(api,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({message:`AAU: seed React Hello World (${path})`,content:Buffer.from(content,'utf8').toString('base64'),branch})});return{created:true}}
-async function seedReactHelloWorld(owner,repo,branch){const files={
-'package.json':`{\n  \"name\": \"aau-react-hello-world\",\n  \"private\": true,\n  \"version\": \"0.0.0\",\n  \"type\": \"module\",\n  \"scripts\": {\"dev\": \"vite\", \"build\": \"vite build\", \"preview\": \"vite preview\"},\n  \"dependencies\": {\"react\": \"^19.1.1\", \"react-dom\": \"^19.1.1\"},\n  \"devDependencies\": {\"@vitejs/plugin-react\": \"^5.0.2\", \"vite\": \"^7.1.5\"}\n}\n`,
-'vite.config.js':`import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({ plugins: [react()] })\n`,
-'index.html':`<!doctype html>\n<html lang=\"en\">\n  <head><meta charset=\"UTF-8\" /><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" /><title>AAU Hello World</title></head>\n  <body><div id=\"root\"></div><script type=\"module\" src=\"/src/main.jsx\"></script></body>\n</html>\n`,
-'src/main.jsx':`import React from 'react'\nimport { createRoot } from 'react-dom/client'\nimport App from './App.jsx'\nimport './index.css'\n\ncreateRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>)\n`,
-'src/App.jsx':`export default function App() {\n  return (\n    <main className=\"shell\">\n      <section className=\"card\">\n        <p className=\"eyebrow\">Autonomous Agent Universe</p>\n        <h1>Hello World</h1>\n        <p>Built with React and deployed through an AAU Agent Construct.</p>\n      </section>\n    </main>\n  )\n}\n`,
-'src/index.css':`:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #111827; background: #f8fafc; }\n* { box-sizing: border-box; }\nbody { margin: 0; min-width: 320px; min-height: 100vh; }\n.shell { min-height: 100vh; display: grid; place-items: center; padding: 2rem; }\n.card { width: min(680px, 100%); background: white; border: 1px solid #e5e7eb; border-radius: 24px; padding: 3rem; box-shadow: 0 24px 60px rgba(15, 23, 42, .08); }\n.eyebrow { font-size: .8rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #64748b; }\nh1 { margin: .5rem 0 1rem; font-size: clamp(3rem, 10vw, 6rem); line-height: .95; }\np { line-height: 1.6; }\n`};let created=0;for(const [path,content] of Object.entries(files)){const r=await putRepoFile(owner,repo,path,content,branch);if(r.created)created++}return{template:'react_hello_world',files_created:created}}
-'''
-          if helper not in s:
-              s=s.replace(marker,helper+marker)
-          old="if(String(info?.owner?.login||'').toLowerCase()!==owner.toLowerCase())throw new Error('github_owner_mismatch');created=true}else{const e=new Error(`github_lookup:${q.r.status}`);e.retryable=q.r.status===429||q.r.status>=500;throw e}return{created,repo_id:String(info.id),repo_full_name:info.full_name,repo_url:info.html_url,default_branch:info.default_branch,private:Boolean(info.private)}}"
-          new="if(String(info?.owner?.login||'').toLowerCase()!==owner.toLowerCase())throw new Error('github_owner_mismatch');created=true}else{const e=new Error(`github_lookup:${q.r.status}`);e.retryable=q.r.status===429||q.r.status>=500;throw e}let seed=null;if(x.template==='react_hello_world')seed=await seedReactHelloWorld(owner,name,info.default_branch||'main');return{created,repo_id:String(info.id),repo_full_name:info.full_name,repo_url:info.html_url,default_branch:info.default_branch,private:Boolean(info.private),seed}}"
-          if old not in s:
-              raise SystemExit('ensureRepo patch target not found')
-          s=s.replace(old,new)
-          old2="if(!repo.includes('/'))throw new Error('github_repository_required');"
-          new2="if(!repo.includes('/')){const e=new Error('github_repository_required');e.retryable=true;throw e}"
-          if old2 not in s:
-              raise SystemExit('vercel retry patch target not found')
-          s=s.replace(old2,new2)
+
+          p = Path('workers/broker-bridge-render.js')
+          s = p.read_text()
+
+          marker = 'async function runVercel(job) {'
+          if marker not in s:
+              raise SystemExit('runVercel marker not found')
+
+          helper = r'''async function ensureDeployment(context) {
+            const x = context.requested_config || {};
+            const projectId = String(context.vercel_project_id || '');
+            const projectName = String(context.vercel_project_name || context.construct_slug || '');
+            const repoFullName = String(context.github_repo_full_name || '');
+            const ref = String(x.ref || context.github_default_branch || 'main');
+            const target = String(x.target || 'production');
+
+            if (!projectId) throw new Error('vercel_project_id_required');
+            if (!projectName) throw new Error('vercel_project_name_required');
+            if (!repoFullName.includes('/')) throw new Error('github_repository_required');
+            if (target !== 'production') throw new Error('deployment_target_not_supported_v0_1');
+
+            const [org, ...repoParts] = repoFullName.split('/');
+            const repo = repoParts.join('/');
+            if (!org || !repo) throw new Error('github_repository_invalid');
+
+            const query = `?teamId=${encodeURIComponent(cfg.vcTeam)}`;
+            const body = {
+              name: projectName,
+              project: projectId,
+              target: 'production',
+              gitSource: {
+                type: 'github',
+                org,
+                repo,
+                ref,
+              },
+              meta: {
+                aauConstructId: String(context.construct_id || ''),
+                aauBrokerJobId: String(context.broker_job_id || ''),
+              },
+            };
+
+            const created = await vc(`/v13/deployments${query}`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+
+            const deploymentId = String(created?.id || created?.uid || '');
+            if (!deploymentId) throw new Error('vercel_deployment_id_missing');
+
+            let current = created;
+            let status = String(current?.status || current?.readyState || '').toUpperCase();
+            const terminalFailure = new Set(['ERROR', 'CANCELED', 'CANCELLED']);
+
+            for (let i = 0; i < 120 && !['READY', ...terminalFailure].includes(status); i += 1) {
+              await sleep(3000);
+              current = await vc(`/v13/deployments/${encodeURIComponent(deploymentId)}${query}`);
+              status = String(current?.status || current?.readyState || '').toUpperCase();
+            }
+
+            if (status !== 'READY') {
+              const error = new Error(status ? `vercel_deployment_terminal_status:${status}` : 'vercel_deployment_poll_timeout');
+              error.retryable = !terminalFailure.has(status);
+              error.details = current;
+              throw error;
+            }
+
+            const rawDeploymentHost = String(current?.url || created?.url || '');
+            const deploymentUrl = rawDeploymentHost
+              ? (rawDeploymentHost.startsWith('http') ? rawDeploymentHost : `https://${rawDeploymentHost}`)
+              : null;
+            if (!deploymentUrl) throw new Error('vercel_deployment_url_missing');
+
+            let aliases = [];
+            try {
+              const aliasBody = await vc(`/v2/deployments/${encodeURIComponent(deploymentId)}/aliases${query}`);
+              aliases = Array.isArray(aliasBody?.aliases) ? aliasBody.aliases : [];
+            } catch (error) {
+              console.log('AAU_VERCEL_ALIAS_LOOKUP_WARN', String(error.message || error));
+            }
+
+            const preferredAlias = aliases.find((item) => String(item?.alias || '').toLowerCase() === `${projectName}.vercel.app`.toLowerCase())
+              || aliases.find((item) => String(item?.alias || '').endsWith('.vercel.app'))
+              || aliases[0]
+              || null;
+            const aliasHost = String(preferredAlias?.alias || '');
+            const productionUrl = aliasHost
+              ? (aliasHost.startsWith('http') ? aliasHost : `https://${aliasHost}`)
+              : deploymentUrl;
+
+            let siteHttpStatus = null;
+            if (x.verify_http !== false) {
+              for (let i = 0; i < 12; i += 1) {
+                try {
+                  const probe = await fetch(productionUrl, { redirect: 'follow' });
+                  siteHttpStatus = probe.status;
+                  if (probe.status >= 200 && probe.status < 400) break;
+                } catch {
+                  siteHttpStatus = 0;
+                }
+                await sleep(2500);
+              }
+            }
+
+            if (context.construct_visibility === 'public' && x.verify_http !== false && !(siteHttpStatus >= 200 && siteHttpStatus < 400)) {
+              const error = new Error(`deployment_http_verification_failed:${siteHttpStatus}`);
+              error.retryable = siteHttpStatus === 0 || siteHttpStatus === 404 || siteHttpStatus >= 500;
+              throw error;
+            }
+
+            const gitSha = String(
+              current?.meta?.githubCommitSha
+              || current?.gitSource?.sha
+              || created?.meta?.githubCommitSha
+              || created?.gitSource?.sha
+              || ''
+            ) || null;
+
+            return {
+              deployment_id: deploymentId,
+              deployment_url: deploymentUrl,
+              production_url: productionUrl,
+              deployment_status: status,
+              production_alias: aliasHost || null,
+              git_ref: ref,
+              git_sha: gitSha,
+              site_http_status: siteHttpStatus,
+              vercel_project_id: projectId,
+              vercel_project_name: projectName,
+              github_repo_full_name: repoFullName,
+            };
+          }
+
+          async function runVercelDeployment(job) {
+            const context = await rpc('aau_bridge_claim_vercel_deployment_job', {
+              p_broker_job_id: job,
+              p_executor_id: cfg.id,
+            });
+            let partial = {};
+            try {
+              partial = await ensureDeployment(context);
+              await rpc('aau_bridge_complete_vercel_deployment_job', {
+                p_broker_job_id: job,
+                p_deployment_id: partial.deployment_id,
+                p_deployment_url: partial.deployment_url,
+                p_production_url: partial.production_url,
+                p_deployment_status: partial.deployment_status,
+                p_git_ref: partial.git_ref,
+                p_git_sha: partial.git_sha,
+                p_result: { ...partial, adapter: 'broker_bridge_render_v0_4', executor_id: cfg.id },
+              });
+              return { ok: true };
+            } catch (error) {
+              const providerError = error?.details?.error || null;
+              const safeMessage = [
+                String(error.message || error),
+                providerError?.code ? `code=${providerError.code}` : null,
+                providerError?.message || null,
+              ].filter(Boolean).join(': ');
+              console.log('AAU_VERCEL_DEPLOYMENT_ERROR', safeMessage);
+              await rpc('aau_bridge_fail_vercel_deployment_job', {
+                p_broker_job_id: job,
+                p_error_code: 'vercel_deployment_bridge_error',
+                p_error_message: safeMessage,
+                p_retryable: Boolean(error.retryable),
+                p_partial_result: partial,
+              }).catch(() => {});
+              return { ok: false, retryable: Boolean(error.retryable), reason: safeMessage };
+            }
+          }
+
+          '''
+
+          if 'async function runVercelDeployment(job)' not in s:
+              s = s.replace(marker, helper + marker, 1)
+
+          old_dispatch = """  const outcome = materialized.provider === 'github'\n    ? await runGithub(materialized.broker_job_id)\n    : materialized.provider === 'vercel'\n      ? await runVercel(materialized.broker_job_id)\n      : { ok: false, retryable: false, reason: 'unsupported_provider' };"""
+          new_dispatch = """  const outcome = materialized.provider === 'github'\n    ? await runGithub(materialized.broker_job_id)\n    : materialized.provider === 'vercel'\n      ? materialized.capability_code === 'vercel.deployment.create'\n        ? await runVercelDeployment(materialized.broker_job_id)\n        : await runVercel(materialized.broker_job_id)\n      : { ok: false, retryable: false, reason: 'unsupported_provider' };"""
+
+          if old_dispatch in s:
+              s = s.replace(old_dispatch, new_dispatch, 1)
+          elif "materialized.capability_code === 'vercel.deployment.create'" not in s:
+              raise SystemExit('provider dispatch patch target not found')
+
+          s = s.replace("version: 'v0_3_render'", "version: 'v0_4_render'")
           p.write_text(s)
           PY
+
           node --check workers/broker-bridge-render.js
-      - name: Commit patch
+          grep -q "runVercelDeployment" workers/broker-bridge-render.js
+          grep -q "vercel.deployment.create" workers/broker-bridge-render.js
+
+      - name: Commit worker upgrade
+        shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add workers/broker-bridge-render.js
-          git commit -m 'feat: seed React Hello World through AAU broker' || exit 0
+          git commit -m 'feat: execute and reconcile Vercel deployments through AAU broker' || exit 0
           git push
