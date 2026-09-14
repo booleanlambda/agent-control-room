@@ -1,5 +1,32 @@
 import { S3Client, ListObjectsV2Command } from '@aws-sdk/client-s3';
 
+const brokerDisabled = ['1', 'true', 'yes'].includes(
+  String(process.env.AAU_BROKER_DISABLED || '').trim().toLowerCase(),
+);
+
+if (brokerDisabled) {
+  const { default: httpServer } = await import('node:http');
+  const port = Number(process.env.PORT || 10000);
+  const service = httpServer.createServer((req, res) => {
+    if (req.url !== '/' && req.url !== '/healthz') {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ ok: false, error: 'not_found' }));
+    }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({
+      ok: true,
+      service: 'AAU Broker Bridge',
+      mode: 'disabled_inert',
+      broker_connected: false,
+      credentials_required: false,
+    }));
+  });
+  service.listen(port, '0.0.0.0', () => {
+    console.log('AAU_BROKER_DISABLED_INERT', JSON.stringify({ port }));
+  });
+  await new Promise(() => {});
+}
+
 const required = [
   'AMQP_URL',
   'AAU_SUPABASE_ANON_KEY',
