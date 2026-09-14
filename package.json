@@ -6,6 +6,7 @@
     "broker-bridge": "node workers/broker-bridge-envcheck.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "latest",
     "ai": "latest",
     "amqplib": "0.10.9"
   }
