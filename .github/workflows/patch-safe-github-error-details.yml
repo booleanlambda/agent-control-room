@@ -14,14 +14,65 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+
           p = Path('workers/broker-bridge-render.js')
-          s = p.read_text()
-          old = """  } catch (error) {\n    await rpc('aau_bridge_fail_github_construct_job', {\n      p_broker_job_id: job,\n      p_error_code: 'github_bridge_error',\n      p_error_message: String(error.message || error),\n      p_retryable: Boolean(error.retryable),\n      p_partial_result: partial,\n    }).catch(() => {});\n    return { ok: false, retryable: Boolean(error.retryable), reason: String(error.message || error) };\n  }\n}\n\nasync function vc"
-          new = """  } catch (error) {\n    const safeGithubError = {\n      status: error.status || null,\n      message: error.details?.message || null,\n      documentation_url: error.details?.documentation_url || null,\n      errors: Array.isArray(error.details?.errors)\n        ? error.details.errors.slice(0, 5).map((item) => ({\n            resource: item?.resource || null,\n            field: item?.field || null,\n            code: item?.code || null,\n            message: item?.message || null,\n          }))\n        : null,\n    };\n    console.log('AAU_GITHUB_ERROR', JSON.stringify(safeGithubError));\n    const safeMessage = [String(error.message || error), safeGithubError.message].filter(Boolean).join(': ');\n    await rpc('aau_bridge_fail_github_construct_job', {\n      p_broker_job_id: job,\n      p_error_code: 'github_bridge_error',\n      p_error_message: safeMessage,\n      p_retryable: Boolean(error.retryable),\n      p_partial_result: { ...partial, github_error: safeGithubError },\n    }).catch(() => {});\n    return { ok: false, retryable: Boolean(error.retryable), reason: safeMessage };\n  }\n}\n\nasync function vc"
-          if old not in s:
-              raise SystemExit('target block not found')
-          p.write_text(s.replace(old, new, 1))
+          lines = p.read_text().splitlines()
+          out = []
+          in_github = False
+          patched = False
+
+          inject = [
+              "    const safeGithubError = {",
+              "      status: error.status || null,",
+              "      message: error.details?.message || null,",
+              "      documentation_url: error.details?.documentation_url || null,",
+              "      errors: Array.isArray(error.details?.errors)",
+              "        ? error.details.errors.slice(0, 5).map((item) => ({",
+              "            resource: item?.resource || null,",
+              "            field: item?.field || null,",
+              "            code: item?.code || null,",
+              "            message: item?.message || null,",
+              "          }))",
+              "        : null,",
+              "    };",
+              "    console.log('AAU_GITHUB_ERROR', JSON.stringify(safeGithubError));",
+              "    const safeMessage = [String(error.message || error), safeGithubError.message].filter(Boolean).join(': ');",
+          ]
+
+          for line in lines:
+              if line.startswith('async function runGithub(job) {'):
+                  in_github = True
+
+              if in_github and line == '  } catch (error) {':
+                  out.append(line)
+                  out.extend(inject)
+                  patched = True
+                  continue
+
+              if in_github and line.strip() == 'p_error_message: String(error.message || error),':
+                  out.append('      p_error_message: safeMessage,')
+                  continue
+
+              if in_github and line.strip() == 'p_partial_result: partial,':
+                  out.append('      p_partial_result: { ...partial, github_error: safeGithubError },')
+                  continue
+
+              if in_github and line.strip() == 'return { ok: false, retryable: Boolean(error.retryable), reason: String(error.message || error) };':
+                  out.append('    return { ok: false, retryable: Boolean(error.retryable), reason: safeMessage };')
+                  continue
+
+              if in_github and line.startswith('async function vc(path'):
+                  in_github = False
+
+              out.append(line)
+
+          if not patched:
+              raise SystemExit('github catch block not found')
+
+          p.write_text('\n'.join(out) + '\n')
           PY
+      - name: Validate syntax
+        run: node --check workers/broker-bridge-render.js
       - name: Commit patch
         run: |
           git config user.name "AAU Infrastructure Bot"
