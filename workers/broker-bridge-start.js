@@ -39,6 +39,19 @@ if (fluxSmokeEnabled) {
   }
 }
 
+if (isEnabled('AAU_EMBODIMENT_RENDERER_ENABLED')) {
+  try {
+    const { startEmbodimentRenderWorker } = await import('./embodiment-render-worker.js');
+    const result = startEmbodimentRenderWorker();
+    console.log('AAU_EMBODIMENT_RENDERER_STARTED', JSON.stringify(result));
+  } catch (error) {
+    console.error('AAU_EMBODIMENT_RENDERER_START_FAILED', JSON.stringify({
+      error_name: error?.name || null,
+      message: String(error?.message || error).slice(0, 1200),
+    }));
+  }
+}
+
 const nvidiaWakeEnabled = isEnabled('AAU_NVIDIA_WAKE_ON_START');
 
 if (nvidiaWakeEnabled) {
