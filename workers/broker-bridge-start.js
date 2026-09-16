@@ -19,6 +19,26 @@ if (nvidiaSmokeEnabled) {
   }
 }
 
+const nvidiaWakeEnabled = ['1', 'true', 'yes'].includes(
+  String(process.env.AAU_NVIDIA_WAKE_ON_START || '').trim().toLowerCase(),
+);
+
+if (nvidiaWakeEnabled) {
+  try {
+    const { runExperimentalNvidiaWake } = await import('./experimental-nvidia-wake.js');
+    const result = await runExperimentalNvidiaWake();
+    console.log('AAU_NVIDIA_AGENT_WAKE_RESULT', JSON.stringify(result));
+  } catch (error) {
+    console.log('AAU_NVIDIA_AGENT_WAKE_RESULT', JSON.stringify({
+      status: 'failed',
+      mode: 'experimental_only',
+      error_name: error?.name || null,
+      http_status: error?.status || null,
+      message: String(error?.message || error).slice(0, 2000),
+    }));
+  }
+}
+
 const singleWakeConfigured = Boolean(
   String(process.env.AAU_NVIDIA_SINGLE_WAKE_REQUEST_ID || '').trim()
   && String(process.env.AAU_NVIDIA_SINGLE_WAKE_AGENT_ID || '').trim()
