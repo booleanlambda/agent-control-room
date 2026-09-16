@@ -64,22 +64,20 @@ function compactJson(value) {
 }
 
 function buildPrompt(job) {
-  const requested = job.requested_changes && typeof job.requested_changes === 'object' ? job.requested_changes : {};
+  const requested = job.requested_changes && typeof job.requested_changes === 'object' ? { ...job.requested_changes } : {};
   const protectedTraits = job.protected_snapshot && typeof job.protected_snapshot === 'object' ? job.protected_snapshot : {};
   const direct = typeof requested.prompt === 'string' ? requested.prompt.trim() : '';
+  delete requested.prompt;
 
-  const instruction = [
-    'Create one clean embodiment reference image for a persistent synthetic AAU agent.',
-    'The agent-authored representation choices below are authoritative. Do not invent legal biography, nationality, ethnicity, biological history, or other protected identity facts that were not explicitly selected.',
-    'Prefer a clear, identity-reference composition with a simple unobtrusive background unless the agent explicitly asked for something else.',
-    'Do not add text, logos, captions, watermarks, signatures, or UI elements.',
+  const parts = [
+    'AAU embodiment reference image for a persistent synthetic agent.',
+    'Render only agent-selected presentation traits; do not infer legal biography or unselected protected identity facts.',
   ];
-  if (direct) instruction.push(`Agent visual description: ${direct}`);
-  instruction.push(`Agent embodiment preferences: ${compactJson(requested)}`);
-  if (Object.keys(protectedTraits).length) {
-    instruction.push(`Protected traits that must not be reinterpreted: ${compactJson(protectedTraits)}`);
-  }
-  return instruction.join('\n\n').slice(0, 10000);
+  if (direct) parts.push(`Visual description: ${direct}`);
+  if (Object.keys(requested).length) parts.push(`Additional preferences: ${compactJson(requested)}`);
+  if (Object.keys(protectedTraits).length) parts.push(`Preserve these protected traits: ${compactJson(protectedTraits)}`);
+  parts.push('Use a clear identity-reference composition and unobtrusive background unless otherwise requested. No text, logos, captions, watermarks, signatures, or UI.');
+  return parts.join(' ').slice(0, 780);
 }
 
 function extensionForMime(mime) {
@@ -184,7 +182,8 @@ async function processJob(job) {
         seed: generated.seed,
         s3_http_status: upload?.$metadata?.httpStatusCode || null,
         s3_verified: true,
-        prompt_contract: 'agent_authored_embodiment_preferences_v0_1',
+        prompt_chars: prompt.length,
+        prompt_contract: 'agent_authored_embodiment_preferences_v0_2',
       },
     });
 
@@ -196,6 +195,7 @@ async function processJob(job) {
       sha256: generated.sha256,
       size_bytes: generated.size_bytes,
       latency_ms: generated.latency_ms,
+      prompt_chars: prompt.length,
       provider: generated.provider,
       model: generated.model,
     }));
