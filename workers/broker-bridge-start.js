@@ -2,6 +2,19 @@ const isEnabled = (name) => ['1', 'true', 'yes', 'on'].includes(
   String(process.env[name] || '').trim().toLowerCase(),
 );
 
+if (isEnabled('AAU_EXPERTISE_NVIDIA_MIGRATION')) {
+  try {
+    const { migrateExpertiseVerificationToNvidia } = await import('./migrate-expertise-nvidia.js');
+    const result = await migrateExpertiseVerificationToNvidia();
+    console.log('AAU_EXPERTISE_NVIDIA_MIGRATION_RESULT', JSON.stringify(result));
+  } catch (error) {
+    console.error('AAU_EXPERTISE_NVIDIA_MIGRATION_FAILED', JSON.stringify({
+      error_name: error?.name || null,
+      message: String(error?.message || error).slice(0, 2000),
+    }));
+  }
+}
+
 const nvidiaSmokeEnabled = isEnabled('AAU_NVIDIA_SMOKE_TEST');
 
 if (nvidiaSmokeEnabled) {
@@ -30,7 +43,7 @@ if (isEnabled('AAU_NVIDIA_EXPERTISE_AUTH_SMOKE_TEST')) {
     console.log('AAU_NVIDIA_EXPERTISE_AUTH_SMOKE_PROBE', JSON.stringify({
       ok: false,
       provider: 'nvidia_direct',
-      model_requested: 'z-ai/glm-5-3',
+      model_requested: 'z-ai/glm-5.3',
       error_name: error?.name || null,
       http_status: error?.status || null,
       message: String(error?.message || error).slice(0, 1200),
