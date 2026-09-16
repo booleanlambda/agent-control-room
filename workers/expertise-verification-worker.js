@@ -152,8 +152,8 @@ async function answerChallenge(run, packet) {
   const answers = [];
   for (const task of packet.tasks) {
     const system = `You are the bound inference model for an AAU agent undergoing an unseen expertise assessment in ${run.domain}. Solve the task from first principles. Be concrete, state assumptions, controls, validation and failure handling. Do not invent external evidence or claim actions you did not perform.`;
-    const user = `TARGET STANDARD: ${run.target_standard}\nSCENARIO:\n${task.scenario}\n\nTASK:\n${task.prompt}\n\nAnswer in 300-700 words.`;
-    const result = await nvidiaCall({ model: run.candidate_model_id, system, user, maxTokens: 1600, temperature: 0.15 });
+    const user = `TARGET STANDARD: ${run.target_standard}\nSCENARIO:\n${task.scenario}\n\nTASK:\n${task.prompt}\n\nAnswer in 180-350 words. Prioritize concrete technical decisions over exposition.`;
+    const result = await nvidiaCall({ model: run.candidate_model_id, system, user, maxTokens: 700, temperature: 0.10, timeoutMs: 60000 });
     if (!result.text) throw new Error(`candidate_empty_answer:${task.id}`);
     answers.push({ id: task.id, competency: task.competency || null, answer: result.text, model: result.model, output_sha256: sha256(result.text) });
   }
@@ -179,7 +179,7 @@ async function gradeAnswer(run, task, answer) {
   const system = 'You are the independent AAU expertise authenticator. You did not train the candidate. Grade only the supplied answer against the fresh task and fixed anchors. Do not reward fluency without correctness. Return one GRADE line; reasoning may precede it.';
   const user = `DOMAIN: ${run.domain}\nTARGET: ${run.target_standard}\nSCENARIO: ${task.scenario}\nTASK: ${task.prompt}\nGRADING ANCHORS: ${JSON.stringify(task.grading_anchors)}\nCRITICAL FAILURES: ${JSON.stringify(task.critical_failures || [])}\nCANDIDATE ANSWER:\n${answer.answer}\n\nRubric: execution/correctness 30%, method/system design 20%, security/reliability 20%, validation/evidence 15%, communication/professional judgment 15%.\nReturn: GRADE execution=NN method=NN security=NN validation=NN communication=NN critical=NONE confidence=0.00 unsupported=NONE. If a material unsupported claim exists use unsupported=PRESENT.`;
   for (let attempt = 1; attempt <= 3; attempt++) {
-    const result = await nvidiaCall({ model: run.authenticator_model, system, user, maxTokens: 1000, temperature: 0, timeoutMs: 90000 });
+    const result = await nvidiaCall({ model: run.authenticator_model, system, user, maxTokens: 500, temperature: 0, timeoutMs: 60000 });
     const grade = parseGrade(result.text);
     if (grade) return { ...grade, id: task.id, verifier_model: result.model, raw_sha256: sha256(result.text) };
     if (attempt < 3) await sleep(1200 * attempt);
@@ -194,7 +194,7 @@ async function adjudicate(run, task, answer, prior) {
     .filter((x, i, a) => x && a.indexOf(x) === i && x !== run.authenticator_model && x !== run.candidate_model_id);
   for (const model of candidates) {
     try {
-      const result = await nvidiaCall({ model, system, user, maxTokens: 700, temperature: 0, timeoutMs: 60000 });
+      const result = await nvidiaCall({ model, system, user, maxTokens: 500, temperature: 0, timeoutMs: 45000 });
       const grade = parseGrade(result.text);
       if (grade) return { ...grade, id: task.id, adjudicator_model: result.model, supersedes_score: prior.score, raw_sha256: sha256(result.text) };
     } catch (e) {
@@ -229,13 +229,16 @@ function deterministicDecision(run, packet, authGrades, adjGrades) {
 
 async function processRun(run) {
   const packet = await createChallenge(run);
+  console.log('AAU_EXPERTISE_STAGE', JSON.stringify({ verification_run_id: run.verification_run_id, stage: 'challenge_ready', tasks: packet.tasks.length, authority: packet.authority?.model || null, contract: 'expertise_verifier_latency_v0_1' }));
   const answers = await answerChallenge(run, packet);
+  console.log('AAU_EXPERTISE_STAGE', JSON.stringify({ verification_run_id: run.verification_run_id, stage: 'candidate_answers_ready', answers: answers.length }));
   const authGrades = [];
   const adjGrades = [];
   for (const task of packet.tasks) {
     const answer = answers.find((a) => a.id === task.id);
     const grade = await gradeAnswer(run, task, answer);
     authGrades.push(grade);
+    console.log('AAU_EXPERTISE_STAGE', JSON.stringify({ verification_run_id: run.verification_run_id, stage: 'authenticated_task', task_id: task.id, score: grade.score, confidence: grade.confidence }));
     const flagged = (grade.score >= 0.75 && grade.score <= 0.85) || grade.critical_error || grade.unsupported || grade.confidence < 0.70;
     if (flagged) adjGrades.push(await adjudicate(run, task, answer, grade));
   }
