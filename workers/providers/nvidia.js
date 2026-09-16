@@ -1,5 +1,6 @@
 const DEFAULT_NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1';
 const DEFAULT_NVIDIA_MODEL = 'nvidia/nemotron-3.5-lightning-30b-a3b';
+const DEFAULT_NVIDIA_TIMEOUT_MS = 60000;
 
 function clean(value) {
   return String(value || '').trim();
@@ -15,6 +16,12 @@ function envBool(name) {
   if (['1','true','yes','on'].includes(raw)) return true;
   if (['0','false','no','off'].includes(raw)) return false;
   return null;
+}
+
+function resolveTimeoutMs() {
+  const raw = Number(process.env.AAU_NVIDIA_TIMEOUT_MS);
+  if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_NVIDIA_TIMEOUT_MS;
+  return Math.max(5000, Math.min(Math.floor(raw), 180000));
 }
 
 function resolveConfig() {
@@ -66,6 +73,7 @@ export function nvidiaConfigStatus() {
     model: config.model,
     json_mode: envBool('AAU_NVIDIA_JSON_MODE'),
     enable_thinking: envBool('AAU_NVIDIA_ENABLE_THINKING'),
+    timeout_ms: resolveTimeoutMs(),
     mode: 'experimental_only',
   };
 }
@@ -98,16 +106,28 @@ export async function nvidiaChatCompletion({
     requestBody.chat_template_kwargs = { enable_thinking: resolvedThinking };
   }
 
-  const response = await fetch(config.url, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${config.apiKey}`,
-      'content-type': 'application/json',
-      accept: 'application/json',
-      'user-agent': 'AAU-NVIDIA-Experimental-Adapter/0.3',
-    },
-    body: JSON.stringify(requestBody),
-  });
+  const timeoutMs = resolveTimeoutMs();
+  let response;
+  try {
+    response = await fetch(config.url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${config.apiKey}`,
+        'content-type': 'application/json',
+        accept: 'application/json',
+        'user-agent': 'AAU-NVIDIA-Experimental-Adapter/0.4',
+      },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+      const timeoutError = new Error(`nvidia_timeout_after_${timeoutMs}ms`);
+      timeoutError.code = 'NVIDIA_TIMEOUT';
+      throw timeoutError;
+    }
+    throw error;
+  }
 
   const raw = await response.text();
   let body = null;
