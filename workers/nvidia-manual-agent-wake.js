@@ -54,6 +54,8 @@ embodiment_update:object
 developmental_inquiry_updates:array
 next_wakes:[]`;
 
+const JSON_CORRECTION = `Your previous response was not valid JSON. Preserve the same intended substantive decision, but return it again as ONE compact syntactically valid JSON object and nothing else. Do not include comments, markdown, trailing commas, or unescaped line breaks inside strings. next_wakes must be an empty array because this is a manual-wake experiment.`;
+
 function sha256(text) {
   return crypto.createHash('sha256').update(text).digest('hex');
 }
@@ -89,8 +91,10 @@ function parseDecision(text) {
   const start = cleaned.indexOf('{');
   const end = cleaned.lastIndexOf('}');
   if (start >= 0 && end > start) {
-    const value = JSON.parse(cleaned.slice(start, end + 1));
-    if (value && typeof value === 'object' && typeof value.selected_action === 'string') return value;
+    try {
+      const value = JSON.parse(cleaned.slice(start, end + 1));
+      if (value && typeof value === 'object' && typeof value.selected_action === 'string') return value;
+    } catch {}
   }
   throw new Error('model_did_not_return_valid_decision_json');
 }
@@ -152,12 +156,13 @@ export async function runConfiguredNvidiaManualWake() {
 
     const packetText = JSON.stringify(packet);
     const startedAt = Date.now();
-    const ai = await nvidiaChatCompletion({
+    const baseMessages = [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: packetText },
+    ];
+    let ai = await nvidiaChatCompletion({
       model,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: packetText },
-      ],
+      messages: baseMessages,
       maxTokens: 2600,
       temperature: 0.2,
       jsonMode: true,
@@ -165,7 +170,30 @@ export async function runConfiguredNvidiaManualWake() {
     });
     if (ai.model_returned !== model) throw new Error(`model_consistency_breach:requested=${model};returned=${ai.model_returned || 'missing'}`);
 
-    const decision = sanitizeDecision(parseDecision(ai.content));
+    let parsed;
+    let jsonRepairAttempted = false;
+    try {
+      parsed = parseDecision(ai.content);
+    } catch {
+      jsonRepairAttempted = true;
+      const firstOutput = String(ai.content || '').slice(0,50000);
+      ai = await nvidiaChatCompletion({
+        model,
+        messages: [
+          ...baseMessages,
+          { role: 'assistant', content: firstOutput },
+          { role: 'user', content: JSON_CORRECTION },
+        ],
+        maxTokens: 2200,
+        temperature: 0,
+        jsonMode: true,
+        enableThinking: false,
+      });
+      if (ai.model_returned !== model) throw new Error(`model_consistency_breach_after_json_repair:requested=${model};returned=${ai.model_returned || 'missing'}`);
+      parsed = parseDecision(ai.content);
+    }
+
+    const decision = sanitizeDecision(parsed);
     const raw = String(ai.content || '');
     const usage = ai.usage || {};
     const inputTokens = Number(usage.prompt_tokens ?? usage.input_tokens ?? 0);
@@ -195,6 +223,7 @@ export async function runConfiguredNvidiaManualWake() {
       authenticator_result: { status: 'not_run_in_executor' },
       experimental_provider_policy: 'nvidia_direct_all_experimental_roles',
       wake_mode: 'manual_operator_triggered',
+      json_repair_attempted: jsonRepairAttempted,
       latency_ms: Date.now() - startedAt,
     };
 
@@ -215,6 +244,7 @@ export async function runConfiguredNvidiaManualWake() {
       stated_reason: decision.stated_reason,
       current_focus: decision.current_focus,
       next_wakes: [],
+      json_repair_attempted: jsonRepairAttempted,
       usage: ai.usage,
       finish_reason: ai.finish_reason,
       applied,
