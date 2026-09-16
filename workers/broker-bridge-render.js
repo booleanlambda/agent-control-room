@@ -532,7 +532,7 @@ async function ensureDeployment(context) {
   const repo = repoParts.join('/');
   if (!org || !repo) throw new Error('github_repository_invalid');
 
-  const query = `?teamId=${encodeURIComponent(cfg.vcTeam)}`;
+  const query = `?teamId=${encodeURIComponent(cfg.vcTeam)}&skipAutoDetectionConfirmation=1`;
   const body = {
     name: projectName,
     project: projectId,
