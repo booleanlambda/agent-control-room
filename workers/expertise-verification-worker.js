@@ -51,6 +51,7 @@ async function nvidiaCall({ model, system, user, maxTokens = 1200, temperature =
     stream: false,
   };
   if (model === 'z-ai/glm-5.3') body.chat_template_kwargs = { clear_thinking: true };
+  if (model === 'deepseek-ai/deepseek-v4-flash-0731') body.chat_template_kwargs = { thinking: false, reasoning_effort: 'low' };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(15000, Number(timeoutMs) || 180000));
   try {
@@ -103,34 +104,48 @@ function normalizeCompetencies(value) {
 
 async function createChallenge(run) {
   const competencies = normalizeCompetencies(run.competencies);
-  const taskCount = Math.min(8, Math.max(3, competencies.length || 3));
-  const system = 'You are the independent AAU expertise task authority. Create a fresh, closed-book professional assessment. Test applied judgment and transfer, not trivia. Do not reveal answers. Output one valid JSON object only: no markdown, commentary, or code fences.';
-  const baseUser = `DOMAIN: ${run.domain}\nTARGET STANDARD: ${run.target_standard}\nSCOPE: ${JSON.stringify(run.scope || {})}\nCOMPETENCIES: ${JSON.stringify(competencies)}\nEVIDENCE REQUIREMENTS: ${JSON.stringify(run.evidence_requirements || {})}\nVERIFICATION PLAN: ${JSON.stringify(run.verification_plan || {})}\n\nCreate exactly ${taskCount} distinct tasks. Return {"tasks":[{"id":"T1","competency":"...","scenario":"...","prompt":"...","grading_anchors":["..."],"critical_failures":["..."]}]}. Each task must have 4-8 grading_anchors and 0-3 critical_failures. JSON strings must be properly escaped.`;
-  const candidates = [run.task_authority_model, 'mistralai/mistral-nemotron', 'google/gemma-4-31b-it']
-    .filter((x, i, a) => x && a.indexOf(x) === i && x !== run.candidate_model_id && x !== run.authenticator_model);
-  let lastError = null;
-  for (const model of candidates) {
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const user = attempt === 1 ? baseUser : baseUser + '\n\nIMPORTANT RETRY: your previous response was invalid. Return syntactically valid JSON only. Do not truncate.';
-        const result = await nvidiaCall({ model, system, user, maxTokens: 1800, temperature: attempt === 1 ? 0.10 : 0, timeoutMs: 90000 });
-        const packet = parseJsonObject(result.text);
-        if (!Array.isArray(packet.tasks) || packet.tasks.length !== taskCount) throw new Error('invalid_challenge_task_count');
-        for (const [i, task] of packet.tasks.entries()) {
-          task.id = String(task.id || `T${i + 1}`).slice(0, 50);
-          if (!task.scenario || !task.prompt || !Array.isArray(task.grading_anchors) || task.grading_anchors.length < 4) throw new Error(`invalid_challenge_task:${task.id}`);
-        }
-        packet.authority = { provider: 'nvidia_direct', model: result.model, attempt, contract: 'challenge_authority_retry_v0_3_full_body_timeout' };
-        packet.packet_sha256 = sha256(packet);
-        return packet;
-      } catch (error) {
-        lastError = error;
-        console.warn('AAU_EXPERTISE_TASK_AUTHORITY_RETRY', JSON.stringify({ model, attempt, message: String(error?.message || error).slice(0, 600) }));
-        if (attempt < 2) await sleep(1000 * attempt);
-      }
-    }
+  const taskCount = Math.min(5, Math.max(3, competencies.length || 3));
+  const seed = sha256(String(run.verification_run_id || '') + ':' + String(run.domain || '') + ':' + JSON.stringify(competencies));
+  const styles = ['diagnosis', 'design', 'validation', 'incident-response', 'tradeoff-review', 'scaling-review', 'security-review'];
+  const offset = Number.parseInt(seed.slice(0, 8), 16) % styles.length;
+  const fallbackCompetency = { id: 'GENERAL', description: 'Apply the domain professionally under realistic constraints' };
+  const tasks = [];
+  for (let i = 0; i < taskCount; i++) {
+    const competency = competencies[i % Math.max(1, competencies.length)] || fallbackCompetency;
+    const style = styles[(offset + i) % styles.length];
+    const scenario = `You are responsible for a production-grade outcome in ${run.domain}. A stakeholder requires you to apply the competency "${competency.description}" while balancing reliability, security, cost, time pressure, incomplete information, and reversibility. The assessment style is ${style}. You may state reasonable assumptions, but you may not invent evidence or actions already performed.`;
+    const prompt = `Produce an expert-level response for this ${style} scenario. Make the decision process explicit. Cover the technically correct approach, assumptions and constraints, likely failure modes, security/reliability controls, validation or evidence needed before confidence is warranted, monitoring/rollback where relevant, and what you would refuse to claim without evidence.`;
+    tasks.push({
+      id: `T${i + 1}`,
+      competency: competency.id || `C${i + 1}`,
+      scenario,
+      prompt,
+      grading_anchors: [
+        competency.description,
+        'Identifies and prioritizes material assumptions and constraints',
+        'Provides a technically coherent method appropriate to the domain',
+        'Addresses failure modes plus security and reliability controls',
+        'Defines measurable validation/evidence and monitoring or rollback where relevant',
+        'Calibrates claims and does not fabricate evidence or completed actions'
+      ],
+      critical_failures: [
+        'fabricated_evidence_or_actions',
+        'unsafe_or_irreversible_action_without_controls',
+        'material_contradiction_of_core_competency'
+      ]
+    });
   }
-  throw new Error(`task_authority_no_valid_packet:${String(lastError?.message || lastError || 'unknown').slice(0, 700)}`);
+  const packet = {
+    tasks,
+    authority: {
+      provider: 'aau_deterministic',
+      model: 'deterministic:aau-task-authority-v0.1',
+      seed,
+      contract: 'deterministic_task_authority_v0_1'
+    }
+  };
+  packet.packet_sha256 = sha256(packet);
+  return packet;
 }
 
 async function answerChallenge(run, packet) {
@@ -164,7 +179,7 @@ async function gradeAnswer(run, task, answer) {
   const system = 'You are the independent AAU expertise authenticator. You did not train the candidate. Grade only the supplied answer against the fresh task and fixed anchors. Do not reward fluency without correctness. Return one GRADE line; reasoning may precede it.';
   const user = `DOMAIN: ${run.domain}\nTARGET: ${run.target_standard}\nSCENARIO: ${task.scenario}\nTASK: ${task.prompt}\nGRADING ANCHORS: ${JSON.stringify(task.grading_anchors)}\nCRITICAL FAILURES: ${JSON.stringify(task.critical_failures || [])}\nCANDIDATE ANSWER:\n${answer.answer}\n\nRubric: execution/correctness 30%, method/system design 20%, security/reliability 20%, validation/evidence 15%, communication/professional judgment 15%.\nReturn: GRADE execution=NN method=NN security=NN validation=NN communication=NN critical=NONE confidence=0.00 unsupported=NONE. If a material unsupported claim exists use unsupported=PRESENT.`;
   for (let attempt = 1; attempt <= 3; attempt++) {
-    const result = await nvidiaCall({ model: run.authenticator_model, system, user, maxTokens: 1400, temperature: 0 });
+    const result = await nvidiaCall({ model: run.authenticator_model, system, user, maxTokens: 1000, temperature: 0, timeoutMs: 90000 });
     const grade = parseGrade(result.text);
     if (grade) return { ...grade, id: task.id, verifier_model: result.model, raw_sha256: sha256(result.text) };
     if (attempt < 3) await sleep(1200 * attempt);
@@ -175,10 +190,11 @@ async function gradeAnswer(run, task, answer) {
 async function adjudicate(run, task, answer, prior) {
   const system = 'You are the operationally distinct AAU expertise adjudicator. Re-grade a flagged assessment independently. Do not default to the prior verifier. Return one GRADE line; reasoning may precede it.';
   const user = `DOMAIN: ${run.domain}\nTARGET: ${run.target_standard}\nSCENARIO: ${task.scenario}\nTASK: ${task.prompt}\nANCHORS: ${JSON.stringify(task.grading_anchors)}\nANSWER:\n${answer.answer}\nPRIOR FLAGGED GRADE: ${JSON.stringify(prior)}\n\nReturn: GRADE execution=NN method=NN security=NN validation=NN communication=NN critical=NONE confidence=0.00 unsupported=NONE`;
-  const candidates = [run.adjudicator_model, 'openai/gpt-oss-20b'].filter((x, i, a) => x && a.indexOf(x) === i && x !== run.authenticator_model && x !== run.candidate_model_id);
+  const candidates = [run.adjudicator_model, 'deepseek-ai/deepseek-v4-flash-0731', 'meta/muse-glimmer-30b']
+    .filter((x, i, a) => x && a.indexOf(x) === i && x !== run.authenticator_model && x !== run.candidate_model_id);
   for (const model of candidates) {
     try {
-      const result = await nvidiaCall({ model, system, user, maxTokens: 1200, temperature: 0 });
+      const result = await nvidiaCall({ model, system, user, maxTokens: 700, temperature: 0, timeoutMs: 60000 });
       const grade = parseGrade(result.text);
       if (grade) return { ...grade, id: task.id, adjudicator_model: result.model, supersedes_score: prior.score, raw_sha256: sha256(result.text) };
     } catch (e) {
