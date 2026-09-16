@@ -69,6 +69,19 @@ if (fluxSmokeEnabled) {
   }
 }
 
+if (isEnabled('AAU_EXPERTISE_VERIFIER_ENABLED')) {
+  try {
+    const { startExpertiseVerificationWorker } = await import('./expertise-verification-worker.js');
+    const result = startExpertiseVerificationWorker();
+    console.log('AAU_EXPERTISE_VERIFIER_STARTED', JSON.stringify(result));
+  } catch (error) {
+    console.error('AAU_EXPERTISE_VERIFIER_START_FAILED', JSON.stringify({
+      error_name: error?.name || null,
+      message: String(error?.message || error).slice(0, 1600),
+    }));
+  }
+}
+
 if (isEnabled('AAU_EMBODIMENT_RENDERER_ENABLED')) {
   try {
     const { startEmbodimentRenderWorker } = await import('./embodiment-render-worker.js');
@@ -100,8 +113,6 @@ if (nvidiaWakeEnabled) {
   }
 }
 
-// Legacy one-shot execution now requires an explicit gate. Stale request IDs alone
-// must never wake an agent during a normal broker deployment.
 const singleWakeConfigured = isEnabled('AAU_NVIDIA_SINGLE_WAKE_ON_START') && Boolean(
   String(process.env.AAU_NVIDIA_SINGLE_WAKE_REQUEST_ID || '').trim()
   && String(process.env.AAU_NVIDIA_SINGLE_WAKE_AGENT_ID || '').trim()
