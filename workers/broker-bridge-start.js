@@ -8,15 +8,21 @@ if (isEnabled('AAU_EXPERTISE_NVIDIA_MIGRATION')) {
     const result = await migrateExpertiseVerificationToNvidia();
     console.log('AAU_EXPERTISE_NVIDIA_MIGRATION_RESULT', JSON.stringify(result));
   } catch (error) {
-    console.error('AAU_EXPERTISE_NVIDIA_MIGRATION_FAILED', JSON.stringify({
-      error_name: error?.name || null,
-      message: String(error?.message || error).slice(0, 2000),
-    }));
+    console.error('AAU_EXPERTISE_NVIDIA_MIGRATION_FAILED', JSON.stringify({ error_name: error?.name || null, message: String(error?.message || error).slice(0, 2000) }));
+  }
+}
+
+if (isEnabled('AAU_EXPERTISE_RUNTIME_PATCH')) {
+  try {
+    const { patchExpertiseVerifierRuntime } = await import('./patch-expertise-verifier-runtime.js');
+    const result = await patchExpertiseVerifierRuntime();
+    console.log('AAU_EXPERTISE_RUNTIME_PATCH_RESULT', JSON.stringify(result));
+  } catch (error) {
+    console.error('AAU_EXPERTISE_RUNTIME_PATCH_FAILED', JSON.stringify({ error_name: error?.name || null, message: String(error?.message || error).slice(0, 2000) }));
   }
 }
 
 const nvidiaSmokeEnabled = isEnabled('AAU_NVIDIA_SMOKE_TEST');
-
 if (nvidiaSmokeEnabled) {
   try {
     const { nvidiaConfigStatus, probeNvidia } = await import('./providers/nvidia.js');
@@ -24,13 +30,7 @@ if (nvidiaSmokeEnabled) {
     const result = await probeNvidia();
     console.log('AAU_NVIDIA_SMOKE_PROBE', JSON.stringify(result));
   } catch (error) {
-    console.log('AAU_NVIDIA_SMOKE_PROBE', JSON.stringify({
-      ok: false,
-      mode: 'experimental_only',
-      error_name: error?.name || null,
-      http_status: error?.status || null,
-      message: String(error?.message || error).slice(0, 1000),
-    }));
+    console.log('AAU_NVIDIA_SMOKE_PROBE', JSON.stringify({ ok: false, mode: 'experimental_only', error_name: error?.name || null, http_status: error?.status || null, message: String(error?.message || error).slice(0, 1000) }));
   }
 }
 
@@ -40,32 +40,18 @@ if (isEnabled('AAU_NVIDIA_EXPERTISE_AUTH_SMOKE_TEST')) {
     const result = await probeNvidiaExpertiseAuthenticator();
     console.log('AAU_NVIDIA_EXPERTISE_AUTH_SMOKE_PROBE', JSON.stringify(result));
   } catch (error) {
-    console.log('AAU_NVIDIA_EXPERTISE_AUTH_SMOKE_PROBE', JSON.stringify({
-      ok: false,
-      provider: 'nvidia_direct',
-      model_requested: 'z-ai/glm-5.3',
-      error_name: error?.name || null,
-      http_status: error?.status || null,
-      message: String(error?.message || error).slice(0, 1200),
-    }));
+    console.log('AAU_NVIDIA_EXPERTISE_AUTH_SMOKE_PROBE', JSON.stringify({ ok: false, provider: 'nvidia_direct', model_requested: 'z-ai/glm-5.3', error_name: error?.name || null, http_status: error?.status || null, message: String(error?.message || error).slice(0, 1200) }));
   }
 }
 
 const fluxSmokeEnabled = isEnabled('AAU_NVIDIA_FLUX_SMOKE_TEST');
-
 if (fluxSmokeEnabled) {
   try {
     const { probeNvidiaFlux2 } = await import('./flux-smoke-probe.js');
     const result = await probeNvidiaFlux2();
     console.log('AAU_NVIDIA_FLUX_SMOKE_PROBE', JSON.stringify(result));
   } catch (error) {
-    console.log('AAU_NVIDIA_FLUX_SMOKE_PROBE', JSON.stringify({
-      ok: false,
-      model: 'black-forest-labs/flux.2-klein-4b',
-      error_name: error?.name || null,
-      http_status: error?.status || null,
-      error_message: String(error?.message || error).slice(0, 800),
-    }));
+    console.log('AAU_NVIDIA_FLUX_SMOKE_PROBE', JSON.stringify({ ok: false, model: 'black-forest-labs/flux.2-klein-4b', error_name: error?.name || null, http_status: error?.status || null, error_message: String(error?.message || error).slice(0, 800) }));
   }
 }
 
@@ -75,10 +61,7 @@ if (isEnabled('AAU_EXPERTISE_VERIFIER_ENABLED')) {
     const result = startExpertiseVerificationWorker();
     console.log('AAU_EXPERTISE_VERIFIER_STARTED', JSON.stringify(result));
   } catch (error) {
-    console.error('AAU_EXPERTISE_VERIFIER_START_FAILED', JSON.stringify({
-      error_name: error?.name || null,
-      message: String(error?.message || error).slice(0, 1600),
-    }));
+    console.error('AAU_EXPERTISE_VERIFIER_START_FAILED', JSON.stringify({ error_name: error?.name || null, message: String(error?.message || error).slice(0, 1600) }));
   }
 }
 
@@ -88,36 +71,24 @@ if (isEnabled('AAU_EMBODIMENT_RENDERER_ENABLED')) {
     const result = startEmbodimentRenderWorker();
     console.log('AAU_EMBODIMENT_RENDERER_STARTED', JSON.stringify(result));
   } catch (error) {
-    console.error('AAU_EMBODIMENT_RENDERER_START_FAILED', JSON.stringify({
-      error_name: error?.name || null,
-      message: String(error?.message || error).slice(0, 1200),
-    }));
+    console.error('AAU_EMBODIMENT_RENDERER_START_FAILED', JSON.stringify({ error_name: error?.name || null, message: String(error?.message || error).slice(0, 1200) }));
   }
 }
 
 const nvidiaWakeEnabled = isEnabled('AAU_NVIDIA_WAKE_ON_START');
-
 if (nvidiaWakeEnabled) {
   try {
     const { runExperimentalNvidiaWake } = await import('./experimental-nvidia-wake.js');
     const result = await runExperimentalNvidiaWake();
     console.log('AAU_NVIDIA_AGENT_WAKE_RESULT', JSON.stringify(result));
   } catch (error) {
-    console.log('AAU_NVIDIA_AGENT_WAKE_RESULT', JSON.stringify({
-      status: 'failed',
-      mode: 'experimental_only',
-      error_name: error?.name || null,
-      http_status: error?.status || null,
-      message: String(error?.message || error).slice(0, 2000),
-    }));
+    console.log('AAU_NVIDIA_AGENT_WAKE_RESULT', JSON.stringify({ status: 'failed', mode: 'experimental_only', error_name: error?.name || null, http_status: error?.status || null, message: String(error?.message || error).slice(0, 2000) }));
   }
 }
 
 const singleWakeConfigured = isEnabled('AAU_NVIDIA_SINGLE_WAKE_ON_START') && Boolean(
-  String(process.env.AAU_NVIDIA_SINGLE_WAKE_REQUEST_ID || '').trim()
-  && String(process.env.AAU_NVIDIA_SINGLE_WAKE_AGENT_ID || '').trim()
+  String(process.env.AAU_NVIDIA_SINGLE_WAKE_REQUEST_ID || '').trim() && String(process.env.AAU_NVIDIA_SINGLE_WAKE_AGENT_ID || '').trim()
 );
-
 if (singleWakeConfigured) {
   const { runConfiguredNvidiaSingleWake } = await import('./nvidia-single-agent-wake.js');
   await runConfiguredNvidiaSingleWake();
@@ -129,10 +100,7 @@ if (isEnabled('AAU_AUTONOMOUS_LIFECYCLE_ENABLED')) {
     const result = await startNvidiaAutonomousLifecycle();
     console.log('AAU_AUTONOMOUS_LIFECYCLE_STARTED', JSON.stringify(result));
   } catch (error) {
-    console.error('AAU_AUTONOMOUS_LIFECYCLE_START_FAILED', JSON.stringify({
-      error_name: error?.name || null,
-      message: String(error?.message || error).slice(0, 2000),
-    }));
+    console.error('AAU_AUTONOMOUS_LIFECYCLE_START_FAILED', JSON.stringify({ error_name: error?.name || null, message: String(error?.message || error).slice(0, 2000) }));
   }
 }
 
