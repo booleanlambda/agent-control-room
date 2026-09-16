@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 
 const ENDPOINT = 'https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b';
 const MODEL = 'black-forest-labs/flux.2-klein-4b';
+const HOSTED_PROMPT_LIMIT = 800;
 
 const clean = (value) => String(value || '').trim();
 
@@ -39,6 +40,7 @@ export function flux2ConfigStatus() {
     provider: 'nvidia',
     model: MODEL,
     endpoint: ENDPOINT,
+    hosted_prompt_limit: HOSTED_PROMPT_LIMIT,
     hosted_trial_generation: true,
     hosted_trial_arbitrary_reference_edit: false,
   };
@@ -59,20 +61,16 @@ export async function generateFlux2Embodiment({
   const startedAt = Date.now();
   let response;
   try {
-    // Keep this payload aligned with the hosted NVIDIA trial endpoint that was
-    // successfully probed from this same Render service. Omitting `mode` lets
-    // the endpoint default to image generation; the human-readable docs label
-    // is not accepted verbatim by the current hosted validator.
     response = await fetch(ENDPOINT, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${apiKey}`,
         'content-type': 'application/json',
         accept: 'application/json',
-        'user-agent': 'AAU-Embodiment-FLUX2/0.2',
+        'user-agent': 'AAU-Embodiment-FLUX2/0.3',
       },
       body: JSON.stringify({
-        prompt: text.slice(0, 10000),
+        prompt: text.slice(0, HOSTED_PROMPT_LIMIT),
         width,
         height,
         samples: 1,
