@@ -94,6 +94,19 @@ if (singleWakeConfigured) {
   await runConfiguredNvidiaSingleWake();
 }
 
+const manualWakeConfigured = isEnabled('AAU_NVIDIA_MANUAL_WAKE_ON_START') && Boolean(
+  String(process.env.AAU_NVIDIA_MANUAL_WAKE_REQUEST_ID || '').trim() && String(process.env.AAU_NVIDIA_MANUAL_WAKE_AGENT_ID || '').trim()
+);
+if (manualWakeConfigured) {
+  try {
+    const { runConfiguredNvidiaManualWake } = await import('./nvidia-manual-agent-wake.js');
+    const result = await runConfiguredNvidiaManualWake();
+    console.log('AAU_NVIDIA_MANUAL_WAKE_STARTUP_RESULT', JSON.stringify(result));
+  } catch (error) {
+    console.error('AAU_NVIDIA_MANUAL_WAKE_STARTUP_FAILED', JSON.stringify({ error_name: error?.name || null, message: String(error?.message || error).slice(0, 2000) }));
+  }
+}
+
 if (isEnabled('AAU_AUTONOMOUS_LIFECYCLE_ENABLED')) {
   try {
     const { startNvidiaAutonomousLifecycle } = await import('./nvidia-autonomous-lifecycle.js');
