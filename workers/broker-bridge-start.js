@@ -21,6 +21,23 @@ if (nvidiaSmokeEnabled) {
   }
 }
 
+if (isEnabled('AAU_NVIDIA_EXPERTISE_AUTH_SMOKE_TEST')) {
+  try {
+    const { probeNvidiaExpertiseAuthenticator } = await import('./nvidia-expertise-auth-probe.js');
+    const result = await probeNvidiaExpertiseAuthenticator();
+    console.log('AAU_NVIDIA_EXPERTISE_AUTH_SMOKE_PROBE', JSON.stringify(result));
+  } catch (error) {
+    console.log('AAU_NVIDIA_EXPERTISE_AUTH_SMOKE_PROBE', JSON.stringify({
+      ok: false,
+      provider: 'nvidia_direct',
+      model_requested: 'z-ai/glm-5-3',
+      error_name: error?.name || null,
+      http_status: error?.status || null,
+      message: String(error?.message || error).slice(0, 1200),
+    }));
+  }
+}
+
 const fluxSmokeEnabled = isEnabled('AAU_NVIDIA_FLUX_SMOKE_TEST');
 
 if (fluxSmokeEnabled) {
