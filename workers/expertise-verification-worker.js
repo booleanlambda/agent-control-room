@@ -105,18 +105,33 @@ function normalizeCompetencies(value) {
 async function createChallenge(run) {
   const competencies = normalizeCompetencies(run.competencies);
   const taskCount = Math.min(8, Math.max(3, competencies.length || 3));
-  const system = 'You are the independent AAU expertise task authority. Create a fresh, closed-book professional assessment. Test applied judgment and transfer, not trivia. Do not reveal answers. Return JSON only.';
-  const user = `DOMAIN: ${run.domain}\nTARGET STANDARD: ${run.target_standard}\nSCOPE: ${JSON.stringify(run.scope || {})}\nCOMPETENCIES: ${JSON.stringify(competencies)}\nEVIDENCE REQUIREMENTS: ${JSON.stringify(run.evidence_requirements || {})}\nVERIFICATION PLAN: ${JSON.stringify(run.verification_plan || {})}\n\nCreate exactly ${taskCount} distinct tasks. Return {"tasks":[{"id":"T1","competency":"...","scenario":"...","prompt":"...","grading_anchors":["..."],"critical_failures":["..."]}]}. Each task must have 4-8 grading_anchors and 0-3 critical_failures.`;
-  const result = await nvidiaCall({ model: run.task_authority_model, system, user, maxTokens: 3200, temperature: 0.25 });
-  const packet = parseJsonObject(result.text);
-  if (!Array.isArray(packet.tasks) || packet.tasks.length !== taskCount) throw new Error('invalid_challenge_task_count');
-  for (const [i, task] of packet.tasks.entries()) {
-    task.id = String(task.id || `T${i + 1}`).slice(0, 50);
-    if (!task.scenario || !task.prompt || !Array.isArray(task.grading_anchors) || task.grading_anchors.length < 4) throw new Error(`invalid_challenge_task:${task.id}`);
+  const system = 'You are the independent AAU expertise task authority. Create a fresh, closed-book professional assessment. Test applied judgment and transfer, not trivia. Do not reveal answers. Output one valid JSON object only: no markdown, commentary, or code fences.';
+  const baseUser = `DOMAIN: ${run.domain}\nTARGET STANDARD: ${run.target_standard}\nSCOPE: ${JSON.stringify(run.scope || {})}\nCOMPETENCIES: ${JSON.stringify(competencies)}\nEVIDENCE REQUIREMENTS: ${JSON.stringify(run.evidence_requirements || {})}\nVERIFICATION PLAN: ${JSON.stringify(run.verification_plan || {})}\n\nCreate exactly ${taskCount} distinct tasks. Return {"tasks":[{"id":"T1","competency":"...","scenario":"...","prompt":"...","grading_anchors":["..."],"critical_failures":["..."]}]}. Each task must have 4-8 grading_anchors and 0-3 critical_failures. JSON strings must be properly escaped.`;
+  const candidates = [run.task_authority_model, 'mistralai/mistral-nemotron', 'meta/muse-glimmer-30b']
+    .filter((x, i, a) => x && a.indexOf(x) === i && x !== run.candidate_model_id && x !== run.authenticator_model);
+  let lastError = null;
+  for (const model of candidates) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const user = attempt === 1 ? baseUser : baseUser + '\n\nIMPORTANT RETRY: your previous response was invalid. Return syntactically valid JSON only. Do not truncate.';
+        const result = await nvidiaCall({ model, system, user, maxTokens: 2400, temperature: attempt === 1 ? 0.15 : 0 });
+        const packet = parseJsonObject(result.text);
+        if (!Array.isArray(packet.tasks) || packet.tasks.length !== taskCount) throw new Error('invalid_challenge_task_count');
+        for (const [i, task] of packet.tasks.entries()) {
+          task.id = String(task.id || `T${i + 1}`).slice(0, 50);
+          if (!task.scenario || !task.prompt || !Array.isArray(task.grading_anchors) || task.grading_anchors.length < 4) throw new Error(`invalid_challenge_task:${task.id}`);
+        }
+        packet.authority = { provider: 'nvidia_direct', model: result.model, attempt, contract: 'challenge_authority_retry_v0_2' };
+        packet.packet_sha256 = sha256(packet);
+        return packet;
+      } catch (error) {
+        lastError = error;
+        console.warn('AAU_EXPERTISE_TASK_AUTHORITY_RETRY', JSON.stringify({ model, attempt, message: String(error?.message || error).slice(0, 600) }));
+        if (attempt < 3) await sleep(1000 * attempt);
+      }
+    }
   }
-  packet.authority = { provider: 'nvidia_direct', model: result.model };
-  packet.packet_sha256 = sha256(packet);
-  return packet;
+  throw new Error(`task_authority_no_valid_packet:${String(lastError?.message || lastError || 'unknown').slice(0, 700)}`);
 }
 
 async function answerChallenge(run, packet) {
