@@ -1,40 +1,16 @@
-name: Adjudicator Quota Smoke
+name: Adjudicator Quota Smoke (Deprecated)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/adjudicator-quota-smoke.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  adjudicator-quota:
+  deprecated:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    env:
-      OPENROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_ADJUDICATOR }}
-      MODEL: google/gemma-4-31b-it:free
     steps:
-      - name: Call adjudicator model
-        shell: bash
+      - name: Deprecated quota path
         run: |
-          set -euo pipefail
-          set +x
-          [ -n "${OPENROUTER_API_KEY:-}" ] || { echo 'ADJUDICATOR_SECRET_PRESENT=false'; exit 2; }
-          echo 'ADJUDICATOR_SECRET_PRESENT=true'
-          jq -n --arg model "$MODEL" '{model:$model,temperature:0,max_tokens:30,messages:[{role:"user",content:"Return exactly: AAU_ADJUDICATOR_OK"}]}' > payload.json
-          code=$(curl -sS -o response.json -w '%{http_code}' https://openrouter.ai/api/v1/chat/completions \
-            -H "Authorization: Bearer ${OPENROUTER_API_KEY}" -H 'Content-Type: application/json' --data-binary @payload.json || true)
-          echo "HTTP_STATUS=${code}"
-          if [ "$code" = '200' ]; then
-            echo "SERVED_MODEL=$(jq -r '.model // empty' response.json)"
-            echo "RESPONSE=$(jq -r '.choices[0].message.content // empty' response.json | tr '\n' ' ')"
-            echo 'ADJUDICATOR_QUOTA_AVAILABLE=true'
-          else
-            jq '{error,message}' response.json 2>/dev/null || cat response.json
-            echo 'ADJUDICATOR_QUOTA_AVAILABLE=false'
-            exit 3
-          fi
+          echo "Deprecated: AAU expertise verification no longer uses OpenRouter quotas."
+          echo "Direct NVIDIA endpoint availability is validated by the Render verifier runtime."
