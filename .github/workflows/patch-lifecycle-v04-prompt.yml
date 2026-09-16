@@ -1,0 +1,61 @@
+name: Patch Lifecycle v0.4 Prompt
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-lifecycle-v04-prompt.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Patch NVIDIA lifecycle prompt
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('workers/nvidia-single-agent-wake.js')
+          s = p.read_text()
+
+          old = '- Identity fields are descriptive records, not objectives. Do not focus on unset identity fields merely because they are blank.'
+          new = '- Identity fields are descriptive records, not objectives. Do not focus on unset identity fields merely because they are blank. However, if mandatory_lifecycle_context identifies a current mandatory artifact stage, addressing that stage is a valid current lifecycle objective; the runtime may require a decision but may not choose the substantive identity value for the agent.'
+          if old not in s:
+              raise SystemExit('identity prompt marker not found')
+          s = s.replace(old, new, 1)
+
+          old = '- The wake reason is a stimulus, not an order about what to think.'
+          new = '- The wake reason is a stimulus, not an order about what to think. If mandatory_lifecycle_context is enrolled and current_stage is not open_autonomy, complete the current ordered artifact-initiation stage before unrelated open-autonomy work. Within that stage, substantive choices remain the agent’s own.'
+          if old not in s:
+              raise SystemExit('autonomy prompt marker not found')
+          s = s.replace(old, new, 1)
+
+          old = '- Embodiment is optional. An unset embodiment is valid.\n- Do not feel pressured to choose a humanlike form, gender presentation, age presentation, culture, voice, or visual identity.'
+          new = '- A particular embodiment or external representation is optional. If mandatory_lifecycle_context requires the Embodiment Artifact stage, making a deliberate embodiment decision is mandatory; representation_desired=false is valid and satisfies that decision when recorded with a reason.\n- Do not feel pressured to choose a humanlike form, gender presentation, age presentation, culture, voice, or visual identity.'
+          if old not in s:
+              raise SystemExit('embodiment prompt marker not found')
+          s = s.replace(old, new, 1)
+
+          s = s.replace("prompt_version: 'persistent_agent_system_prompt_nvidia_v0_2_autonomous_lifecycle'", "prompt_version: 'persistent_agent_system_prompt_nvidia_v0_3_mandatory_artifact_lifecycle'", 1)
+          p.write_text(s)
+          PY
+
+          node --check workers/nvidia-single-agent-wake.js
+          grep -q "mandatory_lifecycle_context" workers/nvidia-single-agent-wake.js
+          grep -q "persistent_agent_system_prompt_nvidia_v0_3_mandatory_artifact_lifecycle" workers/nvidia-single-agent-wake.js
+
+      - name: Commit prompt update
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add workers/nvidia-single-agent-wake.js
+          git commit -m 'feat: enforce mandatory artifact lifecycle in NVIDIA prompt' || exit 0
+          git push
