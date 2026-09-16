@@ -10,7 +10,7 @@ function headers() {
     accept: 'application/vnd.github+json',
     'content-type': 'application/json',
     'x-github-api-version': '2022-11-28',
-    'user-agent': 'AAU-Expertise-Runtime-Patcher/0.5',
+    'user-agent': 'AAU-Expertise-Runtime-Patcher/0.6',
   };
 }
 
@@ -27,48 +27,26 @@ export async function patchExpertiseVerifierRuntime() {
   const api = `${GH}/repos/${REPO}/contents/${PATH}`;
   const file = await gh(`${api}?ref=main`);
   let source = Buffer.from(file.content || '', 'base64').toString('utf8');
-  if (source.includes('expertise_verifier_latency_v0_1')) {
-    return { ok: true, changed: false, reason: 'already_patched_latency_v0_1' };
+  if (source.includes('candidate_no_thinking_v0_1')) {
+    return { ok: true, changed: false, reason: 'already_patched_candidate_no_thinking_v0_1' };
   }
-  if (!source.includes('deterministic_task_authority_v0_1')) {
-    throw new Error('deterministic_authority_not_present');
+  if (!source.includes('expertise_verifier_latency_v0_1')) {
+    throw new Error('latency_patch_not_present');
   }
 
-  source = source.replace(
-    'Answer in 300-700 words.',
-    'Answer in 180-350 words. Prioritize concrete technical decisions over exposition.'
-  );
-  source = source.replace(
-    "const result = await nvidiaCall({ model: run.candidate_model_id, system, user, maxTokens: 1600, temperature: 0.15 });",
-    "const result = await nvidiaCall({ model: run.candidate_model_id, system, user, maxTokens: 700, temperature: 0.10, timeoutMs: 60000 });"
-  );
-  source = source.replace(
-    "const result = await nvidiaCall({ model: run.authenticator_model, system, user, maxTokens: 1000, temperature: 0, timeoutMs: 90000 });",
-    "const result = await nvidiaCall({ model: run.authenticator_model, system, user, maxTokens: 500, temperature: 0, timeoutMs: 60000 });"
-  );
-  source = source.replace(
-    "const result = await nvidiaCall({ model, system, user, maxTokens: 700, temperature: 0, timeoutMs: 60000 });",
-    "const result = await nvidiaCall({ model, system, user, maxTokens: 500, temperature: 0, timeoutMs: 45000 });"
-  );
-
-  const needle = "async function processRun(run) {\n  const packet = await createChallenge(run);\n  const answers = await answerChallenge(run, packet);";
-  const replacement = "async function processRun(run) {\n  const packet = await createChallenge(run);\n  console.log('AAU_EXPERTISE_STAGE', JSON.stringify({ verification_run_id: run.verification_run_id, stage: 'challenge_ready', tasks: packet.tasks.length, authority: packet.authority?.model || null, contract: 'expertise_verifier_latency_v0_1' }));\n  const answers = await answerChallenge(run, packet);\n  console.log('AAU_EXPERTISE_STAGE', JSON.stringify({ verification_run_id: run.verification_run_id, stage: 'candidate_answers_ready', answers: answers.length }));";
-  if (!source.includes(needle)) throw new Error('process_run_anchor_not_found');
-  source = source.replace(needle, replacement);
-
-  source = source.replace(
-    "authGrades.push(grade);",
-    "authGrades.push(grade);\n    console.log('AAU_EXPERTISE_STAGE', JSON.stringify({ verification_run_id: run.verification_run_id, stage: 'authenticated_task', task_id: task.id, score: grade.score, confidence: grade.confidence }));"
-  );
+  const oldLine = "  if (model === 'z-ai/glm-5.3') body.chat_template_kwargs = { clear_thinking: true };";
+  const newLines = "  if (model === 'z-ai/glm-5.3') body.chat_template_kwargs = { clear_thinking: true };\n  else if (String(model || '').startsWith('nvidia/nemotron')) body.chat_template_kwargs = { enable_thinking: false }; // candidate_no_thinking_v0_1";
+  if (!source.includes(oldLine)) throw new Error('nvidia_thinking_anchor_not_found');
+  source = source.replace(oldLine, newLines);
 
   const response = await gh(api, {
     method: 'PUT',
     body: JSON.stringify({
-      message: 'fix: bound expertise verifier stage latency',
+      message: 'fix: disable Nemotron thinking in expertise verifier',
       content: Buffer.from(source, 'utf8').toString('base64'),
       sha: file.sha,
       branch: 'main',
     }),
   });
-  return { ok: true, changed: true, commit_sha: response?.commit?.sha || null, contract: 'expertise_verifier_latency_v0_1' };
+  return { ok: true, changed: true, commit_sha: response?.commit?.sha || null, contract: 'candidate_no_thinking_v0_1' };
 }
