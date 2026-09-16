@@ -60,10 +60,30 @@ export function nvidiaConfigStatus() {
   };
 }
 
-export async function nvidiaChatCompletion({ messages, model, maxTokens = 256, temperature = 0.2 } = {}) {
+export async function nvidiaChatCompletion({
+  messages,
+  model,
+  maxTokens = 256,
+  temperature = 0.2,
+  jsonMode = false,
+  enableThinking = null,
+} = {}) {
   const config = resolveConfig();
   if (!config.apiKey) throw new Error('NVIDIA_API_KEY is not configured');
   if (!Array.isArray(messages) || messages.length === 0) throw new Error('messages are required');
+
+  const requestBody = {
+    model: clean(model) || config.model,
+    messages,
+    max_tokens: Math.max(1, Math.min(Number(maxTokens) || 256, 4096)),
+    temperature: Number.isFinite(Number(temperature)) ? Number(temperature) : 0.2,
+    stream: false,
+  };
+
+  if (jsonMode) requestBody.response_format = { type: 'json_object' };
+  if (typeof enableThinking === 'boolean') {
+    requestBody.chat_template_kwargs = { enable_thinking: enableThinking };
+  }
 
   const response = await fetch(config.url, {
     method: 'POST',
@@ -71,15 +91,9 @@ export async function nvidiaChatCompletion({ messages, model, maxTokens = 256, t
       authorization: `Bearer ${config.apiKey}`,
       'content-type': 'application/json',
       accept: 'application/json',
-      'user-agent': 'AAU-NVIDIA-Experimental-Adapter/0.1',
+      'user-agent': 'AAU-NVIDIA-Experimental-Adapter/0.2',
     },
-    body: JSON.stringify({
-      model: clean(model) || config.model,
-      messages,
-      max_tokens: Math.max(1, Math.min(Number(maxTokens) || 256, 4096)),
-      temperature: Number.isFinite(Number(temperature)) ? Number(temperature) : 0.2,
-      stream: false,
-    }),
+    body: JSON.stringify(requestBody),
   });
 
   const raw = await response.text();
@@ -112,9 +126,11 @@ export async function nvidiaChatCompletion({ messages, model, maxTokens = 256, t
 export async function probeNvidia() {
   const startedAt = Date.now();
   const result = await nvidiaChatCompletion({
-    messages: [{ role: 'user', content: 'Return exactly AAU_NVIDIA_OK and nothing else.' }],
-    maxTokens: 32,
+    messages: [{ role: 'user', content: 'Return JSON exactly as {"status":"AAU_NVIDIA_OK"}.' }],
+    maxTokens: 64,
     temperature: 0,
+    jsonMode: true,
+    enableThinking: false,
   });
 
   return {
