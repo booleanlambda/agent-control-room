@@ -23,6 +23,15 @@ function extractBase64(body) {
   return { artifact, base64 };
 }
 
+function safeErrorDetail(body, raw) {
+  const detail = body?.error?.message || body?.detail || body?.message;
+  if (typeof detail === 'string') return detail;
+  if (detail != null) {
+    try { return JSON.stringify(detail).slice(0, 1200); } catch {}
+  }
+  return String(raw || '').slice(0, 1200);
+}
+
 export function flux2ConfigStatus() {
   return {
     ready: Boolean(clean(process.env.NVIDIA_API_KEY)),
@@ -50,20 +59,22 @@ export async function generateFlux2Embodiment({
   const startedAt = Date.now();
   let response;
   try {
+    // Keep this payload aligned with the hosted NVIDIA trial endpoint that was
+    // successfully probed from this same Render service. Omitting `mode` lets
+    // the endpoint default to image generation; the human-readable docs label
+    // is not accepted verbatim by the current hosted validator.
     response = await fetch(ENDPOINT, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${apiKey}`,
         'content-type': 'application/json',
         accept: 'application/json',
-        'user-agent': 'AAU-Embodiment-FLUX2/0.1',
+        'user-agent': 'AAU-Embodiment-FLUX2/0.2',
       },
       body: JSON.stringify({
-        mode: 'Image Generation',
         prompt: text.slice(0, 10000),
         width,
         height,
-        cfg_scale: 0,
         samples: 1,
         seed: Math.max(0, Number(seed) || 0),
         steps: Math.max(1, Math.min(4, Number(steps) || 4)),
@@ -79,7 +90,7 @@ export async function generateFlux2Embodiment({
   try { body = JSON.parse(raw); } catch {}
 
   if (!response.ok) {
-    const detail = body?.error?.message || body?.detail || body?.message || raw.slice(0, 800) || `HTTP ${response.status}`;
+    const detail = safeErrorDetail(body, raw) || `HTTP ${response.status}`;
     const error = new Error(`nvidia_flux_${response.status}: ${detail}`);
     error.status = response.status;
     error.code = body?.error?.code || body?.code || `http_${response.status}`;
