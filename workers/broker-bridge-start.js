@@ -21,6 +21,24 @@ if (nvidiaSmokeEnabled) {
   }
 }
 
+const fluxSmokeEnabled = isEnabled('AAU_NVIDIA_FLUX_SMOKE_TEST');
+
+if (fluxSmokeEnabled) {
+  try {
+    const { probeNvidiaFlux2 } = await import('./flux-smoke-probe.js');
+    const result = await probeNvidiaFlux2();
+    console.log('AAU_NVIDIA_FLUX_SMOKE_PROBE', JSON.stringify(result));
+  } catch (error) {
+    console.log('AAU_NVIDIA_FLUX_SMOKE_PROBE', JSON.stringify({
+      ok: false,
+      model: 'black-forest-labs/flux.2-klein-4b',
+      error_name: error?.name || null,
+      http_status: error?.status || null,
+      error_message: String(error?.message || error).slice(0, 800),
+    }));
+  }
+}
+
 const nvidiaWakeEnabled = isEnabled('AAU_NVIDIA_WAKE_ON_START');
 
 if (nvidiaWakeEnabled) {
