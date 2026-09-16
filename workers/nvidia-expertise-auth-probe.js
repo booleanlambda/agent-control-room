@@ -2,7 +2,7 @@ import { nvidiaChatCompletion } from './providers/nvidia.js';
 
 export async function probeNvidiaExpertiseAuthenticator() {
   const startedAt = Date.now();
-  const model = 'z-ai/glm-5-3';
+  const model = 'z-ai/glm-5.3';
   const result = await nvidiaChatCompletion({
     model,
     messages: [
