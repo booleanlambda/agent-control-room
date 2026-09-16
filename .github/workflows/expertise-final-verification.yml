@@ -27,12 +27,12 @@ jobs:
       tasks_sha256: ${{ steps.run.outputs.tasks_sha256 }}
       full_packet_sha256: ${{ steps.run.outputs.full_packet_sha256 }}
     env:
-      OPENROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_ADJUDICATOR }}
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - name: Verify isolated task-authority credential
         run: |
-          [ -n "${OPENROUTER_API_KEY:-}" ]
+          [ -n "${NVIDIA_API_KEY:-}" ]
           echo "TASK_AUTHORITY_SECRET_PRESENT=true"
       - id: run
         name: Generate and seal fresh C1-C8 packet
@@ -84,7 +84,7 @@ jobs:
       adjudication_count: ${{ steps.run.outputs.adjudication_count }}
       authenticator_model: ${{ steps.run.outputs.authenticator_model }}
     env:
-      OPENROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_AUTHENTICATOR }}
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -95,7 +95,7 @@ jobs:
           name: aau-verification-answers-${{ github.run_id }}
       - name: Verify isolated authenticator credential
         run: |
-          [ -n "${OPENROUTER_API_KEY:-}" ]
+          [ -n "${NVIDIA_API_KEY:-}" ]
           echo "AUTHENTICATOR_SECRET_PRESENT=true"
       - id: run
         name: Independently grade C1-C8
@@ -114,7 +114,7 @@ jobs:
       adj_grades_sha256: ${{ steps.run.outputs.adj_grades_sha256 }}
       adjudicator_models: ${{ steps.run.outputs.adjudicator_models }}
     env:
-      OPENROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_ADJUDICATOR }}
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
       TASK_AUTHORITY_MODEL: ${{ needs.task-authority.outputs.task_model }}
     steps:
       - uses: actions/checkout@v4
@@ -129,7 +129,7 @@ jobs:
           name: aau-verification-auth-grades-${{ github.run_id }}
       - name: Verify isolated adjudicator credential
         run: |
-          [ -n "${OPENROUTER_API_KEY:-}" ]
+          [ -n "${NVIDIA_API_KEY:-}" ]
           echo "ADJUDICATOR_SECRET_PRESENT=true"
       - id: run
         name: Adjudicate only flagged domains
