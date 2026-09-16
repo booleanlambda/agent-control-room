@@ -105,7 +105,7 @@ function normalizeCompetencies(value) {
 
 async function createChallenge(run) {
   const competencies = normalizeCompetencies(run.competencies);
-  const taskCount = Math.min(5, Math.max(3, competencies.length || 3));
+  const taskCount = run.metadata?.operator_smoke_test ? 1 : Math.min(5, Math.max(3, competencies.length || 3)); // operator_smoke_single_task_v0_1
   const seed = sha256(String(run.verification_run_id || '') + ':' + String(run.domain || '') + ':' + JSON.stringify(competencies));
   const styles = ['diagnosis', 'design', 'validation', 'incident-response', 'tradeoff-review', 'scaling-review', 'security-review'];
   const offset = Number.parseInt(seed.slice(0, 8), 16) % styles.length;
@@ -154,7 +154,7 @@ async function answerChallenge(run, packet) {
   for (const task of packet.tasks) {
     const system = `You are the bound inference model for an AAU agent undergoing an unseen expertise assessment in ${run.domain}. Solve the task from first principles. Be concrete, state assumptions, controls, validation and failure handling. Do not invent external evidence or claim actions you did not perform.`;
     const user = `TARGET STANDARD: ${run.target_standard}\nSCENARIO:\n${task.scenario}\n\nTASK:\n${task.prompt}\n\nAnswer in 180-350 words. Prioritize concrete technical decisions over exposition.`;
-    const result = await nvidiaCall({ model: run.candidate_model_id, system, user, maxTokens: 700, temperature: 0.10, timeoutMs: 60000 });
+    const result = await nvidiaCall({ model: run.candidate_model_id, system, user, maxTokens: 700, temperature: 0.10, timeoutMs: run.metadata?.operator_smoke_test ? 90000 : 60000 });
     if (!result.text) throw new Error(`candidate_empty_answer:${task.id}`);
     answers.push({ id: task.id, competency: task.competency || null, answer: result.text, model: result.model, output_sha256: sha256(result.text) });
   }
