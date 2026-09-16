@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "broker-bridge": "node workers/broker-bridge-envcheck.js"
+    "broker-bridge": "node workers/broker-bridge-start.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "latest",
