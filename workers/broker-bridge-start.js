@@ -19,4 +19,14 @@ if (nvidiaSmokeEnabled) {
   }
 }
 
+const singleWakeConfigured = Boolean(
+  String(process.env.AAU_NVIDIA_SINGLE_WAKE_REQUEST_ID || '').trim()
+  && String(process.env.AAU_NVIDIA_SINGLE_WAKE_AGENT_ID || '').trim()
+);
+
+if (singleWakeConfigured) {
+  const { runConfiguredNvidiaSingleWake } = await import('./nvidia-single-agent-wake.js');
+  await runConfiguredNvidiaSingleWake();
+}
+
 await import('./broker-bridge-envcheck.js');
