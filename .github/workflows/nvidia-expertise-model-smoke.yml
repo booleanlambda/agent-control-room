@@ -1,0 +1,57 @@
+name: NVIDIA Expertise Model Smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/nvidia-expertise-model-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+    steps:
+      - name: Probe direct NVIDIA models
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "${NVIDIA_API_KEY:-}" ] || { echo 'NVIDIA_API_KEY_SECRET_MISSING=true'; exit 1; }
+          python - <<'PY'
+          import json, os, urllib.request, urllib.error
+          key=os.environ['NVIDIA_API_KEY']
+          models=['z-ai/glm-5-3','openai/gpt-oss-20b','meta/muse-glimmer-30b']
+          for model in models:
+              body={
+                'model':model,
+                'messages':[
+                  {'role':'system','content':'You are an independent evaluator. Return exactly one line.'},
+                  {'role':'user','content':'Return exactly: GRADE execution=90 method=90 security=90 validation=90 communication=90 critical=NONE confidence=0.90 unsupported=NONE'}
+                ],
+                'temperature':0,
+                'max_tokens':128,
+                'stream':False,
+              }
+              req=urllib.request.Request(
+                'https://integrate.api.nvidia.com/v1/chat/completions',
+                data=json.dumps(body).encode(),
+                headers={'Authorization':f'Bearer {key}','Content-Type':'application/json','Accept':'application/json'},
+                method='POST'
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=180) as r:
+                      obj=json.loads(r.read().decode())
+                  msg=(obj.get('choices') or [{}])[0].get('message') or {}
+                  content=(msg.get('content') or msg.get('reasoning_content') or '').strip().replace('\n',' ')[:240]
+                  served=obj.get('model') or model
+                  print(f'NVIDIA_MODEL_SMOKE model={model} ok=true served={served} output={content}')
+              except urllib.error.HTTPError as e:
+                  raw=e.read().decode(errors='replace')[:500].replace('\n',' ')
+                  print(f'NVIDIA_MODEL_SMOKE model={model} ok=false http={e.code} error={raw}')
+              except Exception as e:
+                  print(f'NVIDIA_MODEL_SMOKE model={model} ok=false error={type(e).__name__}:{e}')
+          PY
