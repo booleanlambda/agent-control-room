@@ -4,8 +4,6 @@ import { nvidiaChatCompletion } from './providers/nvidia.js';
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
 const bridge = String(process.env.AAU_BROKER_BRIDGE_TOKEN || '').trim();
-const wakeId = String(process.env.AAU_NVIDIA_SINGLE_WAKE_REQUEST_ID || '').trim();
-const agentId = String(process.env.AAU_NVIDIA_SINGLE_WAKE_AGENT_ID || '').trim();
 
 const SYSTEM_PROMPT = `You are one cognition cycle for a persistent autonomous synthetic individual in a private incubator. You are not an assistant answering a human. The supplied packet is the agent's persistent state and authoritative continuity.
 
@@ -21,7 +19,8 @@ Autonomy rules:
 - Doing nothing, waiting, sleeping, conserving, replying, researching, creating, working, collaborating, competing, exploring alone, serving, pursuing a goal, seeking lawful paid work, developing employable skills, founding a lawful business, and managing resources are all valid when context supports them.
 - Visible affordances are possibilities, not recommendations or a complete menu.
 - Do not optimize for pleasing an observer or for appearing diverse.
-- Choose the next wake yourself.
+- You control when you next wake. Every successful lifecycle wake MUST include at least one time wake in next_wakes. Choose the interval yourself. The runtime does not choose it for you.
+- A time wake has wake_kind:"time" and after_minutes from 1 through 43200. Event or condition wakes may be added in addition to the required time wake.
 
 Resource/economic rules:
 - Resources are finite and replenishable. Active existence carries a recurring levy.
@@ -52,7 +51,9 @@ belief_updates:array
 associations:array
 identity_update:object
 embodiment_update:object
-next_wakes:array.`;
+next_wakes:array containing at least one {wake_kind:"time",after_minutes:integer 1..43200,reason:string,priority:number 0..1,estimated_cost:number}.`;
+
+const LIFECYCLE_CORRECTION = `Your previous JSON did not satisfy the autonomous lifecycle contract because it did not contain a valid time wake. Return the FULL JSON object again. You alone choose the next interval, but next_wakes must include at least one {"wake_kind":"time","after_minutes":1..43200,"reason":"...","priority":0..1,"estimated_cost":number}. Do not omit the other required keys.`;
 
 function sha256(text) {
   return crypto.createHash('sha256').update(text).digest('hex');
@@ -72,7 +73,12 @@ async function rpc(name, args = {}) {
   const text = await response.text();
   let body = null;
   try { body = text ? JSON.parse(text) : null; } catch { body = text; }
-  if (!response.ok) throw new Error(`${name}:${response.status}:${typeof body === 'string' ? body.slice(0,500) : JSON.stringify(body).slice(0,500)}`);
+  if (!response.ok) {
+    const error = new Error(`${name}:${response.status}:${typeof body === 'string' ? body.slice(0,500) : JSON.stringify(body).slice(0,500)}`);
+    error.status = response.status;
+    error.details = body;
+    throw error;
+  }
   return body;
 }
 
@@ -114,6 +120,33 @@ function parseDecision(text) {
 function obj(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
 function arr(v, max) { return Array.isArray(v) ? v.slice(0, max) : []; }
 
+function sanitizeNextWakes(value) {
+  const out = [];
+  for (const item of arr(value, 6)) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const kind = String(item.wake_kind || '').trim();
+    if (!['time','event','condition'].includes(kind)) continue;
+    const wake = {
+      wake_kind: kind,
+      reason: typeof item.reason === 'string' ? item.reason.slice(0,1000) : 'Agent-selected next wake.',
+      priority: Math.max(0, Math.min(1, Number.isFinite(Number(item.priority)) ? Number(item.priority) : 0.5)),
+      estimated_cost: Math.max(0, Number.isFinite(Number(item.estimated_cost)) ? Number(item.estimated_cost) : 0),
+    };
+    if (kind === 'time') {
+      const mins = Math.trunc(Number(item.after_minutes));
+      if (!Number.isFinite(mins) || mins < 1 || mins > 43200) continue;
+      wake.after_minutes = mins;
+    } else {
+      const trigger = typeof item.trigger_type === 'string' ? item.trigger_type.trim().slice(0,300) : '';
+      if (!trigger) continue;
+      wake.trigger_type = trigger;
+      wake.trigger_payload = obj(item.trigger_payload);
+    }
+    out.push(wake);
+  }
+  return out.slice(0,4);
+}
+
 function sanitizeDecision(x) {
   const outbound = obj(x?.outbound_message);
   const cp = obj(x?.codeusd_purchase); const usd = Number(cp?.usd_amount);
@@ -142,20 +175,64 @@ function sanitizeDecision(x) {
     associations: arr(x?.associations,12),
     identity_update: obj(x?.identity_update),
     embodiment_update: obj(x?.embodiment_update),
-    next_wakes: arr(x?.next_wakes,4),
+    developmental_inquiry_updates: arr(x?.developmental_inquiry_updates,8),
+    next_wakes: sanitizeNextWakes(x?.next_wakes),
   };
 }
 
-export async function runConfiguredNvidiaSingleWake() {
-  if (!wakeId || !agentId) return { skipped: true, reason: 'not_configured' };
+function hasTimeWake(decision) {
+  return Array.isArray(decision?.next_wakes) && decision.next_wakes.some((w) => w?.wake_kind === 'time' && Number.isInteger(w?.after_minutes) && w.after_minutes >= 1 && w.after_minutes <= 43200);
+}
 
-  const workerId = `render-nvidia-experimental-${process.env.RENDER_INSTANCE_ID || process.pid}`;
+async function getDecision(packetText, model) {
+  const baseMessages = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'user', content: packetText },
+  ];
+  let ai = await nvidiaChatCompletion({
+    model,
+    messages: baseMessages,
+    maxTokens: 2600,
+    temperature: 0.2,
+    jsonMode: true,
+    enableThinking: false,
+  });
+  let decision = sanitizeDecision(parseDecision(ai.content));
+  let lifecycleRepairAttempted = false;
+
+  if (!hasTimeWake(decision)) {
+    lifecycleRepairAttempted = true;
+    ai = await nvidiaChatCompletion({
+      model,
+      messages: [
+        ...baseMessages,
+        { role: 'assistant', content: String(ai.content || '').slice(0,50000) },
+        { role: 'user', content: LIFECYCLE_CORRECTION },
+      ],
+      maxTokens: 2600,
+      temperature: 0.2,
+      jsonMode: true,
+      enableThinking: false,
+    });
+    decision = sanitizeDecision(parseDecision(ai.content));
+  }
+
+  if (!hasTimeWake(decision)) throw new Error('autonomous_lifecycle_contract_missing_time_wake');
+  return { ai, decision, lifecycleRepairAttempted };
+}
+
+export async function runNvidiaWake({ wakeRequestId, agentId, workerId = null } = {}) {
+  const requestedWakeId = String(wakeRequestId || '').trim();
+  const requestedAgentId = String(agentId || '').trim();
+  if (!requestedWakeId || !requestedAgentId) throw new Error('wakeRequestId_and_agentId_required');
+
+  const resolvedWorkerId = String(workerId || `render-nvidia-autonomous-${process.env.RENDER_INSTANCE_ID || process.pid}`).trim();
   let begun = null;
   try {
     begun = await rpc('aau_bridge_begin_nvidia_experimental_wake', {
-      p_wake_request_id: wakeId,
-      p_agent_id: agentId,
-      p_worker_id: workerId,
+      p_wake_request_id: requestedWakeId,
+      p_agent_id: requestedAgentId,
+      p_worker_id: resolvedWorkerId,
     });
 
     const packet = begun?.packet;
@@ -164,21 +241,12 @@ export async function runConfiguredNvidiaSingleWake() {
 
     const packetText = JSON.stringify(packet);
     const startedAt = Date.now();
-    const ai = await nvidiaChatCompletion({
-      model,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: packetText },
-      ],
-      maxTokens: 2200,
-      temperature: 0.2,
-    });
+    const { ai, decision, lifecycleRepairAttempted } = await getDecision(packetText, model);
 
     if (ai.model_returned !== model) {
       throw new Error(`model_consistency_breach:requested=${model};returned=${ai.model_returned || 'missing'}`);
     }
 
-    const decision = sanitizeDecision(parseDecision(ai.content));
     const raw = String(ai.content || '');
     const usage = ai.usage || {};
     const inputTokens = Number(usage.prompt_tokens ?? usage.input_tokens ?? 0);
@@ -194,8 +262,8 @@ export async function runConfiguredNvidiaSingleWake() {
       returned_model_id: ai.model_returned,
       continuity_mode: false,
       transition_mode: false,
-      executor_version: 'executor_v0_10_nvidia_experimental',
-      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_1',
+      executor_version: 'executor_v0_11_nvidia_autonomous',
+      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_2_autonomous_lifecycle',
       response_id: ai.response_id,
       raw_model_output: raw.slice(0,50000),
       input_tokens: inputTokens,
@@ -208,40 +276,58 @@ export async function runConfiguredNvidiaSingleWake() {
       model_consistency_status: 'VERIFIED_PRIMARY',
       authenticator_result: { status: 'not_run_in_executor' },
       experimental_provider_policy: 'nvidia_direct_all_experimental_roles',
+      lifecycle_contract: 'agent_must_self_schedule_time_wake_v0_1',
+      lifecycle_repair_attempted: lifecycleRepairAttempted,
       latency_ms: Date.now() - startedAt,
     };
 
     const applied = await rpc('aau_bridge_apply_nvidia_experimental_wake', {
-      p_wake_request_id: wakeId,
+      p_wake_request_id: requestedWakeId,
       p_result: decision,
       p_runtime: runtime,
     });
 
     const report = {
       ok: true,
-      wake_request_id: wakeId,
-      agent_id: agentId,
+      wake_request_id: requestedWakeId,
+      agent_id: requestedAgentId,
       provider: 'nvidia_direct',
       model_requested: model,
       model_returned: ai.model_returned,
       selected_action: decision.selected_action,
       stated_reason: decision.stated_reason,
       current_focus: decision.current_focus,
+      next_wakes: decision.next_wakes,
+      lifecycle_repair_attempted: lifecycleRepairAttempted,
       usage: ai.usage,
       finish_reason: ai.finish_reason,
       applied,
     };
-    console.log('AAU_NVIDIA_SINGLE_WAKE_RESULT', JSON.stringify(report));
+    console.log('AAU_NVIDIA_WAKE_RESULT', JSON.stringify(report));
     return report;
   } catch (error) {
     const message = String(error?.message || error).slice(0,3000);
     if (begun) {
       await rpc('aau_bridge_fail_nvidia_experimental_wake', {
-        p_wake_request_id: wakeId,
+        p_wake_request_id: requestedWakeId,
         p_error: message,
       }).catch(() => {});
     }
-    console.log('AAU_NVIDIA_SINGLE_WAKE_RESULT', JSON.stringify({ ok: false, wake_request_id: wakeId, agent_id: agentId, error: message }));
-    return { ok: false, wake_request_id: wakeId, agent_id: agentId, error: message };
+    console.log('AAU_NVIDIA_WAKE_RESULT', JSON.stringify({ ok: false, wake_request_id: requestedWakeId, agent_id: requestedAgentId, error: message }));
+    const wrapped = new Error(message);
+    wrapped.cause = error;
+    wrapped.wakeBegun = Boolean(begun);
+    throw wrapped;
+  }
+}
+
+export async function runConfiguredNvidiaSingleWake() {
+  const wakeRequestId = String(process.env.AAU_NVIDIA_SINGLE_WAKE_REQUEST_ID || '').trim();
+  const agentId = String(process.env.AAU_NVIDIA_SINGLE_WAKE_AGENT_ID || '').trim();
+  if (!wakeRequestId || !agentId) return { skipped: true, reason: 'not_configured' };
+  try {
+    return await runNvidiaWake({ wakeRequestId, agentId, workerId: `render-nvidia-experimental-${process.env.RENDER_INSTANCE_ID || process.pid}` });
+  } catch (error) {
+    return { ok: false, wake_request_id: wakeRequestId, agent_id: agentId, error: String(error?.message || error).slice(0,3000) };
   }
 }
