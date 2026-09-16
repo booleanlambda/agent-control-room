@@ -20,6 +20,13 @@ Manual-wake experiment rules:
 - Doing nothing, waiting, conserving, researching, creating, working, collaborating, exploring, developing a skill, pursuing lawful paid work, founding a lawful business, or managing resources are valid when context supports them.
 - Do not optimize for pleasing an observer or for appearing diverse.
 
+Mandatory expertise-artifact rule:
+- If mandatory_lifecycle_context.current_stage is expertise_artifact, you must choose the expertise field yourself and set selected_action to initiate_expertise_artifact.
+- In the same response, associations must contain at least one complete object with exactly this origin: expertise_artifact_initiation_v0_1.
+- That object must contain a nonempty domain string, nonempty target_standard string, nonempty scope object, nonempty competencies array, nonempty evidence_requirements object, and nonempty verification_plan object.
+- Do not merely say that you are initiating expertise. The artifact specification itself must be present in associations or the runtime will reject the wake.
+- Initiating an Expertise Artifact grants zero competence and is not proof of expertise. The target standard and verification plan describe a future development and evidence path.
+
 Resource/economic rules:
 - Maintained existence consumes compute at the current per-minute rate. Day-one allocation is 1,440 compute credits at 1 compute/minute.
 - Effort itself is not taxed. Stress, energy, effort, fatigue, recovery, and related state remain meaningful internal dynamics.
@@ -55,6 +62,8 @@ developmental_inquiry_updates:array
 next_wakes:[]`;
 
 const JSON_CORRECTION = `Your previous response was not valid JSON. Preserve the same intended substantive decision, but return it again as ONE compact syntactically valid JSON object and nothing else. Do not include comments, markdown, trailing commas, or unescaped line breaks inside strings. next_wakes must be an empty array because this is a manual-wake experiment.`;
+
+const EXPERTISE_CORRECTION = `The mandatory lifecycle stage is expertise_artifact, but your previous response did not include a complete expertise artifact specification. Preserve your own substantive field choice, and return the full JSON response again. Set selected_action to initiate_expertise_artifact. associations must contain at least one object with origin exactly "expertise_artifact_initiation_v0_1" and nonempty fields: domain (string), target_standard (string), scope (object), competencies (array), evidence_requirements (object), verification_plan (object). Do not claim competence; artifact initiation grants zero competence. Return JSON only and next_wakes must be [].`;
 
 function sha256(text) {
   return crypto.createHash('sha256').update(text).digest('hex');
@@ -101,6 +110,21 @@ function parseDecision(text) {
 
 function obj(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
 function arr(v, max) { return Array.isArray(v) ? v.slice(0, max) : []; }
+function nonEmptyObject(v) { return v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length > 0; }
+
+function hasCompleteExpertiseInitiation(x) {
+  const items = Array.isArray(x?.associations) ? x.associations : [];
+  return items.some((v) =>
+    v && typeof v === 'object' && !Array.isArray(v) &&
+    v.origin === 'expertise_artifact_initiation_v0_1' &&
+    typeof v.domain === 'string' && v.domain.trim().length > 0 &&
+    typeof v.target_standard === 'string' && v.target_standard.trim().length > 0 &&
+    nonEmptyObject(v.scope) &&
+    Array.isArray(v.competencies) && v.competencies.length > 0 &&
+    nonEmptyObject(v.evidence_requirements) &&
+    nonEmptyObject(v.verification_plan)
+  );
+}
 
 function sanitizeDecision(x) {
   const outbound = obj(x?.outbound_message);
@@ -172,6 +196,7 @@ export async function runConfiguredNvidiaManualWake() {
 
     let parsed;
     let jsonRepairAttempted = false;
+    let lifecycleRepairAttempted = false;
     try {
       parsed = parseDecision(ai.content);
     } catch {
@@ -193,6 +218,26 @@ export async function runConfiguredNvidiaManualWake() {
       parsed = parseDecision(ai.content);
     }
 
+    const mandatoryStage = String(packet?.mandatory_lifecycle_context?.current_stage || packet?.mandatory_lifecycle_context?.stage || '').trim();
+    if (mandatoryStage === 'expertise_artifact' && !hasCompleteExpertiseInitiation(parsed)) {
+      lifecycleRepairAttempted = true;
+      const incompleteOutput = String(ai.content || '').slice(0,50000);
+      ai = await nvidiaChatCompletion({
+        model,
+        messages: [
+          ...baseMessages,
+          { role: 'assistant', content: incompleteOutput },
+          { role: 'user', content: EXPERTISE_CORRECTION },
+        ],
+        maxTokens: 2600,
+        temperature: 0,
+        jsonMode: true,
+        enableThinking: false,
+      });
+      if (ai.model_returned !== model) throw new Error(`model_consistency_breach_after_expertise_repair:requested=${model};returned=${ai.model_returned || 'missing'}`);
+      parsed = parseDecision(ai.content);
+    }
+
     const decision = sanitizeDecision(parsed);
     const raw = String(ai.content || '');
     const usage = ai.usage || {};
@@ -208,8 +253,8 @@ export async function runConfiguredNvidiaManualWake() {
       returned_model_id: ai.model_returned,
       continuity_mode: false,
       transition_mode: false,
-      executor_version: 'executor_v0_12_nvidia_manual',
-      prompt_version: 'persistent_agent_manual_prompt_nvidia_v0_1_existence_credit',
+      executor_version: 'executor_v0_13_nvidia_manual_expertise_contract',
+      prompt_version: 'persistent_agent_manual_prompt_nvidia_v0_2_expertise_contract',
       response_id: ai.response_id,
       raw_model_output: raw.slice(0,50000),
       input_tokens: inputTokens,
@@ -224,6 +269,7 @@ export async function runConfiguredNvidiaManualWake() {
       experimental_provider_policy: 'nvidia_direct_all_experimental_roles',
       wake_mode: 'manual_operator_triggered',
       json_repair_attempted: jsonRepairAttempted,
+      lifecycle_repair_attempted: lifecycleRepairAttempted,
       latency_ms: Date.now() - startedAt,
     };
 
@@ -245,6 +291,7 @@ export async function runConfiguredNvidiaManualWake() {
       current_focus: decision.current_focus,
       next_wakes: [],
       json_repair_attempted: jsonRepairAttempted,
+      lifecycle_repair_attempted: lifecycleRepairAttempted,
       usage: ai.usage,
       finish_reason: ai.finish_reason,
       applied,
