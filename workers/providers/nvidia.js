@@ -9,6 +9,14 @@ function trimTrailingSlash(value) {
   return value.replace(/\/+$/, '');
 }
 
+function envBool(name) {
+  const raw = clean(process.env[name]).toLowerCase();
+  if (!raw) return null;
+  if (['1','true','yes','on'].includes(raw)) return true;
+  if (['0','false','no','off'].includes(raw)) return false;
+  return null;
+}
+
 function resolveConfig() {
   const apiKey = clean(process.env.NVIDIA_API_KEY);
   const baseUrl = trimTrailingSlash(clean(process.env.AAU_NVIDIA_BASE_URL) || DEFAULT_NVIDIA_BASE_URL);
@@ -56,6 +64,8 @@ export function nvidiaConfigStatus() {
     endpoint_path: endpointPath,
     endpoint_kind: config.endpointKind,
     model: config.model,
+    json_mode: envBool('AAU_NVIDIA_JSON_MODE'),
+    enable_thinking: envBool('AAU_NVIDIA_ENABLE_THINKING'),
     mode: 'experimental_only',
   };
 }
@@ -65,12 +75,15 @@ export async function nvidiaChatCompletion({
   model,
   maxTokens = 256,
   temperature = 0.2,
-  jsonMode = false,
+  jsonMode = null,
   enableThinking = null,
 } = {}) {
   const config = resolveConfig();
   if (!config.apiKey) throw new Error('NVIDIA_API_KEY is not configured');
   if (!Array.isArray(messages) || messages.length === 0) throw new Error('messages are required');
+
+  const resolvedJsonMode = typeof jsonMode === 'boolean' ? jsonMode : envBool('AAU_NVIDIA_JSON_MODE');
+  const resolvedThinking = typeof enableThinking === 'boolean' ? enableThinking : envBool('AAU_NVIDIA_ENABLE_THINKING');
 
   const requestBody = {
     model: clean(model) || config.model,
@@ -80,9 +93,9 @@ export async function nvidiaChatCompletion({
     stream: false,
   };
 
-  if (jsonMode) requestBody.response_format = { type: 'json_object' };
-  if (typeof enableThinking === 'boolean') {
-    requestBody.chat_template_kwargs = { enable_thinking: enableThinking };
+  if (resolvedJsonMode === true) requestBody.response_format = { type: 'json_object' };
+  if (typeof resolvedThinking === 'boolean') {
+    requestBody.chat_template_kwargs = { enable_thinking: resolvedThinking };
   }
 
   const response = await fetch(config.url, {
@@ -91,7 +104,7 @@ export async function nvidiaChatCompletion({
       authorization: `Bearer ${config.apiKey}`,
       'content-type': 'application/json',
       accept: 'application/json',
-      'user-agent': 'AAU-NVIDIA-Experimental-Adapter/0.2',
+      'user-agent': 'AAU-NVIDIA-Experimental-Adapter/0.3',
     },
     body: JSON.stringify(requestBody),
   });
