@@ -51,6 +51,7 @@ async function nvidiaCall({ model, system, user, maxTokens = 1200, temperature =
     stream: false,
   };
   if (model === 'z-ai/glm-5.3') body.chat_template_kwargs = { clear_thinking: true };
+  else if (String(model || '').startsWith('nvidia/nemotron')) body.chat_template_kwargs = { enable_thinking: false }; // candidate_no_thinking_v0_1
   if (model === 'deepseek-ai/deepseek-v4-flash-0731') body.chat_template_kwargs = { thinking: false, reasoning_effort: 'low' };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(15000, Number(timeoutMs) || 180000));
