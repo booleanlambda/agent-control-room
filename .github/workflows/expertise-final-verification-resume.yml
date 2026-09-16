@@ -76,7 +76,7 @@ jobs:
       adjudication_count: ${{ steps.run.outputs.adjudication_count }}
       authenticator_model: ${{ steps.run.outputs.authenticator_model }}
     env:
-      OPENROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_AUTHENTICATOR }}
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - name: Download unchanged hidden grader packet from source run
@@ -91,7 +91,7 @@ jobs:
           name: aau-verification-answers-${{ github.run_id }}
       - name: Verify hidden packet identity and isolated authenticator credential
         run: |
-          [ -n "${OPENROUTER_API_KEY:-}" ]
+          [ -n "${NVIDIA_API_KEY:-}" ]
           grep -q "$SEALED_FULL_PACKET_SHA256" grader_packet.json
           echo "HIDDEN_GRADER_PACKET_UNCHANGED=true"
           echo "AUTHENTICATOR_SECRET_PRESENT=true"
@@ -112,7 +112,7 @@ jobs:
       adj_grades_sha256: ${{ steps.run.outputs.adj_grades_sha256 }}
       adjudicator_models: ${{ steps.run.outputs.adjudicator_models }}
     env:
-      OPENROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_ADJUDICATOR }}
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - name: Download unchanged hidden grader packet from source run
@@ -130,7 +130,7 @@ jobs:
           name: aau-verification-auth-grades-${{ github.run_id }}
       - name: Verify isolated adjudicator credential
         run: |
-          [ -n "${OPENROUTER_API_KEY:-}" ]
+          [ -n "${NVIDIA_API_KEY:-}" ]
           echo "ADJUDICATOR_SECRET_PRESENT=true"
       - id: run
         name: Adjudicate only predeclared flagged domains
