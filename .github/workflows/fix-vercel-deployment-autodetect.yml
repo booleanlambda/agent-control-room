@@ -1,0 +1,52 @@
+name: Fix Vercel Deployment Autodetection
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/fix-vercel-deployment-autodetect.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Patch Vercel deployment request
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('workers/broker-bridge-render.js')
+          s = p.read_text()
+          marker = 'async function ensureDeployment(context) {'
+          if marker not in s:
+              raise SystemExit('ensureDeployment marker not found')
+          head, tail = s.split(marker, 1)
+          old = "const query = `?teamId=${encodeURIComponent(cfg.vcTeam)}`;"
+          new = "const query = `?teamId=${encodeURIComponent(cfg.vcTeam)}&skipAutoDetectionConfirmation=1`;"
+          if new not in tail:
+              if old not in tail:
+                  raise SystemExit('deployment query marker not found')
+              tail = tail.replace(old, new, 1)
+          s = head + marker + tail
+          p.write_text(s)
+          PY
+
+          node --check workers/broker-bridge-render.js
+          grep -q "skipAutoDetectionConfirmation=1" workers/broker-bridge-render.js
+
+      - name: Commit broker fix
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add workers/broker-bridge-render.js
+          git commit -m 'fix: confirm Vercel deployment framework autodetection' || exit 0
+          git push
