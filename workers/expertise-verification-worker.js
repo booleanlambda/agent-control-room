@@ -50,7 +50,7 @@ async function nvidiaCall({ model, system, user, maxTokens = 1200, temperature =
     temperature,
     stream: false,
   };
-  if (model === 'z-ai/glm-5.3') body.chat_template_kwargs = { clear_thinking: true };
+  if (model === 'z-ai/glm-5.3') body.chat_template_kwargs = { enable_thinking: false }; // glm_auth_no_thinking_v0_1
   else if (String(model || '').startsWith('nvidia/nemotron')) body.chat_template_kwargs = { enable_thinking: false }; // candidate_no_thinking_v0_1
   if (model === 'deepseek-ai/deepseek-v4-flash-0731') body.chat_template_kwargs = { thinking: false, reasoning_effort: 'low' };
   const controller = new AbortController();
@@ -177,10 +177,10 @@ function parseGrade(text) {
 }
 
 async function gradeAnswer(run, task, answer) {
-  const system = 'You are the independent AAU expertise authenticator. You did not train the candidate. Grade only the supplied answer against the fresh task and fixed anchors. Do not reward fluency without correctness. Return one GRADE line; reasoning may precede it.';
+  const system = 'You are the independent AAU expertise authenticator. You did not train the candidate. Grade only the supplied answer against the fresh task and fixed anchors. Do not reward fluency without correctness. Return exactly one GRADE line and no explanation.';
   const user = `DOMAIN: ${run.domain}\nTARGET: ${run.target_standard}\nSCENARIO: ${task.scenario}\nTASK: ${task.prompt}\nGRADING ANCHORS: ${JSON.stringify(task.grading_anchors)}\nCRITICAL FAILURES: ${JSON.stringify(task.critical_failures || [])}\nCANDIDATE ANSWER:\n${answer.answer}\n\nRubric: execution/correctness 30%, method/system design 20%, security/reliability 20%, validation/evidence 15%, communication/professional judgment 15%.\nReturn: GRADE execution=NN method=NN security=NN validation=NN communication=NN critical=NONE confidence=0.00 unsupported=NONE. If a material unsupported claim exists use unsupported=PRESENT.`;
   for (let attempt = 1; attempt <= 3; attempt++) {
-    const result = await nvidiaCall({ model: run.authenticator_model, system, user, maxTokens: 500, temperature: 0, timeoutMs: 60000 });
+    const result = await nvidiaCall({ model: run.authenticator_model, system, user, maxTokens: 160, temperature: 0, timeoutMs: 60000 });
     const grade = parseGrade(result.text);
     if (grade) return { ...grade, id: task.id, verifier_model: result.model, raw_sha256: sha256(result.text) };
     if (attempt < 3) await sleep(1200 * attempt);
