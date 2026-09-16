@@ -1,0 +1,85 @@
+name: FLUX Credit Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/flux-credit-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe FLUX.2 Klein 4B with one minimal request
+        env:
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${NVIDIA_API_KEY:-}" ]; then
+            echo 'FLUX_PROBE_RESULT={"ok":false,"reason":"NVIDIA_API_KEY_secret_missing"}'
+            exit 1
+          fi
+
+          payload='{"prompt":"A minimal studio test image of a single blue circle centered on a plain white background.","width":1024,"height":1024,"samples":1,"seed":1,"steps":1}'
+          headers_file=$(mktemp)
+          body_file=$(mktemp)
+          status=$(curl -sS -D "$headers_file" -o "$body_file" -w '%{http_code}' \
+            -X POST 'https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b' \
+            -H "Authorization: Bearer ${NVIDIA_API_KEY}" \
+            -H 'Accept: application/json' \
+            -H 'Content-Type: application/json' \
+            --data "$payload")
+
+          export STATUS="$status" BODY_FILE="$body_file" HEADERS_FILE="$headers_file"
+          python - <<'PY'
+          import json, os, re
+          status = int(os.environ['STATUS'])
+          body_path = os.environ['BODY_FILE']
+          headers_path = os.environ['HEADERS_FILE']
+          raw = open(body_path, 'r', encoding='utf-8', errors='replace').read()
+          try:
+              body = json.loads(raw)
+          except Exception:
+              body = {}
+          artifact = None
+          if isinstance(body, dict):
+              arts = body.get('artifacts')
+              data = body.get('data')
+              if isinstance(arts, list) and arts:
+                  artifact = arts[0]
+              elif isinstance(data, list) and data:
+                  artifact = data[0]
+          image_payload = ''
+          if isinstance(artifact, dict):
+              image_payload = artifact.get('base64') or artifact.get('b64_json') or ''
+          quota = {}
+          for line in open(headers_path, 'r', encoding='utf-8', errors='replace'):
+              if ':' not in line:
+                  continue
+              k, v = line.split(':', 1)
+              if re.search(r'(rate|quota|credit|limit|remaining|reset)', k, re.I):
+                  quota[k.strip().lower()] = v.strip()
+          error = None
+          if status < 200 or status >= 300:
+              if isinstance(body, dict):
+                  err = body.get('error')
+                  if isinstance(err, dict):
+                      error = err.get('message') or err.get('code')
+                  error = error or body.get('detail') or body.get('message')
+              error = str(error or raw[:500])
+          print('FLUX_PROBE_RESULT=' + json.dumps({
+              'ok': 200 <= status < 300,
+              'http_status': status,
+              'model': 'black-forest-labs/flux.2-klein-4b',
+              'artifact_present': artifact is not None,
+              'image_payload_present': bool(image_payload),
+              'quota_headers': quota,
+              'error': error,
+          }))
+          PY
+
+          test "$status" -ge 200 -a "$status" -lt 300
