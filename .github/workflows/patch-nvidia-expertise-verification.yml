@@ -1,0 +1,173 @@
+name: Patch NVIDIA Expertise Verification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-nvidia-expertise-verification.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Migrate expertise verification from OpenRouter to NVIDIA direct
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/aau_expertise_final_verification.py')
+          s = path.read_text()
+
+          old = '''def openrouter_call(key, model, system, user, max_tokens=300, temperature=0, reasoning_exclude=None, timeout=210):
+    body = {
+        "model": model,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+    }
+    if reasoning_exclude is not None:
+        body["reasoning"] = {"exclude": bool(reasoning_exclude)}
+    payload = json.dumps(body).encode()
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/booleanlambda/agent-control-room",
+        "X-Title": "AAU External Expertise Verification",
+    }
+    _, obj = http_json("https://openrouter.ai/api/v1/chat/completions", headers=headers, payload=payload, timeout=timeout)
+    msg = obj.get("choices", [{}])[0].get("message", {}) or {}
+    text = msg.get("content") or msg.get("reasoning") or obj.get("choices", [{}])[0].get("text") or ""
+    return obj, text
+'''
+          new = '''def nvidia_call(key, model, system, user, max_tokens=300, temperature=0, reasoning_effort=None, timeout=210):
+    body = {
+        "model": model,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": False,
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+    }
+    if reasoning_effort is not None:
+        body["reasoning_effort"] = reasoning_effort
+    if model == "z-ai/glm-5.3":
+        body["chat_template_kwargs"] = {"clear_thinking": True}
+    payload = json.dumps(body).encode()
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "AAU-Expertise-Verification/0.4",
+    }
+    _, obj = http_json("https://integrate.api.nvidia.com/v1/chat/completions", headers=headers, payload=payload, timeout=timeout)
+    msg = obj.get("choices", [{}])[0].get("message", {}) or {}
+    text = msg.get("content") or msg.get("reasoning_content") or obj.get("choices", [{}])[0].get("text") or ""
+    return obj, text
+'''
+          if old not in s:
+              raise SystemExit('openrouter_call block not found')
+          s = s.replace(old, new)
+
+          old = '''def list_openrouter_models():
+    _, models = http_json("https://openrouter.ai/api/v1/models", timeout=60)
+    return {m["id"] for m in models.get("data", [])}
+'''
+          new = '''def nvidia_candidate_models():
+    return {
+        "openai/gpt-oss-20b",
+        "meta/muse-glimmer-30b",
+        "poolside/laguna-xs-2.1",
+        "z-ai/glm-5.3",
+    }
+'''
+          if old not in s:
+              raise SystemExit('list_openrouter_models block not found')
+          s = s.replace(old, new)
+
+          s = s.replace('os.environ.get("OPENROUTER_API_KEY")', 'os.environ.get("NVIDIA_API_KEY")')
+          s = s.replace('available = list_openrouter_models()', 'available = nvidia_candidate_models()')
+          s = s.replace('avail = list_openrouter_models()', 'avail = nvidia_candidate_models()')
+          s = s.replace('openrouter_call(', 'nvidia_call(')
+          s = s.replace('"provider": "OpenRouter"', '"provider": "NVIDIA Direct"')
+          s = s.replace('"authenticator_provider": "OpenRouter"', '"authenticator_provider": "NVIDIA Direct"')
+          s = s.replace('"authenticator_runtime": "OpenRouter via separate GitHub Actions job"', '"authenticator_runtime": "NVIDIA direct API via separate GitHub Actions job"')
+          s = s.replace('"adjudicator_runtime": "OpenRouter via separate GitHub Actions job when flagged"', '"adjudicator_runtime": "NVIDIA direct API via separate GitHub Actions job when flagged"')
+
+          old_preferred = '''    preferred = [
+        "cohere/north-mini-code:free",
+        "thinkingmachines/inkling:free",
+        "thinkingmachines/inkling-small:free",
+        "poolside/laguna-s-2.1:free",
+        "google/gemma-4-31b-it:free",
+        "google/gemma-4-26b-a4b-it:free",
+    ]'''
+          new_preferred = '''    preferred = [
+        "openai/gpt-oss-20b",
+        "meta/muse-glimmer-30b",
+        "poolside/laguna-xs-2.1",
+    ]'''
+          if old_preferred not in s:
+              raise SystemExit('task authority preferred list not found')
+          s = s.replace(old_preferred, new_preferred, 1)
+
+          old_adj = '''    preferred = [
+        "thinkingmachines/inkling:free",
+        "thinkingmachines/inkling-small:free",
+        "poolside/laguna-s-2.1:free",
+        "google/gemma-4-31b-it:free",
+        "cohere/north-mini-code:free",
+        "nex-agi/nex-n2.5-pro:free",
+        "nex-agi/nex-n2.5-mini:free",
+    ]'''
+          new_adj = '''    preferred = [
+        "meta/muse-glimmer-30b",
+        "poolside/laguna-xs-2.1",
+        "openai/gpt-oss-20b",
+    ]'''
+          if old_adj not in s:
+              raise SystemExit('adjudicator preferred list not found')
+          s = s.replace(old_adj, new_adj, 1)
+
+          s = s.replace('model = "nvidia/nemotron-3-ultra-550b-a55b:free"', 'model = "z-ai/glm-5.3"')
+          s = s.replace('nvidia_call(key, model, system, user, max_tokens=260, temperature=0, reasoning_exclude=True, timeout=210)', 'nvidia_call(key, model, system, user, max_tokens=640, temperature=0, reasoning_effort="low", timeout=210)')
+          s = s.replace('nvidia_call(key, model, system, user, max_tokens=260, temperature=0, timeout=180)', 'nvidia_call(key, model, system, user, max_tokens=512, temperature=0.2, reasoning_effort="low", timeout=180)')
+
+          path.write_text(s)
+
+          workflow_paths = [
+              Path('.github/workflows/expertise-final-verification.yml'),
+              Path('.github/workflows/expertise-final-verification-resume.yml'),
+              Path('.github/workflows/expertise-final-grading-resume.yml'),
+          ]
+          for wp in workflow_paths:
+              w = wp.read_text()
+              w = w.replace('OPENROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_AUTHENTICATOR }}', 'NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}')
+              w = w.replace('OPENROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_ADJUDICATOR }}', 'NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}')
+              w = w.replace('${OPENROUTER_API_KEY:-}', '${NVIDIA_API_KEY:-}')
+              wp.write_text(w)
+          PY
+
+          python -m py_compile scripts/aau_expertise_final_verification.py
+          grep -R "openrouter.ai\|OPENROUTER_API_KEY\|OPEN_ROUTER_AUTHENTICATOR\|OPEN_ROUTER_ADJUDICATOR" \
+            scripts/aau_expertise_final_verification.py \
+            .github/workflows/expertise-final-verification.yml \
+            .github/workflows/expertise-final-verification-resume.yml \
+            .github/workflows/expertise-final-grading-resume.yml && exit 1 || true
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/aau_expertise_final_verification.py \
+            .github/workflows/expertise-final-verification.yml \
+            .github/workflows/expertise-final-verification-resume.yml \
+            .github/workflows/expertise-final-grading-resume.yml
+          if git diff --cached --quiet; then
+            echo 'NVIDIA_EXPERTISE_PATCH_NO_CHANGES=true'
+            exit 0
+          fi
+          git commit -m 'feat: move expertise verification to NVIDIA direct models'
+          git push
