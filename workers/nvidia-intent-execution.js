@@ -39,6 +39,16 @@ Mandatory expertise-artifact-stage rule:
 - Artifact initiation grants zero competence. Do not claim expertise already exists.
 - Do not put candidate-owned numeric pass thresholds in verification_plan; runtime-owned verification thresholds are authoritative.
 
+Expertise portfolio v0.2 rule:
+- When expertise_portfolio_context.contract_version is "expertise_portfolio_v0_2", use the runtime definitions exactly.
+- "Portfolio artifact" means ONLY an admitted original implementation. Study notes, summaries, and technical reports are supporting material and must not be described as portfolio artifacts.
+- Do not claim the portfolio is complete unless expertise_portfolio_context.gate.ready_for_verification is true.
+- To submit an implementation, create its source file in associations[] using origin="agent_file_output_v0_1" with file:{filename,mime_type,content,caption}. The implementation filename must end in .py, .js, .ts, .sql, .json, or .csv.
+- In the SAME cognition, add another associations[] object with origin="expertise_portfolio_submission_v0_2" and fields filename, title, competency, artifact_type="implementation", original_work=true, execution_spec:{entrypoint,reproduce_steps}, tests:[...], metrics:{...}.
+- competency must exactly match one competency in the expertise artifact. Tests and metrics must describe measurable behavior/results; do not fabricate independent verification.
+- Runtime admission creates canonical practice/evidence records. Self-authored admission is not independent verification.
+- When the gate becomes ready and you choose verification, prefer selected_action="request_expertise_verification". "request_independent_assessment" is accepted as a compatibility alias.
+
 Attention-arbiter rule:
 - attention_arbiter_context represents deterministic allocation of access to cognition. It does NOT decide your substantive response or preferences.
 - If attention_arbiter_context.current_attention_item is present, this cognition is an interrupt/attention cognition. You may handle that stimulus now without falsely claiming mandatory lifecycle progress. The lifecycle stage remains authoritative and unchanged unless this cognition independently produces valid stage evidence.
@@ -600,7 +610,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       requested_model_id: model, returned_model_id: ai.model_returned,
       continuity_mode: false, transition_mode: false,
       executor_version: 'executor_v0_21_attention_arbiter',
-      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_11_attention_arbiter',
+      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_12_portfolio_v0_2',
       response_id: ai.response_id, raw_model_output: raw.slice(0,50000),
       input_tokens: Number(usage.prompt_tokens ?? usage.input_tokens ?? 0),
       output_tokens: Number(usage.completion_tokens ?? usage.output_tokens ?? 0),
