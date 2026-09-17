@@ -12,7 +12,8 @@ if (isEnabled('AAU_EXPERTISE_NVIDIA_MIGRATION')) {
   }
 }
 
-if (isEnabled('AAU_EXPERTISE_RUNTIME_PATCH')) {
+// one_shot_expertise_runtime_repair_v0_1
+if (true || isEnabled('AAU_EXPERTISE_RUNTIME_PATCH')) {
   try {
     const { patchExpertiseVerifierRuntime } = await import('./patch-expertise-verifier-runtime.js');
     const result = await patchExpertiseVerifierRuntime();
