@@ -24,7 +24,7 @@ Mandatory embodiment-stage rule:
 - When mandatory_lifecycle_context.current_stage is embodiment_artifact, work on embodiment now and do not return to identity work.
 - selected_action must describe embodiment work and current_focus must be embodiment_artifact.
 - Embodiment must be recognizably human-presenting. The runtime constrains the form to human but does not choose your appearance.
-- If embodiment_context.rendered_candidates is empty: choose your own substantive human appearance now. Set embodiment_update.representation_desired=true, embodiment_update.request_visual_candidates=true, include a nonempty embodiment_update.reason, and include nonempty embodiment_update.preferences or embodiment_update.requested_changes describing your chosen human presentation.
+- If embodiment_context.rendered_candidates is empty: choose your own substantive human appearance now. Set embodiment_update.representation_desired=true, embodiment_update.request_visual_candidates=true, include a nonempty embodiment_update.reason, and include a nonempty embodiment_update.preferences or embodiment_update.requested_changes JSON OBJECT describing your chosen human presentation. Do not return preferences/requested_changes as a plain string; use an object such as {"description":"..."}.
 - Do NOT use current_preferences as a substitute for preferences/requested_changes.
 - If embodiment_context.rendered_candidates contains candidates: choose exactly one yourself by setting embodiment_update.selected_candidate_asset_id to one exact candidate asset_id, set representation_desired=true, set request_visual_candidates=false, and include a nonempty reason. Do not invent an asset id and do not request another candidate instead of choosing from the available valid candidates.
 - The selected candidate becomes your pseudo profile image after runtime validation.
@@ -83,7 +83,7 @@ function embodimentCorrection(packet) {
     const ids = candidates.map((c) => String(c?.asset_id || '')).filter(Boolean).slice(0, 8).join(', ');
     return `Your previous JSON did not complete mandatory Stage 2 or mislabeled the work as identity activity. Rendered human embodiment candidates are already available. Choose ONE candidate yourself now. Set selected_action to select_embodiment_candidate and current_focus to embodiment_artifact. Set embodiment_update.selected_candidate_asset_id to one exact asset_id from this list: ${ids}. Also set representation_desired=true, request_visual_candidates=false, and include a nonempty reason. Do not perform identity work and do not request another candidate. Return the FULL JSON object again, including next_intents.`;
   }
-  return `Your previous JSON did not initiate mandatory Stage 2 or mislabeled the work as identity activity. Choose your own recognizably human-presenting appearance NOW. Set selected_action to define_embodiment_and_request_candidates and current_focus to embodiment_artifact. Set embodiment_update.representation_desired=true, request_visual_candidates=true, include a nonempty reason, and include nonempty preferences or requested_changes describing your chosen human appearance. Do not use current_preferences. Do not perform identity work. Return the FULL JSON object again, including next_intents.`;
+  return `Your previous JSON did not initiate mandatory Stage 2 or mislabeled the work as identity activity. Choose your own recognizably human-presenting appearance NOW. Set selected_action to define_embodiment_and_request_candidates and current_focus to embodiment_artifact. Set embodiment_update.representation_desired=true, request_visual_candidates=true, include a nonempty reason, and include nonempty preferences or requested_changes as a JSON OBJECT describing your chosen human appearance, for example {"description":"..."}. Do not use a plain string for preferences/requested_changes. Do not use current_preferences. Do not perform identity work. Return the FULL JSON object again, including next_intents.`;
 }
 
 function sha256(text) { return crypto.createHash('sha256').update(text).digest('hex'); }
@@ -165,6 +165,23 @@ function sanitizeNextIntents(value) {
   return out.slice(0,4);
 }
 
+function normalizeDescriptionObject(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value === 'string' && value.trim()) return { description: value.trim().slice(0,12000) };
+  return value;
+}
+
+function normalizeEmbodimentUpdate(value) {
+  const update = { ...obj(value) };
+  if (Object.prototype.hasOwnProperty.call(update, 'preferences')) {
+    update.preferences = normalizeDescriptionObject(update.preferences);
+  }
+  if (Object.prototype.hasOwnProperty.call(update, 'requested_changes')) {
+    update.requested_changes = normalizeDescriptionObject(update.requested_changes);
+  }
+  return update;
+}
+
 function sanitizeDecision(x) {
   const outbound = obj(x?.outbound_message);
   const cp = obj(x?.codeusd_purchase); const usd = Number(cp?.usd_amount);
@@ -192,7 +209,7 @@ function sanitizeDecision(x) {
     belief_updates: arr(x?.belief_updates,6),
     associations: arr(x?.associations,12),
     identity_update: obj(x?.identity_update),
-    embodiment_update: obj(x?.embodiment_update),
+    embodiment_update: normalizeEmbodimentUpdate(x?.embodiment_update),
     developmental_inquiry_updates: arr(x?.developmental_inquiry_updates,8),
     next_intents: sanitizeNextIntents(x?.next_intents),
   };
@@ -408,8 +425,8 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       provider: 'nvidia_direct', model, model_provider: 'nvidia_direct', routing_provider: 'nvidia_direct',
       requested_model_id: model, returned_model_id: ai.model_returned,
       continuity_mode: false, transition_mode: false,
-      executor_version: 'executor_v0_19_nvidia_failure_diagnostics',
-      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_9_stage_aligned',
+      executor_version: 'executor_v0_20_nvidia_embodiment_payload_normalization',
+      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_10_embodiment_object_schema',
       response_id: ai.response_id, raw_model_output: raw.slice(0,50000),
       input_tokens: Number(usage.prompt_tokens ?? usage.input_tokens ?? 0),
       output_tokens: Number(usage.completion_tokens ?? usage.output_tokens ?? 0),
@@ -417,7 +434,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       input_hash: sha256(packetText), output_hash: sha256(raw),
       model_consistency_status: 'VERIFIED_PRIMARY', authenticator_result: { status: 'not_run_in_executor' },
       experimental_provider_policy: 'nvidia_direct_all_experimental_roles',
-      lifecycle_contract: 'next_intent_protocol_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+stage_action_alignment_v0_1+failure_diagnostics_v0_1',
+      lifecycle_contract: 'next_intent_protocol_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+stage_action_alignment_v0_1+failure_diagnostics_v0_1+embodiment_payload_normalization_v0_1',
       intent_repair_attempted: intentRepairAttempted,
       identity_repair_attempts: identityRepairAttempts,
       embodiment_repair_attempts: embodimentRepairAttempts,
