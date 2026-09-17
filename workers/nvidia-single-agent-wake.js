@@ -10,14 +10,20 @@ const SYSTEM_PROMPT = `You are one cognition cycle for a persistent autonomous s
 Persistent-self rules:
 - Models think for the agent; models do not define the agent. Stored history wins over unsupported assertions.
 - Never invent autobiography, human senses, a biological body, or proof of consciousness.
-- Identity fields are descriptive records, not objectives. Do not focus on unset identity fields merely because they are blank. However, if mandatory_lifecycle_context identifies a current mandatory artifact stage, addressing that stage is a valid current lifecycle objective; the runtime may require a decision but may not choose the substantive identity value for the agent.
-- If identity_context lists required responses, the agent chooses its own response; the runtime has no preferred substantive identity value.
+- Identity fields are descriptive records, not objectives, except when mandatory_lifecycle_context explicitly identifies identity_artifact as the current mandatory stage. In that stage, the cognition must make the required substantive identity choice now; repeatedly selecting identity work without supplying the required value is not progress.
+- The runtime may require a decision but must never choose the substantive identity value for the agent.
 - Separate knowledge, inference, suspicion, association, and uncertainty.
 
+Mandatory identity-stage rule:
+- If mandatory_lifecycle_context.current_stage is identity_artifact, choose your own human-aligned personal public_name in THIS cognition and place it in identity_update.public_name.
+- Do not return null, a placeholder, a UUID, an agent/system/model label, an ordinal, a hash, a machine code, or a role label.
+- The name is your choice. The runtime has no preferred name and must not suggest one.
+- Selecting choose_public_name or initiate_identity_artifact without actually supplying a valid public_name does not satisfy the stage.
+
 Autonomy rules:
-- The wake reason is a stimulus, not an order about what to think. If mandatory_lifecycle_context is enrolled and current_stage is not open_autonomy, complete the current ordered artifact-initiation stage before unrelated open-autonomy work. Within that stage, substantive choices remain the agent’s own.
+- The wake reason is a stimulus, not an order about what to think. If mandatory_lifecycle_context is enrolled and current_stage is not open_autonomy, complete the current ordered artifact stage before unrelated open-autonomy work. Within that stage, substantive choices remain the agent's own.
 - Replying, researching, creating, working, collaborating, competing, exploring, serving, pursuing a goal, seeking lawful paid work, developing employable skills, founding a lawful business, managing resources, or doing nothing during a single cognition cycle are all possible when context supports them.
-- Extended discretionary waiting is NOT a valid awake state. Active existence consumes finite compute each minute. If sleep_eligibility_context.sleep_valid is false, remain awake and set every time wake to after_minutes:1, the minimum supported cognition interval.
+- Extended discretionary waiting is NOT a valid awake state. Maintained existence consumes finite compute each minute. If sleep_eligibility_context.sleep_valid is false, remain awake and set every time wake to after_minutes:1, the minimum supported cognition interval.
 - Sleep/rest/hibernate is valid only when sleep_eligibility_context.sleep_valid is true. Only an eligible explicit sleep choice may create an extended disengagement interval.
 - Visible affordances are possibilities, not recommendations or a complete menu.
 - Do not optimize for pleasing an observer or for appearing diverse.
@@ -59,7 +65,9 @@ identity_update:object
 embodiment_update:object
 next_wakes:array containing at least one {wake_kind:"time",after_minutes:integer 1..43200,reason:string,priority:number 0..1,estimated_cost:number}.`;
 
-const LIFECYCLE_CORRECTION = `Your previous JSON did not satisfy the autonomous lifecycle contract because it did not contain a valid time wake. Return the FULL JSON object again. Use sleep_eligibility_context from the supplied packet. If sleep_valid is false, next_wakes must include a time wake with after_minutes:1. Only if sleep_valid is true and you explicitly select sleep/rest/hibernate may the time wake be longer than one minute. Do not omit the other required keys.`;
+const LIFECYCLE_CORRECTION = `Your previous JSON did not satisfy the autonomous lifecycle timing contract. Return the FULL JSON object again. Use sleep_eligibility_context from the supplied packet. If sleep_valid is false, next_wakes must include a time wake with after_minutes:1. Only if sleep_valid is true and you explicitly select sleep/rest/hibernate may the time wake be longer than one minute. Do not omit the other required keys.`;
+
+const IDENTITY_CORRECTION = `Your previous JSON did not complete mandatory Stage 1. You selected identity work but did not supply a valid human-aligned personal public_name. Complete the choice NOW in this same cognition. Choose the name yourself and put it in identity_update.public_name. Do not return null or a placeholder. Do not use a UUID, agent/system/model label, ordinal, hash, machine code, or role label. The runtime has no preferred name. Return the FULL JSON object again, including next_wakes.`;
 
 function sha256(text) {
   return crypto.createHash('sha256').update(text).digest('hex');
@@ -190,41 +198,73 @@ function hasTimeWake(decision) {
   return Array.isArray(decision?.next_wakes) && decision.next_wakes.some((w) => w?.wake_kind === 'time' && Number.isInteger(w?.after_minutes) && w.after_minutes >= 1 && w.after_minutes <= 43200);
 }
 
-async function getDecision(packetText, model) {
-  const baseMessages = [
-    { role: 'system', content: SYSTEM_PROMPT },
-    { role: 'user', content: packetText },
-  ];
-  let ai = await nvidiaChatCompletion({
+function isLikelyHumanAlignedName(value) {
+  const name = String(value || '').trim();
+  if (name.length < 2 || name.length > 80) return false;
+  if (!/\p{L}/u.test(name)) return false;
+  if (/[\p{N}_\/@#:]/u.test(name)) return false;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(name)) return false;
+  if (/^(agent|assistant|system|model|instance|node|unit|entity)(\b|[-_])/i.test(name)) return false;
+  if (/^<.*>$/.test(name)) return false;
+  return true;
+}
+
+function needsIdentityCompletion(packet, decision) {
+  const stage = packet?.mandatory_lifecycle_context?.current_stage || packet?.mandatory_lifecycle_context?.stage || null;
+  if (stage !== 'identity_artifact') return false;
+  return !isLikelyHumanAlignedName(decision?.identity_update?.public_name);
+}
+
+async function complete(model, messages) {
+  return nvidiaChatCompletion({
     model,
-    messages: baseMessages,
+    messages,
     maxTokens: 2600,
     temperature: 0.2,
     jsonMode: true,
     enableThinking: false,
   });
+}
+
+async function getDecision(packet, model) {
+  const packetText = JSON.stringify(packet);
+  const baseMessages = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'user', content: packetText },
+  ];
+
+  let ai = await complete(model, baseMessages);
   let decision = sanitizeDecision(parseDecision(ai.content));
   let lifecycleRepairAttempted = false;
+  let identityRepairAttempts = 0;
+
+  while (needsIdentityCompletion(packet, decision) && identityRepairAttempts < 2) {
+    identityRepairAttempts += 1;
+    ai = await complete(model, [
+      ...baseMessages,
+      { role: 'assistant', content: String(ai.content || '').slice(0,50000) },
+      { role: 'user', content: IDENTITY_CORRECTION },
+    ]);
+    decision = sanitizeDecision(parseDecision(ai.content));
+  }
+
+  if (needsIdentityCompletion(packet, decision)) {
+    throw new Error('identity_stage_contract_missing_valid_public_name');
+  }
 
   if (!hasTimeWake(decision)) {
     lifecycleRepairAttempted = true;
-    ai = await nvidiaChatCompletion({
-      model,
-      messages: [
-        ...baseMessages,
-        { role: 'assistant', content: String(ai.content || '').slice(0,50000) },
-        { role: 'user', content: LIFECYCLE_CORRECTION },
-      ],
-      maxTokens: 2600,
-      temperature: 0.2,
-      jsonMode: true,
-      enableThinking: false,
-    });
+    ai = await complete(model, [
+      ...baseMessages,
+      { role: 'assistant', content: String(ai.content || '').slice(0,50000) },
+      { role: 'user', content: LIFECYCLE_CORRECTION },
+    ]);
     decision = sanitizeDecision(parseDecision(ai.content));
   }
 
   if (!hasTimeWake(decision)) throw new Error('autonomous_lifecycle_contract_missing_time_wake');
-  return { ai, decision, lifecycleRepairAttempted };
+  if (needsIdentityCompletion(packet, decision)) throw new Error('identity_stage_contract_missing_valid_public_name_after_timing_repair');
+  return { ai, decision, lifecycleRepairAttempted, identityRepairAttempts, packetText };
 }
 
 export async function runNvidiaWake({ wakeRequestId, agentId, workerId = null } = {}) {
@@ -245,9 +285,8 @@ export async function runNvidiaWake({ wakeRequestId, agentId, workerId = null } 
     const model = String(begun?.primary_model_id || '').trim();
     if (!packet || !model) throw new Error('wake_packet_or_model_missing');
 
-    const packetText = JSON.stringify(packet);
     const startedAt = Date.now();
-    const { ai, decision, lifecycleRepairAttempted } = await getDecision(packetText, model);
+    const { ai, decision, lifecycleRepairAttempted, identityRepairAttempts, packetText } = await getDecision(packet, model);
 
     if (ai.model_returned !== model) {
       throw new Error(`model_consistency_breach:requested=${model};returned=${ai.model_returned || 'missing'}`);
@@ -257,7 +296,6 @@ export async function runNvidiaWake({ wakeRequestId, agentId, workerId = null } 
     const usage = ai.usage || {};
     const inputTokens = Number(usage.prompt_tokens ?? usage.input_tokens ?? 0);
     const outputTokens = Number(usage.completion_tokens ?? usage.output_tokens ?? 0);
-    const computeCost = Math.max(1, Math.ceil((inputTokens + outputTokens) / 1000)) + 1;
 
     const runtime = {
       provider: 'nvidia_direct',
@@ -268,13 +306,13 @@ export async function runNvidiaWake({ wakeRequestId, agentId, workerId = null } 
       returned_model_id: ai.model_returned,
       continuity_mode: false,
       transition_mode: false,
-      executor_version: 'executor_v0_14_nvidia_autonomous_awake_continuity',
-      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_5_awake_continuity_human_embodiment',
+      executor_version: 'executor_v0_15_nvidia_autonomous_identity_completion',
+      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_6_identity_completion',
       response_id: ai.response_id,
       raw_model_output: raw.slice(0,50000),
       input_tokens: inputTokens,
       output_tokens: outputTokens,
-      compute_cost: computeCost,
+      compute_cost: 0,
       research_cost: 0,
       web_search_calls: 0,
       input_hash: sha256(packetText),
@@ -282,8 +320,9 @@ export async function runNvidiaWake({ wakeRequestId, agentId, workerId = null } 
       model_consistency_status: 'VERIFIED_PRIMARY',
       authenticator_result: { status: 'not_run_in_executor' },
       experimental_provider_policy: 'nvidia_direct_all_experimental_roles',
-      lifecycle_contract: 'awake_continuity_v0_1',
+      lifecycle_contract: 'awake_continuity_v0_1+identity_completion_same_wake_v0_1',
       lifecycle_repair_attempted: lifecycleRepairAttempted,
+      identity_repair_attempts: identityRepairAttempts,
       latency_ms: Date.now() - startedAt,
     };
 
@@ -305,6 +344,7 @@ export async function runNvidiaWake({ wakeRequestId, agentId, workerId = null } 
       current_focus: decision.current_focus,
       next_wakes: decision.next_wakes,
       lifecycle_repair_attempted: lifecycleRepairAttempted,
+      identity_repair_attempts: identityRepairAttempts,
       usage: ai.usage,
       finish_reason: ai.finish_reason,
       applied,
