@@ -155,7 +155,22 @@ async function answerChallenge(run, packet) {
   for (const task of packet.tasks) {
     const system = `You are the bound inference model for an AAU agent undergoing an unseen expertise assessment in ${run.domain}. Solve the task from first principles. Be concrete, state assumptions, controls, validation and failure handling. Do not invent external evidence or claim actions you did not perform.`;
     const user = `TARGET STANDARD: ${run.target_standard}\nSCENARIO:\n${task.scenario}\n\nTASK:\n${task.prompt}\n\nAnswer in 180-350 words. Prioritize concrete technical decisions over exposition.`;
-    const result = await nvidiaCall({ model: run.candidate_model_id, system, user, maxTokens: 700, temperature: 0.10, timeoutMs: run.metadata?.operator_smoke_test ? 90000 : 60000 });
+    // candidate_retry_v0_1: preserve the bound candidate model while tolerating transient provider latency/overload.
+    let result = null;
+    let lastError = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        result = await nvidiaCall({ model: run.candidate_model_id, system, user, maxTokens: 700, temperature: 0.10, timeoutMs: 120000 });
+        break;
+      } catch (error) {
+        lastError = error;
+        const status = Number(error?.status || 0);
+        const retryable = error?.name === 'AbortError' || status === 429 || status >= 500;
+        if (!retryable || attempt === 3) throw error;
+        await sleep(1500 * attempt);
+      }
+    }
+    if (!result) throw lastError || new Error(`candidate_no_result:${task.id}`);
     if (!result.text) throw new Error(`candidate_empty_answer:${task.id}`);
     answers.push({ id: task.id, competency: task.competency || null, answer: result.text, model: result.model, output_sha256: sha256(result.text) });
   }
@@ -219,27 +234,48 @@ function parseGrade(text) {
 async function gradeAnswer(run, task, answer) {
   const system = 'You are the independent AAU expertise authenticator. You did not train the candidate. Grade only the supplied answer against the fresh task and fixed anchors. Do not reward fluency without correctness. Return exactly one JSON object and no explanation with numeric fields execution, method, security, validation, communication (0-100), string critical, numeric confidence (0-1), and boolean unsupported.';
   const user = `DOMAIN: ${run.domain}\nTARGET: ${run.target_standard}\nSCENARIO: ${task.scenario}\nTASK: ${task.prompt}\nGRADING ANCHORS: ${JSON.stringify(task.grading_anchors)}\nCRITICAL FAILURES: ${JSON.stringify(task.critical_failures || [])}\nCANDIDATE ANSWER:\n${answer.answer}\n\nRubric: execution/correctness 30%, method/system design 20%, security/reliability 20%, validation/evidence 15%, communication/professional judgment 15%.\nReturn one JSON object: {"execution":NN,"method":NN,"security":NN,"validation":NN,"communication":NN,"critical":"none","confidence":0.00,"unsupported":false}. Set unsupported=true for a material unsupported claim.`;
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    const result = await nvidiaCall({ model: run.authenticator_model, system, user, maxTokens: 220, temperature: 0, timeoutMs: 60000, jsonMode: true });
-    const grade = parseGrade(result.text);
-    if (grade) return { ...grade, id: task.id, verifier_model: result.model, raw_sha256: sha256(result.text) };
-    if (attempt < 3) await sleep(1200 * attempt);
+  // authenticator_fallback_chain_v0_1: Moonshot primary, Meta then NVIDIA fallback.
+  const authModels = [
+    run.authenticator_model || 'moonshotai/kimi-k3',
+    'meta/muse-glimmer-30b',
+    'nvidia/nemotron-3.5-lightning-30b-a3b',
+  ].filter((x, i, a) => x && a.indexOf(x) === i && x !== run.candidate_model_id);
+  let lastAuthError = null;
+  for (const model of authModels) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const result = await nvidiaCall({ model, system, user, maxTokens: 320, temperature: 0, timeoutMs: 120000, jsonMode: false });
+        const grade = parseGrade(result.text);
+        if (grade) return { ...grade, id: task.id, verifier_model: result.model || model, verifier_requested_model: model, authenticator_fallback_used: model !== run.authenticator_model, raw_sha256: sha256(result.text) };
+        lastAuthError = new Error(`authenticator_unusable_grade:${task.id}:${model}`);
+      } catch (error) {
+        lastAuthError = error;
+        const status = Number(error?.status || 0);
+        const retryable = error?.name === 'AbortError' || status === 429 || status >= 500;
+        if (!retryable) break;
+      }
+      if (attempt < 2) await sleep(1500 * attempt);
+    }
+    console.warn('AAU_EXPERTISE_AUTHENTICATOR_MODEL_FAILED', model, String(lastAuthError?.message || lastAuthError || 'unusable_grade').slice(0, 500));
   }
-  throw new Error(`authenticator_unusable_grade:${task.id}`);
+  throw lastAuthError || new Error(`authenticator_unusable_grade:${task.id}`);
 }
 
 async function adjudicate(run, task, answer, prior) {
   const system = 'You are the operationally distinct AAU expertise adjudicator. Re-grade a flagged assessment independently. Do not default to the prior verifier. Return one GRADE line; reasoning may precede it.';
   const user = `DOMAIN: ${run.domain}\nTARGET: ${run.target_standard}\nSCENARIO: ${task.scenario}\nTASK: ${task.prompt}\nANCHORS: ${JSON.stringify(task.grading_anchors)}\nANSWER:\n${answer.answer}\nPRIOR FLAGGED GRADE: ${JSON.stringify(prior)}\n\nReturn: GRADE execution=NN method=NN security=NN validation=NN communication=NN critical=NONE confidence=0.00 unsupported=NONE`;
-  const candidates = [run.adjudicator_model, 'deepseek-ai/deepseek-v4-flash-0731', 'meta/muse-glimmer-30b']
-    .filter((x, i, a) => x && a.indexOf(x) === i && x !== run.authenticator_model && x !== run.candidate_model_id);
+  const candidates = [run.adjudicator_model, 'nvidia/nemotron-3.5-lightning-30b-a3b', 'meta/muse-glimmer-30b']
+    .filter((x, i, a) => x && a.indexOf(x) === i && x !== run.authenticator_model && x !== prior.verifier_model && x !== run.candidate_model_id);
   for (const model of candidates) {
-    try {
-      const result = await nvidiaCall({ model, system, user, maxTokens: 500, temperature: 0, timeoutMs: 45000 });
-      const grade = parseGrade(result.text);
-      if (grade) return { ...grade, id: task.id, adjudicator_model: result.model, supersedes_score: prior.score, raw_sha256: sha256(result.text) };
-    } catch (e) {
-      console.warn('AAU_EXPERTISE_ADJUDICATOR_MODEL_FAILED', model, String(e?.message || e).slice(0, 500));
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const result = await nvidiaCall({ model, system, user, maxTokens: 650, temperature: 0, timeoutMs: 90000 });
+        const grade = parseGrade(result.text);
+        if (grade) return { ...grade, id: task.id, adjudicator_model: result.model || model, supersedes_score: prior.score, raw_sha256: sha256(result.text) };
+      } catch (e) {
+        console.warn('AAU_EXPERTISE_ADJUDICATOR_MODEL_FAILED', model, String(e?.message || e).slice(0, 500));
+      }
+      if (attempt < 2) await sleep(1500 * attempt);
     }
   }
   throw new Error(`adjudicator_no_usable_grade:${task.id}`);
@@ -264,7 +300,7 @@ function deterministicDecision(run, packet, authGrades, adjGrades) {
     overall_score: Number(mean.toFixed(6)),
     gate: { task_count: final.length, mean_score: Number(mean.toFixed(6)), mean_score_min: meanMin, task_score_min: taskMin, required_task_count: countMin, passed_task_count: countPassed, critical_error_count: critical.length, unsupported_claim_count: unsupported.length },
     final_grades: final,
-    provenance: { provider: 'nvidia_direct', candidate_model: run.candidate_model_id, task_authority_model: packet.authority?.model || run.task_authority_model, authenticator_model: run.authenticator_model, adjudicator_models: [...new Set(adjGrades.map((g) => g.adjudicator_model).filter(Boolean))], deterministic_gate: true },
+    provenance: { provider: 'nvidia_direct', candidate_model: run.candidate_model_id, task_authority_model: packet.authority?.model || run.task_authority_model, authenticator_model: run.authenticator_model, authenticator_models_used: [...new Set(authGrades.map((g) => g.verifier_model).filter(Boolean))], adjudicator_models: [...new Set(adjGrades.map((g) => g.adjudicator_model).filter(Boolean))], deterministic_gate: true },
   };
 }
 
@@ -279,7 +315,7 @@ async function processRun(run) {
     const answer = answers.find((a) => a.id === task.id);
     const grade = await gradeAnswer(run, task, answer);
     authGrades.push(grade);
-    console.log('AAU_EXPERTISE_STAGE', JSON.stringify({ verification_run_id: run.verification_run_id, stage: 'authenticated_task', task_id: task.id, score: grade.score, confidence: grade.confidence }));
+    console.log('AAU_EXPERTISE_STAGE', JSON.stringify({ verification_run_id: run.verification_run_id, stage: 'authenticated_task', task_id: task.id, score: grade.score, confidence: grade.confidence, verifier_model: grade.verifier_model, fallback_used: Boolean(grade.authenticator_fallback_used) }));
     const flagged = (grade.score >= 0.75 && grade.score <= 0.85) || grade.critical_error || grade.unsupported || grade.confidence < 0.70;
     if (flagged) adjGrades.push(await adjudicate(run, task, answer, grade));
   }
@@ -332,5 +368,5 @@ export function startExpertiseVerificationWorker() {
   const missing = [['AAU_SUPABASE_ANON_KEY', anon], ['AAU_BROKER_BRIDGE_TOKEN', bridge], ['NVIDIA_API_KEY', nvidiaKey]].filter(([, v]) => !v).map(([k]) => k);
   if (missing.length) return { ok: false, ready: false, missing };
   if (!running) { running = true; loop().catch((e) => console.error('AAU_EXPERTISE_VERIFIER_FATAL', e)); }
-  return { ok: true, ready: true, executor_id: executorId, poll_ms: pollMs, provider: 'nvidia_direct', task_authority: 'deterministic:aau-task-authority-v0.1', authenticator: 'z-ai/glm-5.3', adjudicator: 'meta/muse-glimmer-30b' };
+  return { ok: true, ready: true, executor_id: executorId, poll_ms: pollMs, provider: 'nvidia_direct', task_authority: 'deterministic:aau-task-authority-v0.1', authenticator: 'moonshotai/kimi-k3', authenticator_fallbacks: ['meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b'], adjudicator: 'meta/muse-glimmer-30b' };
 }
