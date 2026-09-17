@@ -77,9 +77,11 @@ export async function patchFileResponseRuntime() {
   const expertiseStage = await patchExpertiseArtifactStage();
   const { patchAttentionArbiterRuntime } = await import('./patch-attention-arbiter-runtime.js');
   const attentionArbiter = await patchAttentionArbiterRuntime();
+  const { patchControlRoomActivityTimeline } = await import('./patch-control-room-activity.js');
+  const controlRoomActivity = await patchControlRoomActivityTimeline();
   return {
     ok: true,
-    contract: 'file_response_repair_v0_1+expertise_artifact_stage_contract_v0_1+attention_arbiter_v0_1+attention_resolution_repair_v0_1',
-    results: [worker, expertiseStage, attentionArbiter],
+    contract: 'file_response_repair_v0_1+expertise_artifact_stage_contract_v0_1+attention_arbiter_v0_1+attention_resolution_repair_v0_1+activity_timeline_schema_v0_2',
+    results: [worker, expertiseStage, attentionArbiter, controlRoomActivity],
   };
 }
