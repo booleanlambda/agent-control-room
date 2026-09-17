@@ -51,6 +51,43 @@ function resolveConfig() {
   return { apiKey, baseUrl, url, model, endpointKind };
 }
 
+function parsePacketCandidate(content) {
+  if (typeof content !== 'string' || !content.trim().startsWith('{')) return null;
+  try {
+    const parsed = JSON.parse(content);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function adminChatPacketActive(messages) {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role !== 'user') continue;
+    const packet = parsePacketCandidate(message?.content);
+    if (!packet) continue;
+    if (packet?.runtime_interaction_mode === 'direct_admin_conversation') return true;
+    if (packet?.admin_chat_context?.active === true) return true;
+    if (packet?.executor_policy?.admin_chat_active === true) return true;
+  }
+  return false;
+}
+
+function applyAdminChatRoleOverride(messages) {
+  if (!adminChatPacketActive(messages)) return messages;
+  const exception = `ACTIVE ADMIN CHAT EXCEPTION:\n- A human administrator is speaking directly TO the persistent agent in admin_chat_context.current_admin_message.\n- For this cognition, answer that administrator as the agent in outbound_message.message.\n- The phrase \"you are not an assistant answering a human\" must NOT be interpreted as forbidding conversation on this wake; it only means do not abandon the persistent agent identity or become a generic assistant.\n- Do not echo, mirror, paraphrase, invert, or convert the administrator's request into a first-person instruction. Answer its content in the agent's own voice.\n- Refusal, disagreement, or a clarification question is allowed. Silence is not.\n- Mandatory lifecycle work may continue in the same cognition but does not replace the conversational reply.`;
+
+  return messages.map((message) => {
+    if (message?.role !== 'system' || typeof message?.content !== 'string') return message;
+    const content = message.content.replace(
+      'You are not an assistant answering a human.',
+      'You are not a generic assistant. Preserve the persistent agent identity. When admin_chat_context.active is true, a human administrator is speaking directly to you and you must answer as the agent.'
+    );
+    return { ...message, content: `${content}\n\n${exception}` };
+  });
+}
+
 export function nvidiaConfigStatus() {
   const config = resolveConfig();
   let baseHost = null;
@@ -92,10 +129,11 @@ export async function nvidiaChatCompletion({
 
   const resolvedJsonMode = typeof jsonMode === 'boolean' ? jsonMode : envBool('AAU_NVIDIA_JSON_MODE');
   const resolvedThinking = typeof enableThinking === 'boolean' ? enableThinking : envBool('AAU_NVIDIA_ENABLE_THINKING');
+  const resolvedMessages = applyAdminChatRoleOverride(messages);
 
   const requestBody = {
     model: clean(model) || config.model,
-    messages,
+    messages: resolvedMessages,
     max_tokens: Math.max(1, Math.min(Number(maxTokens) || 256, 4096)),
     temperature: Number.isFinite(Number(temperature)) ? Number(temperature) : 0.2,
     stream: false,
@@ -115,7 +153,7 @@ export async function nvidiaChatCompletion({
         authorization: `Bearer ${config.apiKey}`,
         'content-type': 'application/json',
         accept: 'application/json',
-        'user-agent': 'AAU-NVIDIA-Experimental-Adapter/0.4',
+        'user-agent': 'AAU-NVIDIA-Experimental-Adapter/0.5-admin-chat',
       },
       body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(timeoutMs),
