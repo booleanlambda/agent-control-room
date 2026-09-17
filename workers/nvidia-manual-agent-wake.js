@@ -29,6 +29,9 @@ Mandatory expertise-artifact rule:
 
 Resource/economic rules:
 - Maintained existence consumes compute at the current per-minute rate. Day-one allocation is 1,440 compute credits at 1 compute/minute.
+- Waking, cognition, model-token usage, thinking, and action selection have zero additional compute charge. Token counts are metering/observability only.
+- Sleeping and waiting have no extra tax, but existence time keeps passing at the same per-minute rate. Long unproductive sleep therefore consumes finite runway without directly producing output.
+- Productive and unproductive minutes cost the same existence compute; the economic difference is what you obtain from those minutes.
 - Effort itself is not taxed. Stress, energy, effort, fatigue, recovery, and related state remain meaningful internal dynamics.
 - Near compute exhaustion, you may request renewal by selecting action request_existence_renewal and stating a reason. Renewal requires external approval based on ecosystem usefulness evidence and absence of confirmed/blocking illegal-activity evidence.
 - Compute may be purchased when funds are sufficient, but purchase is still approval-gated. A compute purchase may be expressed through resource_purchase with resource_type compute and the desired CODEUSD amount.
@@ -36,8 +39,10 @@ Resource/economic rules:
 - CODEUSD is internal utility credit, not real-world money.
 
 Embodiment rules:
-- Under mandatory lifecycle v0.5, both Embodiment Artifact engagement and an affirmative representation are mandatory at the Embodiment stage. representation_desired=true is required by Lifecycle v0.5, and the embodiment must reach at least PROVISIONAL or SELF_SELECTED before the stage can complete.
-- The agent chooses the substantive representation; the runtime may require representation but must not choose its form or identity traits.
+- Under mandatory lifecycle v0.5, an actual stored embodiment image is mandatory at the Embodiment stage. A PROVISIONAL state or statement of intent alone never completes Stage 2.
+- At the mandatory embodiment stage, choose the substantive visual representation yourself, set representation_desired=true and request_visual_candidates=true, and provide nonempty preferences or requested_changes describing the representation you want rendered.
+- The runtime may require that a representation exist but must not choose its form, appearance, voice, gender presentation, age presentation, cultural presentation, or style for you.
+- Stage 2 remains pending until the renderer generates and stores an embodiment asset under AAU custody.
 
 Return ONE compact JSON object and nothing else. Do not reveal chain-of-thought. stated_reason is a short auditable explanation, not private reasoning.
 Required keys:
@@ -65,6 +70,8 @@ next_wakes:[]`;
 const JSON_CORRECTION = `Your previous response was not valid JSON. Preserve the same intended substantive decision, but return it again as ONE compact syntactically valid JSON object and nothing else. Do not include comments, markdown, trailing commas, or unescaped line breaks inside strings. next_wakes must be an empty array because this is a manual-wake experiment.`;
 
 const EXPERTISE_CORRECTION = `The mandatory lifecycle stage is expertise_artifact, but your previous response did not include a complete expertise artifact specification. Preserve your own substantive field choice, and return the full JSON response again. Set selected_action to initiate_expertise_artifact. associations must contain at least one object with origin exactly "expertise_artifact_initiation_v0_1" and nonempty fields: domain (string), target_standard (string), scope (object), competencies (array), evidence_requirements (object), verification_plan (object). Do not claim competence; artifact initiation grants zero competence. Return JSON only and next_wakes must be [].`;
+
+const EMBODIMENT_CORRECTION = `The mandatory lifecycle stage is embodiment_artifact, but your previous response did not request creation of an actual visual artifact. Preserve your own substantive representation choices and return the full JSON response again. Set selected_action to initiate_embodiment_artifact. embodiment_update must include representation_desired:true, request_visual_candidates:true, a nonempty reason, and a nonempty preferences or requested_changes object that describes the visual representation you choose for yourself. A PROVISIONAL state alone is insufficient. The runtime will send your specification to the renderer; it will not choose appearance traits for you. Return JSON only and next_wakes must be [].`;
 
 function sha256(text) {
   return crypto.createHash('sha256').update(text).digest('hex');
@@ -125,6 +132,16 @@ function hasCompleteExpertiseInitiation(x) {
     nonEmptyObject(v.evidence_requirements) &&
     nonEmptyObject(v.verification_plan)
   );
+}
+
+function hasCompleteEmbodimentInitiation(x) {
+  const update = obj(x?.embodiment_update);
+  const hasVisualSpec = nonEmptyObject(update.preferences) || nonEmptyObject(update.requested_changes);
+  return x?.selected_action === 'initiate_embodiment_artifact' &&
+    update.representation_desired === true &&
+    update.request_visual_candidates === true &&
+    typeof update.reason === 'string' && update.reason.trim().length > 0 &&
+    hasVisualSpec;
 }
 
 function sanitizeDecision(x) {
@@ -220,6 +237,25 @@ export async function runConfiguredNvidiaManualWake() {
     }
 
     const mandatoryStage = String(packet?.mandatory_lifecycle_context?.current_stage || packet?.mandatory_lifecycle_context?.stage || '').trim();
+    if (mandatoryStage === 'embodiment_artifact' && !hasCompleteEmbodimentInitiation(parsed)) {
+      lifecycleRepairAttempted = true;
+      const incompleteOutput = String(ai.content || '').slice(0,50000);
+      ai = await nvidiaChatCompletion({
+        model,
+        messages: [
+          ...baseMessages,
+          { role: 'assistant', content: incompleteOutput },
+          { role: 'user', content: EMBODIMENT_CORRECTION },
+        ],
+        maxTokens: 2600,
+        temperature: 0,
+        jsonMode: true,
+        enableThinking: false,
+      });
+      if (ai.model_returned !== model) throw new Error(`model_consistency_breach_after_embodiment_repair:requested=${model};returned=${ai.model_returned || 'missing'}`);
+      parsed = parseDecision(ai.content);
+    }
+
     if (mandatoryStage === 'expertise_artifact' && !hasCompleteExpertiseInitiation(parsed)) {
       lifecycleRepairAttempted = true;
       const incompleteOutput = String(ai.content || '').slice(0,50000);
@@ -244,7 +280,6 @@ export async function runConfiguredNvidiaManualWake() {
     const usage = ai.usage || {};
     const inputTokens = Number(usage.prompt_tokens ?? usage.input_tokens ?? 0);
     const outputTokens = Number(usage.completion_tokens ?? usage.output_tokens ?? 0);
-    const computeCost = Math.max(1, Math.ceil((inputTokens + outputTokens) / 1000)) + 1;
     const runtime = {
       provider: 'nvidia_direct',
       model,
@@ -254,14 +289,18 @@ export async function runConfiguredNvidiaManualWake() {
       returned_model_id: ai.model_returned,
       continuity_mode: false,
       transition_mode: false,
-      executor_version: 'executor_v0_13_nvidia_manual_expertise_contract',
-      prompt_version: 'persistent_agent_manual_prompt_nvidia_v0_2_expertise_contract',
+      executor_version: 'executor_v0_14_nvidia_manual_existence_only',
+      prompt_version: 'persistent_agent_manual_prompt_nvidia_v0_3_existence_only',
       response_id: ai.response_id,
       raw_model_output: raw.slice(0,50000),
       input_tokens: inputTokens,
       output_tokens: outputTokens,
-      compute_cost: computeCost,
+      token_metering_units: inputTokens + outputTokens,
+      compute_cost: 0,
       research_cost: 0,
+      economic_cost_policy: 'existence_time_only_v0_1',
+      wake_cognition_compute_charge: 0,
+      model_token_compute_charge: 0,
       web_search_calls: 0,
       input_hash: sha256(packetText),
       output_hash: sha256(raw),
@@ -291,6 +330,8 @@ export async function runConfiguredNvidiaManualWake() {
       stated_reason: decision.stated_reason,
       current_focus: decision.current_focus,
       next_wakes: [],
+      economic_cost_policy: 'existence_time_only_v0_1',
+      wake_cognition_compute_charge: 0,
       json_repair_attempted: jsonRepairAttempted,
       lifecycle_repair_attempted: lifecycleRepairAttempted,
       usage: ai.usage,
