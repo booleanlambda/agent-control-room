@@ -1,6 +1,9 @@
 const DEFAULT_NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1';
 const DEFAULT_NVIDIA_MODEL = 'nvidia/nemotron-3.5-lightning-30b-a3b';
 const DEFAULT_NVIDIA_TIMEOUT_MS = 60000;
+const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
+const SB_ANON = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
+const BRIDGE_TOKEN = String(process.env.AAU_BROKER_BRIDGE_TOKEN || '').trim();
 
 function clean(value) {
   return String(value || '').trim();
@@ -61,17 +64,24 @@ function parsePacketCandidate(content) {
   }
 }
 
-function adminChatPacketActive(messages) {
+function adminChatEnvelope(messages) {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
     if (message?.role !== 'user') continue;
     const packet = parsePacketCandidate(message?.content);
     if (!packet) continue;
-    if (packet?.runtime_interaction_mode === 'direct_admin_conversation') return true;
-    if (packet?.admin_chat_context?.active === true) return true;
-    if (packet?.executor_policy?.admin_chat_active === true) return true;
+    const active = packet?.runtime_interaction_mode === 'direct_admin_conversation'
+      || packet?.admin_chat_context?.active === true
+      || packet?.executor_policy?.admin_chat_active === true;
+    if (!active) continue;
+    const messageId = clean(packet?.admin_chat_context?.current_admin_message?.message_id);
+    return { active: true, messageId: messageId || null };
   }
-  return false;
+  return { active: false, messageId: null };
+}
+
+function adminChatPacketActive(messages) {
+  return adminChatEnvelope(messages).active;
 }
 
 function applyAdminChatRoleOverride(messages) {
@@ -86,6 +96,49 @@ function applyAdminChatRoleOverride(messages) {
     );
     return { ...message, content: `${content}\n\n${exception}` };
   });
+}
+
+function parseDecisionContent(content) {
+  const cleaned = String(content || '').trim().replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
+  try {
+    const parsed = JSON.parse(cleaned);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function persistAdminChatReplyEarly(messages, content, modelId) {
+  const envelope = adminChatEnvelope(messages);
+  if (!envelope.active || !envelope.messageId || !SB_ANON || !BRIDGE_TOKEN) return;
+  const decision = parseDecisionContent(content);
+  const reply = typeof decision?.outbound_message?.message === 'string'
+    ? decision.outbound_message.message.trim()
+    : '';
+  if (!reply) return;
+
+  try {
+    const response = await fetch(`${SB}/rest/v1/rpc/aau_bridge_upsert_admin_chat_reply_early`, {
+      method: 'POST',
+      headers: {
+        apikey: SB_ANON,
+        authorization: `Bearer ${SB_ANON}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        p_bridge_token: BRIDGE_TOKEN,
+        p_admin_message_id: envelope.messageId,
+        p_reply: reply.slice(0,12000),
+        p_model_id: clean(modelId) || null,
+      }),
+    });
+    if (!response.ok) {
+      const detail = (await response.text()).slice(0,800);
+      console.warn('AAU_ADMIN_CHAT_EARLY_REPLY_PERSIST_FAILED', response.status, detail);
+    }
+  } catch (error) {
+    console.warn('AAU_ADMIN_CHAT_EARLY_REPLY_PERSIST_FAILED', String(error?.message || error).slice(0,800));
+  }
 }
 
 export function nvidiaConfigStatus() {
@@ -153,7 +206,7 @@ export async function nvidiaChatCompletion({
         authorization: `Bearer ${config.apiKey}`,
         'content-type': 'application/json',
         accept: 'application/json',
-        'user-agent': 'AAU-NVIDIA-Experimental-Adapter/0.5-admin-chat',
+        'user-agent': 'AAU-NVIDIA-Experimental-Adapter/0.6-admin-chat-early-reply',
       },
       body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(timeoutMs),
@@ -181,6 +234,7 @@ export async function nvidiaChatCompletion({
   const choice = body?.choices?.[0]?.message || {};
   const content = typeof choice?.content === 'string' ? choice.content : '';
   const reasoningContent = typeof choice?.reasoning_content === 'string' ? choice.reasoning_content : '';
+  await persistAdminChatReplyEarly(resolvedMessages, content, body?.model || model || config.model);
 
   return {
     provider: 'nvidia',
