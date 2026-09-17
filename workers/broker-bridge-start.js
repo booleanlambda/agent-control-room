@@ -23,6 +23,17 @@ if (true || isEnabled('AAU_EXPERTISE_RUNTIME_PATCH')) {
   }
 }
 
+// one_shot_file_response_runtime_repair_v0_1
+if (true || isEnabled('AAU_FILE_RESPONSE_RUNTIME_PATCH')) {
+  try {
+    const { patchFileResponseRuntime } = await import('./patch-file-response-runtime.js');
+    const result = await patchFileResponseRuntime();
+    console.log('AAU_FILE_RESPONSE_RUNTIME_PATCH_RESULT', JSON.stringify(result));
+  } catch (error) {
+    console.error('AAU_FILE_RESPONSE_RUNTIME_PATCH_FAILED', JSON.stringify({ error_name: error?.name || null, message: String(error?.message || error).slice(0, 2000) }));
+  }
+}
+
 const nvidiaSmokeEnabled = isEnabled('AAU_NVIDIA_SMOKE_TEST');
 if (nvidiaSmokeEnabled) {
   try {
