@@ -315,6 +315,48 @@ function lifecycleValidationDetails(packet, decision, issue) {
   return { current_stage: currentStage(packet), failures: ['unknown_lifecycle_contract_failure'] };
 }
 
+// file_response_repair_v0_1: a file wake must produce a reply about the file, not a recycled lifecycle sentence.
+function currentFileStimuli(packet) {
+  return Array.isArray(packet?.agent_file_context?.current_files) ? packet.agent_file_context.current_files : [];
+}
+
+function fileReplyNeedsRepair(packet, decision) {
+  const files = currentFileStimuli(packet);
+  if (!files.length) return false;
+  const reply = String(decision?.outbound_message?.message || '').trim();
+  if (!reply) return true;
+  const lower = reply.toLowerCase();
+  if (/can request visual candidates|request visual candidates for appraisal|if you wish to see candidate assets|if you wish to see visual candidates/.test(lower)) return true;
+  const currentImage = files.find((f) => String(f?.mime_type || '').startsWith('image/'));
+  if (!currentImage) return !/(file|document|attachment|upload|received|reviewed)/i.test(reply);
+  if (currentImage?.vision_ready === true) {
+    const acknowledgesImage = /(image|photo|picture|file|upload|candidate|visual analysis|visual description|reviewed|received)/i.test(reply);
+    if (!acknowledgesImage) return true;
+  }
+  if (currentImage?.purpose === 'embodiment_candidate') {
+    const selected = String(decision?.embodiment_update?.selected_candidate_asset_id || '').trim();
+    if (selected) {
+      const statesSelection = /(select|selected|choose|chosen|accept|accepted|adopt|adopted|use this|this candidate|works for me|fits my)/i.test(reply);
+      if (!statesSelection) return true;
+    }
+  }
+  return false;
+}
+
+function fileResponseCorrection(packet, decision) {
+  const files = currentFileStimuli(packet).slice(0,4).map((f) => ({
+    file_id: f?.file_id || null,
+    filename: f?.filename || null,
+    mime_type: f?.mime_type || null,
+    purpose: f?.purpose || null,
+    embodiment_asset_id: f?.embodiment_asset_id || null,
+    vision_ready: f?.vision_ready === true,
+    vision_analysis: f?.vision_analysis || null,
+  }));
+  const selected = String(decision?.embodiment_update?.selected_candidate_asset_id || '').trim() || null;
+  return `FILE RESPONSE REPAIR: A new administrator-supplied file is part of this cognition, but your previous outbound_message did not respond to that file or contradicted your own selected action. Return the FULL JSON object again. Preserve your substantive autonomous decisions, especially selected_action, current_focus, embodiment_update.selected_candidate_asset_id, and next_intents unless they are themselves invalid. Rewrite outbound_message.message so it explicitly acknowledges the uploaded file and responds to it. If you selected an embodiment candidate, explicitly tell the administrator that you selected/accepted that candidate and briefly explain why using concrete visible details from the tool-derived vision_analysis. Do not say that you can request candidates or ask whether the administrator wants to see candidates when one is already supplied. Treat vision_analysis as tool-derived observation, not infallible ground truth, and do not claim direct visual access beyond it. Current selected candidate asset id: ${selected || 'none'}. File context: ${JSON.stringify(files).slice(0,18000)}`;
+}
+
 function lifecycleContractError(code, issue, packet, decision, ai, repairMeta = {}) {
   const error = new Error(code);
   error.failureDetails = {
@@ -396,7 +438,27 @@ async function getDecision(packet, model) {
       { identity_repair_attempts: identityRepairAttempts, embodiment_repair_attempts: embodimentRepairAttempts, phase: 'post_intent_repair' },
     );
   }
-  return { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, packetText };
+  let fileReplyRepairAttempts = 0;
+  if (fileReplyNeedsRepair(packet, decision)) {
+    fileReplyRepairAttempts += 1;
+    ai = await complete(model, [
+      ...baseMessages,
+      { role: 'assistant', content: String(ai.content || '').slice(0,50000) },
+      { role: 'user', content: fileResponseCorrection(packet, decision) },
+    ]);
+    decision = sanitizeDecision(parseDecision(ai.content));
+  }
+  if (fileReplyNeedsRepair(packet, decision)) throw new Error('file_response_contract_incomplete_after_repair');
+  if (!hasTimeIntent(decision)) throw new Error('file_response_repair_lost_time_intent');
+  const fileRepairLifecycleIssue = lifecycleIssue(packet, decision);
+  if (fileRepairLifecycleIssue) {
+    throw lifecycleContractError(
+      `${fileRepairLifecycleIssue}_stage_contract_incomplete_after_file_response_repair`,
+      fileRepairLifecycleIssue, packet, decision, ai,
+      { file_reply_repair_attempts: fileReplyRepairAttempts, phase: 'file_response_repair' },
+    );
+  }
+  return { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, fileReplyRepairAttempts, packetText };
 }
 
 export async function runNvidiaIntentExecution({ intentExecutionId, agentId, workerId = null } = {}) {
@@ -416,7 +478,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
     if (!packet || !model) throw new Error('intent_packet_or_model_missing');
 
     const startedAt = Date.now();
-    const { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, packetText } = await getDecision(packet, model);
+    const { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, fileReplyRepairAttempts, packetText } = await getDecision(packet, model);
     if (ai.model_returned !== model) throw new Error(`model_consistency_breach:requested=${model};returned=${ai.model_returned || 'missing'}`);
 
     const raw = String(ai.content || '');
@@ -438,6 +500,8 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       intent_repair_attempted: intentRepairAttempted,
       identity_repair_attempts: identityRepairAttempts,
       embodiment_repair_attempts: embodimentRepairAttempts,
+      file_reply_repair_attempts: fileReplyRepairAttempts,
+      file_response_contract: 'file_response_repair_v0_1',
       latency_ms: Date.now() - startedAt,
     };
 
@@ -455,6 +519,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       intent_repair_attempted: intentRepairAttempted,
       identity_repair_attempts: identityRepairAttempts,
       embodiment_repair_attempts: embodimentRepairAttempts,
+      file_reply_repair_attempts: fileReplyRepairAttempts,
       usage: ai.usage, finish_reason: ai.finish_reason, applied,
     };
     console.log('AAU_NVIDIA_INTENT_RESULT', JSON.stringify(report));
