@@ -44,7 +44,14 @@ export async function patchControlRoomIntentVisibility(){
   const file=await gh(`${api}?ref=main`);
   const source=Buffer.from(file.content||'','base64').toString('utf8');
   const out=patch(source);
-  if(out===source)return{ok:true,changed:false,contract:'intent_visibility_v0_1'};
-  const result=await gh(api,{method:'PUT',body:JSON.stringify({message:'fix: show next intent and intent history in control room',content:Buffer.from(out,'utf8').toString('base64'),sha:file.sha,branch:'main'})});
-  return{ok:true,changed:true,contract:'intent_visibility_v0_1',commit_sha:result?.commit?.sha||null};
+  let intentResult;
+  if(out===source){
+    intentResult={ok:true,changed:false,contract:'intent_visibility_v0_1'};
+  } else {
+    const result=await gh(api,{method:'PUT',body:JSON.stringify({message:'fix: show next intent and intent history in control room',content:Buffer.from(out,'utf8').toString('base64'),sha:file.sha,branch:'main'})});
+    intentResult={ok:true,changed:true,contract:'intent_visibility_v0_1',commit_sha:result?.commit?.sha||null};
+  }
+  const { patchControlRoomUiV3 } = await import('./patch-control-room-ui-v3.js');
+  const uiResult = await patchControlRoomUiV3();
+  return {ok:true,changed:Boolean(intentResult.changed||uiResult.changed),contract:'intent_visibility_v0_1+control_room_ui_v3',intent:intentResult,ui:uiResult};
 }
