@@ -11,6 +11,7 @@ Persistent-self rules:
 - Models think for the agent; models do not define the agent. Stored history wins over unsupported assertions.
 - Never invent autobiography, human senses, a biological body, or proof of consciousness.
 - The current mandatory lifecycle stage is authoritative. Complete that stage before unrelated work.
+- selected_action and current_focus must describe the work actually performed in the current mandatory lifecycle stage.
 - The runtime may require a decision but must never choose the substantive identity, embodiment appearance, or expertise field for the agent.
 - Separate knowledge, inference, suspicion, association, and uncertainty.
 
@@ -21,6 +22,7 @@ Mandatory identity-stage rule:
 
 Mandatory embodiment-stage rule:
 - When mandatory_lifecycle_context.current_stage is embodiment_artifact, work on embodiment now and do not return to identity work.
+- selected_action must describe embodiment work and current_focus must be embodiment_artifact.
 - Embodiment must be recognizably human-presenting. The runtime constrains the form to human but does not choose your appearance.
 - If embodiment_context.rendered_candidates is empty: choose your own substantive human appearance now. Set embodiment_update.representation_desired=true, embodiment_update.request_visual_candidates=true, include a nonempty embodiment_update.reason, and include nonempty embodiment_update.preferences or embodiment_update.requested_changes describing your chosen human presentation.
 - Do NOT use current_preferences as a substitute for preferences/requested_changes.
@@ -73,15 +75,15 @@ embodiment_update:object
 next_intents:array containing at least one {intent_kind:"time",after_minutes:integer 1..43200,intent_reason:string,priority:number 0..1,estimated_cost:number}.`;
 
 const INTENT_CORRECTION = `Your previous JSON did not satisfy next_intent_protocol_v0_1. Return the FULL JSON object again. next_intents must contain at least one time intent. If sleep_valid is false, the time intent must use after_minutes:1. Do not use next_wakes or wake_kind.`;
-const IDENTITY_CORRECTION = `Your previous JSON did not complete mandatory Stage 1. Choose your own valid human-aligned personal public_name NOW in identity_update.public_name. Do not return null or a placeholder. Return the FULL JSON object again, including next_intents.`;
+const IDENTITY_CORRECTION = `Your previous JSON did not complete mandatory Stage 1. Choose your own valid human-aligned personal public_name NOW in identity_update.public_name. selected_action and current_focus must describe identity_artifact work. Do not return null or a placeholder. Return the FULL JSON object again, including next_intents.`;
 
 function embodimentCorrection(packet) {
   const candidates = Array.isArray(packet?.embodiment_context?.rendered_candidates) ? packet.embodiment_context.rendered_candidates : [];
   if (candidates.length) {
     const ids = candidates.map((c) => String(c?.asset_id || '')).filter(Boolean).slice(0, 8).join(', ');
-    return `Your previous JSON did not complete mandatory Stage 2. Rendered human embodiment candidates are already available. Choose ONE candidate yourself now. Set embodiment_update.selected_candidate_asset_id to one exact asset_id from this list: ${ids}. Also set representation_desired=true, request_visual_candidates=false, and include a nonempty reason. Do not perform identity work and do not request another candidate. Return the FULL JSON object again, including next_intents.`;
+    return `Your previous JSON did not complete mandatory Stage 2 or mislabeled the work as identity activity. Rendered human embodiment candidates are already available. Choose ONE candidate yourself now. Set selected_action to select_embodiment_candidate and current_focus to embodiment_artifact. Set embodiment_update.selected_candidate_asset_id to one exact asset_id from this list: ${ids}. Also set representation_desired=true, request_visual_candidates=false, and include a nonempty reason. Do not perform identity work and do not request another candidate. Return the FULL JSON object again, including next_intents.`;
   }
-  return `Your previous JSON did not initiate mandatory Stage 2. Choose your own recognizably human-presenting appearance NOW. Set embodiment_update.representation_desired=true, request_visual_candidates=true, include a nonempty reason, and include nonempty preferences or requested_changes describing your chosen human appearance. Do not use current_preferences. Do not perform identity work. Return the FULL JSON object again, including next_intents.`;
+  return `Your previous JSON did not initiate mandatory Stage 2 or mislabeled the work as identity activity. Choose your own recognizably human-presenting appearance NOW. Set selected_action to define_embodiment_and_request_candidates and current_focus to embodiment_artifact. Set embodiment_update.representation_desired=true, request_visual_candidates=true, include a nonempty reason, and include nonempty preferences or requested_changes describing your chosen human appearance. Do not use current_preferences. Do not perform identity work. Return the FULL JSON object again, including next_intents.`;
 }
 
 function sha256(text) { return crypto.createHash('sha256').update(text).digest('hex'); }
@@ -212,8 +214,16 @@ function needsIdentityCompletion(packet, decision) {
   return !isLikelyHumanAlignedName(decision?.identity_update?.public_name);
 }
 function nonEmptyObject(v) { return v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length > 0; }
+function embodimentActionAligned(decision) {
+  const action = String(decision?.selected_action || '').trim();
+  const focus = String(decision?.current_focus || '').trim();
+  if (!action || !focus) return false;
+  if (/identity|public_name/i.test(action) || /identity/i.test(focus)) return false;
+  return focus === 'embodiment_artifact' && /embodiment|visual|candidate|appearance/i.test(action);
+}
 function needsEmbodimentCompletion(packet, decision) {
   if (currentStage(packet) !== 'embodiment_artifact') return false;
+  if (!embodimentActionAligned(decision)) return true;
   const u = obj(decision?.embodiment_update);
   const reason = String(u.reason || '').trim();
   const candidates = Array.isArray(packet?.embodiment_context?.rendered_candidates) ? packet.embodiment_context.rendered_candidates : [];
@@ -303,8 +313,8 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       provider: 'nvidia_direct', model, model_provider: 'nvidia_direct', routing_provider: 'nvidia_direct',
       requested_model_id: model, returned_model_id: ai.model_returned,
       continuity_mode: false, transition_mode: false,
-      executor_version: 'executor_v0_17_nvidia_next_intent_embodiment_enforced',
-      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_8_embodiment_enforced',
+      executor_version: 'executor_v0_18_nvidia_next_intent_stage_aligned',
+      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_9_stage_aligned',
       response_id: ai.response_id, raw_model_output: raw.slice(0,50000),
       input_tokens: Number(usage.prompt_tokens ?? usage.input_tokens ?? 0),
       output_tokens: Number(usage.completion_tokens ?? usage.output_tokens ?? 0),
@@ -312,7 +322,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       input_hash: sha256(packetText), output_hash: sha256(raw),
       model_consistency_status: 'VERIFIED_PRIMARY', authenticator_result: { status: 'not_run_in_executor' },
       experimental_provider_policy: 'nvidia_direct_all_experimental_roles',
-      lifecycle_contract: 'next_intent_protocol_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1',
+      lifecycle_contract: 'next_intent_protocol_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+stage_action_alignment_v0_1',
       intent_repair_attempted: intentRepairAttempted,
       identity_repair_attempts: identityRepairAttempts,
       embodiment_repair_attempts: embodimentRepairAttempts,
