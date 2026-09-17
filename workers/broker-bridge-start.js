@@ -34,6 +34,17 @@ if (true || isEnabled('AAU_FILE_RESPONSE_RUNTIME_PATCH')) {
   }
 }
 
+// one_shot_control_room_intent_visibility_v0_1
+if (true || isEnabled('AAU_CONTROL_ROOM_INTENT_VISIBILITY_PATCH')) {
+  try {
+    const { patchControlRoomIntentVisibility } = await import('./patch-control-room-intents.js');
+    const result = await patchControlRoomIntentVisibility();
+    console.log('AAU_CONTROL_ROOM_INTENT_VISIBILITY_PATCH_RESULT', JSON.stringify(result));
+  } catch (error) {
+    console.error('AAU_CONTROL_ROOM_INTENT_VISIBILITY_PATCH_FAILED', JSON.stringify({ error_name: error?.name || null, message: String(error?.message || error).slice(0, 2000) }));
+  }
+}
+
 const nvidiaSmokeEnabled = isEnabled('AAU_NVIDIA_SMOKE_TEST');
 if (nvidiaSmokeEnabled) {
   try {
