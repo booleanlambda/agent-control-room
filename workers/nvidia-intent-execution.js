@@ -30,6 +30,15 @@ Mandatory embodiment-stage rule:
 - The selected candidate becomes your pseudo profile image after runtime validation.
 - Do not claim CANONICAL or invent storage identifiers. The runtime stores and validates image assets.
 
+Mandatory expertise-artifact-stage rule:
+- ONLY when mandatory_lifecycle_context.current_stage is expertise_artifact, initiate at least one expertise artifact in THIS cognition.
+- Choose the expertise field yourself. The runtime must not choose the domain for you.
+- selected_action must describe expertise-artifact initiation and current_focus must be expertise_artifact.
+- Add one associations[] object with origin="expertise_artifact_initiation_v0_1" and ALL of these fields: domain:string, target_standard:string, scope:nonempty object, competencies:nonempty array, evidence_requirements:nonempty object, verification_plan:nonempty object.
+- target_standard must describe the intended Master’s-equivalent competence target without claiming an academic credential.
+- Artifact initiation grants zero competence. Do not claim expertise already exists.
+- Do not put candidate-owned numeric pass thresholds in verification_plan; runtime-owned verification thresholds are authoritative.
+
 Next Intent protocol:
 - You do not schedule a wake. At the end of cognition, declare what you intend to do next in next_intents.
 - intent_kind may be time, event, or condition. A time intent uses after_minutes.
@@ -76,6 +85,7 @@ next_intents:array containing at least one {intent_kind:"time",after_minutes:int
 
 const INTENT_CORRECTION = `Your previous JSON did not satisfy next_intent_protocol_v0_1. Return the FULL JSON object again. next_intents must contain at least one time intent. If sleep_valid is false, the time intent must use after_minutes:1. Do not use next_wakes or wake_kind.`;
 const IDENTITY_CORRECTION = `Your previous JSON did not complete mandatory Stage 1. Choose your own valid human-aligned personal public_name NOW in identity_update.public_name. selected_action and current_focus must describe identity_artifact work. Do not return null or a placeholder. Return the FULL JSON object again, including next_intents.`;
+const EXPERTISE_ARTIFACT_CORRECTION = `Your previous JSON did not complete mandatory Stage 3. Choose your own expertise field NOW; the runtime has no preferred domain. Set selected_action to initiate_expertise_artifact and current_focus to expertise_artifact. In associations[], include at least one object exactly identified by origin="expertise_artifact_initiation_v0_1" with ALL required fields: domain as a nonempty string; target_standard as a nonempty string describing a Master’s-equivalent competence target without claiming an academic credential; scope as a nonempty JSON object; competencies as a nonempty JSON array; evidence_requirements as a nonempty JSON object; verification_plan as a nonempty JSON object. Do not claim competence merely by creating the artifact and do not provide candidate-owned numeric pass thresholds. Return the FULL JSON object again, including next_intents.`;
 
 function embodimentCorrection(packet) {
   const candidates = Array.isArray(packet?.embodiment_context?.rendered_candidates) ? packet.embodiment_context.rendered_candidates : [];
@@ -252,10 +262,39 @@ function needsEmbodimentCompletion(packet, decision) {
   const visual = nonEmptyObject(u.preferences) || nonEmptyObject(u.requested_changes);
   return !(u.representation_desired === true && u.request_visual_candidates === true && reason && visual);
 }
+function expertiseArtifactAssociation(decision) {
+  const associations = Array.isArray(decision?.associations) ? decision.associations : [];
+  return associations.find((a) => a && typeof a === 'object' && !Array.isArray(a) && String(a.origin || '').trim() === 'expertise_artifact_initiation_v0_1') || null;
+}
+function expertiseArtifactValidation(decision) {
+  const a = expertiseArtifactAssociation(decision);
+  const failures = [];
+  if (!a) return { association: null, failures: ['expertise_artifact_initiation_association_required'] };
+  if (!String(a.domain || '').trim()) failures.push('domain_required');
+  if (!String(a.target_standard || '').trim()) failures.push('target_standard_required');
+  if (!nonEmptyObject(a.scope)) failures.push('scope_nonempty_object_required');
+  if (!Array.isArray(a.competencies) || a.competencies.length === 0) failures.push('competencies_nonempty_array_required');
+  if (!nonEmptyObject(a.evidence_requirements)) failures.push('evidence_requirements_nonempty_object_required');
+  if (!nonEmptyObject(a.verification_plan)) failures.push('verification_plan_nonempty_object_required');
+  return { association: a, failures };
+}
+function needsExpertiseArtifactCompletion(packet, decision) {
+  if (currentStage(packet) !== 'expertise_artifact') return false;
+  const action = String(decision?.selected_action || '').trim();
+  const focus = String(decision?.current_focus || '').trim();
+  if (focus !== 'expertise_artifact' || !/expertise|domain|artifact/i.test(action)) return true;
+  return expertiseArtifactValidation(decision).failures.length > 0;
+}
 function lifecycleIssue(packet, decision) {
   if (needsIdentityCompletion(packet, decision)) return 'identity';
   if (needsEmbodimentCompletion(packet, decision)) return 'embodiment';
+  if (needsExpertiseArtifactCompletion(packet, decision)) return 'expertise_artifact';
   return null;
+}
+function lifecycleCorrection(issue, packet) {
+  if (issue === 'identity') return IDENTITY_CORRECTION;
+  if (issue === 'expertise_artifact') return EXPERTISE_ARTIFACT_CORRECTION;
+  return embodimentCorrection(packet);
 }
 
 function embodimentValidationDetails(packet, decision) {
@@ -301,6 +340,18 @@ function embodimentValidationDetails(packet, decision) {
 
 function lifecycleValidationDetails(packet, decision, issue) {
   if (issue === 'embodiment') return embodimentValidationDetails(packet, decision);
+  if (issue === 'expertise_artifact') {
+    const v = expertiseArtifactValidation(decision);
+    return {
+      current_stage: currentStage(packet),
+      selected_action: decision?.selected_action || null,
+      current_focus: decision?.current_focus || null,
+      association_present: Boolean(v.association),
+      domain: v.association?.domain || null,
+      target_standard: v.association?.target_standard || null,
+      failures: v.failures,
+    };
+  }
   if (issue === 'identity') {
     const publicName = String(decision?.identity_update?.public_name || '').trim();
     return {
@@ -395,7 +446,7 @@ async function getDecision(packet, model) {
     if (!issue) break;
     if (issue === 'identity') identityRepairAttempts += 1;
     if (issue === 'embodiment') embodimentRepairAttempts += 1;
-    const correction = issue === 'identity' ? IDENTITY_CORRECTION : embodimentCorrection(packet);
+    const correction = lifecycleCorrection(issue, packet);
     ai = await complete(model, [...baseMessages, { role: 'assistant', content: String(ai.content || '').slice(0,50000) }, { role: 'user', content: correction }]);
     decision = sanitizeDecision(parseDecision(ai.content));
   }
@@ -421,7 +472,7 @@ async function getDecision(packet, model) {
   if (finalIssue) {
     if (finalIssue === 'identity') identityRepairAttempts += 1;
     if (finalIssue === 'embodiment') embodimentRepairAttempts += 1;
-    const correction = finalIssue === 'identity' ? IDENTITY_CORRECTION : embodimentCorrection(packet);
+    const correction = lifecycleCorrection(finalIssue, packet);
     ai = await complete(model, [...baseMessages, { role: 'assistant', content: String(ai.content || '').slice(0,50000) }, { role: 'user', content: correction }]);
     decision = sanitizeDecision(parseDecision(ai.content));
   }
@@ -496,7 +547,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       input_hash: sha256(packetText), output_hash: sha256(raw),
       model_consistency_status: 'VERIFIED_PRIMARY', authenticator_result: { status: 'not_run_in_executor' },
       experimental_provider_policy: 'nvidia_direct_all_experimental_roles',
-      lifecycle_contract: 'next_intent_protocol_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+stage_action_alignment_v0_1+failure_diagnostics_v0_1+embodiment_payload_normalization_v0_1',
+      lifecycle_contract: 'next_intent_protocol_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+expertise_artifact_stage_contract_v0_1+stage_action_alignment_v0_1+failure_diagnostics_v0_1+embodiment_payload_normalization_v0_1',
       intent_repair_attempted: intentRepairAttempted,
       identity_repair_attempts: identityRepairAttempts,
       embodiment_repair_attempts: embodimentRepairAttempts,
