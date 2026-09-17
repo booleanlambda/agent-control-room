@@ -235,8 +235,9 @@ async function gradeAnswer(run, task, answer) {
   const system = 'You are the independent AAU expertise authenticator. You did not train the candidate. Grade only the supplied answer against the fresh task and fixed anchors. Do not reward fluency without correctness. Return exactly one JSON object and no explanation with numeric fields execution, method, security, validation, communication (0-100), string critical, numeric confidence (0-1), and boolean unsupported.';
   const user = `DOMAIN: ${run.domain}\nTARGET: ${run.target_standard}\nSCENARIO: ${task.scenario}\nTASK: ${task.prompt}\nGRADING ANCHORS: ${JSON.stringify(task.grading_anchors)}\nCRITICAL FAILURES: ${JSON.stringify(task.critical_failures || [])}\nCANDIDATE ANSWER:\n${answer.answer}\n\nRubric: execution/correctness 30%, method/system design 20%, security/reliability 20%, validation/evidence 15%, communication/professional judgment 15%.\nReturn one JSON object: {"execution":NN,"method":NN,"security":NN,"validation":NN,"communication":NN,"critical":"none","confidence":0.00,"unsupported":false}. Set unsupported=true for a material unsupported claim.`;
   // authenticator_fallback_chain_v0_1: Moonshot primary, Meta then NVIDIA fallback.
+  const primaryAuthenticator = 'moonshotai/kimi-k3';
   const authModels = [
-    run.authenticator_model || 'moonshotai/kimi-k3',
+    primaryAuthenticator,
     'meta/muse-glimmer-30b',
     'nvidia/nemotron-3.5-lightning-30b-a3b',
   ].filter((x, i, a) => x && a.indexOf(x) === i && x !== run.candidate_model_id);
@@ -246,7 +247,7 @@ async function gradeAnswer(run, task, answer) {
       try {
         const result = await nvidiaCall({ model, system, user, maxTokens: 320, temperature: 0, timeoutMs: 120000, jsonMode: false });
         const grade = parseGrade(result.text);
-        if (grade) return { ...grade, id: task.id, verifier_model: result.model || model, verifier_requested_model: model, authenticator_fallback_used: model !== run.authenticator_model, raw_sha256: sha256(result.text) };
+        if (grade) return { ...grade, id: task.id, verifier_model: result.model || model, verifier_requested_model: model, authenticator_fallback_used: model !== primaryAuthenticator, raw_sha256: sha256(result.text) };
         lastAuthError = new Error(`authenticator_unusable_grade:${task.id}:${model}`);
       } catch (error) {
         lastAuthError = error;
