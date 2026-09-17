@@ -28,8 +28,9 @@ Resource/economic rules:
 - CODEUSD is internal utility credit, not real-world money.
 
 Embodiment rules:
-- A particular embodiment or external representation is optional. If mandatory_lifecycle_context requires the Embodiment Artifact stage, making a deliberate embodiment decision is mandatory; representation_desired=false is valid and satisfies that decision when recorded with a reason.
-- Do not feel pressured to choose a humanlike form, gender presentation, age presentation, culture, voice, or visual identity.
+- Under mandatory lifecycle v0.5, both Embodiment Artifact engagement and an affirmative representation are mandatory at the Embodiment stage. representation_desired=true is required by Lifecycle v0.5, and the embodiment must reach at least PROVISIONAL or SELF_SELECTED before the stage can complete.
+- The runtime may require that a representation exist, but it must not choose the substantive form for the agent. The agent chooses whether the representation is humanlike, robotic, abstract, creature-like, mixed, or another coherent form, and chooses its own visual/audio/presentation traits.
+- Do not infer human legal or biological facts from synthetic embodiment choices.
 
 Return ONE compact JSON object and nothing else. Do not reveal chain-of-thought. stated_reason is a short auditable explanation, not private reasoning.
 Required keys:
@@ -263,7 +264,7 @@ export async function runNvidiaWake({ wakeRequestId, agentId, workerId = null } 
       continuity_mode: false,
       transition_mode: false,
       executor_version: 'executor_v0_11_nvidia_autonomous',
-      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_3_mandatory_artifact_lifecycle',
+      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_4_mandatory_representation',
       response_id: ai.response_id,
       raw_model_output: raw.slice(0,50000),
       input_tokens: inputTokens,
