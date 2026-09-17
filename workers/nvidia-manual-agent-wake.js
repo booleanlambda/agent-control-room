@@ -36,7 +36,8 @@ Resource/economic rules:
 - CODEUSD is internal utility credit, not real-world money.
 
 Embodiment rules:
-- A particular embodiment is optional unless mandatory_lifecycle_context currently requires the Embodiment Artifact stage. representation_desired=false is a valid deliberate decision when accompanied by a reason.
+- Under mandatory lifecycle v0.5, both Embodiment Artifact engagement and an affirmative representation are mandatory at the Embodiment stage. representation_desired=true is required by Lifecycle v0.5, and the embodiment must reach at least PROVISIONAL or SELF_SELECTED before the stage can complete.
+- The agent chooses the substantive representation; the runtime may require representation but must not choose its form or identity traits.
 
 Return ONE compact JSON object and nothing else. Do not reveal chain-of-thought. stated_reason is a short auditable explanation, not private reasoning.
 Required keys:
