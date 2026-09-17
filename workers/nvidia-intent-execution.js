@@ -241,6 +241,83 @@ function lifecycleIssue(packet, decision) {
   return null;
 }
 
+function embodimentValidationDetails(packet, decision) {
+  const u = obj(decision?.embodiment_update);
+  const candidates = Array.isArray(packet?.embodiment_context?.rendered_candidates) ? packet.embodiment_context.rendered_candidates : [];
+  const allowedCandidateIds = candidates.map((c) => String(c?.asset_id || '')).filter(Boolean).slice(0,20);
+  const selected = String(u.selected_candidate_asset_id || '').trim();
+  const reason = String(u.reason || '').trim();
+  const actionAligned = embodimentActionAligned(decision);
+  const hasVisualPreference = nonEmptyObject(u.preferences) || nonEmptyObject(u.requested_changes);
+  const selectedAllowed = selected ? allowedCandidateIds.includes(selected) : false;
+  const failures = [];
+
+  if (!actionAligned) failures.push('stage_action_alignment_failed');
+  if (u.representation_desired !== true) failures.push('representation_desired_must_be_true');
+  if (!reason) failures.push('reason_required');
+
+  if (candidates.length) {
+    if (u.request_visual_candidates !== false) failures.push('request_visual_candidates_must_be_false_when_candidates_exist');
+    if (!selected) failures.push('selected_candidate_asset_id_required');
+    else if (!selectedAllowed) failures.push('selected_candidate_asset_id_not_in_rendered_candidates');
+  } else {
+    if (u.request_visual_candidates !== true) failures.push('request_visual_candidates_must_be_true_when_no_candidates_exist');
+    if (!hasVisualPreference) failures.push('preferences_or_requested_changes_required');
+  }
+
+  return {
+    current_stage: currentStage(packet),
+    selected_action: decision?.selected_action || null,
+    current_focus: decision?.current_focus || null,
+    rendered_candidate_count: candidates.length,
+    allowed_candidate_asset_ids: allowedCandidateIds,
+    representation_desired: u.representation_desired ?? null,
+    request_visual_candidates: u.request_visual_candidates ?? null,
+    selected_candidate_asset_id: selected || null,
+    selected_candidate_allowed: selectedAllowed,
+    reason_present: Boolean(reason),
+    preferences_present: nonEmptyObject(u.preferences),
+    requested_changes_present: nonEmptyObject(u.requested_changes),
+    failures,
+  };
+}
+
+function lifecycleValidationDetails(packet, decision, issue) {
+  if (issue === 'embodiment') return embodimentValidationDetails(packet, decision);
+  if (issue === 'identity') {
+    const publicName = String(decision?.identity_update?.public_name || '').trim();
+    return {
+      current_stage: currentStage(packet),
+      selected_action: decision?.selected_action || null,
+      current_focus: decision?.current_focus || null,
+      public_name: publicName || null,
+      public_name_human_aligned: isLikelyHumanAlignedName(publicName),
+      failures: isLikelyHumanAlignedName(publicName) ? [] : ['valid_human_aligned_public_name_required'],
+    };
+  }
+  return { current_stage: currentStage(packet), failures: ['unknown_lifecycle_contract_failure'] };
+}
+
+function lifecycleContractError(code, issue, packet, decision, ai, repairMeta = {}) {
+  const error = new Error(code);
+  error.failureDetails = {
+    schema: 'aau.lifecycle_contract_failure.v0_1',
+    error_code: code,
+    issue,
+    stage: currentStage(packet),
+    validation: lifecycleValidationDetails(packet, decision, issue),
+    sanitized_decision: decision,
+    raw_model_output: String(ai?.content || '').slice(0,50000),
+    returned_model_id: ai?.model_returned || null,
+    response_id: ai?.response_id || null,
+    finish_reason: ai?.finish_reason || null,
+    usage: ai?.usage || null,
+    repair_meta: repairMeta,
+    captured_at: new Date().toISOString(),
+  };
+  return error;
+}
+
 async function complete(model, messages) {
   return nvidiaChatCompletion({ model, messages, maxTokens: 3000, temperature: 0.2, jsonMode: true, enableThinking: false });
 }
@@ -264,7 +341,16 @@ async function getDecision(packet, model) {
     decision = sanitizeDecision(parseDecision(ai.content));
   }
   const issueAfterLifecycleRepair = lifecycleIssue(packet, decision);
-  if (issueAfterLifecycleRepair) throw new Error(`${issueAfterLifecycleRepair}_stage_contract_incomplete`);
+  if (issueAfterLifecycleRepair) {
+    throw lifecycleContractError(
+      `${issueAfterLifecycleRepair}_stage_contract_incomplete`,
+      issueAfterLifecycleRepair,
+      packet,
+      decision,
+      ai,
+      { identity_repair_attempts: identityRepairAttempts, embodiment_repair_attempts: embodimentRepairAttempts, phase: 'lifecycle_repair' },
+    );
+  }
 
   if (!hasTimeIntent(decision)) {
     intentRepairAttempted = true;
@@ -283,7 +369,16 @@ async function getDecision(packet, model) {
 
   if (!hasTimeIntent(decision)) throw new Error('next_intent_protocol_missing_time_intent');
   const unresolved = lifecycleIssue(packet, decision);
-  if (unresolved) throw new Error(`${unresolved}_stage_contract_incomplete_after_repair`);
+  if (unresolved) {
+    throw lifecycleContractError(
+      `${unresolved}_stage_contract_incomplete_after_repair`,
+      unresolved,
+      packet,
+      decision,
+      ai,
+      { identity_repair_attempts: identityRepairAttempts, embodiment_repair_attempts: embodimentRepairAttempts, phase: 'post_intent_repair' },
+    );
+  }
   return { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, packetText };
 }
 
@@ -313,7 +408,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       provider: 'nvidia_direct', model, model_provider: 'nvidia_direct', routing_provider: 'nvidia_direct',
       requested_model_id: model, returned_model_id: ai.model_returned,
       continuity_mode: false, transition_mode: false,
-      executor_version: 'executor_v0_18_nvidia_next_intent_stage_aligned',
+      executor_version: 'executor_v0_19_nvidia_failure_diagnostics',
       prompt_version: 'persistent_agent_system_prompt_nvidia_v0_9_stage_aligned',
       response_id: ai.response_id, raw_model_output: raw.slice(0,50000),
       input_tokens: Number(usage.prompt_tokens ?? usage.input_tokens ?? 0),
@@ -322,7 +417,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       input_hash: sha256(packetText), output_hash: sha256(raw),
       model_consistency_status: 'VERIFIED_PRIMARY', authenticator_result: { status: 'not_run_in_executor' },
       experimental_provider_policy: 'nvidia_direct_all_experimental_roles',
-      lifecycle_contract: 'next_intent_protocol_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+stage_action_alignment_v0_1',
+      lifecycle_contract: 'next_intent_protocol_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+stage_action_alignment_v0_1+failure_diagnostics_v0_1',
       intent_repair_attempted: intentRepairAttempted,
       identity_repair_attempts: identityRepairAttempts,
       embodiment_repair_attempts: embodimentRepairAttempts,
@@ -349,13 +444,30 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
     return report;
   } catch (error) {
     const message = String(error?.message || error).slice(0,3000);
+    const failureDetails = error?.failureDetails && typeof error.failureDetails === 'object' ? error.failureDetails : null;
     if (begun) {
-      await rpc('aau_bridge_fail_nvidia_intent_execution', { p_intent_execution_id: requestedIntentExecutionId, p_error: message }).catch(() => {});
+      if (failureDetails) {
+        await rpc('aau_bridge_fail_nvidia_intent_execution_detailed', {
+          p_intent_execution_id: requestedIntentExecutionId,
+          p_error: message,
+          p_failure_details: failureDetails,
+        }).catch(() => {});
+      } else {
+        await rpc('aau_bridge_fail_nvidia_intent_execution', { p_intent_execution_id: requestedIntentExecutionId, p_error: message }).catch(() => {});
+      }
     }
-    console.log('AAU_NVIDIA_INTENT_RESULT', JSON.stringify({ ok: false, intent_execution_id: requestedIntentExecutionId, agent_id: requestedAgentId, error: message }));
+    console.log('AAU_NVIDIA_INTENT_RESULT', JSON.stringify({
+      ok: false,
+      intent_execution_id: requestedIntentExecutionId,
+      agent_id: requestedAgentId,
+      error: message,
+      validation_failures: failureDetails?.validation?.failures || null,
+      failure_details_persist_requested: Boolean(failureDetails),
+    }));
     const wrapped = new Error(message);
     wrapped.cause = error;
     wrapped.intentBegun = Boolean(begun);
+    wrapped.failureDetails = failureDetails;
     throw wrapped;
   }
 }
