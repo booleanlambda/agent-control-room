@@ -9,7 +9,7 @@ function headers() {
     accept: 'application/vnd.github+json',
     'content-type': 'application/json',
     'x-github-api-version': '2022-11-28',
-    'user-agent': 'AAU-File-Response-Patcher/0.2',
+    'user-agent': 'AAU-File-Response-Patcher/0.3',
   };
 }
 
@@ -75,9 +75,11 @@ export async function patchFileResponseRuntime() {
   );
   const { patchExpertiseArtifactStage } = await import('./patch-expertise-artifact-stage.js');
   const expertiseStage = await patchExpertiseArtifactStage();
+  const { patchAttentionArbiterRuntime } = await import('./patch-attention-arbiter-runtime.js');
+  const attentionArbiter = await patchAttentionArbiterRuntime();
   return {
     ok: true,
-    contract: 'file_response_repair_v0_1+expertise_artifact_stage_contract_v0_1',
-    results: [worker, expertiseStage],
+    contract: 'file_response_repair_v0_1+expertise_artifact_stage_contract_v0_1+attention_arbiter_v0_1+attention_resolution_repair_v0_1',
+    results: [worker, expertiseStage, attentionArbiter],
   };
 }
