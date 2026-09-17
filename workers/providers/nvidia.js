@@ -74,10 +74,12 @@ function adminChatEnvelope(messages) {
       || packet?.admin_chat_context?.active === true
       || packet?.executor_policy?.admin_chat_active === true;
     if (!active) continue;
-    const messageId = clean(packet?.admin_chat_context?.current_admin_message?.message_id);
-    return { active: true, messageId: messageId || null };
+    const current = packet?.admin_chat_context?.current_admin_message || {};
+    const messageId = clean(current?.message_id);
+    const adminText = clean(current?.content);
+    return { active: true, messageId: messageId || null, adminText: adminText || null };
   }
-  return { active: false, messageId: null };
+  return { active: false, messageId: null, adminText: null };
 }
 
 function adminChatPacketActive(messages) {
@@ -108,13 +110,41 @@ function parseDecisionContent(content) {
   }
 }
 
+function replyTextFromDecision(content) {
+  const decision = parseDecisionContent(content);
+  return typeof decision?.outbound_message?.message === 'string'
+    ? decision.outbound_message.message.trim()
+    : '';
+}
+
+function normalizedWords(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .map((x) => x.trim())
+    .filter((x) => x.length > 1);
+}
+
+function adminReplyLooksLikeEcho(adminText, reply) {
+  const a = [...new Set(normalizedWords(adminText))];
+  const b = [...new Set(normalizedWords(reply))];
+  if (a.length < 3 || b.length < 3) return false;
+  const as = new Set(a), bs = new Set(b);
+  const intersection = a.filter((word) => bs.has(word)).length;
+  const union = new Set([...a, ...b]).size;
+  const jaccard = union ? intersection / union : 0;
+  const adminLead = String(adminText || '').trim().toLowerCase();
+  const replyLead = String(reply || '').trim().toLowerCase();
+  const imperativeMirror = /^(send|give|tell|show|describe|provide|upload|generate)\b/.test(adminLead)
+    && /^(send|give|tell|show|describe|provide|upload|generate)\b/.test(replyLead);
+  return jaccard >= 0.68 || (imperativeMirror && jaccard >= 0.42);
+}
+
 async function persistAdminChatReplyEarly(messages, content, modelId) {
   const envelope = adminChatEnvelope(messages);
   if (!envelope.active || !envelope.messageId || !SB_ANON || !BRIDGE_TOKEN) return;
-  const decision = parseDecisionContent(content);
-  const reply = typeof decision?.outbound_message?.message === 'string'
-    ? decision.outbound_message.message.trim()
-    : '';
+  const reply = replyTextFromDecision(content);
   if (!reply) return;
 
   try {
@@ -139,6 +169,45 @@ async function persistAdminChatReplyEarly(messages, content, modelId) {
   } catch (error) {
     console.warn('AAU_ADMIN_CHAT_EARLY_REPLY_PERSIST_FAILED', String(error?.message || error).slice(0,800));
   }
+}
+
+async function requestNvidia(config, requestBody, timeoutMs, userAgent) {
+  let response;
+  try {
+    response = await fetch(config.url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${config.apiKey}`,
+        'content-type': 'application/json',
+        accept: 'application/json',
+        'user-agent': userAgent,
+      },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+      const timeoutError = new Error(`nvidia_timeout_after_${timeoutMs}ms`);
+      timeoutError.code = 'NVIDIA_TIMEOUT';
+      throw timeoutError;
+    }
+    throw error;
+  }
+
+  const raw = await response.text();
+  let body = null;
+  try { body = JSON.parse(raw); } catch {}
+  if (!response.ok) {
+    const detail = body?.error?.message || body?.detail || body?.message || raw.slice(0, 800) || `HTTP ${response.status}`;
+    const error = new Error(`nvidia_${response.status}: ${detail}`);
+    error.status = response.status;
+    throw error;
+  }
+  return body;
+}
+
+function correctionMessage(adminText) {
+  return `ADMIN CHAT REPAIR: Your previous outbound_message mirrored or inverted the administrator's request instead of answering it.\n\nThe administrator's message was: ${JSON.stringify(String(adminText || '').slice(0,4000))}\n\nReturn the FULL JSON object again. In outbound_message.message, answer the administrator directly as the persistent agent in your own voice. Do not repeat, paraphrase, invert, or turn the administrator's request into an instruction to them. If they asked about your own embodiment, identity, preferences, thoughts, or work, answer from your persisted self-authored state in the supplied packet and from choices you make yourself in this cognition. You may elaborate your own self-description, but do not let the runtime choose it for you. Preserve all required lifecycle fields and include at least one valid next_intent.`;
 }
 
 export function nvidiaConfigStatus() {
@@ -183,68 +252,63 @@ export async function nvidiaChatCompletion({
   const resolvedJsonMode = typeof jsonMode === 'boolean' ? jsonMode : envBool('AAU_NVIDIA_JSON_MODE');
   const resolvedThinking = typeof enableThinking === 'boolean' ? enableThinking : envBool('AAU_NVIDIA_ENABLE_THINKING');
   const resolvedMessages = applyAdminChatRoleOverride(messages);
+  const envelope = adminChatEnvelope(resolvedMessages);
+  const resolvedModel = clean(model) || config.model;
 
   const requestBody = {
-    model: clean(model) || config.model,
+    model: resolvedModel,
     messages: resolvedMessages,
     max_tokens: Math.max(1, Math.min(Number(maxTokens) || 256, 4096)),
     temperature: Number.isFinite(Number(temperature)) ? Number(temperature) : 0.2,
     stream: false,
   };
-
   if (resolvedJsonMode === true) requestBody.response_format = { type: 'json_object' };
-  if (typeof resolvedThinking === 'boolean') {
-    requestBody.chat_template_kwargs = { enable_thinking: resolvedThinking };
-  }
+  if (typeof resolvedThinking === 'boolean') requestBody.chat_template_kwargs = { enable_thinking: resolvedThinking };
 
   const timeoutMs = resolveTimeoutMs();
-  let response;
-  try {
-    response = await fetch(config.url, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${config.apiKey}`,
-        'content-type': 'application/json',
-        accept: 'application/json',
-        'user-agent': 'AAU-NVIDIA-Experimental-Adapter/0.6-admin-chat-early-reply',
-      },
-      body: JSON.stringify(requestBody),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-  } catch (error) {
-    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
-      const timeoutError = new Error(`nvidia_timeout_after_${timeoutMs}ms`);
-      timeoutError.code = 'NVIDIA_TIMEOUT';
-      throw timeoutError;
+  let body = await requestNvidia(config, requestBody, timeoutMs, 'AAU-NVIDIA-Experimental-Adapter/0.7-admin-chat-repair');
+  let choice = body?.choices?.[0]?.message || {};
+  let content = typeof choice?.content === 'string' ? choice.content : '';
+  let reasoningContent = typeof choice?.reasoning_content === 'string' ? choice.reasoning_content : '';
+  let repairAttempted = false;
+
+  if (envelope.active && envelope.adminText) {
+    const firstReply = replyTextFromDecision(content);
+    if (firstReply && adminReplyLooksLikeEcho(envelope.adminText, firstReply)) {
+      repairAttempted = true;
+      const repairBody = {
+        ...requestBody,
+        messages: [
+          ...resolvedMessages,
+          { role: 'assistant', content: content.slice(0,50000) },
+          { role: 'user', content: correctionMessage(envelope.adminText) },
+        ],
+      };
+      body = await requestNvidia(config, repairBody, timeoutMs, 'AAU-NVIDIA-Experimental-Adapter/0.7-admin-chat-repair');
+      choice = body?.choices?.[0]?.message || {};
+      content = typeof choice?.content === 'string' ? choice.content : '';
+      reasoningContent = typeof choice?.reasoning_content === 'string' ? choice.reasoning_content : '';
+      const repairedReply = replyTextFromDecision(content);
+      if (!repairedReply || adminReplyLooksLikeEcho(envelope.adminText, repairedReply)) {
+        const error = new Error('admin_chat_echo_repair_failed');
+        error.code = 'ADMIN_CHAT_ECHO_REPAIR_FAILED';
+        throw error;
+      }
     }
-    throw error;
   }
 
-  const raw = await response.text();
-  let body = null;
-  try { body = JSON.parse(raw); } catch {}
-
-  if (!response.ok) {
-    const detail = body?.error?.message || body?.detail || body?.message || raw.slice(0, 800) || `HTTP ${response.status}`;
-    const error = new Error(`nvidia_${response.status}: ${detail}`);
-    error.status = response.status;
-    throw error;
-  }
-
-  const choice = body?.choices?.[0]?.message || {};
-  const content = typeof choice?.content === 'string' ? choice.content : '';
-  const reasoningContent = typeof choice?.reasoning_content === 'string' ? choice.reasoning_content : '';
-  await persistAdminChatReplyEarly(resolvedMessages, content, body?.model || model || config.model);
+  await persistAdminChatReplyEarly(resolvedMessages, content, body?.model || resolvedModel);
 
   return {
     provider: 'nvidia',
-    model_requested: clean(model) || config.model,
+    model_requested: resolvedModel,
     model_returned: typeof body?.model === 'string' ? body.model : null,
     content,
     reasoning_content: reasoningContent,
     finish_reason: body?.choices?.[0]?.finish_reason || null,
     usage: body?.usage || null,
     response_id: body?.id || null,
+    admin_chat_repair_attempted: repairAttempted,
   };
 }
 
