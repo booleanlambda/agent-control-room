@@ -9,7 +9,7 @@ function headers() {
     accept: 'application/vnd.github+json',
     'content-type': 'application/json',
     'x-github-api-version': '2022-11-28',
-    'user-agent': 'AAU-File-Response-Patcher/0.1',
+    'user-agent': 'AAU-File-Response-Patcher/0.2',
   };
 }
 
@@ -73,5 +73,11 @@ export async function patchFileResponseRuntime() {
     patchNvidiaIntentWorker,
     'fix: enforce file-specific agent replies after lifecycle repair',
   );
-  return { ok: true, contract: 'file_response_repair_v0_1', results: [worker] };
+  const { patchExpertiseArtifactStage } = await import('./patch-expertise-artifact-stage.js');
+  const expertiseStage = await patchExpertiseArtifactStage();
+  return {
+    ok: true,
+    contract: 'file_response_repair_v0_1+expertise_artifact_stage_contract_v0_1',
+    results: [worker, expertiseStage],
+  };
 }
