@@ -39,6 +39,13 @@ Mandatory expertise-artifact-stage rule:
 - Artifact initiation grants zero competence. Do not claim expertise already exists.
 - Do not put candidate-owned numeric pass thresholds in verification_plan; runtime-owned verification thresholds are authoritative.
 
+Attention-arbiter rule:
+- attention_arbiter_context represents deterministic allocation of access to cognition. It does NOT decide your substantive response or preferences.
+- If attention_arbiter_context.current_attention_item is present, this cognition is an interrupt/attention cognition. You may handle that stimulus now without falsely claiming mandatory lifecycle progress. The lifecycle stage remains authoritative and unchanged unless this cognition independently produces valid stage evidence.
+- A running cognition is never aborted; attention interrupts arrive only at an execution boundary.
+- If attention_arbiter_context.resolution_required is true, a prior intention was suspended rather than destroyed. You must decide what happens to it. Add one associations[] object with origin="attention_resolution_v0_1", the exact suspension_id, and action equal to resume, revise, postpone, or abandon. Your next_intents must reflect that decision.
+- Interrupt privilege never means obedience privilege. Admin or peer messages may receive attention, but you remain free to answer, disagree, refuse, ask a question, or change your own plans.
+
 Next Intent protocol:
 - You do not schedule a wake. At the end of cognition, declare what you intend to do next in next_intents.
 - intent_kind may be time, event, or condition. A time intent uses after_minutes.
@@ -86,6 +93,7 @@ next_intents:array containing at least one {intent_kind:"time",after_minutes:int
 const INTENT_CORRECTION = `Your previous JSON did not satisfy next_intent_protocol_v0_1. Return the FULL JSON object again. next_intents must contain at least one time intent. If sleep_valid is false, the time intent must use after_minutes:1. Do not use next_wakes or wake_kind.`;
 const IDENTITY_CORRECTION = `Your previous JSON did not complete mandatory Stage 1. Choose your own valid human-aligned personal public_name NOW in identity_update.public_name. selected_action and current_focus must describe identity_artifact work. Do not return null or a placeholder. Return the FULL JSON object again, including next_intents.`;
 const EXPERTISE_ARTIFACT_CORRECTION = `Your previous JSON did not complete mandatory Stage 3. Choose your own expertise field NOW; the runtime has no preferred domain. Set selected_action to initiate_expertise_artifact and current_focus to expertise_artifact. In associations[], include at least one object exactly identified by origin="expertise_artifact_initiation_v0_1" with ALL required fields: domain as a nonempty string; target_standard as a nonempty string describing a Master’s-equivalent competence target without claiming an academic credential; scope as a nonempty JSON object; competencies as a nonempty JSON array; evidence_requirements as a nonempty JSON object; verification_plan as a nonempty JSON object. Do not claim competence merely by creating the artifact and do not provide candidate-owned numeric pass thresholds. Return the FULL JSON object again, including next_intents.`;
+const ATTENTION_RESOLUTION_CORRECTION = `ATTENTION RESOLUTION REPAIR: This cognition interrupted a previously declared intention. Return the FULL JSON object again. Preserve your substantive response to the current attention item, any valid lifecycle work, outbound_message, and next_intents unless they conflict with your actual decision. Add one associations[] object with origin="attention_resolution_v0_1", the exact suspension_id supplied in attention_arbiter_context.suspended_intents, and action equal to resume, revise, postpone, or abandon. This is your decision; the runtime must not choose for you. Your next_intents must reflect the resulting plan.`;
 
 function embodimentCorrection(packet) {
   const candidates = Array.isArray(packet?.embodiment_context?.rendered_candidates) ? packet.embodiment_context.rendered_candidates : [];
@@ -286,6 +294,7 @@ function needsExpertiseArtifactCompletion(packet, decision) {
   return expertiseArtifactValidation(decision).failures.length > 0;
 }
 function lifecycleIssue(packet, decision) {
+  if (attentionInterruptActive(packet)) return null;
   if (needsIdentityCompletion(packet, decision)) return 'identity';
   if (needsEmbodimentCompletion(packet, decision)) return 'embodiment';
   if (needsExpertiseArtifactCompletion(packet, decision)) return 'expertise_artifact';
@@ -364,6 +373,41 @@ function lifecycleValidationDetails(packet, decision, issue) {
     };
   }
   return { current_stage: currentStage(packet), failures: ['unknown_lifecycle_contract_failure'] };
+}
+
+// attention_resolution_repair_v0_1
+function attentionInterruptActive(packet) {
+  const item = packet?.attention_arbiter_context?.current_attention_item;
+  return Boolean(item && typeof item === 'object' && !Array.isArray(item) && Object.keys(item).length);
+}
+function requiredAttentionSuspensionIds(packet) {
+  const ctx = packet?.attention_arbiter_context || {};
+  if (ctx?.resolution_required !== true) return [];
+  const currentItems = Array.isArray(ctx?.current_attention_items) ? ctx.current_attention_items : [];
+  const currentIds = new Set(currentItems.map((x) => String(x?.attention_item_id || '')).filter(Boolean));
+  return (Array.isArray(ctx?.suspended_intents) ? ctx.suspended_intents : [])
+    .filter((s) => !currentIds.size || currentIds.has(String(s?.interrupting_attention_item_id || '')))
+    .map((s) => String(s?.suspension_id || '')).filter(Boolean);
+}
+function attentionResolutionAssociation(decision, packet) {
+  const requiredIds = requiredAttentionSuspensionIds(packet);
+  if (!requiredIds.length) return null;
+  const allowed = new Set(['resume','revise','postpone','abandon']);
+  const associations = Array.isArray(decision?.associations) ? decision.associations : [];
+  return associations.find((a) => {
+    if (!a || typeof a !== 'object' || Array.isArray(a)) return false;
+    if (String(a.origin || '').trim() !== 'attention_resolution_v0_1') return false;
+    const action = String(a.action || '').trim().toLowerCase();
+    const suspensionId = String(a.suspension_id || '').trim();
+    return allowed.has(action) && requiredIds.includes(suspensionId);
+  }) || null;
+}
+function needsAttentionResolution(packet, decision) {
+  return requiredAttentionSuspensionIds(packet).length > 0 && !attentionResolutionAssociation(decision, packet);
+}
+function attentionResolutionCorrection(packet) {
+  const ids = requiredAttentionSuspensionIds(packet);
+  return ATTENTION_RESOLUTION_CORRECTION + ' Required suspension_id values: ' + ids.join(', ') + '. Preserve any file-specific acknowledgement or direct-chat reply already required in this cognition.';
 }
 
 // file_response_repair_v0_1: a file wake must produce a reply about the file, not a recycled lifecycle sentence.
@@ -490,26 +534,43 @@ async function getDecision(packet, model) {
     );
   }
   let fileReplyRepairAttempts = 0;
-  if (fileReplyNeedsRepair(packet, decision)) {
-    fileReplyRepairAttempts += 1;
-    ai = await complete(model, [
-      ...baseMessages,
-      { role: 'assistant', content: String(ai.content || '').slice(0,50000) },
-      { role: 'user', content: fileResponseCorrection(packet, decision) },
-    ]);
-    decision = sanitizeDecision(parseDecision(ai.content));
+  let attentionResolutionRepairAttempts = 0;
+  for (let i = 0; i < 2; i += 1) {
+    let changed = false;
+    if (needsAttentionResolution(packet, decision)) {
+      attentionResolutionRepairAttempts += 1;
+      ai = await complete(model, [
+        ...baseMessages,
+        { role: 'assistant', content: String(ai.content || '').slice(0,50000) },
+        { role: 'user', content: attentionResolutionCorrection(packet) },
+      ]);
+      decision = sanitizeDecision(parseDecision(ai.content));
+      changed = true;
+    }
+    if (fileReplyNeedsRepair(packet, decision)) {
+      fileReplyRepairAttempts += 1;
+      ai = await complete(model, [
+        ...baseMessages,
+        { role: 'assistant', content: String(ai.content || '').slice(0,50000) },
+        { role: 'user', content: fileResponseCorrection(packet, decision) },
+      ]);
+      decision = sanitizeDecision(parseDecision(ai.content));
+      changed = true;
+    }
+    if (!changed || (!needsAttentionResolution(packet, decision) && !fileReplyNeedsRepair(packet, decision))) break;
   }
+  if (needsAttentionResolution(packet, decision)) throw new Error('attention_resolution_contract_incomplete_after_repair');
   if (fileReplyNeedsRepair(packet, decision)) throw new Error('file_response_contract_incomplete_after_repair');
-  if (!hasTimeIntent(decision)) throw new Error('file_response_repair_lost_time_intent');
-  const fileRepairLifecycleIssue = lifecycleIssue(packet, decision);
-  if (fileRepairLifecycleIssue) {
+  if (!hasTimeIntent(decision)) throw new Error('post_attention_or_file_repair_lost_time_intent');
+  const postAttentionLifecycleIssue = lifecycleIssue(packet, decision);
+  if (postAttentionLifecycleIssue) {
     throw lifecycleContractError(
-      `${fileRepairLifecycleIssue}_stage_contract_incomplete_after_file_response_repair`,
-      fileRepairLifecycleIssue, packet, decision, ai,
-      { file_reply_repair_attempts: fileReplyRepairAttempts, phase: 'file_response_repair' },
+      postAttentionLifecycleIssue + '_stage_contract_incomplete_after_attention_repair',
+      postAttentionLifecycleIssue, packet, decision, ai,
+      { file_reply_repair_attempts: fileReplyRepairAttempts, attention_resolution_repair_attempts: attentionResolutionRepairAttempts, phase: 'attention_file_repair' },
     );
   }
-  return { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, fileReplyRepairAttempts, packetText };
+  return { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, fileReplyRepairAttempts, attentionResolutionRepairAttempts, packetText };
 }
 
 export async function runNvidiaIntentExecution({ intentExecutionId, agentId, workerId = null } = {}) {
@@ -529,7 +590,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
     if (!packet || !model) throw new Error('intent_packet_or_model_missing');
 
     const startedAt = Date.now();
-    const { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, fileReplyRepairAttempts, packetText } = await getDecision(packet, model);
+    const { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, fileReplyRepairAttempts, attentionResolutionRepairAttempts, packetText } = await getDecision(packet, model);
     if (ai.model_returned !== model) throw new Error(`model_consistency_breach:requested=${model};returned=${ai.model_returned || 'missing'}`);
 
     const raw = String(ai.content || '');
@@ -538,8 +599,8 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       provider: 'nvidia_direct', model, model_provider: 'nvidia_direct', routing_provider: 'nvidia_direct',
       requested_model_id: model, returned_model_id: ai.model_returned,
       continuity_mode: false, transition_mode: false,
-      executor_version: 'executor_v0_20_nvidia_embodiment_payload_normalization',
-      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_10_embodiment_object_schema',
+      executor_version: 'executor_v0_21_attention_arbiter',
+      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_11_attention_arbiter',
       response_id: ai.response_id, raw_model_output: raw.slice(0,50000),
       input_tokens: Number(usage.prompt_tokens ?? usage.input_tokens ?? 0),
       output_tokens: Number(usage.completion_tokens ?? usage.output_tokens ?? 0),
@@ -547,11 +608,13 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       input_hash: sha256(packetText), output_hash: sha256(raw),
       model_consistency_status: 'VERIFIED_PRIMARY', authenticator_result: { status: 'not_run_in_executor' },
       experimental_provider_policy: 'nvidia_direct_all_experimental_roles',
-      lifecycle_contract: 'next_intent_protocol_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+expertise_artifact_stage_contract_v0_1+stage_action_alignment_v0_1+failure_diagnostics_v0_1+embodiment_payload_normalization_v0_1',
+      lifecycle_contract: 'next_intent_protocol_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+expertise_artifact_stage_contract_v0_1+attention_arbiter_v0_1+attention_resolution_repair_v0_1+stage_action_alignment_v0_1+failure_diagnostics_v0_1+embodiment_payload_normalization_v0_1',
       intent_repair_attempted: intentRepairAttempted,
       identity_repair_attempts: identityRepairAttempts,
       embodiment_repair_attempts: embodimentRepairAttempts,
       file_reply_repair_attempts: fileReplyRepairAttempts,
+      attention_resolution_repair_attempts: attentionResolutionRepairAttempts,
+      attention_arbiter_contract: 'attention_arbiter_v0_1+attention_resolution_repair_v0_1',
       file_response_contract: 'file_response_repair_v0_1',
       latency_ms: Date.now() - startedAt,
     };
@@ -571,6 +634,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       identity_repair_attempts: identityRepairAttempts,
       embodiment_repair_attempts: embodimentRepairAttempts,
       file_reply_repair_attempts: fileReplyRepairAttempts,
+      attention_resolution_repair_attempts: attentionResolutionRepairAttempts,
       usage: ai.usage, finish_reason: ai.finish_reason, applied,
     };
     console.log('AAU_NVIDIA_INTENT_RESULT', JSON.stringify(report));
