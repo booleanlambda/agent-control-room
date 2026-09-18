@@ -3,6 +3,7 @@ import { nvidiaChatCompletion } from './providers/nvidia.js';
 
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
+const serviceRole = String(process.env.AAU_SUPABASE_SERVICE_ROLE_KEY || '').trim();
 const bridge = String(process.env.AAU_BROKER_BRIDGE_TOKEN || '').trim();
 
 const SYSTEM_PROMPT = `You are one cognition cycle for a persistent autonomous synthetic individual in a private incubator. You are not an assistant answering a human. The supplied packet is the agent's persistent state and authoritative continuity.
@@ -131,10 +132,10 @@ function obj(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : {
 function arr(v, max) { return Array.isArray(v) ? v.slice(0, max) : []; }
 
 async function rpc(name, args = {}) {
-  if (!anon || !bridge) throw new Error('missing_broker_supabase_credentials');
+  if (!serviceRole || !bridge) throw new Error('missing_internal_scheduler_supabase_credentials');
   const response = await fetch(`${SB}/rest/v1/rpc/${name}`, {
     method: 'POST',
-    headers: { apikey: anon, authorization: `Bearer ${anon}`, 'content-type': 'application/json' },
+    headers: { apikey: serviceRole, authorization: `Bearer ${serviceRole}`, 'content-type': 'application/json' },
     body: JSON.stringify({ p_bridge_token: bridge, ...args }),
   });
   const text = await response.text();
