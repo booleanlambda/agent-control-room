@@ -125,6 +125,34 @@ function fileOutputsFromDecision(content) {
   );
 }
 
+function evidenceOfActionIssueFromDecision(content) {
+  const decision = parseDecisionContent(content);
+  if (!decision || typeof decision !== 'object') return null;
+  const action = String(decision?.selected_action || '').toLowerCase();
+  const reason = String(decision?.stated_reason || '').toLowerCase();
+  const reply = String(decision?.outbound_message?.message || '').toLowerCase();
+  const memory = String(decision?.memory?.content || '').toLowerCase();
+  const text = [action, reason, reply, memory].join(' ');
+  const associations = Array.isArray(decision?.associations) ? decision.associations : [];
+  const runtimeEvidence = associations.filter((x) => x && typeof x === 'object' && x.origin === 'runtime_execution_evidence_v0_1');
+  const fileOutputs = associations.filter((x) => x && typeof x === 'object' && x.origin === 'agent_file_output_v0_1');
+
+  const operationalAction = /(^|_)(execute|run|test|benchmark|measure|profile|simulate|validate)(_|$)/.test(action)
+    || /(telemetry|stress_test|failure_analysis|performance_test|latency_test)/.test(action);
+  let empirical = operationalAction
+    || /\b(executed|ran|benchmarked|measured|observed|telemetry showed|test showed|tests showed|test failed|test passed|stress tests|actual result|failure occurred|produced a collision|latency was|throughput was)\b/.test(text);
+  const explicitNoExecution = /\b(cannot|can not|did not|have not|has not|not yet|no runtime evidence|no execution evidence|not executed|not tested|not benchmarked|hypothetical|proposed test|designed a test|plan to|intend to)\b/.test(text);
+  if (explicitNoExecution && !operationalAction) empirical = false;
+
+  const artifact = /(^|_)(implement|write|create|generate|build)(_|$)/.test(action)
+    || /(implementation|code|script|artifact)/.test(action)
+    || /\b(i implemented|i wrote|i created|i generated|i built|implementation is attached|code is attached)\b/.test(text);
+
+  if (empirical && runtimeEvidence.length === 0) return 'runtime_execution_evidence_required';
+  if (!empirical && artifact && fileOutputs.length === 0) return 'same_cognition_file_output_required';
+  return null;
+}
+
 function normalizedWords(text) {
   return String(text || '')
     .toLowerCase()
@@ -154,6 +182,11 @@ async function persistAdminChatReplyEarly(messages, content, modelId) {
   if (!envelope.active || !envelope.messageId || !SB_ANON || !BRIDGE_TOKEN) return;
   const reply = replyTextFromDecision(content);
   if (!reply) return;
+  const evidenceIssue = evidenceOfActionIssueFromDecision(content);
+  if (evidenceIssue) {
+    console.warn('AAU_ADMIN_CHAT_EARLY_REPLY_BLOCKED_EVIDENCE_OF_ACTION', evidenceIssue);
+    return;
+  }
 
   try {
     const response = await fetch(`${SB}/rest/v1/rpc/aau_bridge_upsert_admin_chat_reply_early`, {
