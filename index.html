@@ -31,9 +31,9 @@ button,input,textarea,select{font:inherit}.wrap{max-width:1480px;margin:auto;pad
 .healthbadge{display:inline-flex;align-items:center;border:1px solid #2a3b50;border-radius:999px;padding:2px 6px;font-size:9px;text-transform:uppercase;letter-spacing:.05em}.healthbadge.retrying{color:var(--warn);border-color:rgba(244,198,106,.45)}.healthbadge.failed{color:var(--bad);border-color:rgba(255,127,141,.45)}.healthbadge.running,.healthbadge.queued{color:var(--accent);border-color:rgba(125,211,252,.4)}.healthbadge.healthy{color:var(--good);border-color:rgba(98,230,170,.4)}.healthbadge.cancelled{color:var(--muted)}
 /* execution_health_ui_v0_1 */
 /* retry_semantic_intent_ui_v0_1 */
-.mobile-label{display:none}
+.monitorbar{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:10px}.monitorbtn{background:#0d1420;color:var(--accent);border:1px solid rgba(125,211,252,.45);border-radius:9px;padding:8px 10px;cursor:pointer}.monitor-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.monitor-card{background:#0a1018;border:1px solid #192638;border-radius:10px;padding:10px;min-width:0}.monitor-card.wide{grid-column:span 2}.monitor-card.full{grid-column:1/-1}.monitor-value{font-size:12px;font-weight:700;margin-top:4px;overflow-wrap:anywhere}.monitor-list{display:flex;flex-direction:column;gap:6px;margin-top:7px}.monitor-row{background:#0d141e;border:1px solid #1b2a3d;border-radius:8px;padding:7px;font-size:10px;line-height:1.4}.monitor-row b{font-size:11px}.statusdot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;background:var(--muted)}.statusdot.online,.statusdot.running,.statusdot.healthy{background:var(--good)}.statusdot.pending,.statusdot.claimed,.statusdot.queued{background:var(--warn)}.statusdot.error,.statusdot.failed,.statusdot.unreachable,.statusdot.verified_fail{background:var(--bad)}.statusdot.verified_pass{background:var(--good)}.mobile-label{display:none}
 @media(max-width:900px){.dashboard-main{grid-template-columns:1fr}.runtime-fold{order:2}.drawer{width:min(760px,100vw)}}
-@media(max-width:650px){.drawer-top{padding:12px}.drawer-content{padding:12px}.drawer-nav{gap:2px;padding:6px}.navbtn{padding:8px 2px}.navbtn .label{display:none}.navbtn .ico{font-size:18px}.overview-grid{grid-template-columns:1fr}.overview-card.wide{grid-column:auto}.chatlog{max-height:calc(100vh - 310px)}}
+@media(max-width:900px){.monitor-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){.monitor-grid{grid-template-columns:1fr}.monitor-card.wide,.monitor-card.full{grid-column:auto}.drawer-top{padding:12px}.drawer-content{padding:12px}.drawer-nav{gap:2px;padding:6px}.navbtn{padding:8px 2px}.navbtn .label{display:none}.navbtn .ico{font-size:18px}.overview-grid{grid-template-columns:1fr}.overview-card.wide{grid-column:auto}.chatlog{max-height:calc(100vh - 310px)}}
 </style>
 </head>
 <body>
@@ -42,13 +42,14 @@ button,input,textarea,select{font:inherit}.wrap{max-width:1480px;margin:auto;pad
   <div class="top"><div><h1>AAU Agent Control Room</h1><div class="sub">Next Intent · lifecycle · existence · expertise · admin chat · bidirectional files</div></div><div class="live"><span id="dot" class="dot"></span><span id="liveText">Locked</span></div></div>
   <div id="error" class="error"></div><div id="banner" class="banner"></div><div id="metrics" class="metrics"></div>
   <div class="dashboard-main"><section class="panel"><h2>Current agent</h2><div id="experiment"></div></section><details class="panel runtime-fold"><summary><span>Runtime details</span><span class="muted">system</span></summary><div id="runtime" class="kv"></div></details></div>
+  <details class="panel" id="monitorFold" style="margin-top:12px"><summary style="cursor:pointer"><span>Runtime Monitor</span> <span class="muted">manual · models · Render · DB · responses</span></summary><div style="margin-top:10px"><div class="monitorbar"><span class="muted" id="monitorStamp">Not checked yet.</span><button class="monitorbtn" id="monitorCheck">Check now</button></div><div id="monitorBody"><div class="empty">Open the monitor and press Check now.</div></div></div></details>
   <div class="toolbar"><input id="search" placeholder="Search agents, stage, focus or action…"><select id="filter"><option value="current">Current experiment</option><option value="paused">Paused population</option><option value="all">All agents</option><option value="archived">Archived</option></select><button id="refresh">Refresh</button></div>
   <div id="grid" class="grid"></div>
 </div>
 <div id="drawerbg" class="drawerbg"></div><aside id="drawer" class="drawer"><div id="drawerbody"></div></aside>
 <script>
 const API='https://mgtilfgygzymxiyixjit.supabase.co/functions/v1/agent-control-room-api';
-const st={pw:null,snap:null,sys:null,filter:'current',q:'',timer:null,drawerAgentId:null,drawerTimer:null,drawerMountedFor:null};
+const st={pw:null,snap:null,sys:null,monitor:null,monitorLoading:false,filter:'current',q:'',timer:null,drawerAgentId:null,drawerTimer:null,drawerMountedFor:null};
 const $=x=>document.querySelector(x), raw=x=>String(x??''), esc=x=>raw(x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const nice=x=>raw(x).replace(/^agent_/,'Agent ').split('_').map(y=>y.charAt(0).toUpperCase()+y.slice(1)).join(' ');
 const when=x=>x?new Date(x).toLocaleString():'none', rel=x=>{if(!x)return'none';const s=(new Date(x)-Date.now())/1000,a=Math.abs(s);let v,u;if(a<60){v=Math.round(a);u='sec'}else if(a<3600){v=Math.round(a/60);u='min'}else if(a<86400){v=Math.round(a/3600);u='hr'}else{v=Math.round(a/86400);u='day'}return s>=0?`in ${v} ${u}${v===1?'':'s'}`:`${v} ${u}${v===1?'':'s'} ago`};
@@ -66,6 +67,36 @@ function controlsHtml(a,p=''){const paused=isPaused(a);return `<div class="contr
 async function controlAgent(id,action){if(action==='pause'&&!confirm('Pause this agent? Active intents will be cancelled and the existence levy frozen.'))return;try{await api('mode=control',{method:'POST',body:{id,action,reason:'agent_control_room_admin_'+action}});await refresh(true);if(st.drawerAgentId===id)await reloadDrawer(id,false)}catch(e){showError(e.message)}}
 function bindControls(a,p=''){const x=document.getElementById(p+'pauseBtn'),y=document.getElementById(p+'unpauseBtn');if(x)x.onclick=()=>controlAgent(a.agent_id,'pause');if(y)y.onclick=()=>controlAgent(a.agent_id,'unpause')}
 function metric(k,v,s=''){return `<div class="metric"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div><div class="s">${esc(s)}</div></div>`}
+
+function statusDot(s){const x=raw(s||'unknown').toLowerCase();return `<span class="statusdot ${esc(x)}"></span>`}
+function gradeRows(xs,label){const a=Array.isArray(xs)?xs:[];return a.length?a.map(g=>`<div class="monitor-row"><b>${esc(g.id||'task')} · ${esc(label)}</b><div>score ${esc(g.score??'—')} · confidence ${esc(g.confidence??'—')}</div><div class="muted">${esc(g.adjudicator_model||g.verifier_model||g.verifier_requested_model||'')}</div></div>`).join(''):'<div class="muted">No grades yet.</div>'}
+function responseRows(xs){const a=Array.isArray(xs)?xs:[];return a.length?a.map(r=>`<div class="monitor-row"><b>${esc(nice(r.selected_action||r.event_type||'response'))}</b><div>${esc(r.stated_reason||'')}</div><div class="msgmeta">${esc(r.returned_model||r.requested_model||'—')} · ${esc(r.latency_ms??'—')} ms · ${esc(r.output_tokens??'—')} out · ${esc(when(r.created_at))}</div></div>`).join(''):'<div class="muted">No recent responses.</div>'}
+function renderMonitor(){
+ const d=st.monitor,b=$('#monitorBody'),s=$('#monitorStamp');if(!b||!s)return;
+ if(st.monitorLoading){s.textContent='Checking…';b.innerHTML='<div class="empty">Checking runtime services…</div>';return}
+ if(!d){s.textContent='Not checked yet.';b.innerHTML='<div class="empty">Open the monitor and press Check now.</div>';return}
+ const db=d.database||{},r=d.render||{},w=d.worker||{},a=d.agent||{},v=d.verification||{};
+ const renderDetail=typeof r.detail==='object'&&r.detail?JSON.stringify(r.detail):raw(r.detail||'');
+ s.textContent='Checked '+when(d.generated_at||r.checked_at);
+ b.innerHTML=`<div class="monitor-grid">
+   <div class="monitor-card"><div class="k">Database</div><div class="monitor-value">${statusDot(db.status)}${esc(nice(db.status||'unknown'))}</div><div class="msgmeta">${esc(when(db.server_time))}</div></div>
+   <div class="monitor-card"><div class="k">Render</div><div class="monitor-value">${statusDot(r.status)}${esc(nice(r.status||'unknown'))}</div><div class="msgmeta">HTTP ${esc(r.http_status??'—')} · ${esc(r.latency_ms??'—')} ms</div></div>
+   <div class="monitor-card"><div class="k">Intent worker</div><div class="monitor-value">${statusDot(w.loop_state)}${esc(nice(w.loop_state||'unknown'))}</div><div class="msgmeta">heartbeat ${esc(w.heartbeat_age_seconds??'—')} sec ago · consumer ${w.consumer_bound?'bound':'not bound'}</div></div>
+   <div class="monitor-card"><div class="k">Agent model</div><div class="monitor-value">${esc(a.model||'—')}</div><div class="msgmeta">${esc(a.provider||'—')} · ${esc(a.public_name||a.internal_label||'')}</div></div>
+   <div class="monitor-card wide"><div class="k">Verification models</div><div class="monitor-list"><div class="monitor-row"><b>Candidate</b><div>${esc(v.candidate_model||'—')}</div></div><div class="monitor-row"><b>Authenticator</b><div>${esc(v.authenticator_model||'—')}</div></div><div class="monitor-row"><b>Adjudicator</b><div>${esc(v.adjudicator_model||'—')}</div></div></div></div>
+   <div class="monitor-card wide"><div class="k">Verification status</div><div class="monitor-value">${statusDot(v.status)}${esc(nice(v.status||'none'))}</div><div class="msgmeta">checkpoint ${esc(v.checkpoint_stage||'—')} · answers ${esc(v.answer_count??0)} · auth ${esc(v.auth_grade_count??0)} · adj ${esc(v.adj_grade_count??0)} · score ${esc(v.overall_score??'—')}</div>${v.last_error?`<div class="badtext" style="margin-top:6px">${esc(v.last_error)}</div>`:''}</div>
+   <div class="monitor-card wide"><div class="k">Verifier responses</div><div class="monitor-list">${gradeRows(v.authenticator_grades,'auth')}${gradeRows(v.adjudicator_grades,'adj')}</div></div>
+   <div class="monitor-card wide"><div class="k">Render response</div><div class="monitor-row mono">${esc(renderDetail||'No body supplied.')}</div></div>
+   <div class="monitor-card full"><div class="k">Recent agent/model responses</div><div class="monitor-list">${responseRows(d.responses)}</div></div>
+ </div>`;
+}
+async function loadMonitor(){
+ if(st.monitorLoading)return;st.monitorLoading=true;renderMonitor();const btn=$('#monitorCheck');if(btn)btn.disabled=true;
+ try{const id=currentId();st.monitor=await api('mode=monitor'+(id?'&id='+encodeURIComponent(id):''));}
+ catch(e){showError(e.message)}
+ finally{st.monitorLoading=false;if(btn)btn.disabled=false;renderMonitor()}
+}
+
 function render(){
  const agents=st.snap?.agents||[], cur=st.sys?.current_agent||{}, exp=st.sys?.experimental_runtime||{};
  $('#banner').innerHTML=`<b>AAU live.</b> <span class="muted">File channel ${esc(st.sys?.file_channel_version||'agent_file_channel_v0_1')} · brain packet ${esc(exp.brain_packet_version||cur.brain_packet_version||'—')}</span>`;
@@ -123,7 +154,7 @@ async function openAgent(id,silent=false){const changed=st.drawerAgentId!==id;st
 function closeDrawer(){st.drawerAgentId=null;st.drawerMountedFor=null;clearInterval(st.drawerTimer);$('#drawer').classList.remove('open');$('#drawerbg').classList.remove('open')}
 async function refresh(silent=false){try{const [snap,sys]=await Promise.all([api('mode=snapshot'),api('mode=system')]);st.snap=snap;st.sys=sys;$('#dot').classList.remove('bad');$('#liveText').textContent='Live';render()}catch(e){$('#dot').classList.add('bad');$('#liveText').textContent='Error';if(!silent)showError(e.message)}}
 async function login(){st.pw=$('#pw').value;$('#loginMsg').textContent='';try{await refresh();$('#login').style.display='none';clearInterval(st.timer);st.timer=setInterval(()=>refresh(true),8000)}catch(e){st.pw=null;$('#loginMsg').textContent=e.message}}
-$('#loginBtn').onclick=login;$('#pw').addEventListener('keydown',e=>{if(e.key==='Enter')login()});$('#refresh').onclick=()=>refresh();$('#filter').onchange=e=>{st.filter=e.target.value;renderGrid()};$('#search').oninput=e=>{st.q=e.target.value;renderGrid()};$('#drawerbg').onclick=closeDrawer;
+$('#loginBtn').onclick=login;$('#pw').addEventListener('keydown',e=>{if(e.key==='Enter')login()});$('#refresh').onclick=()=>refresh();$('#monitorCheck').onclick=()=>loadMonitor();$('#filter').onchange=e=>{st.filter=e.target.value;renderGrid()};$('#search').oninput=e=>{st.q=e.target.value;renderGrid()};$('#drawerbg').onclick=closeDrawer;
 </script>
 </body>
 </html>
