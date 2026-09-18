@@ -288,8 +288,13 @@ async function gradeAnswer(run, task, answer) {
 async function adjudicate(run, task, answer, prior) {
   const system = 'You are the operationally distinct AAU expertise adjudicator. Re-grade a flagged assessment independently. Do not default to the prior verifier. Return one GRADE line; reasoning may precede it.';
   const user = `DOMAIN: ${run.domain}\nTARGET: ${run.target_standard}\nSCENARIO: ${task.scenario}\nTASK: ${task.prompt}\nANCHORS: ${JSON.stringify(task.grading_anchors)}\nANSWER:\n${answer.answer}\nPRIOR FLAGGED GRADE: ${JSON.stringify(prior)}\n\nReturn: GRADE execution=NN method=NN security=NN validation=NN communication=NN critical=NONE confidence=0.00 unsupported=NONE`;
-  const candidates = [run.adjudicator_model, 'nvidia/nemotron-3.5-lightning-30b-a3b', 'meta/muse-glimmer-30b']
-    .filter((x, i, a) => x && a.indexOf(x) === i && x !== run.authenticator_model && x !== prior.verifier_model && x !== run.candidate_model_id);
+  const primaryAdjudicator = 'openai/gpt-oss-20b';
+  const candidates = [
+    primaryAdjudicator,
+    run.adjudicator_model,
+    'z-ai/glm-5.3',
+    'meta/muse-glimmer-30b',
+  ].filter((x, i, a) => x && a.indexOf(x) === i && x !== run.authenticator_model && x !== prior.verifier_model && x !== run.candidate_model_id);
   for (const model of candidates) {
     for (let attempt = 1; attempt <= 1; attempt++) {
       try {
@@ -445,5 +450,5 @@ export function startExpertiseVerificationWorker() {
   const missing = [['AAU_SUPABASE_ANON_KEY', anon], ['AAU_BROKER_BRIDGE_TOKEN', bridge], ['NVIDIA_API_KEY', nvidiaKey]].filter(([, v]) => !v).map(([k]) => k);
   if (missing.length) return { ok: false, ready: false, missing };
   if (!running) { running = true; loop().catch((e) => console.error('AAU_EXPERTISE_VERIFIER_FATAL', e)); }
-  return { ok: true, ready: true, executor_id: executorId, poll_ms: pollMs, provider: 'nvidia_direct', task_authority: 'deterministic:aau-task-authority-v0.1', authenticator: 'moonshotai/kimi-k3', authenticator_fallbacks: ['meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b'], adjudicator: 'meta/muse-glimmer-30b' };
+  return { ok: true, ready: true, executor_id: executorId, poll_ms: pollMs, provider: 'nvidia_direct', task_authority: 'deterministic:aau-task-authority-v0.1', authenticator: 'moonshotai/kimi-k3', authenticator_fallbacks: ['meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b'], adjudicator: 'openai/gpt-oss-20b', adjudicator_fallbacks: ['z-ai/glm-5.3','meta/muse-glimmer-30b'] };
 }
