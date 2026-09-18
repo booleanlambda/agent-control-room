@@ -68,12 +68,12 @@ Attention-arbiter rule:
 
 Next Intent protocol:
 - You do not schedule a wake. At the end of cognition, declare what you intend to do next in next_intents.
-- intent_kind may be time, event, or condition. A time intent uses after_minutes.
+- intent_kind may be time, event, or condition. A time intent is always exactly five minutes after the current cognition.
+- The five-minute interval is runtime policy, not an agent choice. Always return after_minutes:5 for time intents.
 - intent_reason describes what you intend to continue or do when the intent executes.
 - A future next intent does not mean you are sleeping. Sleep is a separate homeostatic action.
-- If sleep_eligibility_context.sleep_valid is false, every time intent must use after_minutes:1.
 - Sleep/rest/hibernate is valid only when sleep_eligibility_context.sleep_valid is true.
-- Every successful cognition MUST include at least one time intent in next_intents.
+- Every successful awake cognition MUST include at least one time intent in next_intents.
 
 Autonomy rules:
 - The current intent execution reason is a stimulus, not an order about what to think.
@@ -108,9 +108,9 @@ belief_updates:array
 associations:array
 identity_update:object
 embodiment_update:object
-next_intents:array containing at least one {intent_kind:"time",after_minutes:integer 1..43200,intent_reason:string,priority:number 0..1,estimated_cost:number}.`;
+next_intents:array containing at least one {intent_kind:"time",after_minutes:5,intent_reason:string,priority:number 0..1,estimated_cost:number}.`;
 
-const INTENT_CORRECTION = `Your previous JSON did not satisfy next_intent_protocol_v0_1. Return the FULL JSON object again. next_intents must contain at least one time intent. If sleep_valid is false, the time intent must use after_minutes:1. Do not use next_wakes or wake_kind.`;
+const INTENT_CORRECTION = `Your previous JSON did not satisfy next_intent_protocol_v0_1. Return the FULL JSON object again. next_intents must contain at least one time intent with after_minutes:5. The interval is fixed by runtime policy and is not your choice. Do not use next_wakes or wake_kind.`;
 const IDENTITY_CORRECTION = `Your previous JSON did not complete mandatory Stage 1. Choose your own valid human-aligned personal public_name NOW in identity_update.public_name. selected_action and current_focus must describe identity_artifact work. Do not return null or a placeholder. Return the FULL JSON object again, including next_intents.`;
 const EXPERTISE_ARTIFACT_CORRECTION = `Your previous JSON did not complete mandatory Stage 3. Choose your own expertise field NOW; the runtime has no preferred domain. Set selected_action to initiate_expertise_artifact and current_focus to expertise_artifact. In associations[], include at least one object exactly identified by origin="expertise_artifact_initiation_v0_1" with ALL required fields: domain as a nonempty string; target_standard as a nonempty string describing a Master’s-equivalent competence target without claiming an academic credential; scope as a nonempty JSON object; competencies as a nonempty JSON array; evidence_requirements as a nonempty JSON object; verification_plan as a nonempty JSON object. Do not claim competence merely by creating the artifact and do not provide candidate-owned numeric pass thresholds. Return the FULL JSON object again, including next_intents.`;
 const ATTENTION_RESOLUTION_CORRECTION = `ATTENTION RESOLUTION REPAIR: This cognition interrupted a previously declared intention. Return the FULL JSON object again. Preserve your substantive response to the current attention item, any valid lifecycle work, outbound_message, and next_intents unless they conflict with your actual decision. Add one associations[] object with origin="attention_resolution_v0_1", the exact suspension_id supplied in attention_arbiter_context.suspended_intents, and action equal to resume, revise, postpone, or abandon. This is your decision; the runtime must not choose for you. Your next_intents must reflect the resulting plan.`;
@@ -189,9 +189,9 @@ function sanitizeNextIntents(value) {
       estimated_cost: Math.max(0, Number.isFinite(Number(item.estimated_cost)) ? Number(item.estimated_cost) : 0),
     };
     if (kind === 'time') {
-      const mins = Math.trunc(Number(item.after_minutes));
-      if (!Number.isFinite(mins) || mins < 1 || mins > 43200) continue;
-      intent.after_minutes = mins;
+      // AAU awake-continuity policy: time intents are fixed at exactly five minutes.
+      // Model-proposed values are ignored so timing is never an agent-controlled variable.
+      intent.after_minutes = 5;
     } else {
       const trigger = typeof item.trigger_type === 'string' ? item.trigger_type.trim().slice(0,300) : '';
       if (!trigger) continue;
@@ -254,7 +254,7 @@ function sanitizeDecision(x) {
 }
 
 function hasTimeIntent(decision) {
-  return Array.isArray(decision?.next_intents) && decision.next_intents.some((i) => i?.intent_kind === 'time' && Number.isInteger(i?.after_minutes) && i.after_minutes >= 1 && i.after_minutes <= 43200);
+  return Array.isArray(decision?.next_intents) && decision.next_intents.some((i) => i?.intent_kind === 'time' && i.after_minutes === 5);
 }
 function isLikelyHumanAlignedName(value) {
   const name = String(value || '').trim();
@@ -619,8 +619,8 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       provider: 'nvidia_direct', model, model_provider: 'nvidia_direct', routing_provider: 'nvidia_direct',
       requested_model_id: model, returned_model_id: ai.model_returned,
       continuity_mode: false, transition_mode: false,
-      executor_version: 'executor_v0_21_attention_arbiter',
-      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_14_threshold_semantics',
+      executor_version: 'executor_v0_22_fixed_five_minute_intent',
+      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_15_fixed_five_minute_intent',
       response_id: ai.response_id, raw_model_output: raw.slice(0,50000),
       input_tokens: Number(usage.prompt_tokens ?? usage.input_tokens ?? 0),
       output_tokens: Number(usage.completion_tokens ?? usage.output_tokens ?? 0),
