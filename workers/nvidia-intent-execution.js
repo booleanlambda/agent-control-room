@@ -3,7 +3,6 @@ import { nvidiaChatCompletion } from './providers/nvidia.js';
 
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
-const serviceRole = String(process.env.AAU_SUPABASE_SERVICE_ROLE_KEY || '').trim();
 const bridge = String(process.env.AAU_BROKER_BRIDGE_TOKEN || '').trim();
 
 const SYSTEM_PROMPT = `You are one cognition cycle for a persistent autonomous synthetic individual in a private incubator. You are not an assistant answering a human. The supplied packet is the agent's persistent state and authoritative continuity.
@@ -132,11 +131,19 @@ function obj(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : {
 function arr(v, max) { return Array.isArray(v) ? v.slice(0, max) : []; }
 
 async function rpc(name, args = {}) {
-  if (!serviceRole || !bridge) throw new Error('missing_internal_scheduler_supabase_credentials');
-  const response = await fetch(`${SB}/rest/v1/rpc/${name}`, {
+  if (!anon || !bridge) throw new Error('missing_broker_supabase_credentials');
+  const heavySchedulerRpc = name === 'aau_bridge_begin_nvidia_intent_execution'
+    || name === 'aau_bridge_apply_nvidia_intent_execution';
+  const rpcArgs = { p_bridge_token: bridge, ...args };
+  const url = heavySchedulerRpc
+    ? `${SB}/functions/v1/aau-scheduler-rpc`
+    : `${SB}/rest/v1/rpc/${name}`;
+  const response = await fetch(url, {
     method: 'POST',
-    headers: { apikey: serviceRole, authorization: `Bearer ${serviceRole}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ p_bridge_token: bridge, ...args }),
+    headers: { apikey: anon, authorization: `Bearer ${anon}`, 'content-type': 'application/json' },
+    body: heavySchedulerRpc
+      ? JSON.stringify({ name, args: rpcArgs })
+      : JSON.stringify(rpcArgs),
   });
   const text = await response.text();
   let body = null;
