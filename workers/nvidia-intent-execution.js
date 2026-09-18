@@ -542,10 +542,11 @@ function evidenceOfActionIssue(packet, decision) {
   const runtimeEvidence = associations.filter((x) => x && typeof x === 'object' && x.origin === 'runtime_execution_evidence_v0_1');
   const fileOutputs = associations.filter((x) => x && typeof x === 'object' && x.origin === 'agent_file_output_v0_1');
 
-  const designOnly = /(^|_)(design|plan|propose|draft|outline|specify)(_|$)/.test(action)
+  const designOnly = /^(design|plan|propose|draft|outline|specify)(_|$)/.test(action)
     || /\b(have not executed|has not been executed|not executed|not tested|not benchmarked|not measured|not verified|not validated|proposed test|designed a test|design only|hypothetical|plan to|intend to|will test|will verify|will validate|will measure|will benchmark)\b/.test(text);
-  const operationalAction = /(^|_)(execute|run|test|benchmark|measure|profile|simulate|validate|verify|evaluate)(_|$)/.test(action)
-    || /(analyze_.*(result|telemetry|failure|performance|latency|viability|divergence)|telemetry_analysis|performance_test|latency_test|collision_test)/.test(action);
+  const operationalAction = /^(execute|run|test|benchmark|measure|profile|simulate|validate|verify|evaluate)(_|$)/.test(action)
+    || /^analyze_.*(result|telemetry|failure|performance|latency|viability|divergence)/.test(action)
+    || /^(telemetry_analysis|performance_test|latency_test|collision_test)(_|$)/.test(action);
   let empirical = operationalAction
     || /\b(executed|ran|tested|benchmarked|measured|observed|verified|validated|confirmed|evaluated|determined|telemetry showed|test showed|tests showed|test failed|test passed|actual result|failure occurred|produced a collision|hashes diverged|maintains contextual divergence|latency was|throughput was|overhead per node is acceptable|empirically validated)\b/.test(text);
   if (designOnly && !operationalAction) empirical = false;
