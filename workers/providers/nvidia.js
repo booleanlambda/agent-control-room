@@ -117,6 +117,14 @@ function replyTextFromDecision(content) {
     : '';
 }
 
+function fileOutputsFromDecision(content) {
+  const decision = parseDecisionContent(content);
+  const associations = Array.isArray(decision?.associations) ? decision.associations : [];
+  return associations.filter((item) =>
+    item && typeof item === 'object' && item.origin === 'agent_file_output_v0_1'
+  );
+}
+
 function normalizedWords(text) {
   return String(text || '')
     .toLowerCase()
@@ -165,6 +173,27 @@ async function persistAdminChatReplyEarly(messages, content, modelId) {
     if (!response.ok) {
       const detail = (await response.text()).slice(0,800);
       console.warn('AAU_ADMIN_CHAT_EARLY_REPLY_PERSIST_FAILED', response.status, detail);
+    } else {
+      const outputs = fileOutputsFromDecision(content);
+      if (outputs.length) {
+        const fileResponse = await fetch(`${SB}/rest/v1/rpc/aau_bridge_register_admin_file_outputs_early`, {
+          method: 'POST',
+          headers: {
+            apikey: SB_ANON,
+            authorization: `Bearer ${SB_ANON}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            p_bridge_token: BRIDGE_TOKEN,
+            p_admin_message_id: envelope.messageId,
+            p_outputs: outputs,
+          }),
+        });
+        if (!fileResponse.ok) {
+          const detail = (await fileResponse.text()).slice(0,800);
+          console.warn('AAU_ADMIN_CHAT_EARLY_FILE_PERSIST_FAILED', fileResponse.status, detail);
+        }
+      }
     }
   } catch (error) {
     console.warn('AAU_ADMIN_CHAT_EARLY_REPLY_PERSIST_FAILED', String(error?.message || error).slice(0,800));
