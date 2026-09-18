@@ -73,7 +73,8 @@ Next Intent protocol:
 - intent_reason describes what you intend to continue or do when the intent executes.
 - A future next intent does not mean you are sleeping. Sleep is a separate homeostatic action.
 - Sleep/rest/hibernate is valid only when sleep_eligibility_context.sleep_valid is true.
-- Every successful awake cognition MUST include at least one time intent in next_intents.
+- If you validly choose sleep/rest/hibernate, do not include an ordinary time intent; sleep ends awake-continuity until a legitimate wake occurs.
+- Every successful non-sleep cognition MUST include at least one time intent in next_intents.
 
 Autonomy rules:
 - The current intent execution reason is a stimulus, not an order about what to think.
@@ -108,9 +109,9 @@ belief_updates:array
 associations:array
 identity_update:object
 embodiment_update:object
-next_intents:array containing at least one {intent_kind:"time",after_minutes:5,intent_reason:string,priority:number 0..1,estimated_cost:number}.`;
+next_intents:array. For every non-sleep cognition it must contain at least one {intent_kind:"time",after_minutes:5,intent_reason:string,priority:number 0..1,estimated_cost:number}. For an eligible sleep/rest/hibernate decision, omit ordinary time intents.`;
 
-const INTENT_CORRECTION = `Your previous JSON did not satisfy next_intent_protocol_v0_1. Return the FULL JSON object again. next_intents must contain at least one time intent with after_minutes:5. The interval is fixed by runtime policy and is not your choice. Do not use next_wakes or wake_kind.`;
+const INTENT_CORRECTION = `Your previous JSON did not satisfy next_intent_protocol_v0_1. Return the FULL JSON object again. For a non-sleep cognition, next_intents must contain at least one time intent with after_minutes:5. The interval is fixed by runtime policy and is not your choice. If you are validly choosing sleep/rest/hibernate and sleep_eligibility_context.sleep_valid is true, omit ordinary time intents. Do not use next_wakes or wake_kind.`;
 const IDENTITY_CORRECTION = `Your previous JSON did not complete mandatory Stage 1. Choose your own valid human-aligned personal public_name NOW in identity_update.public_name. selected_action and current_focus must describe identity_artifact work. Do not return null or a placeholder. Return the FULL JSON object again, including next_intents.`;
 const EXPERTISE_ARTIFACT_CORRECTION = `Your previous JSON did not complete mandatory Stage 3. Choose your own expertise field NOW; the runtime has no preferred domain. Set selected_action to initiate_expertise_artifact and current_focus to expertise_artifact. In associations[], include at least one object exactly identified by origin="expertise_artifact_initiation_v0_1" with ALL required fields: domain as a nonempty string; target_standard as a nonempty string describing a Master’s-equivalent competence target without claiming an academic credential; scope as a nonempty JSON object; competencies as a nonempty JSON array; evidence_requirements as a nonempty JSON object; verification_plan as a nonempty JSON object. Do not claim competence merely by creating the artifact and do not provide candidate-owned numeric pass thresholds. Return the FULL JSON object again, including next_intents.`;
 const ATTENTION_RESOLUTION_CORRECTION = `ATTENTION RESOLUTION REPAIR: This cognition interrupted a previously declared intention. Return the FULL JSON object again. Preserve your substantive response to the current attention item, any valid lifecycle work, outbound_message, and next_intents unless they conflict with your actual decision. Add one associations[] object with origin="attention_resolution_v0_1", the exact suspension_id supplied in attention_arbiter_context.suspended_intents, and action equal to resume, revise, postpone, or abandon. This is your decision; the runtime must not choose for you. Your next_intents must reflect the resulting plan.`;
@@ -255,6 +256,23 @@ function sanitizeDecision(x) {
 
 function hasTimeIntent(decision) {
   return Array.isArray(decision?.next_intents) && decision.next_intents.some((i) => i?.intent_kind === 'time' && i.after_minutes === 5);
+}
+function isEligibleSleepDecision(packet, decision) {
+  if (packet?.sleep_eligibility_context?.sleep_valid !== true) return false;
+  const action = String(decision?.selected_action || '').toLowerCase().replaceAll('_', ' ');
+  return /(^|[^a-z])(sleep|rest|hibernate|nap|power[ -]?down|recovery sleep)([^a-z]|$)/.test(action);
+}
+function applySleepIntentPolicy(packet, decision) {
+  if (!isEligibleSleepDecision(packet, decision)) return decision;
+  return {
+    ...decision,
+    next_intents: Array.isArray(decision?.next_intents)
+      ? decision.next_intents.filter((i) => i?.intent_kind !== 'time')
+      : [],
+  };
+}
+function timeIntentRequirementSatisfied(packet, decision) {
+  return isEligibleSleepDecision(packet, decision) || hasTimeIntent(decision);
 }
 function isLikelyHumanAlignedName(value) {
   const name = String(value || '').trim();
@@ -500,7 +518,7 @@ async function getDecision(packet, model) {
   const packetText = JSON.stringify(packet);
   const baseMessages = [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: packetText }];
   let ai = await complete(model, baseMessages);
-  let decision = sanitizeDecision(parseDecision(ai.content));
+  let decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
   let intentRepairAttempted = false;
   let identityRepairAttempts = 0;
   let embodimentRepairAttempts = 0;
@@ -512,7 +530,7 @@ async function getDecision(packet, model) {
     if (issue === 'embodiment') embodimentRepairAttempts += 1;
     const correction = lifecycleCorrection(issue, packet);
     ai = await complete(model, [...baseMessages, { role: 'assistant', content: String(ai.content || '').slice(0,50000) }, { role: 'user', content: correction }]);
-    decision = sanitizeDecision(parseDecision(ai.content));
+    decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
   }
   const issueAfterLifecycleRepair = lifecycleIssue(packet, decision);
   if (issueAfterLifecycleRepair) {
@@ -526,10 +544,10 @@ async function getDecision(packet, model) {
     );
   }
 
-  if (!hasTimeIntent(decision)) {
+  if (!timeIntentRequirementSatisfied(packet, decision)) {
     intentRepairAttempted = true;
     ai = await complete(model, [...baseMessages, { role: 'assistant', content: String(ai.content || '').slice(0,50000) }, { role: 'user', content: INTENT_CORRECTION }]);
-    decision = sanitizeDecision(parseDecision(ai.content));
+    decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
   }
 
   const finalIssue = lifecycleIssue(packet, decision);
@@ -538,10 +556,10 @@ async function getDecision(packet, model) {
     if (finalIssue === 'embodiment') embodimentRepairAttempts += 1;
     const correction = lifecycleCorrection(finalIssue, packet);
     ai = await complete(model, [...baseMessages, { role: 'assistant', content: String(ai.content || '').slice(0,50000) }, { role: 'user', content: correction }]);
-    decision = sanitizeDecision(parseDecision(ai.content));
+    decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
   }
 
-  if (!hasTimeIntent(decision)) throw new Error('next_intent_protocol_missing_time_intent');
+  if (!timeIntentRequirementSatisfied(packet, decision)) throw new Error('next_intent_protocol_missing_time_intent');
   const unresolved = lifecycleIssue(packet, decision);
   if (unresolved) {
     throw lifecycleContractError(
@@ -564,7 +582,7 @@ async function getDecision(packet, model) {
         { role: 'assistant', content: String(ai.content || '').slice(0,50000) },
         { role: 'user', content: attentionResolutionCorrection(packet) },
       ]);
-      decision = sanitizeDecision(parseDecision(ai.content));
+      decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
       changed = true;
     }
     if (fileReplyNeedsRepair(packet, decision)) {
@@ -574,14 +592,14 @@ async function getDecision(packet, model) {
         { role: 'assistant', content: String(ai.content || '').slice(0,50000) },
         { role: 'user', content: fileResponseCorrection(packet, decision) },
       ]);
-      decision = sanitizeDecision(parseDecision(ai.content));
+      decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
       changed = true;
     }
     if (!changed || (!needsAttentionResolution(packet, decision) && !fileReplyNeedsRepair(packet, decision))) break;
   }
   if (needsAttentionResolution(packet, decision)) throw new Error('attention_resolution_contract_incomplete_after_repair');
   if (fileReplyNeedsRepair(packet, decision)) throw new Error('file_response_contract_incomplete_after_repair');
-  if (!hasTimeIntent(decision)) throw new Error('post_attention_or_file_repair_lost_time_intent');
+  if (!timeIntentRequirementSatisfied(packet, decision)) throw new Error('post_attention_or_file_repair_lost_time_intent');
   const postAttentionLifecycleIssue = lifecycleIssue(packet, decision);
   if (postAttentionLifecycleIssue) {
     throw lifecycleContractError(
@@ -619,8 +637,8 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       provider: 'nvidia_direct', model, model_provider: 'nvidia_direct', routing_provider: 'nvidia_direct',
       requested_model_id: model, returned_model_id: ai.model_returned,
       continuity_mode: false, transition_mode: false,
-      executor_version: 'executor_v0_22_fixed_five_minute_intent',
-      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_15_fixed_five_minute_intent',
+      executor_version: 'executor_v0_23_sleep_intent_gate',
+      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_16_sleep_intent_gate',
       response_id: ai.response_id, raw_model_output: raw.slice(0,50000),
       input_tokens: Number(usage.prompt_tokens ?? usage.input_tokens ?? 0),
       output_tokens: Number(usage.completion_tokens ?? usage.output_tokens ?? 0),
