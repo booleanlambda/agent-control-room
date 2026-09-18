@@ -138,16 +138,16 @@ function evidenceOfActionIssueFromDecision(content) {
   const fileOutputs = associations.filter((x) => x && typeof x === 'object' && x.origin === 'agent_file_output_v0_1');
 
   const designOnly = /(^|_)(design|plan|propose|draft|outline|specify)(_|$)/.test(action)
-    || /\b(have not executed|has not been executed|not executed|not tested|not benchmarked|proposed test|designed a test|design only|hypothetical|plan to|intend to)\b/.test(text);
-  const operationalAction = /(^|_)(execute|run|benchmark|measure|profile|simulate|validate)(_|$)/.test(action)
-    || /(analyze_.*(result|telemetry|failure)|telemetry_analysis|performance_test|latency_test)/.test(action);
+    || /\b(have not executed|has not been executed|not executed|not tested|not benchmarked|not measured|not verified|not validated|proposed test|designed a test|design only|hypothetical|plan to|intend to|will test|will verify|will validate|will measure|will benchmark)\b/.test(text);
+  const operationalAction = /(^|_)(execute|run|test|benchmark|measure|profile|simulate|validate|verify|evaluate)(_|$)/.test(action)
+    || /(analyze_.*(result|telemetry|failure|performance|latency|viability|divergence)|telemetry_analysis|performance_test|latency_test|collision_test)/.test(action);
   let empirical = operationalAction
-    || /\b(executed|ran|benchmarked|measured|observed|telemetry showed|test showed|tests showed|test failed|test passed|actual result|failure occurred|produced a collision|latency was|throughput was)\b/.test(text);
+    || /\b(executed|ran|tested|benchmarked|measured|observed|verified|validated|confirmed|evaluated|determined|telemetry showed|test showed|tests showed|test failed|test passed|actual result|failure occurred|produced a collision|hashes diverged|maintains contextual divergence|latency was|throughput was|overhead per node is acceptable|empirically validated)\b/.test(text);
   if (designOnly && !operationalAction) empirical = false;
 
-  const artifact = /(^|_)(implement|write|create|generate|build)(_|$)/.test(action)
-    || /(implementation|code|script|artifact)/.test(action)
-    || /\b(i implemented|i wrote|i created|i generated|i built|implementation is attached|code is attached)\b/.test(text);
+  const artifact = /(^|_)(implement|write|create|generate|build|develop)(_|$)/.test(action)
+    || /(implementation|code|script|artifact|prototype)/.test(action)
+    || /\b(implemented|wrote|created|generated|built|developed|implementation is attached|code is attached|prototype is attached)\b/.test(text);
 
   if (empirical && runtimeEvidence.length === 0) return 'runtime_execution_evidence_required';
   if (!empirical && artifact && fileOutputs.length === 0) return 'same_cognition_file_output_required';
