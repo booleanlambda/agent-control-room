@@ -542,12 +542,13 @@ function evidenceOfActionIssue(packet, decision) {
   const runtimeEvidence = associations.filter((x) => x && typeof x === 'object' && x.origin === 'runtime_execution_evidence_v0_1');
   const fileOutputs = associations.filter((x) => x && typeof x === 'object' && x.origin === 'agent_file_output_v0_1');
 
-  const operationalAction = /(^|_)(execute|run|test|benchmark|measure|profile|simulate|validate)(_|$)/.test(action)
-    || /(telemetry|stress_test|failure_analysis|performance_test|latency_test)/.test(action);
+  const designOnly = /(^|_)(design|plan|propose|draft|outline|specify)(_|$)/.test(action)
+    || /\b(have not executed|has not been executed|not executed|not tested|not benchmarked|proposed test|designed a test|design only|hypothetical|plan to|intend to)\b/.test(text);
+  const operationalAction = /(^|_)(execute|run|benchmark|measure|profile|simulate|validate)(_|$)/.test(action)
+    || /(analyze_.*(result|telemetry|failure)|telemetry_analysis|performance_test|latency_test)/.test(action);
   let empirical = operationalAction
-    || /\b(executed|ran|benchmarked|measured|observed|telemetry showed|test showed|tests showed|test failed|test passed|stress tests|actual result|failure occurred|produced a collision|latency was|throughput was)\b/.test(text);
-  const explicitNoExecution = /\b(cannot|can not|did not|have not|has not|not yet|no runtime evidence|no execution evidence|not executed|not tested|not benchmarked|hypothetical|proposed test|designed a test|plan to|intend to)\b/.test(text);
-  if (explicitNoExecution && !operationalAction) empirical = false;
+    || /\b(executed|ran|benchmarked|measured|observed|telemetry showed|test showed|tests showed|test failed|test passed|actual result|failure occurred|produced a collision|latency was|throughput was)\b/.test(text);
+  if (designOnly && !operationalAction) empirical = false;
 
   const artifact = /(^|_)(implement|write|create|generate|build)(_|$)/.test(action)
     || /(implementation|code|script|artifact)/.test(action)
