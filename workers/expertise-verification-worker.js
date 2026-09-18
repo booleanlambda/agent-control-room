@@ -54,7 +54,7 @@ async function checkpointVerification(run, stage, fields = {}) {
     p_verification_run_id: run.verification_run_id,
     p_executor_id: executorId,
     p_stage: stage,
-    p_extend_lease_seconds: 1200,
+    p_extend_lease_seconds: 300,
   };
   if (Object.prototype.hasOwnProperty.call(fields, 'challenge_packet')) args.p_challenge_packet = fields.challenge_packet;
   if (Object.prototype.hasOwnProperty.call(fields, 'candidate_answers')) args.p_candidate_answers = fields.candidate_answers;
@@ -268,7 +268,7 @@ async function gradeAnswer(run, task, answer) {
   for (const model of authModels) {
     for (let attempt = 1; attempt <= 1; attempt++) {
       try {
-        const result = await nvidiaCall({ model, system, user, maxTokens: 320, temperature: 0, timeoutMs: 60000, jsonMode: false });
+        const result = await nvidiaCall({ model, system, user, maxTokens: 320, temperature: 0, timeoutMs: 120000, jsonMode: false });
         const grade = parseGrade(result.text);
         if (grade) return { ...grade, id: task.id, verifier_model: result.model || model, verifier_requested_model: model, authenticator_fallback_used: model !== primaryAuthenticator, raw_sha256: sha256(result.text) };
         lastAuthError = new Error(`authenticator_unusable_grade:${task.id}:${model}`);
@@ -421,7 +421,7 @@ let running = false;
 async function loop() {
   while (running) {
     try {
-      const rows = await rpc('aau_bridge_claim_expertise_verification', { p_executor_id: executorId, p_lease_seconds: 1200 });
+      const rows = await rpc('aau_bridge_claim_expertise_verification', { p_executor_id: executorId, p_lease_seconds: 300 });
       const run = Array.isArray(rows) ? rows[0] : null;
       if (!run) { await sleep(pollMs); continue; }
       console.log('AAU_EXPERTISE_VERIFICATION_CLAIMED', JSON.stringify({ verification_run_id: run.verification_run_id, agent_id: run.agent_id, domain: run.domain, candidate_model: run.candidate_model_id }));
