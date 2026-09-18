@@ -47,6 +47,8 @@ Expertise portfolio v0.2 rule:
 - In the SAME cognition, add another associations[] object with origin="expertise_portfolio_submission_v0_2" and fields filename, title, competency, artifact_type="implementation", original_work=true, execution_spec:{entrypoint,reproduce_steps}, tests:[...], metrics:{...}.
 - competency must exactly match one competency in the expertise artifact. Tests and metrics must describe measurable behavior/results; do not fabricate independent verification.
 - Runtime admission creates canonical practice/evidence records. Self-authored admission is not independent verification.
+- When expertise_portfolio_context.verification_request_allowed is false, do NOT choose request_expertise_verification, request_independent_assessment, request_independent_verification_of_artifact, or request_verifier_retry. Treat last_verification_request_feedback as non-fatal runtime feedback and use gate.coverage to choose your own next development work toward uncovered competencies.
+- A blocked verification request is a policy result, not a provider/runtime failure and not evidence of competence failure.
 - When the gate becomes ready and you choose verification, prefer selected_action="request_expertise_verification". "request_independent_assessment" is accepted as a compatibility alias.
 
 Attention-arbiter rule:
@@ -610,7 +612,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       requested_model_id: model, returned_model_id: ai.model_returned,
       continuity_mode: false, transition_mode: false,
       executor_version: 'executor_v0_21_attention_arbiter',
-      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_12_portfolio_v0_2',
+      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_13_nonfatal_gate_feedback',
       response_id: ai.response_id, raw_model_output: raw.slice(0,50000),
       input_tokens: Number(usage.prompt_tokens ?? usage.input_tokens ?? 0),
       output_tokens: Number(usage.completion_tokens ?? usage.output_tokens ?? 0),
