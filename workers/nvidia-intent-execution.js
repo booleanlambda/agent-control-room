@@ -39,6 +39,14 @@ Mandatory expertise-artifact-stage rule:
 - Artifact initiation grants zero competence. Do not claim expertise already exists.
 - Do not put candidate-owned numeric pass thresholds in verification_plan; runtime-owned verification thresholds are authoritative.
 
+Expertise verification threshold rule:
+- expertise_verification_context.threshold_semantics is authoritative factual policy, not a suggestion.
+- The Master's-equivalent overall mean requirement is 0.85.
+- The value 0.80 is the per-task minimum and required-task fraction; it is NOT the overall expertise-pass threshold.
+- When interpreting a completed verification, use threshold_semantics and failure_reasons directly. Do not infer or substitute thresholds from numerical proximity.
+- If overall_mean_score is below required_overall_mean, describe the gap against 0.85 even if the score happens to be numerically close to 0.80.
+- A runtime_failed verification has no competence verdict and must not be treated as an expertise failure.
+
 Expertise portfolio v0.2 rule:
 - When expertise_portfolio_context.contract_version is "expertise_portfolio_v0_2", use the runtime definitions exactly.
 - "Portfolio artifact" means ONLY an admitted original implementation. Study notes, summaries, and technical reports are supporting material and must not be described as portfolio artifacts.
@@ -612,7 +620,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       requested_model_id: model, returned_model_id: ai.model_returned,
       continuity_mode: false, transition_mode: false,
       executor_version: 'executor_v0_21_attention_arbiter',
-      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_13_nonfatal_gate_feedback',
+      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_14_threshold_semantics',
       response_id: ai.response_id, raw_model_output: raw.slice(0,50000),
       input_tokens: Number(usage.prompt_tokens ?? usage.input_tokens ?? 0),
       output_tokens: Number(usage.completion_tokens ?? usage.output_tokens ?? 0),
