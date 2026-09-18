@@ -42,6 +42,27 @@ async function rpc(name, args = {}) {
   return body;
 }
 
+async function getVerificationCheckpoint(run) {
+  return rpc('aau_bridge_get_expertise_verification_checkpoint', {
+    p_verification_run_id: run.verification_run_id,
+    p_executor_id: executorId,
+  });
+}
+
+async function checkpointVerification(run, stage, fields = {}) {
+  const args = {
+    p_verification_run_id: run.verification_run_id,
+    p_executor_id: executorId,
+    p_stage: stage,
+    p_extend_lease_seconds: 1200,
+  };
+  if (Object.prototype.hasOwnProperty.call(fields, 'challenge_packet')) args.p_challenge_packet = fields.challenge_packet;
+  if (Object.prototype.hasOwnProperty.call(fields, 'candidate_answers')) args.p_candidate_answers = fields.candidate_answers;
+  if (Object.prototype.hasOwnProperty.call(fields, 'authenticator_grades')) args.p_authenticator_grades = fields.authenticator_grades;
+  if (Object.prototype.hasOwnProperty.call(fields, 'adjudicator_grades')) args.p_adjudicator_grades = fields.adjudicator_grades;
+  return rpc('aau_bridge_checkpoint_expertise_verification', args);
+}
+
 async function nvidiaCall({ model, system, user, maxTokens = 1200, temperature = 0, timeoutMs = 180000, jsonMode = false }) {
   const body = {
     model,
@@ -150,12 +171,12 @@ async function createChallenge(run) {
   return packet;
 }
 
-async function answerChallenge(run, packet) {
-  const answers = [];
+async function answerChallenge(run, packet, existingAnswers = []) {
+  const answers = Array.isArray(existingAnswers) ? existingAnswers.filter((x) => x && x.id && x.answer) : [];
   for (const task of packet.tasks) {
+    if (answers.some((x) => x.id === task.id && x.answer)) continue;
     const system = `You are the bound inference model for an AAU agent undergoing an unseen expertise assessment in ${run.domain}. Solve the task from first principles. Be concrete, state assumptions, controls, validation and failure handling. Do not invent external evidence or claim actions you did not perform.`;
     const user = `TARGET STANDARD: ${run.target_standard}\nSCENARIO:\n${task.scenario}\n\nTASK:\n${task.prompt}\n\nAnswer in 180-350 words. Prioritize concrete technical decisions over exposition.`;
-    // candidate_retry_v0_1: preserve the bound candidate model while tolerating transient provider latency/overload.
     let result = null;
     let lastError = null;
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -173,6 +194,8 @@ async function answerChallenge(run, packet) {
     if (!result) throw lastError || new Error(`candidate_no_result:${task.id}`);
     if (!result.text) throw new Error(`candidate_empty_answer:${task.id}`);
     answers.push({ id: task.id, competency: task.competency || null, answer: result.text, model: result.model, output_sha256: sha256(result.text) });
+    await checkpointVerification(run, 'candidate_answer_task', { candidate_answers: answers });
+    console.log('AAU_EXPERTISE_STAGE', JSON.stringify({ verification_run_id: run.verification_run_id, stage: 'candidate_answer_task', task_id: task.id, answers: answers.length }));
   }
   return answers;
 }
@@ -243,9 +266,9 @@ async function gradeAnswer(run, task, answer) {
   ].filter((x, i, a) => x && a.indexOf(x) === i && x !== run.candidate_model_id);
   let lastAuthError = null;
   for (const model of authModels) {
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    for (let attempt = 1; attempt <= 1; attempt++) {
       try {
-        const result = await nvidiaCall({ model, system, user, maxTokens: 320, temperature: 0, timeoutMs: 120000, jsonMode: false });
+        const result = await nvidiaCall({ model, system, user, maxTokens: 320, temperature: 0, timeoutMs: 60000, jsonMode: false });
         const grade = parseGrade(result.text);
         if (grade) return { ...grade, id: task.id, verifier_model: result.model || model, verifier_requested_model: model, authenticator_fallback_used: model !== primaryAuthenticator, raw_sha256: sha256(result.text) };
         lastAuthError = new Error(`authenticator_unusable_grade:${task.id}:${model}`);
@@ -268,9 +291,9 @@ async function adjudicate(run, task, answer, prior) {
   const candidates = [run.adjudicator_model, 'nvidia/nemotron-3.5-lightning-30b-a3b', 'meta/muse-glimmer-30b']
     .filter((x, i, a) => x && a.indexOf(x) === i && x !== run.authenticator_model && x !== prior.verifier_model && x !== run.candidate_model_id);
   for (const model of candidates) {
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    for (let attempt = 1; attempt <= 1; attempt++) {
       try {
-        const result = await nvidiaCall({ model, system, user, maxTokens: 650, temperature: 0, timeoutMs: 90000 });
+        const result = await nvidiaCall({ model, system, user, maxTokens: 650, temperature: 0, timeoutMs: 60000 });
         const grade = parseGrade(result.text);
         if (grade) return { ...grade, id: task.id, adjudicator_model: result.model || model, supersedes_score: prior.score, raw_sha256: sha256(result.text) };
       } catch (e) {
@@ -306,22 +329,75 @@ function deterministicDecision(run, packet, authGrades, adjGrades) {
 }
 
 async function processRun(run) {
-  const packet = await createChallenge(run);
-  console.log('AAU_EXPERTISE_STAGE', JSON.stringify({ verification_run_id: run.verification_run_id, stage: 'challenge_ready', tasks: packet.tasks.length, authority: packet.authority?.model || null, contract: 'expertise_verifier_latency_v0_1' }));
-  const answers = await answerChallenge(run, packet);
+  const checkpoint = await getVerificationCheckpoint(run);
+  let packet = checkpoint?.challenge_packet;
+  if (!packet || !Array.isArray(packet.tasks) || packet.tasks.length === 0) {
+    packet = await createChallenge(run);
+    await checkpointVerification(run, 'challenge_ready', { challenge_packet: packet });
+  }
+  console.log('AAU_EXPERTISE_STAGE', JSON.stringify({
+    verification_run_id: run.verification_run_id,
+    stage: 'challenge_ready',
+    tasks: packet.tasks.length,
+    authority: packet.authority?.model || null,
+    contract: 'expertise_verifier_checkpoint_v0_1',
+    resumed: Boolean(checkpoint?.challenge_packet?.tasks?.length),
+  }));
+
+  const answers = await answerChallenge(run, packet, checkpoint?.candidate_answers || []);
+  await checkpointVerification(run, 'candidate_answers_ready', { candidate_answers: answers });
   console.log('AAU_EXPERTISE_STAGE', JSON.stringify({ verification_run_id: run.verification_run_id, stage: 'candidate_answers_ready', answers: answers.length }));
-  const authGrades = [];
-  const adjGrades = [];
+
+  const authGrades = Array.isArray(checkpoint?.authenticator_grades) ? checkpoint.authenticator_grades.filter((x) => x && x.id) : [];
+  const adjGrades = Array.isArray(checkpoint?.adjudicator_grades) ? checkpoint.adjudicator_grades.filter((x) => x && x.id) : [];
+
+  if (answers.length || authGrades.length || adjGrades.length) {
+    console.log('AAU_EXPERTISE_CHECKPOINT_RESUMED', JSON.stringify({
+      verification_run_id: run.verification_run_id,
+      answers: answers.length,
+      authenticator_grades: authGrades.length,
+      adjudicator_grades: adjGrades.length,
+      previous_stage: checkpoint?.stage || null,
+    }));
+  }
+
   for (const task of packet.tasks) {
     const answer = answers.find((a) => a.id === task.id);
-    const grade = await gradeAnswer(run, task, answer);
-    authGrades.push(grade);
-    console.log('AAU_EXPERTISE_STAGE', JSON.stringify({ verification_run_id: run.verification_run_id, stage: 'authenticated_task', task_id: task.id, score: grade.score, confidence: grade.confidence, verifier_model: grade.verifier_model, fallback_used: Boolean(grade.authenticator_fallback_used) }));
+    if (!answer) throw new Error(`candidate_answer_missing:${task.id}`);
+
+    let grade = authGrades.find((g) => g.id === task.id);
+    if (!grade) {
+      grade = await gradeAnswer(run, task, answer);
+      authGrades.push(grade);
+      await checkpointVerification(run, 'authenticated_task', {
+        candidate_answers: answers,
+        authenticator_grades: authGrades,
+        adjudicator_grades: adjGrades,
+      });
+      console.log('AAU_EXPERTISE_STAGE', JSON.stringify({ verification_run_id: run.verification_run_id, stage: 'authenticated_task', task_id: task.id, score: grade.score, confidence: grade.confidence, verifier_model: grade.verifier_model, fallback_used: Boolean(grade.authenticator_fallback_used) }));
+    }
+
     const flagged = (grade.score >= 0.75 && grade.score <= 0.85) || grade.critical_error || grade.unsupported || grade.confidence < 0.70;
-    if (flagged) adjGrades.push(await adjudicate(run, task, answer, grade));
+    if (flagged && !adjGrades.some((g) => g.id === task.id)) {
+      const adjudicated = await adjudicate(run, task, answer, grade);
+      adjGrades.push(adjudicated);
+      await checkpointVerification(run, 'adjudicated_task', {
+        candidate_answers: answers,
+        authenticator_grades: authGrades,
+        adjudicator_grades: adjGrades,
+      });
+      console.log('AAU_EXPERTISE_STAGE', JSON.stringify({ verification_run_id: run.verification_run_id, stage: 'adjudicated_task', task_id: task.id, score: adjudicated.score, adjudicator_model: adjudicated.adjudicator_model }));
+    }
   }
+
   const report = deterministicDecision(run, packet, authGrades, adjGrades);
   report.report_sha256 = sha256(report);
+  await checkpointVerification(run, 'decision_ready', {
+    challenge_packet: packet,
+    candidate_answers: answers,
+    authenticator_grades: authGrades,
+    adjudicator_grades: adjGrades,
+  });
   await rpc('aau_bridge_complete_expertise_verification', {
     p_verification_run_id: run.verification_run_id,
     p_executor_id: executorId,
