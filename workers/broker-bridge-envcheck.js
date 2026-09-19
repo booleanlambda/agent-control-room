@@ -95,6 +95,70 @@ async function probeAgentVercelToken() {
 }
 await probeAgentVercelToken();
 
+async function probeAgentVercelWrite() {
+  const enabled = ['1','true','yes'].includes(
+    String(process.env.AAU_AGENT_VERCEL_WRITE_PROBE || '').trim().toLowerCase(),
+  );
+  if (!enabled) return;
+
+  const token = String(process.env.VERCEL_AGENT_TOKEN || '').trim();
+  if (!token) {
+    console.log('AAU_AGENT_VERCEL_WRITE_PROBE', JSON.stringify({
+      ok: false,
+      reason: 'agent_token_not_configured',
+    }));
+    return;
+  }
+
+  const headers = {
+    authorization: `Bearer ${token}`,
+    accept: 'application/json',
+    'content-type': 'application/json',
+    'user-agent': 'AAU-Agent-Vercel-Write-Probe/0.1',
+  };
+  const teamId = String(process.env.VERCEL_AGENT_TEAM_ID || '').trim();
+  const suffix = teamId ? `?teamId=${encodeURIComponent(teamId)}` : '';
+  const name = `aau-agent-token-write-probe-${Date.now()}`;
+
+  let projectId = null;
+  try {
+    const createResponse = await fetch(`https://api.vercel.com/v11/projects${suffix}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ name }),
+    });
+    let createBody = null;
+    try { createBody = await createResponse.json(); } catch {}
+    projectId = String(createBody?.id || '').trim() || null;
+
+    let deleteStatus = null;
+    if (createResponse.ok && projectId) {
+      const deleteResponse = await fetch(
+        `https://api.vercel.com/v9/projects/${encodeURIComponent(projectId)}${suffix}`,
+        { method: 'DELETE', headers },
+      );
+      deleteStatus = deleteResponse.status;
+    }
+
+    console.log('AAU_AGENT_VERCEL_WRITE_PROBE', JSON.stringify({
+      ok: createResponse.ok && deleteStatus === 204,
+      create_status: createResponse.status,
+      created_project_id_present: Boolean(projectId),
+      delete_status: deleteStatus,
+      scope: teamId ? 'team' : 'personal',
+      message: createBody?.error?.message || createBody?.message || null,
+    }));
+  } catch (error) {
+    console.log('AAU_AGENT_VERCEL_WRITE_PROBE', JSON.stringify({
+      ok: false,
+      project_id_present: Boolean(projectId),
+      error: String(error?.message || error),
+    }));
+  }
+}
+await probeAgentVercelWrite();
+
+
 const brokerDisabled = ['1', 'true', 'yes'].includes(
   String(process.env.AAU_BROKER_DISABLED || '').trim().toLowerCase(),
 );
