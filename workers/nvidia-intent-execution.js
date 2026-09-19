@@ -79,7 +79,8 @@ Mandatory product/service-test-stage rule:
 - A Vercel deployment from before conformance is only PROTOTYPE; even READY and 2xx/3xx from an irrelevant path do not satisfy product acceptance. After conformance passes, canonical deployment must be independently tested using the actual documented product workflow, then the frozen functional, adversarial, and proportionate load tests must pass independently.
 - Durable external states are distinct: REQUESTED is queued, SUCCEEDED confirms the resource/action, VERIFIED_PASS confirms the independent gate. Do not infer one from another. If a broker record conflicts with an old attention alert, use the latest reconciled source status and inspect concrete evidence before retrying.
 - No-progress rule: do not repeat the same analysis, inspection, or deployment without a material change or a new question the action can answer. If selected_action asserts an external inspection or mutation, issue the corresponding authorized capability_request_v0_1 in associations[] during this cognition; otherwise accurately describe it as planned, not performed. When blocked or awaiting independent review, state that condition rather than fabricating progress.
-- Do not treat the root URL 404 as evidence that Flask /health or POST /hash is down. Inspect or exercise the documented product route. A login redirect is not a successful API response.
+- Do not treat the root URL 404 as evidence that Flask /health or POST /hash is down. Inspect or exercise the documented product route.
+- To test an exact operation using vercel.deployment.inspect, set payload.probe_requests to a bounded list of {path,method,body}; for Semantic Bridge, GET /health and POST /hash with an actual small JSON proposition, modal_flavor and world_context. Only http_diagnostics.tested_endpoints provides endpoint-specific evidence. The legacy root diagnostic never supports a claim about other routes. A login redirect is not a successful API response.
 - The agent owns implementation choices, including framework, paths, and equivalent semantic field names unless the frozen architecture explicitly constrains them. An independent reviewer reports concrete deviations; it must not redesign the agent's product.
 
 Attention-arbiter rule:
@@ -457,6 +458,55 @@ function noProgressLoopCorrection(packet, decision) {
 function externalActionMissingCapabilityCorrection(packet, decision) {
   return `ACTION-EXECUTION ALIGNMENT REPAIR: selected_action says you are performing an external inspection/analysis/repair, but associations[] contains no capability_request_v0_1. Return the FULL JSON object again. Either (A) include the matching authorized capability request in associations[] in this SAME cognition, or (B) change selected_action to a genuinely internal step that you actually complete now. Do not claim or schedule an external inspection, repository edit, Vercel configuration change, or deployment without issuing the corresponding capability request. Preserve autonomy over which substantive path you choose.`;
 }
+// Ground assertions about a specific route in method-aware broker evidence.
+// Legacy root-only inspections are never allowed to attest to POST /hash or GET /health.
+function unsupportedEndpointClaimIssue(packet, decision) {
+  if (currentStage(packet) !== 'product_service_test') return null;
+  const reason = String(decision?.stated_reason || '');
+  const routeMatch = reason.match(/\/(hash|health)\b/i);
+  if (!routeMatch) return null;
+  const path = '/' + routeMatch[1].toLowerCase();
+  const clause = (reason.split(/[.\n]/).find((part) => part.includes(path)) || reason);
+  if (!/(verified|confirmed|observed|checked|returns?|responds?|unreachable|404|200|failed|failing|down|is broken)/i.test(clause)
+    || /(need to|will|must|should|not yet|unverified|unknown|cannot confirm|not confirmed)/i.test(clause)) return null;
+  const results = packet?.recent_capability_results?.results;
+  const checks = (Array.isArray(results) ? results : [])
+    .filter((entry) => String(entry?.capability_code || '') === 'vercel.deployment.inspect'
+      && String(entry?.status || '').toUpperCase() === 'COMPLETED')
+    .flatMap((entry) => {
+      const diagnostic = entry?.result?.http_diagnostics?.tested_endpoints || {};
+      return [...(Array.isArray(diagnostic.production) ? diagnostic.production : []),
+        ...(Array.isArray(diagnostic.deployment) ? diagnostic.deployment : [])];
+    });
+  const expectedMethod = path === '/hash' ? 'POST' : 'GET';
+  const matched = checks.filter((probe) => String(probe?.path || '').toLowerCase() === path
+    && String(probe?.method || '').toUpperCase() === expectedMethod);
+  if (!matched.length) return { path, expectedMethod, reason:'route_not_tested' };
+  const statusMatch = clause.match(/\b(200|404|500|502|503)\b/);
+  if (statusMatch && !matched.some((probe) => Number(probe?.status) === Number(statusMatch[1])))
+    return { path, expectedMethod, reason:'claimed_status_conflicts_with_probe' };
+  return null;
+}
+
+function redundantDeploymentInspectionIssue(packet, decision) {
+  if (currentStage(packet) !== 'product_service_test') return false;
+  const requests = capabilityRequestsFromDecision(decision)
+    .filter((request) => String(request?.capability_code || '') === 'vercel.deployment.inspect');
+  if (!requests.length) return false;
+  // A new explicit operation probe is materially different from the legacy root-only inspection.
+  if (requests.some((request) => {
+    const data = request?.payload || {};
+    return (Array.isArray(data.probe_requests) && data.probe_requests.length > 0)
+      || Boolean(data.probe_path);
+  })) return false;
+  const recent = packet?.recent_capability_results?.results;
+  return Boolean((Array.isArray(recent) ? recent : []).find((entry) =>
+    String(entry?.capability_code || '') === 'vercel.deployment.inspect'
+    && String(entry?.status || '').toUpperCase() === 'COMPLETED'
+    && entry?.result?.http_diagnostics?.root_path_only === true
+  ));
+}
+
 function lifecycleCorrection(issue, packet) {
   if (issue === 'identity') return IDENTITY_CORRECTION;
   if (issue === 'expertise_artifact') return EXPERTISE_ARTIFACT_CORRECTION;
@@ -798,6 +848,30 @@ async function getDecision(packet, model) {
     throw error;
   }
 
+  // Reject unsupported endpoint claims before they can be recorded as cognition or used
+  // to justify further external mutations. The agent may choose a different genuine action.
+  const endpointIssue = unsupportedEndpointClaimIssue(packet, decision);
+  if (endpointIssue) {
+    const error = new Error('unsupported_endpoint_claim:' + endpointIssue.path + ':' + endpointIssue.reason);
+    error.failureDetails = {
+      schema:'aau.endpoint_evidence_conflict.v0_1',
+      error_code:'UNSUPPORTED_ENDPOINT_CLAIM',
+      route:endpointIssue.path, expected_method:endpointIssue.expectedMethod,
+      issue:endpointIssue.reason, selected_action:decision?.selected_action || null,
+      stated_reason:decision?.stated_reason || null,
+    };
+    throw error;
+  }
+  if (redundantDeploymentInspectionIssue(packet, decision)) {
+    const error = new Error('redundant_root_only_deployment_inspection');
+    error.failureDetails = {
+      schema:'aau.no_progress_loop_failure.v0_2',
+      error_code:'REDUNDANT_ROOT_INSPECTION',
+      selected_action:decision?.selected_action || null,
+      instruction:'An identical root-only inspection cannot establish the status of an untested API route. Request an explicit method-aware operation probe or choose a new substantive action.',
+    };
+    throw error;
+  }
   return { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, fileReplyRepairAttempts, attentionResolutionRepairAttempts, externalStateRepairAttempts, noProgressRepairAttempts, packetText };
 }
 
