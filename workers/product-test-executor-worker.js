@@ -216,7 +216,7 @@ async function collectRepoEvidence(repoUrl) {
   };
 }
 
-function validatePlan(plan, base, gateIds) {
+function validatePlan(plan, base, testIds) {
   if (!plan || typeof plan !== 'object') throw new Error('execution_plan_object_required');
   if (plan.executable !== true) return { ...plan, requests: [] };
   const requests = Array.isArray(plan.requests) ? plan.requests.slice(0, 16) : [];
@@ -226,13 +226,15 @@ function validatePlan(plan, base, gateIds) {
     const path = String(req?.path || '/');
     const target = new URL(path, base);
     if (target.origin !== base.origin) throw new Error('cross_origin_test_request_blocked');
-    const ids = Array.isArray(req?.gate_ids) ? req.gate_ids.map(String) : [];
-    if (ids.some((id) => !gateIds.has(id))) throw new Error('execution_plan_unknown_gate_id');
+    const gateIds = Array.isArray(req?.gate_ids) ? req.gate_ids.map(String) : [];
+    const adversarialIds = Array.isArray(req?.adversarial_ids) ? req.adversarial_ids.map(String) : [];
+    if ([...gateIds, ...adversarialIds].some((id) => !testIds.has(id))) throw new Error('execution_plan_unknown_test_id');
     const headers = {};
     if (method === 'POST') headers['content-type'] = 'application/json';
     return {
       id: String(req?.id || `R${index + 1}`).slice(0, 80),
-      gate_ids: ids,
+      gate_ids: gateIds,
+      adversarial_ids: adversarialIds,
       method,
       path: target.pathname + target.search,
       headers,
@@ -246,14 +248,16 @@ function validatePlan(plan, base, gateIds) {
 
 async function makeExecutionPlan(job, discovery, repoEvidence) {
   const gateIds = new Set((job.specification?.deterministic_gates || []).map((x) => String(x?.id || '')).filter(Boolean));
+  const adversarialIds = new Set((job.specification?.adversarial_tests || []).map((x) => String(x?.id || '')).filter(Boolean));
+  const testIds = new Set([...gateIds, ...adversarialIds]);
   const system = [
     'You are the AAU independent Product Test Execution Planner.',
-    'A Product Test Specification is already frozen; you may only map its existing gates to observable tests. Do not add or relax requirements.',
+    'A Product Test Specification is already frozen; you may only map its existing deterministic gates and adversarial tests to observable tests. Do not add or relax requirements.',
     'Use only endpoints actually evidenced by the supplied discovery material. Never invent an endpoint.',
     'All HTTP requests must be same-origin relative paths. Methods are limited to GET or POST.',
     'Choose at most 16 functional requests.',
     'Mark safe_for_load=true only for an operation that is clearly non-destructive/idempotent or a pure computation. Never load-test payments, messaging, deletion, account creation, external side effects, or ambiguous mutations.',
-    'If a frozen gate cannot be independently tested from the available interface/repository evidence, leave it unmapped and list it in unexecutable_gate_ids.',
+    'If a frozen deterministic or adversarial test cannot be independently tested from the available interface/repository evidence, leave it unmapped and list its ID in unexecutable_test_ids.',
     'Agent-authored tests are supporting evidence only, not proof by themselves.',
     'Return one compact JSON object only.',
   ].join(' ');
@@ -289,6 +293,7 @@ Return:
     {
       "id":"R1",
       "gate_ids":["G1"],
+      "adversarial_ids":["A1"],
       "method":"GET|POST",
       "path":"/documented-path",
       "body":{},
@@ -297,14 +302,14 @@ Return:
     }
   ],
   "load_request_id":"R1 or null",
-  "unexecutable_gate_ids":[],
+  "unexecutable_test_ids":[],
   "notes":"..."
 }
 If the service exposes no documented/testable core operation, set executable=false and explain why.`;
 
   const result = await modelWithFallback(system, user, 3200);
   const parsed = parseJsonObject(result.text);
-  const plan = validatePlan(parsed, safeBaseUrl(job.production_url), gateIds);
+  const plan = validatePlan(parsed, safeBaseUrl(job.production_url), testIds);
   return { plan, planner_model: result.model, planner_requested_model: result.requested_model, planner_fallback_used: result.fallback_used };
 }
 
@@ -321,6 +326,7 @@ async function executeFunctional(base, plan) {
     results.push({
       request_id: req.id,
       gate_ids: req.gate_ids,
+      adversarial_ids: req.adversarial_ids,
       method: req.method,
       path: req.path,
       status: result.status,
@@ -403,9 +409,9 @@ async function executeLoad(base, plan, spec) {
 async function judgeEvidence(job, planBundle, repoEvidence, functional, load) {
   const system = [
     'You are the independent AAU Product Test Authenticator.',
-    'Judge only the frozen gates against the supplied runtime evidence.',
+    'Judge every frozen deterministic gate, adversarial test, and required load test against the supplied runtime evidence.',
     'Never infer a pass from deployment, HTTP 200 alone, agent-authored tests, comments, or intention.',
-    'A gate is PASS only if the evidence actually reaches the quantity and condition required by its frozen pass_condition.',
+    'A test is PASS only if the evidence actually reaches the quantity and condition required by its frozen pass_condition.',
     'If evidence is missing, too small, indirect, or ambiguous, mark UNVERIFIED, not PASS.',
     'Repository evidence may prove repository/file existence but code comments do not prove runtime behavior.',
     'For load requirements, use the runtime load metrics exactly; do not invent users or requests.',
@@ -432,11 +438,14 @@ Return:
   "gate_results":[
     {"gate_id":"G1","status":"PASS|FAIL|UNVERIFIED","evidence_refs":["R1"],"reason":"..."}
   ],
-  "adversarial_summary":{"status":"PASS|FAIL|UNVERIFIED","reason":"..."},
+  "adversarial_results":[
+    {"test_id":"A1","status":"PASS|FAIL|UNVERIFIED","evidence_refs":["R2"],"reason":"..."}
+  ],
+  "load_test_result":{"status":"PASS|FAIL|UNVERIFIED","reason":"..."},
   "overall_assessment":"...",
   "unsupported_or_missing_evidence":[]
 }
-Every deterministic gate in the frozen specification must appear exactly once.`;
+Every deterministic gate and every adversarial test in the frozen specification must appear exactly once. If load_test.required=true, load_test_result must judge every frozen load threshold plus any required correctness/isolation condition.`;
 
   const result = await modelWithFallback(system, user, 3200);
   const report = parseJsonObject(result.text);
@@ -451,11 +460,26 @@ Every deterministic gate in the frozen specification must appear exactly once.`;
     if (!['PASS', 'FAIL', 'UNVERIFIED'].includes(String(row?.status || ''))) throw new Error('judge_gate_status_invalid');
   }
   const missing = [...expected].filter((id) => !seen.has(id));
-  if (missing.length) {
-    for (const id of missing) rows.push({ gate_id: id, status: 'UNVERIFIED', evidence_refs: [], reason: 'No independent evidence result was returned for this frozen gate.' });
+  for (const id of missing) rows.push({ gate_id: id, status: 'UNVERIFIED', evidence_refs: [], reason: 'No independent evidence result was returned for this frozen gate.' });
+
+  const expectedAdv = new Set((job.specification?.adversarial_tests || []).map((x) => String(x?.id || '')).filter(Boolean));
+  const advRows = Array.isArray(report?.adversarial_results) ? report.adversarial_results : [];
+  const seenAdv = new Set();
+  for (const row of advRows) {
+    const id = String(row?.test_id || '');
+    if (!expectedAdv.has(id)) throw new Error('judge_unknown_adversarial_id');
+    if (seenAdv.has(id)) throw new Error('judge_duplicate_adversarial_id');
+    seenAdv.add(id);
+    if (!['PASS', 'FAIL', 'UNVERIFIED'].includes(String(row?.status || ''))) throw new Error('judge_adversarial_status_invalid');
   }
+  const missingAdv = [...expectedAdv].filter((id) => !seenAdv.has(id));
+  for (const id of missingAdv) advRows.push({ test_id: id, status: 'UNVERIFIED', evidence_refs: [], reason: 'No independent evidence result was returned for this frozen adversarial test.' });
+
+  const loadStatus = String(report?.load_test_result?.status || (job.specification?.load_test?.required ? 'UNVERIFIED' : 'PASS'));
+  if (!['PASS', 'FAIL', 'UNVERIFIED'].includes(loadStatus)) throw new Error('judge_load_status_invalid');
+
   return {
-    report: { ...report, gate_results: rows },
+    report: { ...report, gate_results: rows, adversarial_results: advRows, load_test_result: { ...(report?.load_test_result || {}), status: loadStatus } },
     judge_model: result.model,
     judge_requested_model: result.requested_model,
     judge_fallback_used: result.fallback_used,
@@ -474,11 +498,26 @@ async function processRun(job) {
 
   const judged = await judgeEvidence(job, planBundle, repoEvidence, functional, load);
   const gateResults = Array.isArray(judged.report?.gate_results) ? judged.report.gate_results : [];
+  const adversarialResults = Array.isArray(judged.report?.adversarial_results) ? judged.report.adversarial_results : [];
   const allRequiredGatesVerified = gateResults.length > 0 && gateResults.every((x) => x.status === 'PASS');
+  const requiredAdversarialCount = Array.isArray(job.specification?.adversarial_tests) ? job.specification.adversarial_tests.length : 0;
+  const allAdversarialTestsVerified = requiredAdversarialCount === 0 ||
+    (adversarialResults.length === requiredAdversarialCount && adversarialResults.every((x) => x.status === 'PASS'));
+
   const requiredLoad = Boolean(job.specification?.load_test?.required);
   const requiredUsers = Math.max(0, Number(job.specification?.load_test?.virtual_users || 0));
-  const loadSatisfied = !requiredLoad || (load.completed === true && Number(load.virtual_users || 0) >= requiredUsers);
-  const verdict = allRequiredGatesVerified && loadSatisfied ? 'verified_pass' : 'verified_fail';
+  const thresholds = job.specification?.load_test?.thresholds || {};
+  const minSuccess = Number(thresholds.min_success_rate ?? 0);
+  const maxError = Number(thresholds.max_error_rate ?? 1);
+  const numericalLoadSatisfied = !requiredLoad || (
+    load.completed === true &&
+    Number(load.virtual_users || 0) >= requiredUsers &&
+    Number(load.success_rate || 0) >= minSuccess &&
+    Number(load.error_rate ?? 1) <= maxError
+  );
+  const loadJudgedPass = !requiredLoad || judged.report?.load_test_result?.status === 'PASS';
+  const loadSatisfied = numericalLoadSatisfied && loadJudgedPass;
+  const verdict = allRequiredGatesVerified && allAdversarialTestsVerified && loadSatisfied ? 'verified_pass' : 'verified_fail';
 
   const evidence = {
     service_discovery: discovery.map((x) => ({
@@ -495,6 +534,8 @@ async function processRun(job) {
   const finalReport = {
     ...judged.report,
     all_required_gates_verified: allRequiredGatesVerified,
+    adversarial_tests_verified: allAdversarialTestsVerified,
+    load_test_verified: loadSatisfied,
     load_requirement_satisfied: loadSatisfied,
     planner_model: planBundle.planner_model,
     planner_requested_model: planBundle.planner_requested_model,
@@ -520,6 +561,8 @@ async function processRun(job) {
     verdict: completed?.verdict || verdict,
     gate_count: gateResults.length,
     all_required_gates_verified: allRequiredGatesVerified,
+    adversarial_tests_verified: allAdversarialTestsVerified,
+    load_test_verified: loadSatisfied,
     load_required: requiredLoad,
     load_virtual_users: load.virtual_users || 0,
     load_completed: Boolean(load.completed),
