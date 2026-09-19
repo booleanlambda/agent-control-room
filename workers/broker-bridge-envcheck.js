@@ -43,6 +43,58 @@ async function probeAgentGithubToken() {
 }
 await probeAgentGithubToken();
 
+
+async function probeAgentVercelToken() {
+  const token = String(process.env.VERCEL_AGENT_TOKEN || '').trim();
+  if (!token) {
+    console.log('AAU_AGENT_VERCEL_TOKEN_PROBE', JSON.stringify({
+      present: false,
+      ok: false,
+      reason: 'not_configured',
+    }));
+    return;
+  }
+
+  try {
+    const headers = {
+      authorization: `Bearer ${token}`,
+      accept: 'application/json',
+      'user-agent': 'AAU-Agent-Vercel-Token-Probe/0.1',
+    };
+    const userResponse = await fetch('https://api.vercel.com/v2/user', { headers });
+    let userBody = null;
+    try { userBody = await userResponse.json(); } catch {}
+
+    const teamsResponse = userResponse.ok
+      ? await fetch('https://api.vercel.com/v2/teams?limit=20', { headers })
+      : null;
+    let teamsBody = null;
+    try { teamsBody = teamsResponse ? await teamsResponse.json() : null; } catch {}
+
+    console.log('AAU_AGENT_VERCEL_TOKEN_PROBE', JSON.stringify({
+      present: true,
+      ok: userResponse.ok,
+      status: userResponse.status,
+      user_id: userBody?.user?.id || userBody?.id || null,
+      username: userBody?.user?.username || userBody?.username || null,
+      email_present: Boolean(userBody?.user?.email || userBody?.email),
+      teams_status: teamsResponse?.status || null,
+      team_count: Array.isArray(teamsBody?.teams) ? teamsBody.teams.length : null,
+      configured_agent_team: String(process.env.VERCEL_AGENT_TEAM_ID || '').trim() || null,
+      message: userBody?.error?.message || userBody?.message || null,
+      mode: 'read_only',
+    }));
+  } catch (error) {
+    console.log('AAU_AGENT_VERCEL_TOKEN_PROBE', JSON.stringify({
+      present: true,
+      ok: false,
+      error: String(error?.message || error),
+      mode: 'read_only',
+    }));
+  }
+}
+await probeAgentVercelToken();
+
 const brokerDisabled = ['1', 'true', 'yes'].includes(
   String(process.env.AAU_BROKER_DISABLED || '').trim().toLowerCase(),
 );
@@ -76,8 +128,8 @@ const required = [
   'AAU_BROKER_BRIDGE_TOKEN',
   'AAU_GITHUB_TOKEN',
   'AAU_GITHUB_OWNER',
-  'AAU_VERCEL_TOKEN',
-  'AAU_VERCEL_TEAM_ID',
+  // Vercel provider credentials are validated separately. Agent token is preferred
+  // by the runtime and may operate in personal scope without a team id.
 ];
 
 const missing = required.filter((key) => !String(process.env[key] || '').trim());
