@@ -23,25 +23,45 @@ const workerId = String(process.env.AAU_AUTONOMOUS_INTENT_WORKER_ID || process.e
 
 async function rpc(name, args = {}) {
   if (!supabaseAuthKey || !bridge) throw new Error('missing_broker_supabase_credentials');
-  const response = await fetch(`${SB}/rest/v1/rpc/${name}`, {
-    method: 'POST',
-    headers: {
-      apikey: supabaseAuthKey,
-      authorization: `Bearer ${supabaseAuthKey}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({ p_bridge_token: bridge, ...args }),
-  });
-  const text = await response.text();
-  let body = null;
-  try { body = text ? JSON.parse(text) : null; } catch { body = text; }
-  if (!response.ok) {
+
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const response = await fetch(`${SB}/rest/v1/rpc/${name}`, {
+      method: 'POST',
+      headers: {
+        apikey: supabaseAuthKey,
+        authorization: `Bearer ${supabaseAuthKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ p_bridge_token: bridge, ...args }),
+    });
+    const text = await response.text();
+    let body = null;
+    try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+
+    if (response.ok) return body;
+
+    const code = body && typeof body === 'object' ? String(body.code || '') : '';
+    if (code === '57014' && attempt < maxAttempts) {
+      const backoffMs = attempt === 1 ? 250 : 750;
+      console.warn('AAU_SUPABASE_RPC_RETRY', JSON.stringify({
+        rpc: name,
+        code,
+        attempt,
+        next_attempt: attempt + 1,
+        backoff_ms: backoffMs,
+      }));
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      continue;
+    }
+
     const error = new Error(`${name}:${response.status}:${typeof body === 'string' ? body.slice(0,500) : JSON.stringify(body).slice(0,500)}`);
     error.status = response.status;
     error.details = body;
     throw error;
   }
-  return body;
+
+  throw new Error(`${name}:retry_exhausted`);
 }
 
 function delayQueueName(intentExecutionId) {
