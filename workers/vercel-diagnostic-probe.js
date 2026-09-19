@@ -38,15 +38,52 @@ export async function probeLatestVercelDeployment(){
   if(!projectId) throw new Error('AAU_VERCEL_DIAGNOSTIC_PROJECT_ID_missing');
   const teamId=String(process.env.VERCEL_AGENT_TEAM_ID||process.env.AAU_VERCEL_TEAM_ID||'').trim();
 
-  const list=await getJson('/v7/deployments'+qs({projectId,limit:10,teamId}));
-  const deployments=Array.isArray(list?.deployments)?list.deployments:(Array.isArray(list)?list:[]);
-  if(!deployments.length) return {ok:false,project_id:projectId,reason:'no_deployments'};
+  const diagnostic={ok:false,project_id:projectId,stages:{},deployment:null,build_events:[]};
 
-  const latest=deployments[0];
-  const id=String(latest?.uid||latest?.id||'');
-  if(!id) return {ok:false,project_id:projectId,reason:'latest_deployment_id_missing'};
+  let project=null;
+  try{
+    project=await getJson('/v9/projects/'+encodeURIComponent(projectId)+qs({teamId}));
+    diagnostic.stages.project='ok';
+  }catch(error){
+    diagnostic.stages.project={error:String(error?.message||error),details:error?.details||null};
+  }
 
-  const detail=await getJson('/v13/deployments/'+encodeURIComponent(id)+qs({teamId}));
+  let deployments=[];
+  try{
+    const list=await getJson('/v7/deployments'+qs({projectId,limit:10,teamId}));
+    deployments=Array.isArray(list?.deployments)?list.deployments:(Array.isArray(list)?list:[]);
+    diagnostic.stages.list='ok';
+  }catch(error){
+    diagnostic.stages.list={error:String(error?.message||error),details:error?.details||null};
+  }
+
+  const projectCandidates=[
+    ...(Array.isArray(project?.latestDeployments)?project.latestDeployments:[]),
+    project?.targets?.production,
+    project?.targets?.preview,
+  ].filter(Boolean);
+  const latest=deployments[0]||projectCandidates[0]||null;
+  const id=String(latest?.uid||latest?.id||latest?.deploymentId||'');
+  if(!id){
+    diagnostic.reason='latest_deployment_id_missing';
+    diagnostic.project_summary=project?{
+      id:project.id||null,
+      name:project.name||null,
+      framework:project.framework??null,
+      latest_deployments:(project?.latestDeployments||[]).slice?.(0,5)||[],
+      targets:project?.targets||{}
+    }:null;
+    return diagnostic;
+  }
+
+  let detail=latest;
+  try{
+    detail=await getJson('/v13/deployments/'+encodeURIComponent(id)+qs({teamId}));
+    diagnostic.stages.detail='ok';
+  }catch(error){
+    diagnostic.stages.detail={error:String(error?.message||error),details:error?.details||null};
+  }
+
   let events=[];
   try{
     const raw=await getJson('/v3/deployments/'+encodeURIComponent(id)+'/events'+qs({direction:'backward',limit:100,builds:1,teamId}));
@@ -57,25 +94,29 @@ export async function probeLatestVercelDeployment(){
       text:redact(e?.text||e?.payload?.text||''),
       status_code:e?.statusCode||e?.payload?.statusCode||null
     }));
+    diagnostic.stages.events='ok';
   }catch(error){
-    events=[{type:'events_fetch_error',text:redact(error?.details?.error?.message||error?.message||error)}];
+    diagnostic.stages.events={error:String(error?.message||error),details:error?.details||null};
   }
 
-  return {
-    ok:true,
-    project_id:projectId,
-    deployment:{
-      id,
-      name:detail?.name||latest?.name||null,
-      url:detail?.url||latest?.url||null,
-      status:detail?.status||latest?.status||null,
-      ready_state:detail?.readyState||latest?.readyState||latest?.state||null,
-      error_code:detail?.errorCode||detail?.error?.code||null,
-      error_message:redact(detail?.errorMessage||detail?.error?.message||''),
-      created_at:detail?.createdAt||latest?.createdAt||latest?.created||null,
-      git_sha:detail?.gitSource?.sha||detail?.meta?.githubCommitSha||latest?.meta?.githubCommitSha||null,
-      git_ref:detail?.gitSource?.ref||detail?.meta?.githubCommitRef||latest?.meta?.githubCommitRef||null
-    },
-    build_events:events
+  diagnostic.ok=true;
+  diagnostic.deployment={
+    id,
+    name:detail?.name||latest?.name||null,
+    url:detail?.url||latest?.url||null,
+    status:detail?.status||latest?.status||null,
+    ready_state:detail?.readyState||latest?.readyState||latest?.state||null,
+    error_code:detail?.errorCode||detail?.error?.code||latest?.errorCode||null,
+    error_message:redact(detail?.errorMessage||detail?.error?.message||latest?.errorMessage||''),
+    created_at:detail?.createdAt||latest?.createdAt||latest?.created||null,
+    git_sha:detail?.gitSource?.sha||detail?.meta?.githubCommitSha||latest?.meta?.githubCommitSha||null,
+    git_ref:detail?.gitSource?.ref||detail?.meta?.githubCommitRef||latest?.meta?.githubCommitRef||null
   };
+  diagnostic.build_events=events;
+  diagnostic.project_summary=project?{
+    id:project.id||null,
+    name:project.name||null,
+    framework:project.framework??null
+  }:null;
+  return diagnostic;
 }
