@@ -46,6 +46,24 @@ function delayQueueName(intentExecutionId) {
   return `aau.intent.delay.${String(intentExecutionId).replace(/[^a-zA-Z0-9_-]/g, '')}`;
 }
 
+function legacyDelayQueueName(wakeRequestId) {
+  return `aau.wake.delay.${String(wakeRequestId).replace(/[^a-zA-Z0-9_-]/g, '')}`;
+}
+
+function wakeEnvelope(row, delayQueue = null) {
+  return {
+    schema: 'aau.autonomous_wake.v0_1',
+    type: 'autonomous_wake',
+    message_id: crypto.randomUUID(),
+    wake_request_id: row.wake_request_id,
+    agent_id: row.agent_id,
+    lifecycle_run_id: row.run_id,
+    due_at: row.due_at,
+    delay_queue: delayQueue,
+    created_at: new Date().toISOString(),
+  };
+}
+
 function intentEnvelope(row, delayQueue = null) {
   return {
     schema: 'aau.next_intent.v0_1',
@@ -131,6 +149,78 @@ async function armPending(channel) {
   }
 }
 
+
+async function publishArmedWake(channel, row) {
+  const due = row.due_at ? new Date(row.due_at).getTime() : Date.now();
+  const delayMs = Math.max(0, due - Date.now());
+  let delayQueue = null;
+  const envelope = wakeEnvelope(row);
+
+  await channel.assertQueue(LEGACY_QUEUE, { durable: true });
+
+  if (delayMs > 1000) {
+    delayQueue = legacyDelayQueueName(row.wake_request_id);
+    envelope.delay_queue = delayQueue;
+    await channel.assertQueue(delayQueue, {
+      durable: true,
+      arguments: {
+        'x-dead-letter-exchange': '',
+        'x-dead-letter-routing-key': LEGACY_QUEUE,
+      },
+    });
+    channel.sendToQueue(delayQueue, Buffer.from(JSON.stringify(envelope)), {
+      persistent: true,
+      expiration: String(Math.max(1, Math.ceil(delayMs))),
+      messageId: envelope.message_id,
+      contentType: 'application/json',
+      type: 'autonomous_wake',
+    });
+  } else {
+    channel.sendToQueue(LEGACY_QUEUE, Buffer.from(JSON.stringify(envelope)), {
+      persistent: true,
+      messageId: envelope.message_id,
+      contentType: 'application/json',
+      type: 'autonomous_wake',
+    });
+  }
+
+  await channel.waitForConfirms();
+  await rpc('aau_bridge_mark_autonomous_wake_armed', {
+    p_wake_request_id: row.wake_request_id,
+    p_worker_id: workerId,
+    p_message_id: envelope.message_id,
+    p_delay_queue: delayQueue,
+  });
+
+  console.log('AAU_AUTONOMOUS_WAKE_ARMED', JSON.stringify({
+    wake_request_id: row.wake_request_id,
+    agent_id: row.agent_id,
+    due_at: row.due_at,
+    delay_ms: delayMs,
+    delay_queue: delayQueue,
+    message_id: envelope.message_id,
+  }));
+}
+
+async function armLegacyPending(channel) {
+  const rows = await rpc('aau_bridge_claim_unarmed_autonomous_wakes', {
+    p_worker_id: workerId,
+    p_limit: 12,
+  });
+  for (const row of Array.isArray(rows) ? rows : []) {
+    try {
+      await publishArmedWake(channel, row);
+    } catch (error) {
+      await rpc('aau_bridge_release_autonomous_wake_arm_claim', {
+        p_wake_request_id: row.wake_request_id,
+        p_worker_id: workerId,
+        p_error: String(error?.message || error).slice(0,1200),
+      }).catch(() => {});
+      console.error('AAU_AUTONOMOUS_WAKE_ARM_FAILED', row.wake_request_id, String(error?.message || error));
+    }
+  }
+}
+
 async function heartbeat() {
   try {
     const result = await rpc('aau_bridge_autonomous_worker_heartbeat', {
@@ -197,11 +287,19 @@ async function handleIntent(channel, msg) {
     }));
   } catch (error) {
     const message = String(error?.message || error);
-    await rpc('aau_bridge_reset_autonomous_intent_arm', {
-      p_intent_execution_id: event.intent_execution_id,
-      p_worker_id: workerId,
-      p_error: message.slice(0,1200),
-    }).catch(() => {});
+    if (event.legacy) {
+      await rpc('aau_bridge_reset_autonomous_wake_arm', {
+        p_wake_request_id: event.intent_execution_id,
+        p_worker_id: workerId,
+        p_error: message.slice(0,1200),
+      }).catch(() => {});
+    } else {
+      await rpc('aau_bridge_reset_autonomous_intent_arm', {
+        p_intent_execution_id: event.intent_execution_id,
+        p_worker_id: workerId,
+        p_error: message.slice(0,1200),
+      }).catch(() => {});
+    }
     if (event.delay_queue) await channel.deleteQueue(event.delay_queue).catch(() => {});
     channel.ack(msg);
     console.error('AAU_AUTONOMOUS_INTENT_CONSUME_FAILED', event.intent_execution_id, message);
@@ -223,6 +321,7 @@ export async function startNvidiaAutonomousLifecycle() {
 
   await heartbeat();
   await armPending(channel);
+  await armLegacyPending(channel);
 
   await channel.consume(MAIN_QUEUE, (msg) => {
     void handleIntent(channel, msg);
@@ -239,7 +338,10 @@ export async function startNvidiaAutonomousLifecycle() {
     protocol: 'next_intent_protocol_v0_1',
   }));
 
-  const armTimer = setInterval(() => void armPending(channel).catch((e) => console.error('AAU_AUTONOMOUS_INTENT_ARM_SCAN_FAILED', String(e?.message || e))), ARM_POLL_MS);
+  const armTimer = setInterval(() => {
+    void armPending(channel).catch((e) => console.error('AAU_AUTONOMOUS_INTENT_ARM_SCAN_FAILED', String(e?.message || e)));
+    void armLegacyPending(channel).catch((e) => console.error('AAU_AUTONOMOUS_WAKE_ARM_SCAN_FAILED', String(e?.message || e)));
+  }, ARM_POLL_MS);
   const heartbeatTimer = setInterval(() => void heartbeat(), HEARTBEAT_MS);
 
   const stop = async () => {
