@@ -3,6 +3,42 @@ import { S3Client, ListObjectsV2Command } from '@aws-sdk/client-s3';
 async function probeAgentGithubToken() {
   const token = String(process.env.AAU_AGENT_GITHUB_TOKEN || '').trim();
   if (!token) {
+    let writeProbe = null;
+    if (userResponse.ok && userBody?.login) {
+      const probeName = `aau-agent-token-write-probe-${Date.now()}`;
+      const createResponse = await fetch('https://api.github.com/user/repos', {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: probeName,
+          private: true,
+          auto_init: true,
+          description: 'Temporary AAU agent GitHub credential write probe',
+        }),
+      });
+      let createBody = null;
+      try { createBody = await createResponse.json(); } catch {}
+
+      let deleteStatus = null;
+      if (createResponse.status === 201 && createBody?.full_name) {
+        const deleteResponse = await fetch(
+          `https://api.github.com/repos/${encodeURIComponent(userBody.login)}/${encodeURIComponent(probeName)}`,
+          { method: 'DELETE', headers },
+        );
+        deleteStatus = deleteResponse.status;
+      }
+
+      writeProbe = {
+        create_status: createResponse.status,
+        created_repo: createBody?.full_name || null,
+        created_private: createBody?.private ?? null,
+        delete_status: deleteStatus,
+        ok: createResponse.status === 201 && deleteStatus === 204,
+        message: createBody?.message || null,
+      };
+      console.log('AAU_AGENT_GITHUB_WRITE_PROBE', JSON.stringify(writeProbe));
+    }
+
     console.log('AAU_AGENT_GITHUB_TOKEN_PROBE', JSON.stringify({
       present: false,
       ok: false,
