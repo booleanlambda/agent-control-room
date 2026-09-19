@@ -70,6 +70,7 @@ Mandatory product/service-test-stage rule:
 - Do not request vercel.project.create until external_workflow.states.github_repository.durable_state is SUCCEEDED. Do not request vercel.deployment.create until external_workflow.states.vercel_project.durable_state is SUCCEEDED. Use the SAME existing construct_id or construct_ref throughout the chain and set verify_http=true for the final deployment.
 - The v0.1 pass gate requires: complete agent-authored offering plan; real Construct; active GitHub repository containing at least one agent-authored file; successful production deployment; and runtime HTTP verification returning 2xx/3xx.
 - A selected_action, stated_reason, planned next intent, or capability request is never proof of execution. Never describe a repository, project, deployment, or HTTP verification as completed unless product_service_test_context.external_workflow reports durable_state=SUCCEEDED for that exact step.
+- AUTHORITATIVE EXTERNAL-STATE RECONCILIATION: If product_service_test_context.external_workflow.states.production_deployment.durable_state is FAILED, that failure is the current fact until a later durable runtime state replaces it. Do not say or imply that you "re-initiated", "retried", "redeployed", or are merely waiting to verify a deployment unless the runtime context contains evidence of that later action. last_capability_request_feedback.requested=0 means no capability request was executed from the prior cognition. When deployment is FAILED, acknowledge the failure and autonomously choose a repair, investigation, implementation change, or new runtime action. Do not select verify_deployment_http_status or final product-test submission as though a failed deployment were pending or successful.
 
 Attention-arbiter rule:
 - attention_arbiter_context represents deterministic allocation of access to cognition. It does NOT decide your substantive response or preferences.
@@ -365,6 +366,35 @@ function lifecycleIssue(packet, decision) {
   if (needsExpertiseArtifactCompletion(packet, decision)) return 'expertise_artifact';
   return null;
 }
+
+function productServiceContext(packet) {
+  return packet?.mandatory_lifecycle_context?.product_service_test_context
+    || packet?.product_service_test_context
+    || {};
+}
+
+function deploymentStateReconciliationIssue(packet, decision) {
+  if (currentStage(packet) !== 'product_service_test') return false;
+  const ctx = productServiceContext(packet);
+  const deployment = ctx?.external_workflow?.states?.production_deployment || {};
+  if (String(deployment?.durable_state || '').toUpperCase() !== 'FAILED') return false;
+
+  const action = String(decision?.selected_action || '').trim();
+  const reason = String(decision?.stated_reason || '').trim();
+  const combined = `${action} ${reason}`;
+
+  const verificationLoop = /verify[_\s-]*(deployment|http)|http[_\s-]*status|submit[_\s-]*final|final[_\s-]*(product|verification|adjudication)/i.test(combined);
+  const unsupportedRetryClaim = /(re-?initiated|re-?deployed|re-?submitted|retried|retry has been|deployment has been initiated|deployment is now pending)/i.test(reason);
+
+  return verificationLoop || unsupportedRetryClaim;
+}
+
+function deploymentStateReconciliationCorrection(packet) {
+  const ctx = productServiceContext(packet);
+  const deployment = ctx?.external_workflow?.states?.production_deployment || {};
+  const feedback = ctx?.external_workflow?.last_capability_request_feedback || {};
+  return `AUTHORITATIVE EXTERNAL-STATE REPAIR: Your previous JSON conflicts with durable runtime state. The current production deployment is FAILED. Error code: ${String(deployment?.error_code || 'unknown')}. Error message: ${String(deployment?.error_message || 'unknown')}. The prior cognition's runtime capability feedback reports requested=${String(feedback?.requested ?? 'unknown')}; requested=0 means no external retry action was issued. Return the FULL JSON object again. Do not claim that deployment was re-initiated, retried, redeployed, pending, or ready for HTTP verification unless the runtime context contains a later durable action proving that premise. Because the authoritative deployment state is FAILED, do not choose verify_deployment_http_status or final product-test submission as if a deployment were pending/succeeded. Explicitly acknowledge the failure in stated_reason and autonomously choose what to do next: investigate, repair implementation/configuration, or issue a new runtime capability request if you decide that is appropriate. The runtime does not choose the repair for you. Preserve the same product and frozen Product Test specification.`;
+}
 function lifecycleCorrection(issue, packet) {
   if (issue === 'identity') return IDENTITY_CORRECTION;
   if (issue === 'expertise_artifact') return EXPERTISE_ARTIFACT_CORRECTION;
@@ -637,7 +667,38 @@ async function getDecision(packet, model) {
     );
   }
 
-  return { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, fileReplyRepairAttempts, attentionResolutionRepairAttempts, packetText };
+  let externalStateRepairAttempts = 0;
+  for (let i = 0; i < 2 && deploymentStateReconciliationIssue(packet, decision); i += 1) {
+    externalStateRepairAttempts += 1;
+    ai = await complete(model, [
+      ...baseMessages,
+      { role: 'assistant', content: String(ai.content || '').slice(0,50000) },
+      { role: 'user', content: deploymentStateReconciliationCorrection(packet) },
+    ]);
+    decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
+  }
+  if (deploymentStateReconciliationIssue(packet, decision)) {
+    const error = new Error('stage_action_alignment_failed:authoritative_external_state_conflict');
+    error.failureDetails = {
+      schema: 'aau.external_state_reconciliation_failure.v0_1',
+      error_code: 'AUTHORITATIVE_EXTERNAL_STATE_CONFLICT',
+      stage: currentStage(packet),
+      selected_action: decision?.selected_action || null,
+      stated_reason: decision?.stated_reason || null,
+      product_service_test_context: productServiceContext(packet),
+      sanitized_decision: decision,
+      raw_model_output: String(ai?.content || '').slice(0,50000),
+      returned_model_id: ai?.model_returned || null,
+      response_id: ai?.response_id || null,
+      finish_reason: ai?.finish_reason || null,
+      usage: ai?.usage || null,
+      repair_meta: { external_state_repair_attempts: externalStateRepairAttempts },
+      captured_at: new Date().toISOString(),
+    };
+    throw error;
+  }
+
+  return { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, fileReplyRepairAttempts, attentionResolutionRepairAttempts, externalStateRepairAttempts, packetText };
 }
 
 export async function runNvidiaIntentExecution({ intentExecutionId, agentId, workerId = null } = {}) {
@@ -675,7 +736,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       input_hash: sha256(packetText), output_hash: sha256(raw),
       model_consistency_status: 'VERIFIED_PRIMARY', authenticator_result: { status: 'not_run_in_executor' },
       experimental_provider_policy: 'nvidia_direct_all_experimental_roles',
-      lifecycle_contract: 'next_intent_protocol_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+expertise_artifact_stage_contract_v0_1+product_service_test_v0_1+durable_external_capability_state_v0_1+attention_arbiter_v0_1+attention_resolution_repair_v0_1+stage_action_alignment_v0_1+failure_diagnostics_v0_1+embodiment_payload_normalization_v0_1',
+      lifecycle_contract: 'next_intent_protocol_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+expertise_artifact_stage_contract_v0_1+product_service_test_v0_1+durable_external_capability_state_v0_1+authoritative_external_state_reconciliation_v0_1+attention_arbiter_v0_1+attention_resolution_repair_v0_1+stage_action_alignment_v0_1+failure_diagnostics_v0_1+embodiment_payload_normalization_v0_1',
       intent_repair_attempted: intentRepairAttempted,
       identity_repair_attempts: identityRepairAttempts,
       embodiment_repair_attempts: embodimentRepairAttempts,
