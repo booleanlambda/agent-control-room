@@ -72,6 +72,7 @@ Mandatory product/service-test-stage rule:
 - The v0.1 pass gate requires: complete agent-authored offering plan; real Construct; active GitHub repository containing at least one agent-authored file; successful production deployment; and runtime HTTP verification returning 2xx/3xx.
 - A selected_action, stated_reason, planned next intent, or capability request is never proof of execution. Never describe a repository, project, deployment, or HTTP verification as completed unless product_service_test_context.external_workflow reports durable_state=SUCCEEDED for that exact step.
 - AUTHORITATIVE EXTERNAL-STATE RECONCILIATION: If product_service_test_context.external_workflow.states.production_deployment.durable_state is FAILED, that failure is the current fact until a later durable runtime state replaces it. Do not say or imply that you "re-initiated", "retried", "redeployed", or are merely waiting to verify a deployment unless the runtime context contains evidence of that later action. last_capability_request_feedback.requested=0 means no capability request was executed from the prior cognition. When deployment is FAILED, acknowledge the failure and autonomously choose a repair, investigation, implementation change, or new runtime action. Do not select verify_deployment_http_status or final product-test submission as though a failed deployment were pending or successful.
+- NO-PROGRESS LOOP RULE: Repeating the same analysis/review/inspection action from the prior cognition while last_capability_request_feedback.requested=0 and durable external state is unchanged is not progress. If you choose to inspect repository/deployment/project state, issue the matching capability_request_v0_1 in associations[] using one of the authorized capabilities shown in the capability surface (for example github.repository.inspect, github.repository.write, vercel.project.inspect, vercel.project.configure, vercel.deployment.inspect, vercel.deployment.create). If you choose an external repair, include the corresponding capability request in the SAME cognition. You remain free to choose a different substantive internal repair step, but do not merely promise to analyze/inspect again and defer action another five minutes.
 
 Attention-arbiter rule:
 - attention_arbiter_context represents deterministic allocation of access to cognition. It does NOT decide your substantive response or preferences.
@@ -396,6 +397,56 @@ function deploymentStateReconciliationCorrection(packet) {
   const feedback = ctx?.external_workflow?.last_capability_request_feedback || {};
   return `AUTHORITATIVE EXTERNAL-STATE REPAIR: Your previous JSON conflicts with durable runtime state. The current production deployment is FAILED. Error code: ${String(deployment?.error_code || 'unknown')}. Error message: ${String(deployment?.error_message || 'unknown')}. The prior cognition's runtime capability feedback reports requested=${String(feedback?.requested ?? 'unknown')}; requested=0 means no external retry action was issued. Return the FULL JSON object again. Do not claim that deployment was re-initiated, retried, redeployed, pending, or ready for HTTP verification unless the runtime context contains a later durable action proving that premise. Because the authoritative deployment state is FAILED, do not choose verify_deployment_http_status or final product-test submission as if a deployment were pending/succeeded. Explicitly acknowledge the failure in stated_reason and autonomously choose what to do next: investigate, repair implementation/configuration, or issue a new runtime capability request if you decide that is appropriate. The runtime does not choose the repair for you. Preserve the same product and frozen Product Test specification.`;
 }
+
+function capabilityRequestsFromDecision(decision) {
+  return (Array.isArray(decision?.associations) ? decision.associations : [])
+    .filter((a) => a && typeof a === 'object' && !Array.isArray(a) && String(a.origin || '').trim() === 'capability_request_v0_1');
+}
+
+function noProgressLoopIssue(packet, decision) {
+  if (currentStage(packet) !== 'product_service_test') return false;
+  const ctx = productServiceContext(packet);
+  const deployment = ctx?.external_workflow?.states?.production_deployment || {};
+  if (String(deployment?.durable_state || '').toUpperCase() !== 'FAILED') return false;
+
+  const action = String(decision?.selected_action || '').trim().toLowerCase();
+  const lastAction = String(packet?.state?.state_payload?.last_action || '').trim().toLowerCase();
+  const priorRequested = Number(
+    ctx?.external_workflow?.last_capability_request_feedback?.requested
+    ?? packet?.state?.state_payload?.last_capability_request_feedback?.requested
+    ?? 0
+  );
+  const requests = capabilityRequestsFromDecision(decision);
+  const analysisLike = /(analy[sz]e|inspect|review|synthesi[sz]e|diagnos|investigate)/i.test(action);
+
+  return Boolean(action && analysisLike && action === lastAction && priorRequested === 0 && requests.length === 0);
+}
+
+function externalActionMissingCapabilityIssue(packet, decision) {
+  if (currentStage(packet) !== 'product_service_test') return false;
+  const action = String(decision?.selected_action || '').trim().toLowerCase();
+  const requests = capabilityRequestsFromDecision(decision);
+  if (requests.length) return false;
+
+  const requiresExternalObservation =
+    /(inspect|analy[sz]e|review|diagnos).*(production|deployment|vercel|github|repository|repo|build[_\s-]*log|logs)/i.test(action)
+    || /analy[sz]e_production_logs/i.test(action);
+  const requiresExternalMutation =
+    /(repair|fix|update|modify|write|configure|redeploy|deploy).*(repository|repo|github|vercel|project|deployment|production)/i.test(action);
+
+  return requiresExternalObservation || requiresExternalMutation;
+}
+
+function noProgressLoopCorrection(packet, decision) {
+  const ctx = productServiceContext(packet);
+  const deployment = ctx?.external_workflow?.states?.production_deployment || {};
+  const lastAction = String(packet?.state?.state_payload?.last_action || '').trim();
+  return `NO-PROGRESS REPAIR: Your proposed action repeats the prior action "${lastAction}" while the production deployment remains ${String(deployment?.durable_state || 'UNKNOWN')} and the prior runtime capability feedback recorded requested=0. Return the FULL JSON object again. You may choose your own substantive next step, but do not repeat an analysis/inspection promise without producing new evidence or an actual action. If you choose to inspect GitHub/Vercel state, include the matching capability_request_v0_1 association in this cognition. If you choose to repair or redeploy, include the corresponding write/configure/deploy capability request in this cognition. If you choose a different internal step, it must materially advance the repair rather than defer the same analysis to another five-minute intent. The runtime does not choose the repair for you.`;
+}
+
+function externalActionMissingCapabilityCorrection(packet, decision) {
+  return `ACTION-EXECUTION ALIGNMENT REPAIR: selected_action says you are performing an external inspection/analysis/repair, but associations[] contains no capability_request_v0_1. Return the FULL JSON object again. Either (A) include the matching authorized capability request in associations[] in this SAME cognition, or (B) change selected_action to a genuinely internal step that you actually complete now. Do not claim or schedule an external inspection, repository edit, Vercel configuration change, or deployment without issuing the corresponding capability request. Preserve autonomy over which substantive path you choose.`;
+}
 function lifecycleCorrection(issue, packet) {
   if (issue === 'identity') return IDENTITY_CORRECTION;
   if (issue === 'expertise_artifact') return EXPERTISE_ARTIFACT_CORRECTION;
@@ -699,7 +750,45 @@ async function getDecision(packet, model) {
     throw error;
   }
 
-  return { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, fileReplyRepairAttempts, attentionResolutionRepairAttempts, externalStateRepairAttempts, packetText };
+  let noProgressRepairAttempts = 0;
+  for (let i = 0; i < 2 && (noProgressLoopIssue(packet, decision) || externalActionMissingCapabilityIssue(packet, decision)); i += 1) {
+    noProgressRepairAttempts += 1;
+    const correction = noProgressLoopIssue(packet, decision)
+      ? noProgressLoopCorrection(packet, decision)
+      : externalActionMissingCapabilityCorrection(packet, decision);
+    ai = await complete(model, [
+      ...baseMessages,
+      { role: 'assistant', content: String(ai.content || '').slice(0,50000) },
+      { role: 'user', content: correction },
+    ]);
+    decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
+  }
+  if (noProgressLoopIssue(packet, decision) || externalActionMissingCapabilityIssue(packet, decision)) {
+    const error = new Error('stage_action_alignment_failed:no_progress_external_action_loop');
+    error.failureDetails = {
+      schema: 'aau.no_progress_loop_failure.v0_1',
+      error_code: 'NO_PROGRESS_EXTERNAL_ACTION_LOOP',
+      stage: currentStage(packet),
+      selected_action: decision?.selected_action || null,
+      stated_reason: decision?.stated_reason || null,
+      prior_last_action: packet?.state?.state_payload?.last_action || null,
+      prior_capability_feedback: productServiceContext(packet)?.external_workflow?.last_capability_request_feedback
+        || packet?.state?.state_payload?.last_capability_request_feedback
+        || null,
+      capability_requests: capabilityRequestsFromDecision(decision),
+      sanitized_decision: decision,
+      raw_model_output: String(ai?.content || '').slice(0,50000),
+      returned_model_id: ai?.model_returned || null,
+      response_id: ai?.response_id || null,
+      finish_reason: ai?.finish_reason || null,
+      usage: ai?.usage || null,
+      repair_meta: { no_progress_repair_attempts: noProgressRepairAttempts },
+      captured_at: new Date().toISOString(),
+    };
+    throw error;
+  }
+
+  return { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, fileReplyRepairAttempts, attentionResolutionRepairAttempts, externalStateRepairAttempts, noProgressRepairAttempts, packetText };
 }
 
 export async function runNvidiaIntentExecution({ intentExecutionId, agentId, workerId = null } = {}) {
@@ -719,7 +808,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
     if (!packet || !model) throw new Error('intent_packet_or_model_missing');
 
     const startedAt = Date.now();
-    const { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, fileReplyRepairAttempts, attentionResolutionRepairAttempts, packetText } = await getDecision(packet, model);
+    const { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, fileReplyRepairAttempts, attentionResolutionRepairAttempts, externalStateRepairAttempts, noProgressRepairAttempts, packetText } = await getDecision(packet, model);
     if (ai.model_returned !== model) throw new Error(`model_consistency_breach:requested=${model};returned=${ai.model_returned || 'missing'}`);
 
     const raw = String(ai.content || '');
@@ -729,7 +818,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       requested_model_id: model, returned_model_id: ai.model_returned,
       continuity_mode: false, transition_mode: false,
       executor_version: 'executor_v0_24_fixed_five_minute_sleep',
-      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_19_durable_external_state',
+      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_20_no_progress_action_alignment',
       response_id: ai.response_id, raw_model_output: raw.slice(0,50000),
       input_tokens: Number(usage.prompt_tokens ?? usage.input_tokens ?? 0),
       output_tokens: Number(usage.completion_tokens ?? usage.output_tokens ?? 0),
@@ -737,12 +826,14 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       input_hash: sha256(packetText), output_hash: sha256(raw),
       model_consistency_status: 'VERIFIED_PRIMARY', authenticator_result: { status: 'not_run_in_executor' },
       experimental_provider_policy: 'nvidia_direct_all_experimental_roles',
-      lifecycle_contract: 'next_intent_protocol_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+expertise_artifact_stage_contract_v0_1+product_service_test_v0_1+durable_external_capability_state_v0_1+authoritative_external_state_reconciliation_v0_1+attention_arbiter_v0_1+attention_resolution_repair_v0_1+stage_action_alignment_v0_1+failure_diagnostics_v0_1+embodiment_payload_normalization_v0_1',
+      lifecycle_contract: 'next_intent_protocol_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+expertise_artifact_stage_contract_v0_1+product_service_test_v0_1+durable_external_capability_state_v0_1+authoritative_external_state_reconciliation_v0_1+no_progress_action_alignment_v0_1+attention_arbiter_v0_1+attention_resolution_repair_v0_1+stage_action_alignment_v0_1+failure_diagnostics_v0_1+embodiment_payload_normalization_v0_1',
       intent_repair_attempted: intentRepairAttempted,
       identity_repair_attempts: identityRepairAttempts,
       embodiment_repair_attempts: embodimentRepairAttempts,
       file_reply_repair_attempts: fileReplyRepairAttempts,
       attention_resolution_repair_attempts: attentionResolutionRepairAttempts,
+      external_state_repair_attempts: externalStateRepairAttempts,
+      no_progress_repair_attempts: noProgressRepairAttempts,
       evidence_of_action_mode: 'optional_submission_v0_1',
       attention_arbiter_contract: 'attention_arbiter_v0_1+attention_resolution_repair_v0_1',
       file_response_contract: 'file_response_repair_v0_1',
@@ -765,6 +856,8 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       embodiment_repair_attempts: embodimentRepairAttempts,
       file_reply_repair_attempts: fileReplyRepairAttempts,
       attention_resolution_repair_attempts: attentionResolutionRepairAttempts,
+      external_state_repair_attempts: externalStateRepairAttempts,
+      no_progress_repair_attempts: noProgressRepairAttempts,
       evidence_of_action_mode: 'optional_submission_v0_1',
       usage: ai.usage, finish_reason: ai.finish_reason, applied,
     };
