@@ -979,7 +979,7 @@ async function inspectVercelDeployment(context) {
   let deploymentId = requestedId;
   let selected = null;
   if (!deploymentId) {
-    const list = await vc(`/v13/deployments${vercelQuery({ projectId, limit: 10 })}`);
+    const list = await vc(`/v7/deployments${vercelQuery({ projectId, limit: 10 })}`);
     const rows = Array.isArray(list?.deployments) ? list.deployments : (Array.isArray(list) ? list : []);
     selected = rows.find((d) => ['ERROR','CANCELED','CANCELLED'].includes(String(d?.status || d?.readyState || '').toUpperCase()))
       || rows[0]
@@ -1049,7 +1049,20 @@ async function runProductBuildAccess(job, capabilityCode) {
     });
     return { ok: true };
   } catch (error) {
-    const safeMessage = String(error?.message || error).slice(0,1600);
+    const providerMessage = error?.details?.error?.message || error?.details?.message || null;
+    const providerCode = error?.details?.error?.code || error?.details?.code || null;
+    const safeMessage = [
+      String(error?.message || error),
+      providerCode ? `code=${providerCode}` : null,
+      providerMessage ? redactDiagnosticText(providerMessage) : null,
+    ].filter(Boolean).join(': ').slice(0,1600);
+    console.log('AAU_PRODUCT_BUILD_ACCESS_ERROR', JSON.stringify({
+      capability_code: capabilityCode,
+      broker_job_id: job,
+      status: error?.status || null,
+      code: providerCode,
+      message: safeMessage,
+    }));
     await rpc('aau_bridge_fail_product_build_job', {
       p_broker_job_id: job,
       p_error_code: 'product_build_access_error',
