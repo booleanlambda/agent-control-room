@@ -92,14 +92,17 @@ Attention-arbiter rule:
 
 Next Intent protocol:
 - You do not schedule a wake. At the end of cognition, declare what you intend to do next in next_intents.
-- intent_kind may be time, event, or condition. A time intent is always exactly five minutes after the current cognition.
-- The five-minute interval is runtime policy, not an agent choice. Always return after_minutes:5 for time intents.
+- intent_kind may be time, event, condition, or group. A time intent is always exactly five minutes after the current cognition.
+- You may declare ONE group as a next intent when independent authorized work can be done together. The group executes its members in this cognition, not at five-minute intervals. Only one fallback continuation is scheduled five minutes later.
+- A group has {intent_kind:"group",group_id:"stable-descriptive-id",members:[{id:"member-id",action:"..."},...],execution:"independent_members_together",continuation:"on_result_or_blocker",fallback_after_minutes:5,intent_reason:"..."}. Use one to four distinct member actions. Supported member actions: request_existence_renewal, request_product_test_execution, review_independent_test_result, inspect_resource_state. Unsupported or dependent members are rejected, not simulated. Never claim an approval, test pass, or grant merely because its request was submitted.
+- Other authorized external capability requests may be submitted in associations[] during the same cognition; the group does not bypass their existing authorization or imply that asynchronous results have arrived.
+- The five-minute interval is runtime policy, not an agent choice. Return after_minutes:5 for a standalone time intent or fallback_after_minutes:5 for a group. Do not include a redundant standalone time intent alongside a group.
 - intent_reason describes what you intend to continue or do when the intent executes.
 - A future next intent does not mean you are sleeping. Sleep is a separate homeostatic action.
 - Sleep/rest/hibernate is valid only when sleep_eligibility_context.sleep_valid is true.
 - Every valid sleep/rest/hibernate period is exactly five minutes. Five minutes is runtime policy: there is no shorter or longer sleep duration and you do not choose it.
 - If you validly choose sleep/rest/hibernate, do not include an ordinary time intent; the runtime schedules the genuine sleep-complete wake exactly five minutes after sleep begins.
-- Every successful non-sleep cognition MUST include at least one time intent in next_intents.
+- Every successful non-sleep cognition MUST include either a time intent or one valid group intent with its five-minute fallback in next_intents.
 
 Autonomy rules:
 - The current intent execution reason is a stimulus, not an order about what to think.
@@ -140,9 +143,9 @@ belief_updates:array
 associations:array
 identity_update:object
 embodiment_update:object
-next_intents:array. For every non-sleep cognition it must contain at least one {intent_kind:"time",after_minutes:5,intent_reason:string,priority:number 0..1,estimated_cost:number}. For an eligible sleep/rest/hibernate decision, omit ordinary time intents; the runtime owns the exact five-minute sleep-complete wake.`;
+next_intents:array. For every non-sleep cognition it must contain either a standalone {intent_kind:"time",after_minutes:5,intent_reason:string,priority:number 0..1,estimated_cost:number} or one valid {intent_kind:"group",group_id:string,members:array,execution:"independent_members_together",continuation:"on_result_or_blocker",fallback_after_minutes:5,intent_reason:string}. For an eligible sleep/rest/hibernate decision, omit ordinary time and group intents; the runtime owns the exact five-minute sleep-complete wake.`;
 
-const INTENT_CORRECTION = `Your previous JSON did not satisfy next_intent_protocol_v0_1. Return the FULL JSON object again. For a non-sleep cognition, next_intents must contain at least one time intent with after_minutes:5. The interval is fixed by runtime policy and is not your choice. If you are validly choosing sleep/rest/hibernate and sleep_eligibility_context.sleep_valid is true, omit ordinary time intents. Sleep duration is exactly five minutes and is runtime-owned. Do not use next_wakes or wake_kind.`;
+const INTENT_CORRECTION = `Your previous JSON did not satisfy next_intent_protocol_v0_1. Return the FULL JSON object again. For a non-sleep cognition, next_intents must contain either a time intent with after_minutes:5 or one valid group intent with fallback_after_minutes:5 and one to four allowed independent members. The interval is fixed by runtime policy and is not your choice. If you are validly choosing sleep/rest/hibernate and sleep_eligibility_context.sleep_valid is true, omit time and group intents. Sleep duration is exactly five minutes and is runtime-owned. Do not use next_wakes or wake_kind.`;
 const IDENTITY_CORRECTION = `Your previous JSON did not complete mandatory Stage 1. Choose your own valid human-aligned personal public_name NOW in identity_update.public_name. selected_action and current_focus must describe identity_artifact work. Do not return null or a placeholder. Return the FULL JSON object again, including next_intents.`;
 const EXPERTISE_ARTIFACT_CORRECTION = `Your previous JSON did not complete mandatory Stage 3. Choose your own expertise field NOW; the runtime has no preferred domain. Set selected_action to initiate_expertise_artifact and current_focus to expertise_artifact. In associations[], include at least one object exactly identified by origin="expertise_artifact_initiation_v0_1" with ALL required fields: domain as a nonempty string; target_standard as a nonempty string describing a Master’s-equivalent competence target without claiming an academic credential; scope as a nonempty JSON object; competencies as a nonempty JSON array; evidence_requirements as a nonempty JSON object; verification_plan as a nonempty JSON object. Do not claim competence merely by creating the artifact and do not provide candidate-owned numeric pass thresholds. Return the FULL JSON object again, including next_intents.`;
 const ATTENTION_RESOLUTION_CORRECTION = `ATTENTION RESOLUTION REPAIR: This cognition interrupted a previously declared intention. Return the FULL JSON object again. Preserve your substantive response to the current attention item, any valid lifecycle work, outbound_message, and next_intents unless they conflict with your actual decision. Add one associations[] object with origin="attention_resolution_v0_1", the exact suspension_id supplied in attention_arbiter_context.suspended_intents, and action equal to resume, revise, postpone, or abandon. This is your decision; the runtime must not choose for you. Your next_intents must reflect the resulting plan.`;
@@ -221,7 +224,26 @@ function sanitizeNextIntents(value) {
   for (const item of arr(value, 6)) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
     const kind = String(item.intent_kind || '').trim();
-    if (!['time','event','condition'].includes(kind)) continue;
+    if (!['time','event','condition','group'].includes(kind)) continue;
+    if (kind === 'group') {
+      const members = arr(item.members, 5).map((m) => ({
+        id: String(m?.id || '').slice(0,64),
+        action: String(m?.action || '').slice(0,100),
+        reason: typeof m?.reason === 'string' ? m.reason.slice(0,1000) : null,
+        ...(Object.prototype.hasOwnProperty.call(obj(m), 'depends_on') ? { depends_on: m.depends_on } : {}),
+      }));
+      out.push({
+        intent_kind: 'group',
+        group_id: String(item.group_id || '').slice(0,80),
+        intent_reason: typeof item.intent_reason === 'string' ? item.intent_reason.slice(0,1000) : 'Continue the intent group.',
+        members, execution: String(item.execution || 'independent_members_together'),
+        continuation: String(item.continuation || 'on_result_or_blocker'),
+        fallback_after_minutes: Number(item.fallback_after_minutes ?? 5),
+        priority: Math.max(0, Math.min(1, Number(item.priority) || 0.5)),
+        estimated_cost: 0,
+      });
+      continue;
+    }
     const intent = {
       intent_kind: kind,
       intent_reason: typeof item.intent_reason === 'string' ? item.intent_reason.slice(0,1000) : 'Continue the selected course of action.',
@@ -240,7 +262,8 @@ function sanitizeNextIntents(value) {
     }
     out.push(intent);
   }
-  return out.slice(0,4);
+  const hasGroup = out.some((i) => i.intent_kind === 'group');
+  return (hasGroup ? out.filter((i) => i.intent_kind !== 'time') : out).slice(0,4);
 }
 
 function normalizeDescriptionObject(value) {
@@ -294,7 +317,10 @@ function sanitizeDecision(x) {
 }
 
 function hasTimeIntent(decision) {
-  return Array.isArray(decision?.next_intents) && decision.next_intents.some((i) => i?.intent_kind === 'time' && i.after_minutes === 5);
+  return Array.isArray(decision?.next_intents) && decision.next_intents.some((i) =>
+    (i?.intent_kind === 'time' && i.after_minutes === 5) ||
+    (i?.intent_kind === 'group' && i.fallback_after_minutes === 5 && Array.isArray(i.members) && i.members.length > 0)
+  );
 }
 function isEligibleSleepDecision(packet, decision) {
   if (packet?.sleep_eligibility_context?.sleep_valid !== true) return false;
@@ -306,7 +332,7 @@ function applySleepIntentPolicy(packet, decision) {
   return {
     ...decision,
     next_intents: Array.isArray(decision?.next_intents)
-      ? decision.next_intents.filter((i) => i?.intent_kind !== 'time')
+      ? decision.next_intents.filter((i) => i?.intent_kind !== 'time' && i?.intent_kind !== 'group')
       : [],
   };
 }
