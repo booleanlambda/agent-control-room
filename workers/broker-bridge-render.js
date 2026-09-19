@@ -753,12 +753,16 @@ async function runVercelDeployment(job) {
       providerError?.message || null,
     ].filter(Boolean).join(': ');
     console.log('AAU_VERCEL_DEPLOYMENT_ERROR', safeMessage);
+    const diagnostics = safeDeploymentDetails(error?.details || {});
     await rpc('aau_bridge_fail_vercel_deployment_job', {
       p_broker_job_id: job,
       p_error_code: 'vercel_deployment_bridge_error',
       p_error_message: safeMessage,
       p_retryable: Boolean(error.retryable),
-      p_partial_result: partial,
+      p_partial_result: {
+        ...partial,
+        deployment_diagnostics: diagnostics,
+      },
     }).catch(() => {});
     return { ok: false, retryable: Boolean(error.retryable), reason: safeMessage };
   }
@@ -790,6 +794,270 @@ async function runVercel(job) {
       p_partial_result: partial,
     }).catch(() => {});
     return { ok: false, retryable: Boolean(error.retryable), reason: String(error.message || error) };
+  }
+}
+
+
+function redactDiagnosticText(value) {
+  return String(value || '')
+    .replace(/(authorization\s*[:=]\s*bearer\s+)[^\s]+/ig, '$1[REDACTED]')
+    .replace(/((?:api[_-]?key|token|secret|password|private[_-]?key)\s*[:=]\s*)[^\s,;]+/ig, '$1[REDACTED]')
+    .slice(0, 12000);
+}
+
+function safeDeploymentDetails(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  return {
+    id: raw.id || raw.uid || null,
+    name: raw.name || null,
+    url: raw.url || null,
+    status: raw.status || null,
+    readyState: raw.readyState || null,
+    errorCode: raw.errorCode || raw.error?.code || null,
+    errorMessage: redactDiagnosticText(raw.errorMessage || raw.error?.message || ''),
+    createdAt: raw.createdAt || raw.created || null,
+    buildingAt: raw.buildingAt || null,
+    ready: raw.ready || null,
+    target: raw.target || null,
+    projectId: raw.projectId || raw.project || null,
+    gitSource: raw.gitSource ? {
+      type: raw.gitSource.type || null,
+      ref: raw.gitSource.ref || null,
+      sha: raw.gitSource.sha || null,
+      repoId: raw.gitSource.repoId || null,
+    } : null,
+    meta: raw.meta ? {
+      githubCommitSha: raw.meta.githubCommitSha || null,
+      githubCommitRef: raw.meta.githubCommitRef || null,
+      githubCommitRepo: raw.meta.githubCommitRepo || null,
+      githubCommitOrg: raw.meta.githubCommitOrg || null,
+    } : null,
+  };
+}
+
+async function inspectGithubRepository(context) {
+  const full = String(context.github_repo_full_name || '');
+  const [owner, ...parts] = full.split('/');
+  const repo = parts.join('/');
+  if (!owner || !repo) throw new Error('github_repo_full_name_missing');
+  const branch = String(context.requested_config?.branch || context.github_default_branch || 'main');
+
+  const info = await gh(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`);
+  const tree = await gh(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(branch)}?recursive=1`);
+  const allFiles = Array.isArray(tree?.tree)
+    ? tree.tree.filter((x) => x?.type === 'blob').map((x) => ({
+        path: x.path,
+        size: x.size || null,
+        sha: x.sha || null,
+      }))
+    : [];
+
+  const requestedPaths = Array.isArray(context.requested_config?.paths)
+    ? context.requested_config.paths.map((x) => String(x || '').replace(/^\/+/, '')).filter(Boolean).slice(0, 16)
+    : [];
+  const candidates = requestedPaths.length
+    ? requestedPaths
+    : allFiles
+        .filter((x) => Number(x.size || 0) <= 80000 && /\.(py|js|ts|tsx|jsx|json|md|txt|yaml|yml|toml|ini|cfg|html|css)$/i.test(x.path))
+        .slice(0, 16)
+        .map((x) => x.path);
+
+  const contents = [];
+  let budget = 220000;
+  for (const path of candidates) {
+    if (budget <= 0) break;
+    if (path.includes('..') || !/^[A-Za-z0-9._\/-]{1,220}$/.test(path)) continue;
+    try {
+      const item = await gh(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(branch)}`);
+      if (item?.type !== 'file' || item?.encoding !== 'base64' || !item?.content) continue;
+      const text = Buffer.from(String(item.content).replace(/\n/g, ''), 'base64').toString('utf8');
+      const clipped = text.slice(0, Math.min(50000, budget));
+      budget -= clipped.length;
+      contents.push({ path, sha: item.sha || null, content: clipped });
+    } catch (error) {
+      contents.push({ path, error: String(error?.message || error).slice(0,500) });
+    }
+  }
+
+  return {
+    repo_full_name: info.full_name || full,
+    default_branch: info.default_branch || branch,
+    private: Boolean(info.private),
+    branch,
+    file_count: allFiles.length,
+    tree: allFiles.slice(0, 300),
+    files: contents,
+  };
+}
+
+async function writeGithubRepository(context) {
+  const full = String(context.github_repo_full_name || '');
+  const [owner, ...parts] = full.split('/');
+  const repo = parts.join('/');
+  if (!owner || !repo) throw new Error('github_repo_full_name_missing');
+  const branch = String(context.requested_config?.branch || context.github_default_branch || 'main');
+  const files = normalizeAgentAuthoredFiles(context.requested_config?.files);
+  if (!files.length) throw new Error('github_repository_write_requires_files');
+
+  const results = [];
+  for (const file of files) {
+    const r = await putRepoFile(
+      owner,
+      repo,
+      file.path,
+      file.content,
+      branch,
+      String(context.requested_config?.commit_message || `AAU agent repair: ${file.path}`).slice(0,180),
+      true,
+    );
+    results.push({ path: file.path, created: Boolean(r.created), updated: Boolean(r.updated) });
+  }
+  return {
+    repo_full_name: full,
+    branch,
+    files_requested: files.length,
+    files_created: results.filter((x) => x.created).length,
+    files_updated: results.filter((x) => x.updated).length,
+    files: results,
+  };
+}
+
+async function inspectVercelProject(context) {
+  const projectId = String(context.vercel_project_id || '');
+  if (!projectId) throw new Error('vercel_project_id_required');
+  const project = await vc(`/v9/projects/${encodeURIComponent(projectId)}${vercelQuery()}`);
+  return {
+    project_id: project.id || projectId,
+    project_name: project.name || context.vercel_project_name || null,
+    framework: project.framework ?? null,
+    root_directory: project.rootDirectory ?? null,
+    build_command: project.buildCommand ?? null,
+    install_command: project.installCommand ?? null,
+    output_directory: project.outputDirectory ?? null,
+    dev_command: project.devCommand ?? null,
+    node_version: project.nodeVersion ?? null,
+    linked_repository: linked(project),
+  };
+}
+
+async function configureVercelProject(context) {
+  const projectId = String(context.vercel_project_id || '');
+  if (!projectId) throw new Error('vercel_project_id_required');
+  const x = context.requested_config || {};
+  const allowed = ['framework','rootDirectory','buildCommand','installCommand','outputDirectory','devCommand','nodeVersion'];
+  const body = {};
+  for (const key of allowed) {
+    if (Object.prototype.hasOwnProperty.call(x, key)) body[key] = x[key];
+  }
+  if (!Object.keys(body).length) throw new Error('vercel_project_configure_requires_allowlisted_setting');
+
+  const project = await vc(`/v9/projects/${encodeURIComponent(projectId)}${vercelQuery()}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return {
+    project_id: project.id || projectId,
+    project_name: project.name || context.vercel_project_name || null,
+    applied_settings: body,
+    framework: project.framework ?? null,
+    root_directory: project.rootDirectory ?? null,
+    build_command: project.buildCommand ?? null,
+    install_command: project.installCommand ?? null,
+    output_directory: project.outputDirectory ?? null,
+    dev_command: project.devCommand ?? null,
+    node_version: project.nodeVersion ?? null,
+    linked_repository: linked(project),
+  };
+}
+
+async function inspectVercelDeployment(context) {
+  const projectId = String(context.vercel_project_id || '');
+  if (!projectId) throw new Error('vercel_project_id_required');
+  const requestedId = String(context.requested_config?.deployment_id || '').trim();
+
+  let deploymentId = requestedId;
+  let selected = null;
+  if (!deploymentId) {
+    const list = await vc(`/v13/deployments${vercelQuery({ projectId, limit: 10 })}`);
+    const rows = Array.isArray(list?.deployments) ? list.deployments : (Array.isArray(list) ? list : []);
+    selected = rows.find((d) => ['ERROR','CANCELED','CANCELLED'].includes(String(d?.status || d?.readyState || '').toUpperCase()))
+      || rows[0]
+      || null;
+    deploymentId = String(selected?.id || selected?.uid || '');
+  }
+
+  if (!deploymentId) {
+    const previous = context.latest_deployment || {};
+    const prevResult = previous.result_payload || {};
+    deploymentId = String(prevResult.deployment_id || prevResult.id || '');
+  }
+  if (!deploymentId) throw new Error('vercel_deployment_not_found_for_construct');
+
+  const deployment = await vc(`/v13/deployments/${encodeURIComponent(deploymentId)}${vercelQuery()}`);
+  let events = [];
+  try {
+    const eventBody = await vc(`/v3/deployments/${encodeURIComponent(deploymentId)}/events${vercelQuery({ direction: 'backward', follow: 0, limit: 100, builds: 1 })}`);
+    const rows = Array.isArray(eventBody) ? eventBody : (Array.isArray(eventBody?.events) ? eventBody.events : []);
+    events = rows.slice(0,100).map((e) => ({
+      type: e?.type || e?.payload?.type || null,
+      created: e?.created || e?.date || e?.payload?.created || null,
+      text: redactDiagnosticText(e?.text || e?.payload?.text || ''),
+      status_code: e?.statusCode || e?.payload?.statusCode || null,
+      info: e?.payload?.info ? {
+        type: e.payload.info.type || null,
+        name: e.payload.info.name || null,
+        path: e.payload.info.path || null,
+        step: e.payload.info.step || null,
+        readyState: e.payload.info.readyState || null,
+      } : null,
+    }));
+  } catch (error) {
+    events = [{ type: 'inspection_warning', text: `build_log_fetch_failed:${String(error?.message || error).slice(0,500)}` }];
+  }
+
+  return {
+    project_id: projectId,
+    deployment: safeDeploymentDetails(deployment),
+    build_events: events,
+    latest_broker_deployment: context.latest_deployment || {},
+  };
+}
+
+async function runProductBuildAccess(job, capabilityCode) {
+  const context = await rpc('aau_bridge_claim_product_build_job', {
+    p_broker_job_id: job,
+    p_executor_id: cfg.id,
+  });
+  let result = {};
+  try {
+    if (capabilityCode === 'github.repository.inspect') result = await inspectGithubRepository(context);
+    else if (capabilityCode === 'github.repository.write') result = await writeGithubRepository(context);
+    else if (capabilityCode === 'vercel.project.inspect') result = await inspectVercelProject(context);
+    else if (capabilityCode === 'vercel.project.configure') result = await configureVercelProject(context);
+    else if (capabilityCode === 'vercel.deployment.inspect') result = await inspectVercelDeployment(context);
+    else throw new Error(`unsupported_product_build_capability:${capabilityCode}`);
+
+    await rpc('aau_bridge_complete_product_build_job', {
+      p_broker_job_id: job,
+      p_result: {
+        ...result,
+        adapter: 'broker_bridge_product_build_access_v0_1',
+        executor_id: cfg.id,
+        capability_code: capabilityCode,
+      },
+    });
+    return { ok: true };
+  } catch (error) {
+    const safeMessage = String(error?.message || error).slice(0,1600);
+    await rpc('aau_bridge_fail_product_build_job', {
+      p_broker_job_id: job,
+      p_error_code: 'product_build_access_error',
+      p_error_message: safeMessage,
+      p_retryable: Boolean(error?.retryable),
+      p_partial_result: result,
+    }).catch(() => {});
+    return { ok: false, retryable: Boolean(error?.retryable), reason: safeMessage };
   }
 }
 
@@ -876,13 +1144,23 @@ async function handle(channel, queue, message) {
       : retry(channel, queue, message, materialized.job_status);
   }
 
-  const outcome = materialized.provider === 'github'
-    ? await runGithub(materialized.broker_job_id)
-    : materialized.provider === 'vercel'
-      ? materialized.capability_code === 'vercel.deployment.create'
-        ? await runVercelDeployment(materialized.broker_job_id)
-        : await runVercel(materialized.broker_job_id)
-      : { ok: false, retryable: false, reason: 'unsupported_provider' };
+  const productBuildCapabilities = new Set([
+    'github.repository.inspect',
+    'github.repository.write',
+    'vercel.project.inspect',
+    'vercel.project.configure',
+    'vercel.deployment.inspect',
+  ]);
+
+  const outcome = productBuildCapabilities.has(materialized.capability_code)
+    ? await runProductBuildAccess(materialized.broker_job_id, materialized.capability_code)
+    : materialized.provider === 'github'
+      ? await runGithub(materialized.broker_job_id)
+      : materialized.provider === 'vercel'
+        ? materialized.capability_code === 'vercel.deployment.create'
+          ? await runVercelDeployment(materialized.broker_job_id)
+          : await runVercel(materialized.broker_job_id)
+        : { ok: false, retryable: false, reason: 'unsupported_provider' };
 
   if (outcome.ok) {
     channel.ack(message);
