@@ -1017,6 +1017,56 @@ async function probePublicHttpEndpoint(rawUrl) {
   }
 }
 
+// Explicit endpoint probes are scoped to the selected deployment host and cannot redirect to an arbitrary URL.
+function readRequestedEndpointProbes(config = {}) {
+  const configured = config.probe_requests ?? (config.probe_path
+    ? [{ path: config.probe_path, method: config.probe_method || 'GET', body: config.probe_body }]
+    : []);
+  if (!Array.isArray(configured) || configured.length > 3) throw new Error('probe_requests_must_be_array_with_max_three_items');
+  return configured.map((entry) => {
+    const path = String(entry?.path || '');
+    const method = String(entry?.method || 'GET').toUpperCase();
+    if (!/^\/[A-Za-z0-9_/-]{0,180}$/.test(path) || path.startsWith('//') || path.includes('..'))
+      throw new Error('probe_path_must_be_safe_relative_path');
+    if (method !== 'GET' && method !== 'POST') throw new Error('probe_method_must_be_GET_or_POST');
+    const body = entry?.body ?? null;
+    if (method === 'POST' && (body === null || typeof body !== 'object' || Array.isArray(body) || JSON.stringify(body).length > 4096))
+      throw new Error('post_probe_requires_small_json_object');
+    if (method === 'GET' && body !== null) throw new Error('get_probe_must_not_have_body');
+    return { path, method, body };
+  });
+}
+
+async function probeProductOperation(host, probe) {
+  const origin = new URL(/^https?:\/\//i.test(host) ? host : `https://${host}`).origin;
+  const url = origin + probe.path;
+  try {
+    const response = await fetch(url, {
+      method: probe.method,
+      redirect: 'manual',
+      headers: { accept: 'application/json', 'user-agent': 'AAU-Product-Endpoint-Probe/0.1',
+        ...(probe.method === 'POST' ? { 'content-type': 'application/json' } : {}) },
+      ...(probe.method === 'POST' ? { body: JSON.stringify(probe.body) } : {}),
+      signal: AbortSignal.timeout(15000),
+    });
+    const preview = redactDiagnosticText(await response.text()).slice(0,1200);
+    const location = response.headers.get('location') || '';
+    const authRedirect = response.status >= 300 && response.status < 400 &&
+      /(?:vercel\.com\/login|\/sso-api|\/login|\/signin)/i.test(location);
+    const contentType = response.headers.get('content-type') || '';
+    return {
+      method: probe.method, path: probe.path, requested_url: url,
+      response_url: response.url || url, status: response.status,
+      ok: response.ok && !authRedirect, authenticated_redirect: authRedirect,
+      content_type: contentType.slice(0,120), location: location.slice(0,400),
+      body_preview: preview,
+    };
+  } catch (error) {
+    return { method: probe.method, path: probe.path, requested_url: url, status: 0,
+      ok: false, error: redactDiagnosticText(String(error?.message || error)).slice(0,400) };
+  }
+}
+
 async function inspectVercelDeployment(context) {
   const projectId = String(context.vercel_project_id || '');
   if (!projectId) throw new Error('vercel_project_id_required');
@@ -1078,12 +1128,22 @@ async function inspectVercelDeployment(context) {
     || ''
   ).trim();
 
+  const requestedProbes = readRequestedEndpointProbes(context.requested_config || {});
   const [deploymentHttp, productionHttp] = await Promise.all([
     probePublicHttpEndpoint(deploymentHost),
     productionUrl && productionUrl !== deploymentHost
       ? probePublicHttpEndpoint(productionUrl)
       : Promise.resolve(null),
   ]);
+
+  // The root diagnostics above are retained for backwards compatibility. They are never
+  // evidence about any other route. An explicit probe records its actual method and path.
+  const productionProbes = [];
+  const deploymentProbes = [];
+  for (const probe of requestedProbes) {
+    if (productionUrl) productionProbes.push(await probeProductOperation(productionUrl, probe));
+    if (deploymentHost) deploymentProbes.push(await probeProductOperation(deploymentHost, probe));
+  }
 
   return {
     project_id: projectId,
@@ -1093,6 +1153,10 @@ async function inspectVercelDeployment(context) {
     http_diagnostics: {
       deployment: deploymentHttp,
       production: productionHttp,
+      root_path_only: true,
+      endpoint_probe_state: requestedProbes.length ? 'TESTED' : 'NOT_REQUESTED',
+      tested_endpoints: { production: productionProbes, deployment: deploymentProbes },
+      endpoint_evidence_rule: 'Only tested_endpoints entries establish status for their exact method and path. Root 404 is not evidence about /health or /hash. Login redirects are not API success.',
     },
     latest_broker_deployment: context.latest_deployment || {},
   };
