@@ -1,0 +1,313 @@
+import crypto from 'node:crypto';
+
+const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
+const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
+const bridge = String(process.env.AAU_BROKER_BRIDGE_TOKEN || '').trim();
+const nvidiaKey = String(process.env.NVIDIA_API_KEY || '').trim();
+const executorId = `render:product-test-designer:${process.env.RENDER_INSTANCE_ID || process.pid}`;
+const pollMs = Math.max(2500, Number(process.env.AAU_PRODUCT_TEST_DESIGNER_POLL_MS || 5000));
+let running = false;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function jsonResponse(response) {
+  const raw = await response.text();
+  let body = null;
+  try { body = JSON.parse(raw); } catch {}
+  return { raw, body };
+}
+
+async function rpc(name, args = {}) {
+  const response = await fetch(`${SB}/rest/v1/rpc/${name}`, {
+    method: 'POST',
+    headers: {
+      apikey: anon,
+      authorization: `Bearer ${anon}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ p_bridge_token: bridge, ...args }),
+  });
+  const { raw, body } = await jsonResponse(response);
+  if (!response.ok) {
+    const error = new Error(`${name}:${response.status}:${body?.message || raw.slice(0, 800)}`);
+    error.status = response.status;
+    throw error;
+  }
+  return body;
+}
+
+async function modelCall(model, system, user) {
+  const controller = new AbortController();
+  const timeoutMs = 180000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const body = {
+      model,
+      messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+      max_tokens: 4200,
+      temperature: 0,
+      stream: false,
+    };
+    if (String(model).startsWith('nvidia/nemotron')) {
+      body.chat_template_kwargs = { enable_thinking: false };
+    }
+    const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        authorization: `Bearer ${nvidiaKey}`,
+        'content-type': 'application/json',
+        accept: 'application/json',
+        'user-agent': 'AAU-Product-Test-Designer/0.2',
+      },
+      body: JSON.stringify(body),
+    });
+    const { raw, body: parsed } = await jsonResponse(response);
+    if (!response.ok) {
+      const error = new Error(`nvidia_${response.status}:${parsed?.error?.message || parsed?.detail || raw.slice(0, 800)}`);
+      error.status = response.status;
+      throw error;
+    }
+    const message = parsed?.choices?.[0]?.message || {};
+    return {
+      model: parsed?.model || model,
+      text: String(message.content || message.reasoning_content || parsed?.choices?.[0]?.text || '').trim(),
+      usage: parsed?.usage || null,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function parseJsonObject(text) {
+  const raw = String(text || '').trim();
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start < 0 || end <= start) throw new Error('product_test_spec_json_missing');
+  return JSON.parse(raw.slice(start, end + 1));
+}
+
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function validateSpec(spec, claimManifest) {
+  if (!spec || typeof spec !== 'object' || Array.isArray(spec)) throw new Error('spec_object_required');
+  if (!spec.test_profile || typeof spec.test_profile !== 'object') throw new Error('test_profile_required');
+  if (!Array.isArray(spec.deterministic_gates) || spec.deterministic_gates.length < 1) throw new Error('deterministic_gates_required');
+  if (!Array.isArray(spec.adversarial_tests)) throw new Error('adversarial_tests_required');
+  if (!String(spec.approval_rule || '').trim()) throw new Error('approval_rule_required');
+
+  const known = new Set(asArray(claimManifest).map((x) => String(x?.id || '')).filter(Boolean));
+  for (const gate of spec.deterministic_gates) {
+    if (!['explicit_claim', 'usage_model'].includes(String(gate?.basis || ''))) throw new Error('gate_basis_invalid');
+    if (!String(gate?.test || '').trim() || !String(gate?.pass_condition || '').trim() ||
+        !String(gate?.evidence || '').trim() || !String(gate?.rationale || '').trim()) {
+      throw new Error('gate_fields_incomplete');
+    }
+    const ids = asArray(gate.claim_ids).map(String);
+    if (gate.basis === 'explicit_claim' && ids.length === 0) throw new Error('explicit_claim_gate_requires_claim_ids');
+    if (ids.some((id) => !known.has(id))) throw new Error('unknown_claim_id_in_gate');
+  }
+
+  const serialized = JSON.stringify(spec).toLowerCase();
+  const unrelatedRepoRules = [
+    'tagged release',
+    '5+ commits',
+    'five commits',
+    'commit count',
+    'publicly accessible repository',
+    'repository must be public',
+  ];
+  if (unrelatedRepoRules.some((term) => serialized.includes(term))) {
+    throw new Error('unrelated_repository_maturity_requirement');
+  }
+
+  return {
+    ...spec,
+    frozen_claims: claimManifest,
+  };
+}
+
+async function design(job) {
+  const system = [
+    'You are the independent AAU Product Test Designer.',
+    'The autonomous agent alone chooses the product/service, problem, architecture and implementation.',
+    'Your job is to freeze a proportional acceptance test specification from the agent-authored claims and a reasonable inferred usage model.',
+    'You may NOT redesign the offering or add unrelated quality conventions.',
+    'Every deterministic gate must declare basis=explicit_claim or basis=usage_model.',
+    'explicit_claim gates must reference only the supplied claim IDs.',
+    'usage_model gates must be necessary to demonstrate the offering under its inferred real usage; explain the rationale.',
+    'Do not require public source code, a commit count, tagged releases, branding, documentation volume, or other conventions unless the agent explicitly claimed them.',
+    'Do not treat deployment, HTTP 200, or the agent\'s own test suite as proof of substantive correctness.',
+    'For a remotely consumed service/API, normally include a 1000-virtual-user concurrent stress characterization unless clearly disproportionate; distinguish realistic operating concurrency from stress concurrency.',
+    'Performance metrics such as p50/p95/p99 should be measured. Do not invent a latency pass threshold unless it follows from an explicit claim or the stated usage model and you give a concrete rationale.',
+    'Prefer adversarial/property tests that could falsify the agent\'s strongest claims.',
+    'Return one compact JSON object only, with no markdown.',
+  ].join(' ');
+
+  const user = `AGENT SUBMISSION SNAPSHOT:
+${JSON.stringify(job.submission_snapshot)}
+
+AUTHORITATIVE FROZEN CLAIM MANIFEST:
+${JSON.stringify(job.claim_manifest)}
+
+Return:
+{
+  "test_profile":{
+    "product_class":"...",
+    "assumed_usage_model":"...",
+    "assumed_userbase":1000,
+    "realistic_concurrency":0,
+    "stress_concurrency":0,
+    "rationale":"..."
+  },
+  "deterministic_gates":[
+    {
+      "id":"G1",
+      "basis":"explicit_claim|usage_model",
+      "claim_ids":["C1"],
+      "test":"...",
+      "pass_condition":"...",
+      "evidence":"runtime-generated evidence only",
+      "rationale":"..."
+    }
+  ],
+  "load_test":{
+    "required":true,
+    "virtual_users":1000,
+    "workflow":"realistic complete user operation(s), not health pings",
+    "duration_seconds":120,
+    "metrics":["success_rate","error_rate","p50_ms","p95_ms","p99_ms","correctness_under_load","cross_user_isolation"],
+    "pass_conditions":["..."],
+    "rationale":"..."
+  },
+  "adversarial_tests":[
+    {"id":"A1","basis":"explicit_claim|usage_model","claim_ids":["VP1"],"test":"...","purpose":"...","pass_condition":"..."}
+  ],
+  "independent_test_rules":[
+    "Agent-authored tests may be evidence but are not the judge.",
+    "Runtime must generate independent inputs and preserve raw results."
+  ],
+  "approval_rule":"..."
+}
+
+If a 1000-user stress test is not relevant, set load_test.required=false and explain exactly why. Do not invent completed evidence.`;
+
+  const models = [
+    'moonshotai/kimi-k3',
+    'meta/muse-glimmer-30b',
+    'nvidia/nemotron-3.5-lightning-30b-a3b',
+  ];
+  let lastError = null;
+
+  for (const model of models) {
+    try {
+      const result = await modelCall(model, system, user);
+      const parsed = parseJsonObject(result.text);
+      return {
+        specification: validateSpec(parsed, job.claim_manifest),
+        modelRequested: model,
+        modelUsed: result.model || model,
+        fallbackUsed: model !== models[0],
+        usage: result.usage,
+      };
+    } catch (error) {
+      lastError = error;
+      console.warn('AAU_PRODUCT_TEST_DESIGNER_MODEL_FAILED', JSON.stringify({
+        product_test_design_id: job.product_test_design_id,
+        model,
+        status: error?.status || null,
+        message: String(error?.message || error).slice(0, 800),
+      }));
+    }
+  }
+
+  throw lastError || new Error('product_test_designer_no_usable_model');
+}
+
+async function processOne(job) {
+  try {
+    const result = await design(job);
+    const completed = await rpc('aau_bridge_complete_product_test_design', {
+      p_product_test_design_id: job.product_test_design_id,
+      p_executor_id: executorId,
+      p_model_requested: result.modelRequested,
+      p_model_used: result.modelUsed,
+      p_fallback_used: result.fallbackUsed,
+      p_specification: result.specification,
+    });
+    console.log('AAU_PRODUCT_TEST_DESIGN_FROZEN', JSON.stringify({
+      product_test_design_id: job.product_test_design_id,
+      agent_id: job.agent_id,
+      model_requested: result.modelRequested,
+      model_used: result.modelUsed,
+      fallback_used: result.fallbackUsed,
+      gate_count: asArray(result.specification?.deterministic_gates).length,
+      adversarial_count: asArray(result.specification?.adversarial_tests).length,
+      load_required: Boolean(result.specification?.load_test?.required),
+      virtual_users: result.specification?.load_test?.virtual_users ?? null,
+      db_status: completed?.status || null,
+    }));
+  } catch (error) {
+    console.error('AAU_PRODUCT_TEST_DESIGN_FAILED', JSON.stringify({
+      product_test_design_id: job.product_test_design_id,
+      agent_id: job.agent_id,
+      error_name: error?.name || null,
+      message: String(error?.message || error).slice(0, 1500),
+    }));
+    try {
+      await rpc('aau_bridge_fail_product_test_design', {
+        p_product_test_design_id: job.product_test_design_id,
+        p_executor_id: executorId,
+        p_error_code: 'product_test_designer_error',
+        p_error_message: String(error?.message || error),
+        p_retryable: true,
+      });
+    } catch (failError) {
+      console.error('AAU_PRODUCT_TEST_DESIGN_FAIL_RECORD_FAILED', String(failError?.message || failError));
+    }
+  }
+}
+
+async function loop() {
+  while (running) {
+    try {
+      const rows = await rpc('aau_bridge_claim_product_test_design', {
+        p_executor_id: executorId,
+        p_lease_seconds: 900,
+      });
+      const job = Array.isArray(rows) ? rows[0] : null;
+      if (job) {
+        await processOne(job);
+        continue;
+      }
+    } catch (error) {
+      console.error('AAU_PRODUCT_TEST_DESIGNER_LOOP_ERROR', String(error?.message || error).slice(0, 1500));
+    }
+    await sleep(pollMs);
+  }
+}
+
+export function startProductTestDesignerWorker() {
+  const missing = [
+    ['AAU_SUPABASE_ANON_KEY', anon],
+    ['AAU_BROKER_BRIDGE_TOKEN', bridge],
+    ['NVIDIA_API_KEY', nvidiaKey],
+  ].filter(([, value]) => !value).map(([key]) => key);
+
+  if (missing.length) return { ok: false, ready: false, missing };
+  if (!running) {
+    running = true;
+    loop().catch((error) => console.error('AAU_PRODUCT_TEST_DESIGNER_FATAL', error));
+  }
+  return {
+    ok: true,
+    ready: true,
+    executor_id: executorId,
+    poll_ms: pollMs,
+    version: 'product_test_designer_v0_2',
+    authenticator: 'moonshotai/kimi-k3',
+    fallbacks: ['meta/muse-glimmer-30b', 'nvidia/nemotron-3.5-lightning-30b-a3b'],
+  };
+}
