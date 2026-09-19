@@ -41,6 +41,8 @@ alter table agent_lab.product_test_designs enable row level security;
 create index if not exists product_test_designs_claim_idx
   on agent_lab.product_test_designs(status, created_at)
   where status in ('queued','running');
+create index if not exists product_test_designs_agent_idx
+  on agent_lab.product_test_designs(agent_id);
 
 create table if not exists agent_lab.product_test_runs (
   product_test_run_id uuid primary key default extensions.gen_random_uuid(),
@@ -67,6 +69,10 @@ alter table agent_lab.product_test_runs enable row level security;
 create index if not exists product_test_runs_status_idx
   on agent_lab.product_test_runs(status,created_at)
   where status in ('queued','running');
+create index if not exists product_test_runs_agent_idx
+  on agent_lab.product_test_runs(agent_id);
+create index if not exists product_test_runs_product_service_test_idx
+  on agent_lab.product_test_runs(product_service_test_id);
 
 create or replace function agent_lab.product_test_submission_snapshot_v0_2(p_agent_id uuid)
 returns jsonb
