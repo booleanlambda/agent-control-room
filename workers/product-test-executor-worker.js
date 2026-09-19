@@ -88,22 +88,43 @@ function parseJsonObject(text) {
 async function modelWithFallback(system, user, maxTokens, validate = null, phase = 'unspecified') {
   const models = ['moonshotai/kimi-k3', 'meta/muse-glimmer-30b', 'nvidia/nemotron-3.5-lightning-30b-a3b'];
   let lastError = null;
+  const accept = (raw) => {
+    const parsed = parseJsonObject(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('model_json_object_required');
+    return typeof validate === 'function' ? validate(parsed) : parsed;
+  };
   for (const model of models) {
+    let result = null;
     try {
-      const result = await modelCall(model, system, user, maxTokens);
+      result = await modelCall(model, system, user, maxTokens);
       // A successful HTTP completion is not a usable model result. Parse and validate
       // BEFORE selecting the model; malformed outputs must reach the fallback chain.
-      const parsed = parseJsonObject(result.text);
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('model_json_object_required');
-      const validated = typeof validate === 'function' ? validate(parsed) : parsed;
-      return { ...result, parsed: validated, requested_model: model, fallback_used: model !== models[0] };
+      const parsed = accept(result.text);
+      return { ...result, parsed, requested_model: model, fallback_used: model !== models[0], json_repaired: false };
     } catch (error) {
       lastError = error;
       console.warn('AAU_PRODUCT_TEST_EXECUTOR_MODEL_FAILED', JSON.stringify({
-        phase, model,
+        phase, model, stage: result ? 'output_validation' : 'provider',
         status: error?.status || null,
         message: String(error?.message || error).slice(0, 800),
       }));
+      // One bounded syntax-only repair per model response. Do not rerun timeout/HTTP
+      // failures, invent missing observations, or accept an unvalidated repair.
+      if (result?.text) {
+        try {
+          const repairSystem = 'You repair JSON formatting, not test evidence. Return exactly ONE syntactically valid JSON object. Preserve the original fields and semantic content. Escape embedded string control characters and remove surrounding commentary. Do not invent observations, HTTP results, approval or product outcomes. If content is incomplete, report it as incomplete.';
+          const repairUser = `REQUIRED SCHEMA:\n${phase === 'planner' ? '{"executable":boolean,"requests":array,"load_request_id":string|null,"unexecutable_test_ids":array,"notes":string}' : '{"gate_results":array,"adversarial_results":array,"load_test_result":object,"overall_assessment":string,"unsupported_or_missing_evidence":array}'}\nORIGINAL OUTPUT TO REPAIR:\n${String(result.text).slice(0,18000)}`;
+          const repaired = await modelCall(model, repairSystem, repairUser, Math.max(4500, maxTokens), 70000);
+          const parsed = accept(repaired.text);
+          console.log('AAU_PRODUCT_TEST_EXECUTOR_JSON_REPAIRED', JSON.stringify({ phase, model }));
+          return { ...repaired, parsed, requested_model: model, fallback_used: model !== models[0], json_repaired: true };
+        } catch (repairError) {
+          lastError = repairError;
+          console.warn('AAU_PRODUCT_TEST_EXECUTOR_JSON_REPAIR_FAILED', JSON.stringify({
+            phase, model, message: String(repairError?.message || repairError).slice(0,800),
+          }));
+        }
+      }
     }
   }
   const exhausted = new Error(`product_test_${phase}_models_exhausted:${String(lastError?.message || 'no_usable_model').slice(0,600)}`);
@@ -249,10 +270,34 @@ async function collectRepoEvidence(repoUrl) {
   };
 }
 
+// Keep reasoning input bounded. Source is supporting evidence; missing source can
+// only reduce confidence, never justify an unsupported PASS.
+function compactRepositoryEvidence(repoEvidence) {
+  const files = Array.isArray(repoEvidence?.sampled_contents) ? repoEvidence.sampled_contents : [];
+  const selected = [...files].sort((a,b) =>
+    Number(/manifest|modal|hash|main|app/i.test(b.path || '')) - Number(/manifest|modal|hash|main|app/i.test(a.path || ''))
+  ).slice(0,8);
+  let budget = 58000;
+  const contents = [];
+  for (const file of selected) {
+    const content = String(file.content || '').slice(0,Math.min(12000,budget));
+    if (content) contents.push({path:file.path,sha:file.sha,content});
+    budget -= content.length;
+    if (budget<=0) break;
+  }
+  return {
+    available:repoEvidence?.available,repo_full_name:repoEvidence?.repo_full_name,
+    private:repoEvidence?.private,default_branch:repoEvidence?.default_branch,
+    file_count:repoEvidence?.file_count,files:(repoEvidence?.files || []).slice(0,60),
+    sampled_contents:contents,source_excerpt_bounded:true,
+  };
+}
+
 function validatePlan(plan, base, testIds) {
   if (!plan || typeof plan !== 'object') throw new Error('execution_plan_object_required');
   if (plan.executable !== true) return { ...plan, requests: [] };
   const requests = Array.isArray(plan.requests) ? plan.requests.slice(0, 16) : [];
+  if (requests.length===0) throw new Error('executable_plan_requires_functional_requests');
   const normalized = requests.map((req, index) => {
     const method = String(req?.method || 'GET').toUpperCase();
     if (!['GET', 'POST'].includes(method)) throw new Error('unsupported_http_method');
@@ -309,7 +354,7 @@ async function makeExecutionPlan(job, discovery, repoEvidence) {
     private: repoEvidence.private,
     default_branch: repoEvidence.default_branch,
     files: repoEvidence.files,
-    sampled_contents: repoEvidence.sampled_contents,
+    sampled_contents: compactRepositoryEvidence(repoEvidence).sampled_contents,
   };
 
   const user = `FROZEN SPECIFICATION:
@@ -342,9 +387,20 @@ Return:
 }
 If the service exposes no documented/testable core operation, set executable=false and explain why.`;
 
+  const verifiedOperation = job?.metadata?.canonical_operation_evidence || {};
   const result = await modelWithFallback(
-    system, user, 3200,
-    (parsed) => validatePlan(parsed, safeBaseUrl(job.production_url), testIds),
+    system, user, 4500,
+    (parsed) => {
+      if (verifiedOperation.verified === true && parsed.executable !== true) {
+        throw new Error('verified_canonical_operation_requires_fresh_test_plan');
+      }
+      const plan = validatePlan(parsed, safeBaseUrl(job.production_url), testIds);
+      if (verifiedOperation.verified === true &&
+          !plan.requests.some((req) => req.path === verifiedOperation.operation_path && req.method === verifiedOperation.operation_method)) {
+        throw new Error('verified_canonical_operation_not_in_plan');
+      }
+      return plan;
+    },
     'planner',
   );
   const plan = result.parsed;
@@ -463,7 +519,7 @@ EXECUTION PLAN:
 ${JSON.stringify(planBundle.plan)}
 
 REPOSITORY EVIDENCE:
-${JSON.stringify(repoEvidence)}
+${JSON.stringify(compactRepositoryEvidence(repoEvidence))}
 
 FUNCTIONAL HTTP EVIDENCE:
 ${JSON.stringify(functional)}
@@ -485,7 +541,7 @@ Return:
 }
 Every deterministic gate and every adversarial test in the frozen specification must appear exactly once. If load_test.required=true, load_test_result must judge every frozen load threshold plus any required correctness/isolation condition.`;
 
-  const result = await modelWithFallback(system, user, 3200, null, 'judge');
+  const result = await modelWithFallback(system, user, 4500, null, 'judge');
   const report = result.parsed;
   const expected = new Set((job.specification?.deterministic_gates || []).map((x) => String(x?.id || '')).filter(Boolean));
   const rows = Array.isArray(report?.gate_results) ? report.gate_results : [];
@@ -581,7 +637,7 @@ async function processRun(job) {
     judge_model: judged.judge_model,
     judge_requested_model: judged.judge_requested_model,
     judge_fallback_used: judged.judge_fallback_used,
-    executor_version: 'product_test_executor_v0_3_verified_operation_discovery',
+    executor_version: 'product_test_executor_v0_4_json_repair_bounded_context',
   };
 
   const completed = await rpc('aau_bridge_complete_product_test_run', {
@@ -604,7 +660,7 @@ async function processRun(job) {
     load_required: requiredLoad,
     load_virtual_users: load.virtual_users || 0,
     load_completed: Boolean(load.completed),
-    executor_version: 'product_test_executor_v0_3_verified_operation_discovery',
+    executor_version: 'product_test_executor_v0_4_json_repair_bounded_context',
   }));
 }
 
@@ -657,7 +713,7 @@ export function startProductTestExecutorWorker() {
     ready: true,
     executor_id: executorId,
     poll_ms: pollMs,
-    version: 'product_test_executor_v0_3_verified_operation_discovery',
+    version: 'product_test_executor_v0_4_json_repair_bounded_context',
     max_virtual_users: 1000,
     same_origin_only: true,
     authenticator: 'moonshotai/kimi-k3',
