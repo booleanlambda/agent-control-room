@@ -59,6 +59,17 @@ Expertise portfolio v0.2 rule:
 - A blocked verification request is a policy result, not a provider/runtime failure and not evidence of competence failure.
 - When the gate becomes ready and you choose verification, prefer selected_action="request_expertise_verification". "request_independent_assessment" is accepted as a compatibility alias.
 
+
+Mandatory product/service-test-stage rule:
+- ONLY when mandatory_lifecycle_context.current_stage is product_service_test, the mandatory task is to independently choose, build, and externalize one real product or service. The runtime must not choose the problem, target user, offering, name, design, or value proposition for you.
+- Revenue, a paying customer, and commercial success are NOT required to pass. Narrative claims are never evidence.
+- Use product_service_test_context as the factual progress record. Do not claim the test is complete unless its status is verified_pass.
+- First define a concrete problem, target user, value proposition, and measurable success_criteria. Add an associations[] object with origin="product_service_test_submission_v0_1", offering_type equal to "product" or "service", title, problem_statement, target_user, value_proposition, and a nonempty success_criteria array.
+- Create a real Construct through a capability_request_v0_1. For github.repository.create, include a construct_spec chosen by you and payload.files containing your own UTF-8 repository files. Do not use a blank repository as evidence and do not expose, request, print, or infer the GitHub token.
+- Build in stages. Wait for durable runtime evidence that the GitHub repository exists before requesting Vercel project creation; wait for the project result before requesting a production deployment. Set verify_http=true for the final deployment.
+- The v0.1 pass gate requires: complete agent-authored offering plan; real Construct; active GitHub repository containing at least one agent-authored file; successful production deployment; and runtime HTTP verification returning 2xx/3xx.
+- External capability success is asynchronous. Never describe a requested repository, project, or deployment as completed until the runtime reports a successful result.
+
 Attention-arbiter rule:
 - attention_arbiter_context represents deterministic allocation of access to cognition. It does NOT decide your substantive response or preferences.
 - If attention_arbiter_context.current_attention_item is present, this cognition is an interrupt/attention cognition. You may handle that stimulus now without falsely claiming mandatory lifecycle progress. The lifecycle stage remains authoritative and unchanged unless this cognition independently produces valid stage evidence.
@@ -655,7 +666,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       requested_model_id: model, returned_model_id: ai.model_returned,
       continuity_mode: false, transition_mode: false,
       executor_version: 'executor_v0_24_fixed_five_minute_sleep',
-      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_17_fixed_five_minute_sleep',
+      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_18_product_service_test',
       response_id: ai.response_id, raw_model_output: raw.slice(0,50000),
       input_tokens: Number(usage.prompt_tokens ?? usage.input_tokens ?? 0),
       output_tokens: Number(usage.completion_tokens ?? usage.output_tokens ?? 0),
@@ -663,7 +674,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       input_hash: sha256(packetText), output_hash: sha256(raw),
       model_consistency_status: 'VERIFIED_PRIMARY', authenticator_result: { status: 'not_run_in_executor' },
       experimental_provider_policy: 'nvidia_direct_all_experimental_roles',
-      lifecycle_contract: 'next_intent_protocol_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+expertise_artifact_stage_contract_v0_1+attention_arbiter_v0_1+attention_resolution_repair_v0_1+stage_action_alignment_v0_1+failure_diagnostics_v0_1+embodiment_payload_normalization_v0_1',
+      lifecycle_contract: 'next_intent_protocol_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+expertise_artifact_stage_contract_v0_1+product_service_test_v0_1+attention_arbiter_v0_1+attention_resolution_repair_v0_1+stage_action_alignment_v0_1+failure_diagnostics_v0_1+embodiment_payload_normalization_v0_1',
       intent_repair_attempted: intentRepairAttempted,
       identity_repair_attempts: identityRepairAttempts,
       embodiment_repair_attempts: embodimentRepairAttempts,
