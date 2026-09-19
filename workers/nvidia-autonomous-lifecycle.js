@@ -86,8 +86,11 @@ async function publishArmedIntent(channel, row) {
 
   await channel.assertQueue(MAIN_QUEUE, { durable: true });
 
+  const staleDelayQueue = delayQueueName(row.intent_execution_id);
+  await channel.deleteQueue(staleDelayQueue).catch(() => {});
+
   if (delayMs > 1000) {
-    delayQueue = delayQueueName(row.intent_execution_id);
+    delayQueue = staleDelayQueue;
     envelope.delay_queue = delayQueue;
     await channel.assertQueue(delayQueue, {
       durable: true,
@@ -158,8 +161,11 @@ async function publishArmedWake(channel, row) {
 
   await channel.assertQueue(LEGACY_QUEUE, { durable: true });
 
+  const staleDelayQueue = legacyDelayQueueName(row.wake_request_id);
+  await channel.deleteQueue(staleDelayQueue).catch(() => {});
+
   if (delayMs > 1000) {
-    delayQueue = legacyDelayQueueName(row.wake_request_id);
+    delayQueue = staleDelayQueue;
     envelope.delay_queue = delayQueue;
     await channel.assertQueue(delayQueue, {
       durable: true,
