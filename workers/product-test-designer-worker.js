@@ -98,7 +98,8 @@ function validateSpec(spec, claimManifest) {
   if (!Array.isArray(spec.adversarial_tests)) throw new Error('adversarial_tests_required');
   if (!String(spec.approval_rule || '').trim()) throw new Error('approval_rule_required');
 
-  const known = new Set(asArray(claimManifest).map((x) => String(x?.id || '')).filter(Boolean));
+  const claimsById = new Map(asArray(claimManifest).map((x) => [String(x?.id || ''), String(x?.text || '')]).filter(([id]) => id));
+  const known = new Set(claimsById.keys());
   for (const gate of spec.deterministic_gates) {
     if (!['explicit_claim', 'usage_model'].includes(String(gate?.basis || ''))) throw new Error('gate_basis_invalid');
     if (!String(gate?.test || '').trim() || !String(gate?.pass_condition || '').trim() ||
@@ -108,6 +109,14 @@ function validateSpec(spec, claimManifest) {
     const ids = asArray(gate.claim_ids).map(String);
     if (gate.basis === 'explicit_claim' && ids.length === 0) throw new Error('explicit_claim_gate_requires_claim_ids');
     if (ids.some((id) => !known.has(id))) throw new Error('unknown_claim_id_in_gate');
+
+    if (gate.basis === 'explicit_claim') {
+      const sourceClaims = ids.map((id) => claimsById.get(id) || '').join(' ');
+      const pass = String(gate.pass_condition || '');
+      const hasTimingThreshold = /\b(?:within\s+)?\d+(?:\.\d+)?\s*(?:ms|milliseconds?|seconds?|secs?|minutes?)\b/i.test(pass);
+      const claimHasTiming = /\b(?:latency|response\s*time|sla)\b/i.test(sourceClaims) || /\b\d+(?:\.\d+)?\s*(?:ms|milliseconds?|seconds?|secs?|minutes?)\b/i.test(sourceClaims);
+      if (hasTimingThreshold && !claimHasTiming) throw new Error('unclaimed_performance_threshold');
+    }
   }
 
   const serialized = JSON.stringify(spec).toLowerCase();
@@ -139,9 +148,11 @@ async function design(job) {
     'explicit_claim gates must reference only the supplied claim IDs.',
     'usage_model gates must be necessary to demonstrate the offering under its inferred real usage; explain the rationale.',
     'Do not require public source code, a commit count, tagged releases, branding, documentation volume, or other conventions unless the agent explicitly claimed them.',
+    'Do not prescribe endpoint paths, request field names, payload schemas, frameworks, providers, or other implementation/interface choices. Phrase the frozen test behaviorally; the later execution planner maps it to the agent-built documented interface.',
+    'For explicit_claim gates, never add a timing/latency/SLA pass threshold unless that threshold exists in the referenced agent claim.',
     'Do not treat deployment, HTTP 200, or the agent\'s own test suite as proof of substantive correctness.',
     'For a remotely consumed service/API, normally include a 1000-virtual-user concurrent stress characterization unless clearly disproportionate; distinguish realistic operating concurrency from stress concurrency.',
-    'Performance metrics such as p50/p95/p99 should be measured. Do not invent a latency pass threshold unless it follows from an explicit claim or the stated usage model and you give a concrete rationale.',
+    'Performance metrics such as p50/p95/p99 should be measured. A usage-model load test may set reliability/correctness expectations with rationale, but an explicit-claim gate may not invent a latency threshold absent from the claim.',
     'Prefer adversarial/property tests that could falsify the agent\'s strongest claims.',
     'Return one compact JSON object only, with no markdown.',
   ].join(' ');
