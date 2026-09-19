@@ -1,5 +1,63 @@
 import { S3Client, ListObjectsV2Command } from '@aws-sdk/client-s3';
 
+async function probeAgentGithubToken() {
+  const token = String(process.env.AAU_AGENT_GITHUB_TOKEN || '').trim();
+  if (!token) {
+    console.log('AAU_AGENT_GITHUB_TOKEN_PROBE', JSON.stringify({
+      present: false,
+      ok: false,
+      reason: 'not_configured',
+    }));
+    return;
+  }
+
+  try {
+    const headers = {
+      authorization: `Bearer ${token}`,
+      accept: 'application/vnd.github+json',
+      'x-github-api-version': '2022-11-28',
+      'user-agent': 'AAU-Agent-Token-Probe/0.2',
+    };
+    const userResponse = await fetch('https://api.github.com/user', { headers });
+    let userBody = null;
+    try { userBody = await userResponse.json(); } catch {}
+
+    const owner = String(process.env.AAU_GITHUB_OWNER || userBody?.login || '').trim();
+    let repoStatus = null;
+    let repoPush = null;
+    let repoAdmin = null;
+    if (userResponse.ok && owner) {
+      const repoResponse = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/agent-control-room`, { headers });
+      repoStatus = repoResponse.status;
+      let repoBody = null;
+      try { repoBody = await repoResponse.json(); } catch {}
+      repoPush = repoBody?.permissions?.push ?? null;
+      repoAdmin = repoBody?.permissions?.admin ?? null;
+    }
+
+    console.log('AAU_AGENT_GITHUB_TOKEN_PROBE', JSON.stringify({
+      present: true,
+      ok: userResponse.ok,
+      status: userResponse.status,
+      login: userBody?.login || null,
+      configured_owner: process.env.AAU_GITHUB_OWNER || null,
+      oauth_scopes: userResponse.headers.get('x-oauth-scopes') || null,
+      repo_status: repoStatus,
+      repo_push: repoPush,
+      repo_admin: repoAdmin,
+      message: userBody?.message || null,
+    }));
+  } catch (error) {
+    console.log('AAU_AGENT_GITHUB_TOKEN_PROBE', JSON.stringify({
+      present: true,
+      ok: false,
+      error: String(error?.message || error),
+    }));
+  }
+}
+
+await probeAgentGithubToken();
+
 const brokerDisabled = ['1', 'true', 'yes'].includes(
   String(process.env.AAU_BROKER_DISABLED || '').trim().toLowerCase(),
 );
@@ -131,48 +189,5 @@ if (process.env.AAU_GITHUB_TOKEN) {
 }
 
 
-if (process.env.AAU_AGENT_GITHUB_TOKEN) {
-  try {
-    const headers = {
-      authorization: `Bearer ${process.env.AAU_AGENT_GITHUB_TOKEN}`,
-      accept: 'application/vnd.github+json',
-      'x-github-api-version': '2022-11-28',
-      'user-agent': 'AAU-Agent-Token-Probe/0.1',
-    };
-    const userResponse = await fetch('https://api.github.com/user', { headers });
-    let userBody = null;
-    try { userBody = await userResponse.json(); } catch {}
-
-    const owner = String(process.env.AAU_GITHUB_OWNER || userBody?.login || '').trim();
-    let repoStatus = null;
-    let repoPush = null;
-    let repoAdmin = null;
-    if (userResponse.ok && owner) {
-      const repoResponse = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/agent-control-room`, { headers });
-      repoStatus = repoResponse.status;
-      let repoBody = null;
-      try { repoBody = await repoResponse.json(); } catch {}
-      repoPush = repoBody?.permissions?.push ?? null;
-      repoAdmin = repoBody?.permissions?.admin ?? null;
-    }
-
-    console.log('AAU_AGENT_GITHUB_TOKEN_PROBE', JSON.stringify({
-      ok: userResponse.ok,
-      status: userResponse.status,
-      login: userBody?.login || null,
-      configured_owner: process.env.AAU_GITHUB_OWNER || null,
-      oauth_scopes: userResponse.headers.get('x-oauth-scopes') || null,
-      repo_status: repoStatus,
-      repo_push: repoPush,
-      repo_admin: repoAdmin,
-      message: userBody?.message || null,
-    }));
-  } catch (error) {
-    console.log('AAU_AGENT_GITHUB_TOKEN_PROBE', JSON.stringify({
-      ok: false,
-      error: String(error?.message || error),
-    }));
-  }
-}
 
 await import('./broker-bridge-render.js');
