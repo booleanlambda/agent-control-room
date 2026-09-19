@@ -319,9 +319,12 @@ export async function startNvidiaAutonomousLifecycle() {
   connection.on('error', (error) => console.error('AAU_AUTONOMOUS_INTENT_RABBIT_ERROR', String(error?.message || error)));
   connection.on('close', () => console.error('AAU_AUTONOMOUS_INTENT_RABBIT_CLOSED'));
 
-  await heartbeat();
-  await armPending(channel);
-  await armLegacyPending(channel);
+  // Do not block service startup on Supabase availability. RabbitMQ consumers
+  // and the broker HTTP server must be able to come up even while DB RPCs are
+  // slow or timing out. Initial DB work is best-effort and retried by timers.
+  void heartbeat().catch((e) => console.error('AAU_AUTONOMOUS_INTENT_INITIAL_HEARTBEAT_FAILED', String(e?.message || e)));
+  void armPending(channel).catch((e) => console.error('AAU_AUTONOMOUS_INTENT_INITIAL_ARM_FAILED', String(e?.message || e)));
+  void armLegacyPending(channel).catch((e) => console.error('AAU_AUTONOMOUS_WAKE_INITIAL_ARM_FAILED', String(e?.message || e)));
 
   await channel.consume(MAIN_QUEUE, (msg) => {
     void handleIntent(channel, msg);
