@@ -171,4 +171,14 @@ if (isEnabled('AAU_AUTONOMOUS_LIFECYCLE_ENABLED')) {
   }
 }
 
+if (isEnabled('AAU_VERCEL_DIAGNOSTIC_ON_START')) {
+  void import('./vercel-diagnostic-probe.js')
+    .then(({ probeLatestVercelDeployment }) => probeLatestVercelDeployment())
+    .then((result) => console.log('AAU_VERCEL_DIAGNOSTIC_RESULT', JSON.stringify(result)))
+    .catch((error) => console.error('AAU_VERCEL_DIAGNOSTIC_FAILED', JSON.stringify({
+      message: String(error?.message || error).slice(0,1200),
+      details: error?.details || null,
+    })));
+}
+
 await import('./broker-bridge-envcheck.js');
