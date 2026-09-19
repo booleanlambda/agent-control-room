@@ -8,6 +8,8 @@ const VC = 'https://api.vercel.com';
 
 const AGENT_GH = String(process.env.AAU_AGENT_GITHUB_TOKEN || '').trim();
 const PLATFORM_GH = String(process.env.AAU_GITHUB_TOKEN || '').trim();
+const AGENT_VC = String(process.env.VERCEL_AGENT_TOKEN || '').trim();
+const PLATFORM_VC = String(process.env.AAU_VERCEL_TOKEN || '').trim();
 
 const cfg = {
   amqp: String(process.env.AMQP_URL || process.env.AMQP || '').trim(),
@@ -19,8 +21,11 @@ const cfg = {
   ghOwner: AGENT_GH
     ? String(process.env.AAU_AGENT_GITHUB_OWNER || '').trim()
     : String(process.env.AAU_GITHUB_OWNER || '').trim(),
-  vc: String(process.env.AAU_VERCEL_TOKEN || '').trim(),
-  vcTeam: String(process.env.AAU_VERCEL_TEAM_ID || '').trim(),
+  vc: AGENT_VC || PLATFORM_VC,
+  vcCredential: AGENT_VC ? 'agent' : (PLATFORM_VC ? 'platform' : 'none'),
+  vcTeam: AGENT_VC
+    ? String(process.env.VERCEL_AGENT_TEAM_ID || '').trim()
+    : String(process.env.AAU_VERCEL_TEAM_ID || '').trim(),
   id: String(process.env.AAU_BROKER_PUBLISHER_ID || `render:${process.env.RENDER_INSTANCE_ID || process.pid}`),
   port: Number(process.env.PORT || 10000),
   poll: Number(process.env.AAU_OUTBOX_POLL_MS || 1500),
@@ -62,11 +67,11 @@ const providerStatus = () => ({
     missing: cfg.gh ? [] : ['AAU_AGENT_GITHUB_TOKEN_OR_AAU_GITHUB_TOKEN'],
   },
   vercel: {
-    ready: Boolean(cfg.vc && cfg.vcTeam),
-    missing: [
-      ['AAU_VERCEL_TOKEN', cfg.vc],
-      ['AAU_VERCEL_TEAM_ID', cfg.vcTeam],
-    ].filter(([, value]) => !value).map(([key]) => key),
+    ready: Boolean(cfg.vc),
+    credential: cfg.vcCredential,
+    scope: cfg.vcTeam ? 'team' : 'personal',
+    team_id_configured: Boolean(cfg.vcTeam),
+    missing: cfg.vc ? [] : ['VERCEL_AGENT_TOKEN_OR_AAU_VERCEL_TOKEN'],
   },
 });
 
@@ -496,11 +501,6 @@ async function vc(path, options = {}) {
     error.retryable = true;
     throw error;
   }
-  if (!cfg.vcTeam) {
-    const error = new Error('vercel_team_not_configured');
-    error.retryable = true;
-    throw error;
-  }
   const { response, body } = await http(`${VC}${path}`, {
     ...options,
     headers: {
@@ -517,6 +517,16 @@ async function vc(path, options = {}) {
     throw error;
   }
   return body;
+}
+
+function vercelQuery(params = {}) {
+  const query = new URLSearchParams();
+  if (cfg.vcTeam) query.set('teamId', cfg.vcTeam);
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== '') query.set(key, String(value));
+  }
+  const text = query.toString();
+  return text ? `?${text}` : '';
 }
 
 function linked(project) {
@@ -539,7 +549,7 @@ async function ensureProject(context) {
     throw error;
   }
 
-  const query = `?teamId=${encodeURIComponent(cfg.vcTeam)}`;
+  const query = vercelQuery();
   const lookup = await http(`${VC}/v9/projects/${encodeURIComponent(name)}${query}`, {
     headers: { authorization: `Bearer ${cfg.vc}`, accept: 'application/json' },
   });
@@ -594,7 +604,7 @@ async function ensureDeployment(context) {
   const repo = repoParts.join('/');
   if (!org || !repo) throw new Error('github_repository_invalid');
 
-  const query = `?teamId=${encodeURIComponent(cfg.vcTeam)}&skipAutoDetectionConfirmation=1`;
+  const query = vercelQuery({ skipAutoDetectionConfirmation: 1 });
   const body = {
     name: projectName,
     project: projectId,
@@ -719,7 +729,7 @@ async function runVercelDeployment(job) {
       p_deployment_status: partial.deployment_status,
       p_git_ref: partial.git_ref,
       p_git_sha: partial.git_sha,
-      p_result: { ...partial, adapter: 'broker_bridge_render_v0_4', executor_id: cfg.id },
+      p_result: { ...partial, adapter: 'broker_bridge_render_v0_5_agent_vercel', executor_id: cfg.id, vercel_credential_mode: cfg.vcCredential, vercel_scope: cfg.vcTeam ? 'team' : 'personal' },
     });
     return { ok: true };
   } catch (error) {
