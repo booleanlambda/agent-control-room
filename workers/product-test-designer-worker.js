@@ -38,7 +38,7 @@ async function rpc(name, args = {}) {
 
 async function modelCall(model, system, user) {
   const controller = new AbortController();
-  const timeoutMs = 180000;
+  const timeoutMs = 60000;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const body = {
