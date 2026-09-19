@@ -221,6 +221,35 @@ async function armLegacyPending(channel) {
   }
 }
 
+let armScanInFlight = false;
+let heartbeatInFlight = false;
+
+async function runArmScan(channel, { initial = false } = {}) {
+  if (armScanInFlight) {
+    if (!initial) console.log('AAU_AUTONOMOUS_ARM_SCAN_SKIPPED_INFLIGHT');
+    return;
+  }
+  armScanInFlight = true;
+  try {
+    // New autonomous work is armed only onto aau.intent. The legacy aau.wake
+    // queue remains bound for draining messages that were already published,
+    // but we do not create new legacy wake messages from the same DB rows.
+    await armPending(channel);
+  } finally {
+    armScanInFlight = false;
+  }
+}
+
+async function runHeartbeat() {
+  if (heartbeatInFlight) return;
+  heartbeatInFlight = true;
+  try {
+    await heartbeat();
+  } finally {
+    heartbeatInFlight = false;
+  }
+}
+
 async function heartbeat() {
   try {
     const result = await rpc('aau_bridge_autonomous_worker_heartbeat', {
@@ -322,9 +351,8 @@ export async function startNvidiaAutonomousLifecycle() {
   // Do not block service startup on Supabase availability. RabbitMQ consumers
   // and the broker HTTP server must be able to come up even while DB RPCs are
   // slow or timing out. Initial DB work is best-effort and retried by timers.
-  void heartbeat().catch((e) => console.error('AAU_AUTONOMOUS_INTENT_INITIAL_HEARTBEAT_FAILED', String(e?.message || e)));
-  void armPending(channel).catch((e) => console.error('AAU_AUTONOMOUS_INTENT_INITIAL_ARM_FAILED', String(e?.message || e)));
-  void armLegacyPending(channel).catch((e) => console.error('AAU_AUTONOMOUS_WAKE_INITIAL_ARM_FAILED', String(e?.message || e)));
+  void runHeartbeat().catch((e) => console.error('AAU_AUTONOMOUS_INTENT_INITIAL_HEARTBEAT_FAILED', String(e?.message || e)));
+  void runArmScan(channel, { initial: true }).catch((e) => console.error('AAU_AUTONOMOUS_INTENT_INITIAL_ARM_FAILED', String(e?.message || e)));
 
   await channel.consume(MAIN_QUEUE, (msg) => {
     void handleIntent(channel, msg);
@@ -342,10 +370,11 @@ export async function startNvidiaAutonomousLifecycle() {
   }));
 
   const armTimer = setInterval(() => {
-    void armPending(channel).catch((e) => console.error('AAU_AUTONOMOUS_INTENT_ARM_SCAN_FAILED', String(e?.message || e)));
-    void armLegacyPending(channel).catch((e) => console.error('AAU_AUTONOMOUS_WAKE_ARM_SCAN_FAILED', String(e?.message || e)));
+    void runArmScan(channel).catch((e) => console.error('AAU_AUTONOMOUS_INTENT_ARM_SCAN_FAILED', String(e?.message || e)));
   }, ARM_POLL_MS);
-  const heartbeatTimer = setInterval(() => void heartbeat(), HEARTBEAT_MS);
+  const heartbeatTimer = setInterval(() => {
+    void runHeartbeat().catch((e) => console.error('AAU_AUTONOMOUS_INTENT_HEARTBEAT_LOOP_FAILED', String(e?.message || e)));
+  }, HEARTBEAT_MS);
 
   const stop = async () => {
     clearInterval(armTimer);
