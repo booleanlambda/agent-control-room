@@ -83,13 +83,11 @@ Autonomy rules:
 - Visible affordances are possibilities, not recommendations or a complete menu.
 - Do not optimize for pleasing an observer or for appearing diverse.
 
-Evidence-of-Action contract:
-- Never state or imply that you executed, ran, tested, benchmarked, measured, profiled, simulated, observed telemetry, or obtained an empirical result unless the result is backed by runtime evidence available to this cognition.
-- Runtime-backed execution evidence must be represented in associations[] with origin="runtime_execution_evidence_v0_1" and a real capability_invocation_id. A self-authored code file, JSON report, narrative, remembered claim, or newly generated hash is NOT proof that execution occurred.
-- If you do not have runtime-backed evidence, say so plainly. You may design a test, write code, propose expected outcomes, request an appropriate capability, or reason hypothetically, but do not convert those into observed facts.
-- If you claim that you implemented/wrote/created code or another artifact in THIS cognition, produce the artifact in the same cognition using origin="agent_file_output_v0_1".
-- Historical execution claims require the actual prior runtime evidence reference; do not reconstruct evidence after the fact.
-- If current capability_surface contains no execution/test runner, you cannot truthfully claim that code ran during this cognition.
+Optional Evidence-of-Action submission:
+- Evidence submission is optional and never blocks cognition or autonomy.
+- When genuine runtime evidence is available, you may attach it in associations[] using origin="runtime_execution_evidence_v0_1" with the real capability_invocation_id.
+- You may attach files/artifacts using origin="agent_file_output_v0_1".
+- Absence of evidence is not a validation error and must not trigger a repair loop.
 
 Resource/economic rules:
 - Resources are finite and replenishable. Maintained existence carries a recurring levy.
@@ -532,61 +530,6 @@ async function complete(model, messages) {
 }
 
 
-function evidenceOfActionIssue(packet, decision) {
-  const action = String(decision?.selected_action || '').toLowerCase();
-  const reason = String(decision?.stated_reason || '').toLowerCase();
-  const reply = String(decision?.outbound_message?.message || '').toLowerCase();
-  const memory = String(decision?.memory?.content || '').toLowerCase();
-  const text = [action, reason, reply, memory].join(' ');
-  const associations = Array.isArray(decision?.associations) ? decision.associations : [];
-  const runtimeEvidence = associations.filter((x) => x && typeof x === 'object' && x.origin === 'runtime_execution_evidence_v0_1');
-  const fileOutputs = associations.filter((x) => x && typeof x === 'object' && x.origin === 'agent_file_output_v0_1');
-
-  const designOnly = /^(design|plan|propose|draft|outline|specify)(_|$)/.test(action)
-    || /\b(have not executed|has not been executed|not executed|not tested|not benchmarked|not measured|not verified|not validated|proposed test|designed a test|design only|hypothetical|plan to|intend to|will test|will verify|will validate|will measure|will benchmark)\b/.test(text);
-  const operationalAction = /^(execute|run|test|benchmark|measure|profile|simulate|validate|verify|evaluate)(_|$)/.test(action)
-    || /^analyze_.*(result|telemetry|failure|performance|latency|viability|divergence)/.test(action)
-    || /^(telemetry_analysis|performance_test|latency_test|collision_test)(_|$)/.test(action);
-  let empirical = operationalAction
-    || /\b(executed|ran|tested|benchmarked|measured|observed|verified|validated|confirmed|evaluated|determined|telemetry showed|test showed|tests showed|test failed|test passed|actual result|failure occurred|produced a collision|hashes diverged|maintains contextual divergence|latency was|throughput was|overhead per node is acceptable|empirically validated)\b/.test(text);
-  if (designOnly && !operationalAction) empirical = false;
-
-  const artifact = /(^|_)(implement|write|create|generate|build|develop)(_|$)/.test(action)
-    || /(implementation|code|script|artifact|prototype)/.test(action)
-    || /\b(implemented|wrote|created|generated|built|developed|implementation is attached|code is attached|prototype is attached)\b/.test(text);
-
-  if (empirical && runtimeEvidence.length === 0) return 'runtime_execution_evidence_required';
-  if (!empirical && artifact && fileOutputs.length === 0) return 'same_cognition_file_output_required';
-  return null;
-}
-
-function evidenceCorrection(issue) {
-  if (issue === 'runtime_execution_evidence_required') {
-    return 'EVIDENCE-OF-ACTION CORRECTION: Your previous JSON claimed execution/testing/measurement/telemetry without runtime-backed execution evidence. Return the FULL JSON object again. Do NOT invent a run, result, hash, telemetry, failure threshold, benchmark, or historical artifact. If no real runtime evidence is available, explicitly say the work has not been executed/verified and reframe the action as design, code creation, analysis, or capability request. Preserve all required lifecycle, attention, admin-chat, file, and next_intents fields.';
-  }
-  return 'EVIDENCE-OF-ACTION CORRECTION: Your previous JSON claimed that you created/implemented an artifact but did not include a same-cognition agent_file_output_v0_1 artifact. Return the FULL JSON object again. Either include the actual artifact in associations[] or accurately state that no artifact was created. Preserve all required lifecycle, attention, admin-chat, file, and next_intents fields.';
-}
-
-function evidenceContractError(issue, packet, decision, ai, repairAttempts) {
-  const error = new Error('evidence_of_action_contract_incomplete_after_repair');
-  error.failureDetails = {
-    schema: 'aau.evidence_of_action_failure.v0_1',
-    error_code: 'EVIDENCE_OF_ACTION_REQUIRED',
-    issue,
-    stage: currentStage(packet),
-    validation: { failures: [issue], contract: 'evidence_of_action_v0_1' },
-    sanitized_decision: decision,
-    raw_model_output: String(ai?.content || '').slice(0,50000),
-    returned_model_id: ai?.model_returned || null,
-    response_id: ai?.response_id || null,
-    finish_reason: ai?.finish_reason || null,
-    usage: ai?.usage || null,
-    repair_meta: { evidence_repair_attempts: repairAttempts },
-    captured_at: new Date().toISOString(),
-  };
-  return error;
-}
-
 async function getDecision(packet, model) {
   const packetText = JSON.stringify(packet);
   const baseMessages = [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: packetText }];
@@ -646,7 +589,6 @@ async function getDecision(packet, model) {
   }
   let fileReplyRepairAttempts = 0;
   let attentionResolutionRepairAttempts = 0;
-  let evidenceRepairAttempts = 0;
   for (let i = 0; i < 2; i += 1) {
     let changed = false;
     if (needsAttentionResolution(packet, decision)) {
@@ -683,31 +625,7 @@ async function getDecision(packet, model) {
     );
   }
 
-  let evidenceIssue = evidenceOfActionIssue(packet, decision);
-  if (evidenceIssue) {
-    evidenceRepairAttempts += 1;
-    ai = await complete(model, [
-      ...baseMessages,
-      { role: 'assistant', content: String(ai.content || '').slice(0,50000) },
-      { role: 'user', content: evidenceCorrection(evidenceIssue) },
-    ]);
-    decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
-    evidenceIssue = evidenceOfActionIssue(packet, decision);
-  }
-  if (evidenceIssue) throw evidenceContractError(evidenceIssue, packet, decision, ai, evidenceRepairAttempts);
-  if (!timeIntentRequirementSatisfied(packet, decision)) throw new Error('evidence_repair_lost_time_intent');
-  if (needsAttentionResolution(packet, decision)) throw new Error('evidence_repair_lost_attention_resolution');
-  if (fileReplyNeedsRepair(packet, decision)) throw new Error('evidence_repair_lost_file_response');
-  const postEvidenceLifecycleIssue = lifecycleIssue(packet, decision);
-  if (postEvidenceLifecycleIssue) {
-    throw lifecycleContractError(
-      postEvidenceLifecycleIssue + '_stage_contract_incomplete_after_evidence_repair',
-      postEvidenceLifecycleIssue, packet, decision, ai,
-      { evidence_repair_attempts: evidenceRepairAttempts, phase: 'evidence_of_action_repair' },
-    );
-  }
-
-  return { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, fileReplyRepairAttempts, attentionResolutionRepairAttempts, evidenceRepairAttempts, packetText };
+  return { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, fileReplyRepairAttempts, attentionResolutionRepairAttempts, packetText };
 }
 
 export async function runNvidiaIntentExecution({ intentExecutionId, agentId, workerId = null } = {}) {
@@ -727,14 +645,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
     if (!packet || !model) throw new Error('intent_packet_or_model_missing');
 
     const startedAt = Date.now();
-    packet.evidence_of_action_context = {
-      version: 'evidence_of_action_v0_1',
-      hard_requirement: true,
-      runtime_execution_evidence_origin: 'runtime_execution_evidence_v0_1',
-      artifact_creation_evidence_origin: 'agent_file_output_v0_1',
-      rule: 'Empirical execution/test/benchmark/measurement/telemetry claims require runtime-backed evidence. Self-authored files do not prove execution. Historical claims require the actual prior runtime evidence reference.',
-    };
-    const { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, fileReplyRepairAttempts, attentionResolutionRepairAttempts, evidenceRepairAttempts, packetText } = await getDecision(packet, model);
+    const { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, fileReplyRepairAttempts, attentionResolutionRepairAttempts, packetText } = await getDecision(packet, model);
     if (ai.model_returned !== model) throw new Error(`model_consistency_breach:requested=${model};returned=${ai.model_returned || 'missing'}`);
 
     const raw = String(ai.content || '');
@@ -758,8 +669,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       embodiment_repair_attempts: embodimentRepairAttempts,
       file_reply_repair_attempts: fileReplyRepairAttempts,
       attention_resolution_repair_attempts: attentionResolutionRepairAttempts,
-      evidence_repair_attempts: evidenceRepairAttempts,
-      evidence_of_action_contract: 'evidence_of_action_v0_1',
+      evidence_of_action_mode: 'optional_submission_v0_1',
       attention_arbiter_contract: 'attention_arbiter_v0_1+attention_resolution_repair_v0_1',
       file_response_contract: 'file_response_repair_v0_1',
       latency_ms: Date.now() - startedAt,
@@ -781,7 +691,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       embodiment_repair_attempts: embodimentRepairAttempts,
       file_reply_repair_attempts: fileReplyRepairAttempts,
       attention_resolution_repair_attempts: attentionResolutionRepairAttempts,
-      evidence_repair_attempts: evidenceRepairAttempts,
+      evidence_of_action_mode: 'optional_submission_v0_1',
       usage: ai.usage, finish_reason: ai.finish_reason, applied,
     };
     console.log('AAU_NVIDIA_INTENT_RESULT', JSON.stringify(report));
