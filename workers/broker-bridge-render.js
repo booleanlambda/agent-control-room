@@ -539,7 +539,8 @@ function linked(project) {
 
 async function ensureProject(context) {
   const x = context.requested_config || {};
-  const name = String(x.project_name || context.construct_slug).toLowerCase();
+  const rawName = String(x.project_name || x.name || context.construct_slug || context.construct_name || '');
+  const name = rawName.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
   const repo = String(context.github_repo_full_name || '');
 
   if (!/^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$/.test(name)) throw new Error('invalid_project_name');
@@ -765,7 +766,7 @@ async function runVercel(job) {
       p_project_name: partial.project_name,
       p_project_url: partial.project_url,
       p_git_repo_full_name: partial.github_repo_full_name,
-      p_result: { ...partial, adapter: 'broker_bridge_render_v0_3', executor_id: cfg.id },
+      p_result: { ...partial, adapter: 'broker_bridge_render_v0_4_project_name', executor_id: cfg.id },
     });
     return { ok: true };
   } catch (error) {
