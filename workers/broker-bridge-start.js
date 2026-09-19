@@ -99,6 +99,16 @@ if (isEnabled('AAU_PRODUCT_TEST_DESIGNER_ENABLED')) {
   }
 }
 
+if (isEnabled('AAU_PRODUCT_SERVICE_ARCHITECT_ENABLED')) {
+  try {
+    const { startProductServiceArchitectWorker } = await import('./product-service-architect-worker.js');
+    const result = startProductServiceArchitectWorker();
+    console.log('AAU_PRODUCT_SERVICE_ARCHITECT_STARTED', JSON.stringify(result));
+  } catch (error) {
+    console.error('AAU_PRODUCT_SERVICE_ARCHITECT_START_FAILED', JSON.stringify({ error_name: error?.name || null, message: String(error?.message || error).slice(0, 1600) }));
+  }
+}
+
 if (isEnabled('AAU_PRODUCT_ARCH_CONFORMANCE_ENABLED')) {
   try {
     const { startProductArchitectureConformanceWorker } = await import('./product-architecture-conformance-worker.js');
