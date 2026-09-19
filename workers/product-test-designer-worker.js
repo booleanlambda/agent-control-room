@@ -97,6 +97,18 @@ function validateSpec(spec, claimManifest) {
   if (!Array.isArray(spec.deterministic_gates) || spec.deterministic_gates.length < 1) throw new Error('deterministic_gates_required');
   if (!Array.isArray(spec.adversarial_tests)) throw new Error('adversarial_tests_required');
   if (!String(spec.approval_rule || '').trim()) throw new Error('approval_rule_required');
+  if (spec?.load_test?.required === true) {
+    if (spec.load_test.mode !== 'concurrent_wave') throw new Error('load_test_mode_must_be_concurrent_wave');
+    if (Number(spec.load_test.virtual_users) < 1 || Number(spec.load_test.virtual_users) > 1000) throw new Error('load_test_virtual_users_invalid');
+    const t = spec.load_test.thresholds;
+    if (!t || typeof t !== 'object') throw new Error('load_test_thresholds_required');
+    const minSuccess = Number(t.min_success_rate);
+    const maxError = Number(t.max_error_rate);
+    if (!Number.isFinite(minSuccess) || minSuccess < 0 || minSuccess > 1) throw new Error('load_min_success_rate_invalid');
+    if (!Number.isFinite(maxError) || maxError < 0 || maxError > 1) throw new Error('load_max_error_rate_invalid');
+    if (typeof t.require_correctness_under_load !== 'boolean') throw new Error('load_correctness_flag_required');
+    if (typeof t.require_cross_user_isolation !== 'boolean') throw new Error('load_isolation_flag_required');
+  }
 
   const claimsById = new Map(asArray(claimManifest).map((x) => [String(x?.id || ''), String(x?.text || '')]).filter(([id]) => id));
   const known = new Set(claimsById.keys());
@@ -151,7 +163,8 @@ async function design(job) {
     'Do not prescribe endpoint paths, request field names, payload schemas, frameworks, providers, or other implementation/interface choices. Phrase the frozen test behaviorally; the later execution planner maps it to the agent-built documented interface.',
     'For explicit_claim gates, never add a timing/latency/SLA pass threshold unless that threshold exists in the referenced agent claim.',
     'Do not treat deployment, HTTP 200, or the agent\'s own test suite as proof of substantive correctness.',
-    'For a remotely consumed service/API, normally include a 1000-virtual-user concurrent stress characterization unless clearly disproportionate; distinguish realistic operating concurrency from stress concurrency.',
+    'For a remotely consumed service/API, normally include a 1000-virtual-user concurrent-wave stress characterization unless clearly disproportionate; distinguish realistic operating concurrency from stress concurrency.',
+    'When load_test.required=true, provide machine-readable thresholds: min_success_rate (0..1), max_error_rate (0..1), require_correctness_under_load boolean, and require_cross_user_isolation boolean. Do not hide load pass criteria only in prose.',
     'Performance metrics such as p50/p95/p99 should be measured. A usage-model load test may set reliability/correctness expectations with rationale, but an explicit-claim gate may not invent a latency threshold absent from the claim.',
     'Prefer adversarial/property tests that could falsify the agent\'s strongest claims.',
     'Return one compact JSON object only, with no markdown.',
@@ -186,11 +199,16 @@ Return:
   ],
   "load_test":{
     "required":true,
+    "mode":"concurrent_wave",
     "virtual_users":1000,
     "workflow":"realistic complete user operation(s), not health pings",
-    "duration_seconds":120,
     "metrics":["success_rate","error_rate","p50_ms","p95_ms","p99_ms","correctness_under_load","cross_user_isolation"],
-    "pass_conditions":["..."],
+    "thresholds":{
+      "min_success_rate":0.99,
+      "max_error_rate":0.01,
+      "require_correctness_under_load":true,
+      "require_cross_user_isolation":false
+    },
     "rationale":"..."
   },
   "adversarial_tests":[
