@@ -80,6 +80,11 @@ async function probeAgentVercelToken() {
       email_present: Boolean(userBody?.user?.email || userBody?.email),
       teams_status: teamsResponse?.status || null,
       team_count: Array.isArray(teamsBody?.teams) ? teamsBody.teams.length : null,
+      teams: Array.isArray(teamsBody?.teams) ? teamsBody.teams.slice(0,5).map((t) => ({
+        id: t?.id || null,
+        slug: t?.slug || null,
+        name: t?.name || null,
+      })) : [],
       configured_agent_team: String(process.env.VERCEL_AGENT_TEAM_ID || '').trim() || null,
       message: userBody?.error?.message || userBody?.message || null,
       mode: 'read_only',
