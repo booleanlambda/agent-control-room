@@ -229,7 +229,7 @@ function normalizeAgentAuthoredFiles(raw) {
   return out;
 }
 
-async function putRepoFile(owner, repo, path, content, branch, message = null) {
+async function putRepoFile(owner, repo, path, content, branch, message = null, upsert = false) {
   const encodedPath = path.split('/').map(encodeURIComponent).join('/');
   const api = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodedPath}`;
   const lookup = await http(`${GH}${api}`, {
@@ -240,23 +240,29 @@ async function putRepoFile(owner, repo, path, content, branch, message = null) {
     },
   });
 
-  if (lookup.response.ok) return { created: false };
-  if (lookup.response.status !== 404) {
+  if (lookup.response.ok && !upsert) return { created: false, updated: false };
+  if (!lookup.response.ok && lookup.response.status !== 404) {
     const error = new Error(`github_file_lookup:${lookup.response.status}`);
     error.retryable = lookup.response.status === 429 || lookup.response.status >= 500;
     throw error;
   }
 
+  const existingSha = lookup.response.ok ? String(lookup.body?.sha || '') : '';
+  if (lookup.response.ok && !existingSha) throw new Error('github_existing_file_sha_missing');
+
+  const body = {
+    message: message || `AAU: write agent-authored file (${path})`,
+    content: Buffer.from(content, 'utf8').toString('base64'),
+    branch,
+  };
+  if (existingSha) body.sha = existingSha;
+
   await gh(api, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      message: message || `AAU: write agent-authored file (${path})`,
-      content: Buffer.from(content, 'utf8').toString('base64'),
-      branch,
-    }),
+    body: JSON.stringify(body),
   });
-  return { created: true };
+  return { created: !existingSha, updated: Boolean(existingSha) };
 }
 
 async function seedReactHelloWorld(owner, repo, branch) {
@@ -423,7 +429,9 @@ async function ensureRepo(context) {
   }
 
   const authoredFiles = normalizeAgentAuthoredFiles(x.files);
+  const upsertFiles = x.upsert_files === true;
   let filesWritten = 0;
+  let filesUpdated = 0;
   for (const file of authoredFiles) {
     const result = await putRepoFile(
       owner,
@@ -431,9 +439,11 @@ async function ensureRepo(context) {
       file.path,
       file.content,
       branch,
-      `AAU agent: add ${file.path}`,
+      upsertFiles ? `AAU agent: upsert ${file.path}` : `AAU agent: add ${file.path}`,
+      upsertFiles,
     );
     if (result.created) filesWritten += 1;
+    if (result.updated) filesUpdated += 1;
   }
 
   return {
@@ -447,6 +457,8 @@ async function ensureRepo(context) {
     authenticated_owner: identity.login,
     agent_authored_files_requested: authoredFiles.length,
     agent_authored_files_written: filesWritten,
+    agent_authored_files_updated: filesUpdated,
+    upsert_files: upsertFiles,
     seed,
   };
 }
