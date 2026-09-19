@@ -6,13 +6,19 @@ const SB = 'https://mgtilfgygzymxiyixjit.supabase.co';
 const GH = 'https://api.github.com';
 const VC = 'https://api.vercel.com';
 
+const AGENT_GH = String(process.env.AAU_AGENT_GITHUB_TOKEN || '').trim();
+const PLATFORM_GH = String(process.env.AAU_GITHUB_TOKEN || '').trim();
+
 const cfg = {
   amqp: String(process.env.AMQP_URL || process.env.AMQP || '').trim(),
   sb: String(process.env.AAU_SUPABASE_URL || SB).replace(/\/$/, ''),
   anon: String(process.env.AAU_SUPABASE_ANON_KEY || '').trim(),
   bridge: String(process.env.AAU_BROKER_BRIDGE_TOKEN || '').trim(),
-  gh: String(process.env.AAU_GITHUB_TOKEN || '').trim(),
-  ghOwner: String(process.env.AAU_GITHUB_OWNER || '').trim(),
+  gh: AGENT_GH || PLATFORM_GH,
+  ghCredential: AGENT_GH ? 'agent' : (PLATFORM_GH ? 'platform' : 'none'),
+  ghOwner: AGENT_GH
+    ? String(process.env.AAU_AGENT_GITHUB_OWNER || '').trim()
+    : String(process.env.AAU_GITHUB_OWNER || '').trim(),
   vc: String(process.env.AAU_VERCEL_TOKEN || '').trim(),
   vcTeam: String(process.env.AAU_VERCEL_TEAM_ID || '').trim(),
   id: String(process.env.AAU_BROKER_PUBLISHER_ID || `render:${process.env.RENDER_INSTANCE_ID || process.pid}`),
@@ -50,11 +56,10 @@ const missingCore = () => [
 
 const providerStatus = () => ({
   github: {
-    ready: Boolean(cfg.gh && cfg.ghOwner),
-    missing: [
-      ['AAU_GITHUB_TOKEN', cfg.gh],
-      ['AAU_GITHUB_OWNER', cfg.ghOwner],
-    ].filter(([, value]) => !value).map(([key]) => key),
+    ready: Boolean(cfg.gh),
+    credential: cfg.ghCredential,
+    owner_mode: cfg.ghOwner ? 'configured' : 'authenticated_identity',
+    missing: cfg.gh ? [] : ['AAU_AGENT_GITHUB_TOKEN_OR_AAU_GITHUB_TOKEN'],
   },
   vercel: {
     ready: Boolean(cfg.vc && cfg.vcTeam),
@@ -182,7 +187,44 @@ async function gh(path, options = {}) {
   return body;
 }
 
-async function putRepoFile(owner, repo, path, content, branch) {
+let githubIdentityCache = null;
+
+async function authenticatedGithubIdentity() {
+  if (githubIdentityCache) return githubIdentityCache;
+  const body = await gh('/user');
+  const login = String(body?.login || '').trim();
+  if (!login) throw new Error('github_authenticated_identity_missing');
+  githubIdentityCache = { login, id: body?.id ? String(body.id) : null };
+  return githubIdentityCache;
+}
+
+function normalizeAgentAuthoredFiles(raw) {
+  const out = [];
+  if (!raw) return out;
+
+  const entries = Array.isArray(raw)
+    ? raw.map((item) => [item?.path, item?.content])
+    : (raw && typeof raw === 'object')
+      ? Object.entries(raw)
+      : [];
+
+  let totalBytes = 0;
+  for (const [rawPath, rawContent] of entries.slice(0, 32)) {
+    const path = String(rawPath || '').trim().replace(/^\/+/, '');
+    const content = typeof rawContent === 'string' ? rawContent : '';
+    if (!path || path.includes('..') || !/^[A-Za-z0-9._\/-]{1,180}$/.test(path)) {
+      throw new Error('invalid_agent_file_path');
+    }
+    const bytes = Buffer.byteLength(content, 'utf8');
+    if (bytes > 131072) throw new Error('agent_file_too_large');
+    totalBytes += bytes;
+    if (totalBytes > 524288) throw new Error('agent_files_total_too_large');
+    out.push({ path, content });
+  }
+  return out;
+}
+
+async function putRepoFile(owner, repo, path, content, branch, message = null) {
   const encodedPath = path.split('/').map(encodeURIComponent).join('/');
   const api = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodedPath}`;
   const lookup = await http(`${GH}${api}`, {
@@ -204,7 +246,7 @@ async function putRepoFile(owner, repo, path, content, branch) {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      message: `AAU: seed React Hello World (${path})`,
+      message: message || `AAU: write agent-authored file (${path})`,
       content: Buffer.from(content, 'utf8').toString('base64'),
       branch,
     }),
@@ -314,15 +356,17 @@ p { line-height: 1.6; }
 
 async function ensureRepo(context) {
   const x = context.requested_config || {};
-  const owner = String(x.owner || cfg.ghOwner);
-  const name = String(x.name || x.repo_name || context.construct_slug);
+  const identity = await authenticatedGithubIdentity();
+  const ownerType = x.owner_type === 'org' ? 'org' : 'user';
+  const owner = String(x.owner || cfg.ghOwner || identity.login).trim();
+  const name = String(x.name || x.repo_name || context.construct_slug).trim();
 
-  if (!owner) {
-    const error = new Error('github_owner_not_configured');
-    error.retryable = true;
-    throw error;
-  }
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(owner)) throw new Error('invalid_github_owner');
   if (!/^[A-Za-z0-9._-]{1,100}$/.test(name)) throw new Error('invalid_repository_name');
+
+  if (ownerType === 'user' && owner.toLowerCase() !== identity.login.toLowerCase()) {
+    throw new Error('github_user_owner_must_match_agent_identity');
+  }
 
   let info;
   let created = false;
@@ -342,7 +386,7 @@ async function ensureRepo(context) {
   } else if (lookup.response.status === 404) {
     const marker = `[AAU construct:${context.construct_id}]`;
     const description = `${String(x.description || `AAU Agent Construct: ${context.construct_name || name}`)} ${marker}`.slice(0, 350);
-    info = await gh(x.owner_type === 'org'
+    info = await gh(ownerType === 'org'
       ? `/orgs/${encodeURIComponent(owner)}/repos`
       : '/user/repos', {
       method: 'POST',
@@ -367,9 +411,24 @@ async function ensureRepo(context) {
     throw error;
   }
 
+  const branch = info.default_branch || 'main';
   let seed = null;
   if (x.template === 'react_hello_world') {
-    seed = await seedReactHelloWorld(owner, name, info.default_branch || 'main');
+    seed = await seedReactHelloWorld(owner, name, branch);
+  }
+
+  const authoredFiles = normalizeAgentAuthoredFiles(x.files);
+  let filesWritten = 0;
+  for (const file of authoredFiles) {
+    const result = await putRepoFile(
+      owner,
+      name,
+      file.path,
+      file.content,
+      branch,
+      `AAU agent: add ${file.path}`,
+    );
+    if (result.created) filesWritten += 1;
   }
 
   return {
@@ -377,12 +436,15 @@ async function ensureRepo(context) {
     repo_id: String(info.id),
     repo_full_name: info.full_name,
     repo_url: info.html_url,
-    default_branch: info.default_branch,
+    default_branch: branch,
     private: Boolean(info.private),
+    credential_mode: cfg.ghCredential,
+    authenticated_owner: identity.login,
+    agent_authored_files_requested: authoredFiles.length,
+    agent_authored_files_written: filesWritten,
     seed,
   };
 }
-
 async function runGithub(job) {
   const context = await rpc('aau_bridge_claim_github_construct_job', {
     p_broker_job_id: job,
@@ -398,7 +460,7 @@ async function runGithub(job) {
       p_repo_url: partial.repo_url,
       p_default_branch: partial.default_branch,
       p_private: partial.private,
-      p_result: { ...partial, adapter: 'broker_bridge_render_v0_3', executor_id: cfg.id },
+      p_result: { ...partial, adapter: 'broker_bridge_render_v0_4_agent_github', executor_id: cfg.id },
     });
     return { ok: true };
   } catch (error) {
