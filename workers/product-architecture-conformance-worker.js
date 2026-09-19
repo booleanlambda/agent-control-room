@@ -158,8 +158,61 @@ function validate(result) {
   return { ...result, status };
 }
 
+// Deterministic corroboration of a manifest's claimed *literal* request fields.
+ // Architectural semantic names may vary; a manifest cannot claim that a deployed
+ // validator accepts a key that the source explicitly rejects.
+function manifestInputMismatch(snapshot) {
+  const manifest = snapshot.files.find((file) => /ARCHITECTURE[_-]MANIFEST\.md$/i.test(file.path));
+  const source = snapshot.files.find((file) => /\.py$/i.test(file.path)
+    && /not in data/.test(file.content) && /route\(['"]\/hash/.test(file.content));
+  if (!manifest || !source) return null;
+  const line = manifest.content.split(/\r?\n/).find((text) =>
+    /Interface Contract \(Inputs\)/i.test(text) && /validation for/i.test(text));
+  if (!line) return null;
+  const after = line.split(/validation for/i)[1] || '';
+  const documented = [...after.matchAll(/`([a-z][a-z0-9_]*)`/gi)].map((match) => match[1]);
+  const required = [...source.content.matchAll(/['"]([a-z][a-z0-9_]*)['"]\s+not in\s+data/gi)].map((match) => match[1]);
+  if (!documented.length || !required.length) return null;
+  const missing = documented.filter((name) => !required.includes(name));
+  const undocumented = required.filter((name) => !documented.includes(name));
+  if (!missing.length && !undocumented.length) return null;
+  return { documented, required, missing, undocumented, manifest_path:manifest.path,
+    source_path:source.path, manifest_sha:manifest.sha, source_sha:source.sha,
+    tree_sha:snapshot.tree_sha };
+}
+
 async function review(job) {
   const snapshot = await repositorySnapshot(job.repo_full_name, job.default_branch || 'main');
+  const mismatch = manifestInputMismatch(snapshot);
+  if (mismatch) {
+    return {
+      result: {
+        status:'VERIFIED_FAIL',
+        implementation_manifest:{
+          explicit_manifest_present:true,
+          source_files:[mismatch.manifest_path,mismatch.source_path],
+          mappings:[{architecture_requirement:'Documented inputs must match the actual live request validator',
+            implementation:'Manifest input names contradict the implementation source',
+            evidence_files:[mismatch.manifest_path,mismatch.source_path]}],
+        },
+        evidence:{ repo_full_name:job.repo_full_name,branch:job.default_branch || 'main',
+          files_reviewed:[mismatch.manifest_path,mismatch.source_path],
+          manifest_input_mismatch:mismatch,tree_sha:snapshot.tree_sha },
+        report:{
+          summary:'The manifest claims literal request validation fields that do not match the implementation. A client following the documented request would not satisfy the actual validator. Repair documentation or implementation, then request a new review.',
+          satisfied_requirements:[],
+          deviations:[{id:'ARCH-MANIFEST-INPUT-ACCURACY',severity:'major',
+            requirement:'Documentation sufficient to construct a valid request that matches the implementation',
+            observed:'Manifest documents '+mismatch.documented.join(', ')+'; source requires '+mismatch.required.join(', '),
+            effect:'Documented request is not valid for the current interface.'}],
+        },
+      },
+      modelRequested:'runtime/deterministic-manifest-consistency-v0_1',
+      modelUsed:'runtime/deterministic-manifest-consistency-v0_1',
+      fallbackUsed:false,
+    };
+  }
+
   const system = [
     'You are the independent AAU Product/Service Architecture Conformance Reviewer.',
     'The autonomous agent owns product and implementation choices. Do not redesign the product.',
