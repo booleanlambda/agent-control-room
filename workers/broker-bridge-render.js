@@ -978,6 +978,45 @@ async function configureVercelProject(context) {
   };
 }
 
+
+async function probePublicHttpEndpoint(rawUrl) {
+  const raw = String(rawUrl || '').trim();
+  if (!raw) return null;
+  const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      redirect: 'follow',
+      headers: {
+        accept: '*/*',
+        'user-agent': 'AAU-Broker-Bridge/0.3',
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+    const bodyText = await response.text();
+    const safeHeaders = {};
+    for (const key of ['content-type','server','x-vercel-error','x-vercel-id','location']) {
+      const value = response.headers.get(key);
+      if (value) safeHeaders[key] = redactDiagnosticText(value).slice(0,500);
+    }
+    return {
+      requested_url: url,
+      response_url: response.url || url,
+      status: response.status,
+      ok: response.ok,
+      headers: safeHeaders,
+      body_preview: redactDiagnosticText(bodyText).slice(0,2000),
+    };
+  } catch (error) {
+    return {
+      requested_url: url,
+      status: 0,
+      ok: false,
+      error: redactDiagnosticText(String(error?.message || error)).slice(0,1000),
+    };
+  }
+}
+
 async function inspectVercelDeployment(context) {
   const projectId = String(context.vercel_project_id || '');
   if (!projectId) throw new Error('vercel_project_id_required');
@@ -1031,11 +1070,30 @@ async function inspectVercelDeployment(context) {
     events = [{ type: 'inspection_warning', text: `build_log_fetch_failed:${String(error?.message || error).slice(0,500)}` }];
   }
 
+  const deploymentHost = String(deployment?.url || '').trim();
+  const latestResult = context.latest_deployment?.result_payload || {};
+  const productionUrl = String(
+    latestResult.production_url
+    || latestResult.public_url
+    || ''
+  ).trim();
+
+  const [deploymentHttp, productionHttp] = await Promise.all([
+    probePublicHttpEndpoint(deploymentHost),
+    productionUrl && productionUrl !== deploymentHost
+      ? probePublicHttpEndpoint(productionUrl)
+      : Promise.resolve(null),
+  ]);
+
   return {
     project_id: projectId,
     deployment_selection_source: selectionSource,
     deployment: safeDeploymentDetails(deployment),
     build_events: events,
+    http_diagnostics: {
+      deployment: deploymentHttp,
+      production: productionHttp,
+    },
     latest_broker_deployment: context.latest_deployment || {},
   };
 }
