@@ -150,9 +150,35 @@ async function boundedFetch(url, options = {}, timeoutMs = 12000, maxBytes = 120
   }
 }
 
-async function discoverHttp(base) {
+async function discoverHttp(base, job) {
   const paths = ['/', '/.well-known/aau-test-manifest.json', '/openapi.json', '/swagger.json', '/api/openapi.json'];
   const out = [];
+  // A product need not expose a root page or OpenAPI. Reuse a separately audited,
+  // deployment-matched exact-operation probe for DISCOVERY ONLY, never as fresh
+  // functional, adversarial, or load evidence.
+  const proof = job?.metadata?.canonical_operation_evidence || {};
+  const method = String(proof.operation_method || '').toUpperCase();
+  const path = String(proof.operation_path || '');
+  let matchesOrigin = false;
+  try {
+    const url = new URL(String(proof.production_url || ''));
+    matchesOrigin = url.origin === base.origin && url.pathname === base.pathname;
+  } catch {}
+  if (proof.verified === true && Number(proof.operation_http_status) === 200
+    && ['GET', 'POST'].includes(method)
+    && /^\/[a-zA-Z0-9_./-]{1,180}$/.test(path) && !path.includes('..')
+    && matchesOrigin && String(proof.deployment_id || '').trim() && String(proof.git_sha || '').trim()) {
+    out.push({
+      path, method, status: 200, content_type: proof.operation_content_type || 'application/json',
+      source: 'previous_runtime_verified_canonical_operation_probe',
+      observed_at: proof.probe_completed_at || null,
+      body: JSON.stringify({
+        discovery_hint: 'A prior deployment-matched runtime probe returned HTTP 200 for this exact method and path. Construct a fresh valid request using repository source/manifest. Do NOT treat this earlier probe as proof of independent test pass.',
+        operation_method: method, operation_path: path,
+      }),
+      body_sha256: null, latency_ms: null, error: null,
+    });
+  }
   for (const path of paths) {
     const target = new URL(path, base);
     if (target.origin !== base.origin) continue;
@@ -260,7 +286,7 @@ async function makeExecutionPlan(job, discovery, repoEvidence) {
   const system = [
     'You are the AAU independent Product Test Execution Planner.',
     'A Product Test Specification is already frozen; you may only map its existing deterministic gates and adversarial tests to observable tests. Do not add or relax requirements.',
-    'Use only endpoints actually evidenced by the supplied discovery material. Never invent an endpoint.',
+    'Use only endpoints actually evidenced by the supplied discovery material. A previous runtime-verified canonical operation probe is valid endpoint DISCOVERY even if root and OpenAPI paths return 404; it is NOT a fresh functional test or proof of success. Build a fresh valid operation request from the repository documentation and implementation. Never invent an endpoint.',
     'All HTTP requests must be same-origin relative paths. Methods are limited to GET or POST.',
     'Choose at most 16 functional requests.',
     'Mark safe_for_load=true only for an operation that is clearly non-destructive/idempotent or a pure computation. Never load-test payments, messaging, deletion, account creation, external side effects, or ambiguous mutations.',
@@ -271,6 +297,8 @@ async function makeExecutionPlan(job, discovery, repoEvidence) {
 
   const compactDiscovery = discovery.map((x) => ({
     path: x.path,
+    method: x.method || 'GET',
+    source: x.source || 'fresh_http_discovery',
     status: x.status,
     content_type: x.content_type,
     body: String(x.body || '').slice(0, 30000),
@@ -498,7 +526,7 @@ Every deterministic gate and every adversarial test in the frozen specification 
 
 async function processRun(job) {
   const base = safeBaseUrl(job.production_url);
-  const discovery = await discoverHttp(base);
+  const discovery = await discoverHttp(base, job);
   const repoEvidence = await collectRepoEvidence(job.repo_url);
   const planBundle = await makeExecutionPlan(job, discovery, repoEvidence);
   const functional = planBundle.plan.executable ? await executeFunctional(base, planBundle.plan) : [];
@@ -531,7 +559,7 @@ async function processRun(job) {
 
   const evidence = {
     service_discovery: discovery.map((x) => ({
-      path: x.path, status: x.status, latency_ms: x.latency_ms,
+      path: x.path, method: x.method || 'GET', source: x.source || 'fresh_http_discovery', status: x.status, latency_ms: x.latency_ms,
       content_type: x.content_type, body_sha256: x.body_sha256,
       body_excerpt: String(x.body || '').slice(0, 12000),
       error: x.error || null,
@@ -553,7 +581,7 @@ async function processRun(job) {
     judge_model: judged.judge_model,
     judge_requested_model: judged.judge_requested_model,
     judge_fallback_used: judged.judge_fallback_used,
-    executor_version: 'product_test_executor_v0_2_validated_model_fallback',
+    executor_version: 'product_test_executor_v0_3_verified_operation_discovery',
   };
 
   const completed = await rpc('aau_bridge_complete_product_test_run', {
@@ -576,7 +604,7 @@ async function processRun(job) {
     load_required: requiredLoad,
     load_virtual_users: load.virtual_users || 0,
     load_completed: Boolean(load.completed),
-    executor_version: 'product_test_executor_v0_2_validated_model_fallback',
+    executor_version: 'product_test_executor_v0_3_verified_operation_discovery',
   }));
 }
 
@@ -629,7 +657,7 @@ export function startProductTestExecutorWorker() {
     ready: true,
     executor_id: executorId,
     poll_ms: pollMs,
-    version: 'product_test_executor_v0_2_validated_model_fallback',
+    version: 'product_test_executor_v0_3_verified_operation_discovery',
     max_virtual_users: 1000,
     same_origin_only: true,
     authenticator: 'moonshotai/kimi-k3',
