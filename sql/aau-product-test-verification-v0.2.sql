@@ -333,36 +333,80 @@ begin
 end
 $$;
 
-create or replace function public.aau_bridge_complete_product_test_design(
-  p_bridge_token text,p_product_test_design_id uuid,p_executor_id text,
-  p_model_requested text,p_model_used text,p_fallback_used boolean,p_specification jsonb
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path='pg_catalog','public','agent_lab'
-as $$
+CREATE OR REPLACE FUNCTION public.aau_bridge_complete_product_test_design(p_bridge_token text, p_product_test_design_id uuid, p_executor_id text, p_model_requested text, p_model_used text, p_fallback_used boolean, p_specification jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'pg_catalog', 'public', 'agent_lab'
+AS $function$
 declare
   v_design agent_lab.product_test_designs%rowtype;
-  v_gate jsonb; v_claim_id jsonb; v_known boolean; v_spec jsonb;
-  v_claim_text text; v_pass_condition text;
+  v_gate jsonb;
+  v_claim_id jsonb;
+  v_known boolean;
+  v_spec jsonb;
+  v_claim_text text;
+  v_pass_condition text;
+  v_load_required boolean := false;
+  v_virtual_users integer := 0;
+  v_min_success numeric;
+  v_max_error numeric;
+  v_require_correctness boolean;
+  v_require_isolation boolean;
 begin
   perform agent_lab.assert_broker_bridge_token(p_bridge_token);
-  select * into v_design from agent_lab.product_test_designs
-  where product_test_design_id=p_product_test_design_id for update;
+
+  select * into v_design
+  from agent_lab.product_test_designs
+  where product_test_design_id=p_product_test_design_id
+  for update;
+
   if not found then raise exception 'product_test_design_not_found'; end if;
   if v_design.status<>'running' then raise exception 'product_test_design_not_running'; end if;
-  if coalesce(v_design.claimed_by,'')<>coalesce(p_executor_id,'') then raise exception 'product_test_design_claim_owner_mismatch'; end if;
-
+  if coalesce(v_design.claimed_by,'')<>coalesce(p_executor_id,'') then
+    raise exception 'product_test_design_claim_owner_mismatch';
+  end if;
   if jsonb_typeof(p_specification)<>'object' then raise exception 'product_test_spec_object_required'; end if;
   if jsonb_typeof(p_specification->'deterministic_gates')<>'array' then raise exception 'deterministic_gates_array_required'; end if;
   if jsonb_typeof(p_specification->'adversarial_tests')<>'array' then raise exception 'adversarial_tests_array_required'; end if;
   if jsonb_typeof(p_specification->'test_profile')<>'object' then raise exception 'test_profile_object_required'; end if;
   if nullif(trim(coalesce(p_specification->>'approval_rule','')),'') is null then raise exception 'approval_rule_required'; end if;
 
+  begin
+    v_load_required := coalesce((p_specification#>>'{load_test,required}')::boolean,false);
+  exception when others then
+    raise exception 'load_test_required_boolean_invalid';
+  end;
+
+  if v_load_required then
+    if coalesce(p_specification#>>'{load_test,mode}','') <> 'concurrent_wave' then
+      raise exception 'load_test_mode_must_be_concurrent_wave';
+    end if;
+    begin v_virtual_users := (p_specification#>>'{load_test,virtual_users}')::integer;
+    exception when others then raise exception 'load_test_virtual_users_invalid'; end;
+    if v_virtual_users < 1 or v_virtual_users > 1000 then
+      raise exception 'load_test_virtual_users_invalid';
+    end if;
+    if jsonb_typeof(p_specification#>'{load_test,thresholds}') <> 'object' then
+      raise exception 'load_test_thresholds_required';
+    end if;
+    begin v_min_success := (p_specification#>>'{load_test,thresholds,min_success_rate}')::numeric;
+    exception when others then raise exception 'load_min_success_rate_invalid'; end;
+    begin v_max_error := (p_specification#>>'{load_test,thresholds,max_error_rate}')::numeric;
+    exception when others then raise exception 'load_max_error_rate_invalid'; end;
+    if v_min_success < 0 or v_min_success > 1 then raise exception 'load_min_success_rate_invalid'; end if;
+    if v_max_error < 0 or v_max_error > 1 then raise exception 'load_max_error_rate_invalid'; end if;
+    begin v_require_correctness := (p_specification#>>'{load_test,thresholds,require_correctness_under_load}')::boolean;
+    exception when others then raise exception 'load_correctness_flag_required'; end;
+    begin v_require_isolation := (p_specification#>>'{load_test,thresholds,require_cross_user_isolation}')::boolean;
+    exception when others then raise exception 'load_isolation_flag_required'; end;
+  end if;
+
   for v_gate in select value from jsonb_array_elements(p_specification->'deterministic_gates')
   loop
-    if coalesce(v_gate->>'basis','') not in ('explicit_claim','usage_model') then raise exception 'gate_basis_invalid'; end if;
+    if coalesce(v_gate->>'basis','') not in ('explicit_claim','usage_model') then
+      raise exception 'gate_basis_invalid';
+    end if;
     if nullif(trim(coalesce(v_gate->>'test','')),'') is null
        or nullif(trim(coalesce(v_gate->>'pass_condition','')),'') is null
        or nullif(trim(coalesce(v_gate->>'evidence','')),'') is null
@@ -374,6 +418,7 @@ begin
       if jsonb_typeof(v_gate->'claim_ids')<>'array' or jsonb_array_length(v_gate->'claim_ids')<1 then
         raise exception 'explicit_claim_gate_requires_claim_ids';
       end if;
+
       v_claim_text := '';
       for v_claim_id in select value from jsonb_array_elements(v_gate->'claim_ids')
       loop
@@ -382,7 +427,9 @@ begin
           where c->>'id'=trim(both '"' from v_claim_id::text)
         ) into v_known;
         if not v_known then raise exception 'unknown_claim_id_in_gate'; end if;
-        select v_claim_text || ' ' || coalesce(c->>'text','') into v_claim_text
+
+        select v_claim_text || ' ' || coalesce(c->>'text','')
+          into v_claim_text
         from jsonb_array_elements(v_design.claim_manifest) c
         where c->>'id'=trim(both '"' from v_claim_id::text)
         limit 1;
@@ -403,29 +450,42 @@ begin
     raise exception 'unrelated_repository_maturity_requirement';
   end if;
 
-  v_spec := (p_specification - 'frozen_claims') || jsonb_build_object(
-    'frozen_claims',v_design.claim_manifest,
-    'specification_version','product_test_designer_v0_2',
-    'scope_rule','Tests must derive from explicit agent claims or the inferred usage model. Unrelated product requirements and implementation/interface prescriptions are forbidden.'
-  );
+  v_spec := (p_specification - 'frozen_claims')
+    || jsonb_build_object(
+      'frozen_claims',v_design.claim_manifest,
+      'specification_version','product_test_designer_v0_2',
+      'scope_rule','Tests must derive from explicit agent claims or the inferred usage model. Unrelated product requirements and implementation/interface prescriptions are forbidden.'
+    );
 
   update agent_lab.product_test_designs
-  set status='frozen',specification=v_spec,
+  set status='frozen',
+      specification=v_spec,
       model_requested=nullif(trim(coalesce(p_model_requested,'')),''),
       model_used=nullif(trim(coalesce(p_model_used,'')),''),
-      fallback_used=coalesce(p_fallback_used,false),frozen_at=now(),claim_expires_at=null,
-      error_code=null,error_message=null,updated_at=now(),
+      fallback_used=coalesce(p_fallback_used,false),
+      frozen_at=now(),
+      claim_expires_at=null,
+      error_code=null,
+      error_message=null,
+      updated_at=now(),
       metadata=coalesce(metadata,'{}'::jsonb)||jsonb_build_object(
-        'completed_by',p_executor_id,'completed_at',now(),
+        'completed_by',p_executor_id,
+        'completed_at',now(),
         'runtime_claim_manifest_authoritative',true,
         'unrelated_requirements_forbidden',true,
-        'implementation_choice_preserved',true
+        'implementation_choice_preserved',true,
+        'machine_verifiable_load_thresholds',true
       )
   where product_test_design_id=p_product_test_design_id;
 
-  return jsonb_build_object('ok',true,'product_test_design_id',p_product_test_design_id,'status','frozen','specification',v_spec);
+  return jsonb_build_object(
+    'ok',true,
+    'product_test_design_id',p_product_test_design_id,
+    'status','frozen',
+    'specification',v_spec
+  );
 end
-$$;
+$function$;
 
 create or replace function public.aau_bridge_fail_product_test_design(
   p_bridge_token text,p_product_test_design_id uuid,p_executor_id text,
@@ -684,52 +744,115 @@ begin
 end
 $$;
 
-create or replace function public.aau_bridge_complete_product_test_run(
-  p_bridge_token text,p_product_test_run_id uuid,p_executor_id text,p_verdict text,
-  p_evidence jsonb,p_metrics jsonb,p_final_report jsonb
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path='pg_catalog','public','agent_lab'
-as $$
+CREATE OR REPLACE FUNCTION public.aau_bridge_complete_product_test_run(p_bridge_token text, p_product_test_run_id uuid, p_executor_id text, p_verdict text, p_evidence jsonb, p_metrics jsonb, p_final_report jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'pg_catalog', 'public', 'agent_lab'
+AS $function$
 declare
-  v_run agent_lab.product_test_runs%rowtype; v_design agent_lab.product_test_designs%rowtype;
-  v_required_load boolean:=false; v_required_users integer:=0; v_actual_users integer:=0;
-  v_all_verified boolean:=false; v_authoritative text; v_eval jsonb;
+  v_run agent_lab.product_test_runs%rowtype;
+  v_design agent_lab.product_test_designs%rowtype;
+  v_required_load boolean := false;
+  v_required_users integer := 0;
+  v_actual_users integer := 0;
+  v_all_verified boolean := false;
+  v_adversarial_verified boolean := false;
+  v_load_verified boolean := false;
+  v_load_completed boolean := false;
+  v_thresholds_present boolean := false;
+  v_min_success numeric := 0;
+  v_max_error numeric := 1;
+  v_actual_success numeric := 0;
+  v_actual_error numeric := 1;
+  v_authoritative text;
+  v_eval jsonb;
 begin
   perform agent_lab.assert_broker_bridge_token(p_bridge_token);
   if p_verdict not in ('verified_pass','verified_fail') then raise exception 'invalid_product_test_verdict'; end if;
-  select * into v_run from agent_lab.product_test_runs where product_test_run_id=p_product_test_run_id for update;
+
+  select * into v_run
+  from agent_lab.product_test_runs
+  where product_test_run_id=p_product_test_run_id
+  for update;
+
   if not found then raise exception 'product_test_run_not_found'; end if;
   if v_run.status<>'running' then raise exception 'product_test_run_not_running'; end if;
   if coalesce(v_run.executor_id,'')<>coalesce(p_executor_id,'') then raise exception 'product_test_run_executor_mismatch'; end if;
-  select * into v_design from agent_lab.product_test_designs where product_test_design_id=v_run.product_test_design_id;
 
-  begin v_required_load:=coalesce((v_design.specification#>>'{load_test,required}')::boolean,false); exception when others then v_required_load:=false; end;
-  begin v_required_users:=coalesce((v_design.specification#>>'{load_test,virtual_users}')::integer,0); exception when others then v_required_users:=0; end;
-  begin v_actual_users:=coalesce((p_metrics#>>'{load,virtual_users}')::integer,0); exception when others then v_actual_users:=0; end;
-  begin v_all_verified:=coalesce((p_final_report->>'all_required_gates_verified')::boolean,false); exception when others then v_all_verified:=false; end;
+  select * into v_design
+  from agent_lab.product_test_designs
+  where product_test_design_id=v_run.product_test_design_id;
 
-  v_authoritative:=case
-    when p_verdict='verified_pass' and v_all_verified
-      and (not v_required_load or (
-        coalesce((p_metrics#>>'{load,completed}')::boolean,false) and v_actual_users>=v_required_users
-      ))
-    then 'verified_pass' else 'verified_fail' end;
+  begin v_required_load := coalesce((v_design.specification#>>'{load_test,required}')::boolean,false);
+  exception when others then v_required_load:=false; end;
+  begin v_required_users := coalesce((v_design.specification#>>'{load_test,virtual_users}')::integer,0);
+  exception when others then v_required_users:=0; end;
+  begin v_actual_users := coalesce((p_metrics#>>'{load,virtual_users}')::integer,0);
+  exception when others then v_actual_users:=0; end;
+  begin v_all_verified := coalesce((p_final_report->>'all_required_gates_verified')::boolean,false);
+  exception when others then v_all_verified:=false; end;
+  begin v_adversarial_verified := coalesce((p_final_report->>'adversarial_tests_verified')::boolean,false);
+  exception when others then v_adversarial_verified:=false; end;
+  begin v_load_verified := coalesce((p_final_report->>'load_test_verified')::boolean,false);
+  exception when others then v_load_verified:=false; end;
+  begin v_load_completed := coalesce((p_metrics#>>'{load,completed}')::boolean,false);
+  exception when others then v_load_completed:=false; end;
+
+  v_thresholds_present := jsonb_typeof(v_design.specification#>'{load_test,thresholds}')='object';
+  begin v_min_success := coalesce((v_design.specification#>>'{load_test,thresholds,min_success_rate}')::numeric,0);
+  exception when others then v_min_success:=0; end;
+  begin v_max_error := coalesce((v_design.specification#>>'{load_test,thresholds,max_error_rate}')::numeric,1);
+  exception when others then v_max_error:=1; end;
+  begin v_actual_success := coalesce((p_metrics#>>'{load,success_rate}')::numeric,0);
+  exception when others then v_actual_success:=0; end;
+  begin v_actual_error := coalesce((p_metrics#>>'{load,error_rate}')::numeric,1);
+  exception when others then v_actual_error:=1; end;
+
+  v_authoritative := case
+    when p_verdict='verified_pass'
+      and v_all_verified
+      and v_adversarial_verified
+      and (
+        not v_required_load
+        or (
+          v_thresholds_present
+          and v_load_verified
+          and v_load_completed
+          and v_actual_users>=v_required_users
+          and v_actual_success>=v_min_success
+          and v_actual_error<=v_max_error
+        )
+      )
+    then 'verified_pass'
+    else 'verified_fail'
+  end;
 
   update agent_lab.product_test_runs
-  set status=v_authoritative,evidence=coalesce(p_evidence,'{}'::jsonb),metrics=coalesce(p_metrics,'{}'::jsonb),
+  set status=v_authoritative,
+      evidence=coalesce(p_evidence,'{}'::jsonb),
+      metrics=coalesce(p_metrics,'{}'::jsonb),
       final_report=coalesce(p_final_report,'{}'::jsonb)||jsonb_build_object(
-        'worker_reported_verdict',p_verdict,'authoritative_verdict',v_authoritative,'runtime_gate_authority',true
+        'worker_reported_verdict',p_verdict,
+        'authoritative_verdict',v_authoritative,
+        'runtime_gate_authority',true,
+        'runtime_load_thresholds_checked',v_required_load,
+        'runtime_adversarial_gate_checked',true
       ),
-      completed_at=now(),updated_at=now()
+      completed_at=now(),
+      updated_at=now()
   where product_test_run_id=p_product_test_run_id;
 
-  v_eval:=agent_lab.evaluate_product_service_test_v0_1(v_run.agent_id);
-  return jsonb_build_object('ok',true,'product_test_run_id',p_product_test_run_id,'verdict',v_authoritative,'product_service_evaluation',v_eval);
+  v_eval := agent_lab.evaluate_product_service_test_v0_1(v_run.agent_id);
+
+  return jsonb_build_object(
+    'ok',true,
+    'product_test_run_id',p_product_test_run_id,
+    'verdict',v_authoritative,
+    'product_service_evaluation',v_eval
+  );
 end
-$$;
+$function$;
 
 create or replace function public.aau_bridge_fail_product_test_run(
   p_bridge_token text,p_product_test_run_id uuid,p_executor_id text,
