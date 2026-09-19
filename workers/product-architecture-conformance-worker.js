@@ -67,35 +67,39 @@ async function repositorySnapshot(repoFullName, branch) {
   if (!owner || !repo) throw new Error('repo_full_name_invalid');
   const ref = encodeURIComponent(branch || 'main');
   const tree = await github(`/repos/${owner}/${repo}/git/trees/${ref}?recursive=1`);
+  // Capture immutable blob SHAs from one tree, not mutable contents from main during review.
+  const rank = (path) => /ARCHITECTURE.*MANIFEST/i.test(path) ? 0
+    : /(modal|core|bridge|api|app|route|vercel)/i.test(path) ? 1
+    : /readme|contract|test/i.test(path) ? 2 : 3;
   const blobs = Array.isArray(tree?.tree) ? tree.tree
-    .filter((x) => x?.type === 'blob' && safeTextPath(x?.path) && Number(x?.size || 0) <= 120000)
-    .sort((a,b) => String(a.path).localeCompare(String(b.path)))
-    .slice(0,60) : [];
-
+    .filter((x) => x?.type === 'blob' && safeTextPath(x?.path) && Number(x?.size || 0) <= 90000)
+    .sort((a,b) => rank(a.path) - rank(b.path) || String(a.path).localeCompare(String(b.path)))
+    .slice(0,22) : [];
   const files = [];
   let totalChars = 0;
   for (const blob of blobs) {
-    if (totalChars >= 260000) break;
-    const content = await github(`/repos/${owner}/${repo}/contents/${blob.path.split('/').map(encodeURIComponent).join('/')}?ref=${ref}`);
-    if (!content || content.type !== 'file' || content.encoding !== 'base64') continue;
-    let text = '';
-    try { text = Buffer.from(String(content.content || '').replace(/\n/g,''), 'base64').toString('utf8'); } catch { continue; }
-    const remain = 260000 - totalChars;
-    const clipped = text.slice(0, Math.max(0, remain));
-    files.push({ path: blob.path, size: Number(blob.size || clipped.length), content: clipped });
+    if (totalChars >= 48000) break;
+    const content = await github(`/repos/${owner}/${repo}/git/blobs/${encodeURIComponent(blob.sha)}`);
+    if (!content || content.encoding !== 'base64') continue;
+    let source = '';
+    try { source = Buffer.from(String(content.content || '').replace(/\n/g,''), 'base64').toString('utf8'); } catch { continue; }
+    const remaining = 48000 - totalChars;
+    const clipped = source.slice(0, Math.min(18000, remaining));
+    files.push({ path: blob.path, sha:blob.sha, size:Number(blob.size || clipped.length),
+      content:clipped, truncated:clipped.length < source.length });
     totalChars += clipped.length;
   }
-  return { repo_full_name: repoFullName, branch: branch || 'main', files };
+  return { repo_full_name:repoFullName, branch:branch || 'main', tree_sha:tree?.sha || null, files };
 }
 
 async function modelCall(model, system, user) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 60000);
+  const timer = setTimeout(() => controller.abort(), 110000);
   try {
     const body = {
       model,
       messages: [{ role:'system', content:system }, { role:'user', content:user }],
-      max_tokens: 4200,
+      max_tokens: 2800,
       temperature: 0,
       stream: false,
     };
@@ -161,6 +165,8 @@ async function review(job) {
     'The autonomous agent owns product and implementation choices. Do not redesign the product.',
     'Judge only whether the repository implements the supplied frozen architecture.',
     'The architecture intentionally leaves programming language, framework, endpoint path, module names, and persistence choices open unless explicitly required.',
+    'Input/output names in the architecture are semantic roles, not literal field names, when interface_contract.literal_field_names_required is false. Accept equivalent documented JSON names and do not report a naming-only deviation.',
+    'Do not accept an agent claim of tested behavior as independent test evidence; assess inspectable source and report uncertainty.',
     'Conformance happens before canonical deployment. Do NOT require a live URL, deployment, load test, latency result, or production HTTP probe.',
     'Require an explicit agent-authored architecture-to-implementation manifest somewhere in repository content. It may be in any file or documentation section; do not prescribe a filename.',
     'The manifest must intentionally map frozen architecture requirements to concrete files/components/interfaces. Do not count a mapping invented only by you.',
