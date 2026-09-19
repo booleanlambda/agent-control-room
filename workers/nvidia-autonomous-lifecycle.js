@@ -4,6 +4,8 @@ import { runNvidiaIntentExecution } from './nvidia-intent-execution.js';
 
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
+const serviceRole = String(process.env.AAU_SUPABASE_SERVICE_ROLE_KEY || '').trim();
+const supabaseAuthKey = serviceRole || anon;
 const bridge = String(process.env.AAU_BROKER_BRIDGE_TOKEN || '').trim();
 const MAIN_QUEUE = 'aau.intent';
 const LEGACY_QUEUE = 'aau.wake';
@@ -20,12 +22,12 @@ const amqpUrl = normalizeAmqp(process.env.AMQP_URL || process.env.AMQP || '');
 const workerId = String(process.env.AAU_AUTONOMOUS_INTENT_WORKER_ID || process.env.AAU_AUTONOMOUS_WAKE_WORKER_ID || `render:nvidia-intent-lifecycle:${process.env.RENDER_INSTANCE_ID || process.pid}`).trim();
 
 async function rpc(name, args = {}) {
-  if (!anon || !bridge) throw new Error('missing_broker_supabase_credentials');
+  if (!supabaseAuthKey || !bridge) throw new Error('missing_broker_supabase_credentials');
   const response = await fetch(`${SB}/rest/v1/rpc/${name}`, {
     method: 'POST',
     headers: {
-      apikey: anon,
-      authorization: `Bearer ${anon}`,
+      apikey: supabaseAuthKey,
+      authorization: `Bearer ${supabaseAuthKey}`,
       'content-type': 'application/json',
     },
     body: JSON.stringify({ p_bridge_token: bridge, ...args }),
