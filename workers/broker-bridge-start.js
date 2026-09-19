@@ -1,6 +1,3 @@
-// temporary_product_test_designer_smoke_v0_1
-const productTestDesignerSmoke = true;
-
 const isEnabled = (name) => ['1', 'true', 'yes', 'on'].includes(
   String(process.env[name] || '').trim().toLowerCase(),
 );
@@ -45,17 +42,6 @@ if (true || isEnabled('AAU_CONTROL_ROOM_INTENT_VISIBILITY_PATCH')) {
     console.log('AAU_CONTROL_ROOM_INTENT_VISIBILITY_PATCH_RESULT', JSON.stringify(result));
   } catch (error) {
     console.error('AAU_CONTROL_ROOM_INTENT_VISIBILITY_PATCH_FAILED', JSON.stringify({ error_name: error?.name || null, message: String(error?.message || error).slice(0, 2000) }));
-  }
-}
-
-
-if (productTestDesignerSmoke) {
-  try {
-    const { runProductTestDesignerSmoke } = await import('./product-test-designer-smoke.js');
-    const result = await runProductTestDesignerSmoke();
-    console.log('AAU_PRODUCT_TEST_DESIGNER_SMOKE_RESULT', JSON.stringify(result));
-  } catch (error) {
-    console.error('AAU_PRODUCT_TEST_DESIGNER_SMOKE_FAILED', JSON.stringify({ error_name:error?.name || null, message:String(error?.message || error).slice(0,2000) }));
   }
 }
 
