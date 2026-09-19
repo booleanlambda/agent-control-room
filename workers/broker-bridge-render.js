@@ -983,22 +983,30 @@ async function inspectVercelDeployment(context) {
   if (!projectId) throw new Error('vercel_project_id_required');
   const requestedId = String(context.requested_config?.deployment_id || '').trim();
 
-  let deploymentId = requestedId;
-  let selected = null;
+  // Selection order is intentional:
+  // 1) explicit agent-requested deployment,
+  // 2) the construct's latest durable broker deployment,
+  // 3) newest provider deployment for the project.
+  // Never prefer an older failed deployment merely because it failed.
+  const previous = context.latest_deployment || {};
+  const prevResult = previous.result_payload || {};
+  const durableDeploymentId = String(prevResult.deployment_id || prevResult.id || '').trim();
+
+  let deploymentId = requestedId || durableDeploymentId;
+  let selectionSource = requestedId
+    ? 'requested_deployment_id'
+    : (durableDeploymentId ? 'latest_durable_broker_deployment' : null);
+
   if (!deploymentId) {
     const list = await vc(`/v7/deployments${vercelQuery({ projectId, limit: 10 })}`);
     const rows = Array.isArray(list?.deployments) ? list.deployments : (Array.isArray(list) ? list : []);
-    selected = rows.find((d) => ['ERROR','CANCELED','CANCELLED'].includes(String(d?.status || d?.readyState || '').toUpperCase()))
-      || rows[0]
-      || null;
+    const selected = [...rows].sort((a, b) =>
+      Number(b?.createdAt || b?.created || 0) - Number(a?.createdAt || a?.created || 0)
+    )[0] || null;
     deploymentId = String(selected?.id || selected?.uid || '');
+    if (deploymentId) selectionSource = 'newest_provider_deployment';
   }
 
-  if (!deploymentId) {
-    const previous = context.latest_deployment || {};
-    const prevResult = previous.result_payload || {};
-    deploymentId = String(prevResult.deployment_id || prevResult.id || '');
-  }
   if (!deploymentId) throw new Error('vercel_deployment_not_found_for_construct');
 
   const deployment = await vc(`/v13/deployments/${encodeURIComponent(deploymentId)}${vercelQuery()}`);
@@ -1025,6 +1033,7 @@ async function inspectVercelDeployment(context) {
 
   return {
     project_id: projectId,
+    deployment_selection_source: selectionSource,
     deployment: safeDeploymentDetails(deployment),
     build_events: events,
     latest_broker_deployment: context.latest_deployment || {},
