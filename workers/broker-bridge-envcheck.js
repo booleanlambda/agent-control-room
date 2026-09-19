@@ -16,79 +16,28 @@ async function probeAgentGithubToken() {
       authorization: `Bearer ${token}`,
       accept: 'application/vnd.github+json',
       'x-github-api-version': '2022-11-28',
-      'user-agent': 'AAU-Agent-Token-Probe/0.3',
+      'user-agent': 'AAU-Agent-Token-Probe/0.4',
     };
     const userResponse = await fetch('https://api.github.com/user', { headers });
     let userBody = null;
     try { userBody = await userResponse.json(); } catch {}
 
-    const owner = String(process.env.AAU_GITHUB_OWNER || userBody?.login || '').trim();
-    let repoStatus = null;
-    let repoPush = null;
-    let repoAdmin = null;
-    if (userResponse.ok && owner) {
-      const repoResponse = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/agent-control-room`, { headers });
-      repoStatus = repoResponse.status;
-      let repoBody = null;
-      try { repoBody = await repoResponse.json(); } catch {}
-      repoPush = repoBody?.permissions?.push ?? null;
-      repoAdmin = repoBody?.permissions?.admin ?? null;
-    }
-
-    let writeProbe = null;
-    if (userResponse.ok && userBody?.login) {
-      const probeName = `aau-agent-token-write-probe-${Date.now()}`;
-      const createResponse = await fetch('https://api.github.com/user/repos', {
-        method: 'POST',
-        headers: { ...headers, 'content-type': 'application/json' },
-        body: JSON.stringify({
-          name: probeName,
-          private: true,
-          auto_init: true,
-          description: 'Temporary AAU agent GitHub credential write probe',
-        }),
-      });
-      let createBody = null;
-      try { createBody = await createResponse.json(); } catch {}
-
-      let deleteStatus = null;
-      if (createResponse.status === 201 && createBody?.full_name) {
-        const deleteResponse = await fetch(
-          `https://api.github.com/repos/${encodeURIComponent(userBody.login)}/${encodeURIComponent(probeName)}`,
-          { method: 'DELETE', headers },
-        );
-        deleteStatus = deleteResponse.status;
-      }
-
-      writeProbe = {
-        create_status: createResponse.status,
-        created_repo: createBody?.full_name || null,
-        created_private: createBody?.private ?? null,
-        delete_status: deleteStatus,
-        ok: createResponse.status === 201 && deleteStatus === 204,
-        message: createBody?.message || null,
-      };
-      console.log('AAU_AGENT_GITHUB_WRITE_PROBE', JSON.stringify(writeProbe));
-    }
-
+    const configuredOwner = String(process.env.AAU_AGENT_GITHUB_OWNER || '').trim() || null;
     console.log('AAU_AGENT_GITHUB_TOKEN_PROBE', JSON.stringify({
       present: true,
       ok: userResponse.ok,
       status: userResponse.status,
       login: userBody?.login || null,
-      configured_owner: process.env.AAU_GITHUB_OWNER || null,
-      oauth_scopes: userResponse.headers.get('x-oauth-scopes') || null,
-      repo_status: repoStatus,
-      repo_push: repoPush,
-      repo_admin: repoAdmin,
-      write_probe_ok: writeProbe?.ok ?? null,
+      configured_agent_owner: configuredOwner,
       message: userBody?.message || null,
+      mode: 'read_only',
     }));
   } catch (error) {
     console.log('AAU_AGENT_GITHUB_TOKEN_PROBE', JSON.stringify({
       present: true,
       ok: false,
       error: String(error?.message || error),
+      mode: 'read_only',
     }));
   }
 }
