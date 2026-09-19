@@ -947,7 +947,14 @@ async function configureVercelProject(context) {
   const allowed = ['framework','rootDirectory','buildCommand','installCommand','outputDirectory','devCommand','nodeVersion'];
   const body = {};
   for (const key of allowed) {
-    if (Object.prototype.hasOwnProperty.call(x, key)) body[key] = x[key];
+    if (!Object.prototype.hasOwnProperty.call(x, key)) continue;
+    if (key === 'framework' && String(x[key] ?? '').trim().toLowerCase() === 'other') {
+      // Agent-facing/Vercel-CLI semantic: "other" means clear the framework preset.
+      // Vercel's REST API represents the cleared framework as null.
+      body[key] = null;
+    } else {
+      body[key] = x[key];
+    }
   }
   if (!Object.keys(body).length) throw new Error('vercel_project_configure_requires_allowlisted_setting');
 
