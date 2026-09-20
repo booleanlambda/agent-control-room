@@ -324,12 +324,13 @@ function deterministicDecision(run, packet, authGrades, adjGrades) {
   const critical = final.filter((g) => g.critical_error);
   const unsupported = final.filter((g) => g.unsupported);
   const passed = final.length === packet.tasks.length && mean >= meanMin && countPassed >= countMin && critical.length === 0 && unsupported.length === 0;
+  const manuallyReviewed = [...authGrades,...adjGrades].some((g) => g?.source === 'operator_attested_model_review_v0_1');
   return {
     overall_result: passed ? 'verified_pass' : 'verified_fail',
     overall_score: Number(mean.toFixed(6)),
     gate: { task_count: final.length, mean_score: Number(mean.toFixed(6)), mean_score_min: meanMin, task_score_min: taskMin, required_task_count: countMin, passed_task_count: countPassed, critical_error_count: critical.length, unsupported_claim_count: unsupported.length },
     final_grades: final,
-    provenance: { provider: 'nvidia_direct', candidate_model: run.candidate_model_id, task_authority_model: packet.authority?.model || run.task_authority_model, authenticator_model: run.authenticator_model, authenticator_models_used: [...new Set(authGrades.map((g) => g.verifier_model).filter(Boolean))], adjudicator_models: [...new Set(adjGrades.map((g) => g.adjudicator_model).filter(Boolean))], deterministic_gate: true },
+    provenance: { provider: manuallyReviewed ? 'nvidia_direct_and_operator_attested_review' : 'nvidia_direct', manual_review_used: manuallyReviewed, candidate_model: run.candidate_model_id, task_authority_model: packet.authority?.model || run.task_authority_model, authenticator_model: run.authenticator_model, authenticator_models_used: [...new Set(authGrades.map((g) => g.verifier_model).filter(Boolean))], adjudicator_models: [...new Set(adjGrades.map((g) => g.adjudicator_model).filter(Boolean))], deterministic_gate: true },
   };
 }
 
@@ -436,7 +437,20 @@ async function loop() {
           p_error_code: status ? `http_${status}` : String(error?.name || 'verification_error'),
           p_error_message: String(error?.message || error).slice(0, 1800),
           p_retry_after_seconds: retryable ? 120 : null,
-        }).catch(() => {});
+        }).then((failure) => {
+          if (failure?.status === 'manual_required') {
+            console.error('AAU_MANUAL_VERIFICATION_INTERVENTION_REQUIRED', JSON.stringify({
+              verification_run_id: run.verification_run_id,
+              agent_id: run.agent_id,
+              failed_stage: failure?.failed_stage || null,
+              attempts: failure?.attempt_count || null,
+              error_code: status ? `http_${status}` : String(error?.name || 'verification_error'),
+              action: 'operator_inspection_required_no_auto_retry',
+            }));
+          }
+        }).catch((failError) => {
+          console.error('AAU_EXPERTISE_FAILURE_CHECKPOINT_ERROR', String(failError?.message || failError).slice(0,1000));
+        });
         console.error('AAU_EXPERTISE_VERIFICATION_FAILED', JSON.stringify({ verification_run_id: run.verification_run_id, status, retryable, message: String(error?.message || error).slice(0, 1200) }));
       }
     } catch (error) {
