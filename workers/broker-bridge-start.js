@@ -201,4 +201,13 @@ if (isEnabled('AAU_VERCEL_DIAGNOSTIC_ON_START')) {
     })));
 }
 
+// Shared Knowledge Pool source refresh is independent of the operator-paused news broadcaster.
+// Runtime-config and source enablement are enforced again by the broker-token DB RPC.
+try {
+  const { startKnowledgeSourceRefresh } = await import('./knowledge-source-refresh.js');
+  console.log('AAU_KNOWLEDGE_SOURCE_REFRESH_STARTED',JSON.stringify(startKnowledgeSourceRefresh()));
+} catch(error) {
+  console.error('AAU_KNOWLEDGE_SOURCE_REFRESH_START_FAILED',String(error?.message||error).slice(0,500));
+}
+
 await import('./broker-bridge-envcheck.js');
