@@ -456,13 +456,14 @@ async function executeLoad(base, plan, spec) {
   const task = async () => {
     const options = { method: req.method, headers: req.headers || {} };
     if (req.method === 'POST') options.body = JSON.stringify(req.body ?? {});
-    const result = await boundedFetch(target, options, 25000, 3000);
+    const result = await boundedFetch(target, options, 60000, 3000);
     return {
       status: result.status,
       ok: result.ok,
       latency_ms: result.latency_ms,
       body_sha256: result.body_sha256,
       error: result.error || null,
+      error_kind: result.error ? (/abort|timeout/i.test(result.error) ? 'client_deadline_abort' : 'transport_error') : (result.ok ? null : 'http_error'),
     };
   };
 
@@ -475,7 +476,7 @@ async function executeLoad(base, plan, spec) {
   const success = results.filter((x) => x.ok).length;
   const statusCounts = {};
   for (const row of results) {
-    const key = row.status == null ? 'transport_error' : String(row.status);
+    const key = row.status == null ? (row.error_kind || 'transport_error') : String(row.status);
     statusCounts[key] = (statusCounts[key] || 0) + 1;
   }
 
@@ -483,6 +484,8 @@ async function executeLoad(base, plan, spec) {
     required: true,
     completed: true,
     virtual_users: desired,
+    client_request_timeout_ms: 60000,
+    client_request_timeout_policy: 'fixed_60s_per_operation; client deadline aborts remain failures',
     operation_request_id: req.id,
     operation_method: req.method,
     operation_path: req.path,
@@ -637,7 +640,7 @@ async function processRun(job) {
     judge_model: judged.judge_model,
     judge_requested_model: judged.judge_requested_model,
     judge_fallback_used: judged.judge_fallback_used,
-    executor_version: 'product_test_executor_v0_4_json_repair_bounded_context',
+    executor_version: 'product_test_executor_v0_5_load_timeout_provenance',
   };
 
   const completed = await rpc('aau_bridge_complete_product_test_run', {
@@ -660,7 +663,7 @@ async function processRun(job) {
     load_required: requiredLoad,
     load_virtual_users: load.virtual_users || 0,
     load_completed: Boolean(load.completed),
-    executor_version: 'product_test_executor_v0_4_json_repair_bounded_context',
+    executor_version: 'product_test_executor_v0_5_load_timeout_provenance',
   }));
 }
 
@@ -713,7 +716,7 @@ export function startProductTestExecutorWorker() {
     ready: true,
     executor_id: executorId,
     poll_ms: pollMs,
-    version: 'product_test_executor_v0_4_json_repair_bounded_context',
+    version: 'product_test_executor_v0_5_load_timeout_provenance',
     max_virtual_users: 1000,
     same_origin_only: true,
     authenticator: 'moonshotai/kimi-k3',
