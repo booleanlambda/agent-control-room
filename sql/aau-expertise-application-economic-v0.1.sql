@@ -112,10 +112,10 @@ begin
     end if;
 
     insert into agent_lab.expertise_artifacts(
-      agent_id,domain,status,target_standard,scope,competencies,evidence_requirements,
+      agent_id,domain,artifact_version,status,target_standard,scope,competencies,evidence_requirements,
       verification_plan,intended_application,economic_viability,source_wake_request_id,source_activity_id,metadata
     ) values (
-      p_agent_id,v_domain,'initiated',v_target,v_scope,v_comp,v_evidence,v_verify,
+      p_agent_id,v_domain,2,'initiated',v_target,v_scope,v_comp,v_evidence,v_verify,
       v_app,v_economy,p_wake_request_id,p_activity_id,
       jsonb_build_object(
         'origin','expertise_artifact_initiation_v0_1',
