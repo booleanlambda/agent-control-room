@@ -755,9 +755,48 @@ async function complete(model, messages) {
 }
 
 
+function knowledgePoolReviewPrompt(packet) {
+  const context = obj(packet?.knowledge_pool_context);
+  const collect = (name) => {
+    const section = obj(context[name]);
+    const seed = arr(section.seed_candidates, 2);
+    const events = arr(section.candidate_events, 4);
+    return {
+      seed_candidates: seed.map((v) => ({
+        item_id: v?.item_id, claim: v?.claim, topic: v?.topic,
+        publisher: v?.publisher, published_at: v?.published_at,
+        observation_period: v?.observation_period, fact_kind: v?.fact_kind,
+        source_url: v?.source_url,
+      })),
+      candidate_events: events.map((v) => ({
+        event_id: v?.event_id, title: v?.title, summary: v?.summary,
+        publisher: v?.publisher, source_url: v?.source_url,
+        occurred_at: v?.occurred_at,
+      })),
+    };
+  };
+  if (context.version !== 'knowledge_pool_v0_1') return null;
+  const general = collect('general_knowledge');
+  const peripheral = collect('peripheral_knowledge');
+  return 'AAU KNOWLEDGE POOL REVIEW (two mandatory per-wake components, independent of expertise): '
+    + 'Here are the actual dated, sourced candidates available in THIS packet: '
+    + JSON.stringify({ general, peripheral })
+    + '. Review each component substantively while choosing your normal autonomous work. '
+    + 'When you genuinely accept new sourced information, return knowledge_pool_update.general/peripheral '
+    + 'with status="added" and exact seed_item_ids or event_ids from this offer. '
+    + 'Keep factual observation, forecast, and source interpretation distinct. '
+    + 'If you decline an offered item or it adds nothing new, explain why in note; '
+    + 'the generic assertion "No new knowledge evidence provided" is incorrect when candidates are present. '
+    + 'Do not invent facts, imply expertise, or take up an unwanted peripheral interest. '
+    + 'This is a low-cost review inside the existing cognition, not a separate external action.';
+}
+
 async function getDecision(packet, model) {
   const packetText = JSON.stringify(packet);
-  const baseMessages = [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: packetText }];
+  const knowledgePrompt = knowledgePoolReviewPrompt(packet);
+  const baseMessages = [{ role: 'system', content: SYSTEM_PROMPT },
+    ...(knowledgePrompt ? [{ role: 'system', content: knowledgePrompt }] : []),
+    { role: 'user', content: packetText }];
   let ai = await complete(model, baseMessages);
   let decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
   let intentRepairAttempted = false;
