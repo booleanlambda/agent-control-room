@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { withReviewerNvidiaSlot } from './reviewer-nvidia-endpoint-gate.js';
+import { withReviewerNvidiaSlot, isReviewerModelInBackoff, noteReviewerModelTimeout, noteReviewerModelSuccess } from './reviewer-nvidia-endpoint-gate.js';
 
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
@@ -98,6 +98,7 @@ async function nvidiaCall({ model, system, user, maxTokens = 1200, temperature =
       e.status = response.status;
       throw e;
     }
+    noteReviewerModelSuccess(model);
     const message = parsed.body?.choices?.[0]?.message || {};
     return {
       text: String(message.content || message.reasoning_content || parsed.body?.choices?.[0]?.text || '').trim(),
@@ -106,6 +107,7 @@ async function nvidiaCall({ model, system, user, maxTokens = 1200, temperature =
     };
   } catch (error) {
     if (error?.name === 'AbortError') {
+      noteReviewerModelTimeout(model);
       console.warn('AAU_REVIEWER_ENDPOINT_TIMEOUT', JSON.stringify({
         stage:'expertise', model, duration_ms:Date.now()-requestStarted,
         request_chars:system.length+user.length, timeout_ms:timeoutMs,
@@ -278,9 +280,13 @@ async function gradeAnswer(run, task, answer) {
   ].filter((x, i, a) => x && a.indexOf(x) === i && x !== run.candidate_model_id);
   let lastAuthError = null;
   for (const model of authModels) {
+    if (isReviewerModelInBackoff(model)) {
+      console.warn('AAU_EXPERTISE_AUTHENTICATOR_BACKOFF_SKIP',model);
+      continue;
+    }
     for (let attempt = 1; attempt <= 1; attempt++) {
       try {
-        const result = await nvidiaCall({ model, system, user, maxTokens: 320, temperature: 0, timeoutMs: 120000, jsonMode: false });
+        const result = await nvidiaCall({ model, system, user, maxTokens: 320, temperature: 0, timeoutMs: model === primaryAuthenticator ? 45000 : model.startsWith('meta/') ? 60000 : 110000, jsonMode: false });
         const grade = parseGrade(result.text);
         if (grade) return { ...grade, id: task.id, verifier_model: result.model || model, verifier_requested_model: model, authenticator_fallback_used: model !== primaryAuthenticator, raw_sha256: sha256(result.text) };
         lastAuthError = new Error(`authenticator_unusable_grade:${task.id}:${model}`);
@@ -308,6 +314,7 @@ async function adjudicate(run, task, answer, prior) {
     'meta/muse-glimmer-30b',
   ].filter((x, i, a) => x && a.indexOf(x) === i && x !== run.authenticator_model && x !== prior.verifier_model && x !== run.candidate_model_id);
   for (const model of candidates) {
+    if (isReviewerModelInBackoff(model)) {console.warn('AAU_EXPERTISE_ADJUDICATOR_BACKOFF_SKIP',model);continue;}
     for (let attempt = 1; attempt <= 1; attempt++) {
       try {
         const result = await nvidiaCall({ model, system, user, maxTokens: 650, temperature: 0, timeoutMs: 60000 });
