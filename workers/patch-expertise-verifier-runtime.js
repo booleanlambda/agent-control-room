@@ -41,7 +41,12 @@ async function patchFile(path, transform, message) {
 }
 
 function patchVerifierWorker(source) {
-  if (source.includes('authenticator_fallback_chain_v0_1') && source.includes('candidate_retry_v0_1')) return source;
+  // The candidate retry loop is already present in newer verifier workers, even
+  // when the old patch marker is absent. Do not treat that as an anchor failure.
+  // Avoid startup-time GitHub writes once the canonical worker is up to date.
+  if (source.includes('authenticator_fallback_chain_v0_1') &&
+      (source.includes('candidate_retry_v0_1') ||
+       (source.includes('let result = null;') && source.includes('candidate_no_result:')))) return source;
   let next = source;
 
   if (!next.includes('candidate_retry_v0_1')) {
