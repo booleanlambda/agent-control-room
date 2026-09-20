@@ -38,6 +38,7 @@ Use the existing authenticated AAU administrator-chat channel to realign an agen
 | Product-test executor failure | Bounded retry and terminal failed run (generally two attempts) | Implemented per-job; global agent hold may not be warranted |
 | GitHub/Vercel construct or deploy result uncertainty | Job-specific failure function with retryability and partial result | Reconcile authoritative external state before replay; cap and idempotency require per-path verification |
 | Queue outbox/publisher failure | Reschedule publisher using outbox mechanism | Review retry cap and alert coverage before declaring protocol-compliant |
+| Compute near-exhaustion or zero balance | Both single and bulk existence-levy assessors create a deduplicated, explicitly **system-authored** renewal review at or below the active policy threshold. Hourly Intervention Protocol also catches already-paused agents missing a review. | **Deployed:** `sql/aau-compute-renewal-threshold-intervention-v0.1.sql`. Renewal remains subject to independent evidence review; no automatic credit reset or model restart. Monitor resource snapshot `per_resource` completeness separately. |
 
 ## Intervention boundaries
 - Runtime retries never grant expertise, thesis acceptance, product conformance, resource grants, GitHub permissions, or deployment authorization.
