@@ -64,6 +64,7 @@ declare
   v_plan_check jsonb;
   v_id uuid;
   v_results jsonb := '[]'::jsonb;
+  v_initiated integer := 0;
   v_removed_candidate_thresholds boolean := false;
 begin
   if jsonb_typeof(p_requests) <> 'array' then
@@ -152,6 +153,7 @@ begin
 
     perform agent_lab.ensure_domain_learning_track_for_artifact(p_agent_id,v_id);
 
+    v_initiated := v_initiated + 1;
     v_results := v_results || jsonb_build_array(jsonb_build_object(
       'status','initiated',
       'expertise_artifact_id',v_id,
@@ -165,7 +167,7 @@ begin
     ));
   end loop;
 
-  return jsonb_build_object('applied',jsonb_array_length(v_results),'results',v_results);
+  return jsonb_build_object('applied',v_initiated,'results',v_results);
 end
 $function$
 
