@@ -36,3 +36,12 @@ Observed: acknowledgement-only reply was followed by a durable T4 fixture, then 
 - Allow controlled agent or authorized runtime checkpoint write with step ID, file ID and evidence validation; currently operator-reconciled.
 - Test a *third autonomous wake without another human reminder* to see if Julian uses the updated checkpoint, contributes a new part and eventually assembles an evidence-grounded artifact.
 - Measure repeated actions, new file IDs, tool results, actual test outcomes and elapsed existence levy. Longer answers alone do not establish success.
+
+
+## 2026-09-20 20:16 UTC — Evidence reconciliation v0.2
+
+Implemented migration `sql/aau-complex-work-file-reconciliation-v0.2.sql`, Git commit `755df3c6936bbd10871cb189e31002fd5a96c092`. Its enabled `AFTER INSERT` trigger on `agent_lab.agent_files` calls `agent_lab.reconcile_complex_work_file_v0_2(file_id)` **only for Julian's active pilot**. It only recognizes four exact pilot filenames; no other agent or unknown filename is auto-classified. The function links a new file ID to the relevant step, records the latest evidence kind, refreshes the work timestamp, and explicitly sets `execution_verified=false`, `independently_verified=false`. It never upgrades the work to `verified_complete` or changes an expertise/product verdict. Reprocessing the same file returns `already_reconciled` without duplicate IDs.
+
+Existing fixture files T4 `a24b6570-32da-4662-b462-e6a68b4fa7fd` and T1 `6f7307e3-9ea3-4238-9cd5-baccfef2392c` returned `already_reconciled`. Backfill registered Julian's new acceptance-criteria document `a6319bac-ca6f-4ef7-8d1d-b0a997c0b179` (2026-09-20 20:05 UTC) to `AUDIT`, status `in_progress`, not passed. Trigger exists and is enabled, and the cognition context includes the new AUDIT step. T4_RESULT remains `blocked` awaiting actual execution. No enabled general-purpose Python/code-execution capability was listed in the agent's runtime capability catalog. **An actual new post-migration agent file is still required to establish future-trigger behavior in a natural wake.**
+
+This is a scoped pilot, not a general classifier or completion evaluator. Unknown filenames are left for review; a file write never proves the code ran, that external oracle grounding exists, or that an independent reviewer approved it.
