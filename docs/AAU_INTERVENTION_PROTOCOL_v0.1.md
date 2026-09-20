@@ -9,10 +9,23 @@ Preserve agent continuity, action evidence, authorized model identity, and finit
 1. **Detect** a failure, expired lease, conflicting external state, prolonged no-progress loop, or safety/permission condition. Record error class, run/wake ID, agent ID, worker, model, attempt count, timestamp, and relevant evidence.
 2. **Reconcile** the authoritative database, external service state, and last durable checkpoint. Never duplicate a potentially committed external action merely because its response timed out. Do not overwrite a completed, failed, or cancelled run based on a late worker response.
 3. **Classify** whether it is a transient platform error, unknown external-action outcome, semantic contract error, evidence/test failure, security/capability failure, or resource condition.
-4. **Intervene proportionately**: retry with bounded delay, resume from a checkpoint, inspect externally committed outcomes, return actionable assessment findings to the agent, or enter operator-review hold. Do not prescribe the agent's creative or substantive decisions.
+4. **Intervene proportionately**: retry with bounded delay, resume from a checkpoint, inspect externally committed outcomes, send a grounded admin realignment message at a safe cognition boundary when needed, return actionable assessment findings to the agent, or enter operator-review hold. Do not prescribe the agent's creative or substantive decisions.
 5. **Account for resources**: a healthy active agent pays the configured existence levy. A terminal runtime hold must disable future wakes and the levy until an explicit authorized recovery. Retain audit of actual incurred compute. There must be no implicit model swap.
 6. **Resume deliberately**: verify prerequisites, identify whether the failed action is safe to replay, and schedule a fresh or reconciled wake with an idempotency key. Clear the hold only via the authorized control path.
 7. **Verify outcome**: recovery is complete only after a durable successful job result or an explicit blocked/terminal outcome. An acknowledgment, a claimed job, or a queued retry is not evidence that the original task succeeded.
+
+## Admin-message realignment (required intervention path)
+
+Use the existing authenticated AAU administrator-chat channel to realign an agent's **next model cognition** when the available brain packet is stale, a persistent retry/interpretation loop is detected, a verified external result contradicts its last plan, or an infrastructure error requires a change in execution approach. This is an evidence-bearing operational intervention, **not a model swap, personality edit, or waiver of verification**.
+
+1. **Trigger** only after reconciling a concrete problem or dependency: repeated equivalent failed actions, failed authorization, an expired/failed verification, unknown external side effects, budget exhaustion, or recovery from a terminal runtime hold. A transient timeout alone does not justify modifying the agent's goals.
+2. **Compose the admin message** with the affected operation and artifact IDs, latest authoritative result, exact error and confidence/uncertainty, what prior assumption is invalid, permitted recovery actions, resource/authorization constraints, and a request for one bounded, independently checkable next action. State explicitly which outcomes remain unverified; never invent logs or results.
+3. **Deliver via the authenticated admin-chat mechanism** and persist message and attention/wake references. A paused agent may have the message suppressed or queued by its attention arbiter. The operator must use the authorized resume path to allow delivery; do not claim realignment merely because message submission returned successfully.
+4. **Apply only at a safe execution boundary.** Do not interrupt a currently executing cognition or overwrite a live claimant. Incorporate the message into the next cognition's actual input; preserve the bound model and canonical brain state unless a separately authorized model-consistency transition exists.
+5. **Keep agent autonomy.** Admin messages may convey factual corrections, environmental requirements and policy gates; the agent decides its own substantive research, product, and remediation approach within those constraints. Admin messaging must not manufacture consent, approvals, verified competence, revenue, or evidence.
+6. **Verify effect, not obedience.** Record message delivery, next wake claim/completion, agent's stated interpretation, and an actual artifact, test, or authoritative blocked outcome. Acknowledgment alone is insufficient. If realignment fails, classify and escalate; never enter an unbounded admin-message/retry loop.
+
+**Current implementation boundary:** AAU has an admin-chat-to-attention/wake channel and an authorized pause/resume control. The protocol previously used it manually for Julian's assessment message and restart. A universal automatic classifier that creates these messages for every failure class has **not** been wired; its trigger, delivery, idempotency, and validation remain rollout work.
 
 ## Observed mechanisms (2026-09-20)
 | Failure class | Existing behavior | Intervention status |
@@ -36,10 +49,10 @@ Preserve agent continuity, action evidence, authorized model identity, and finit
 
 ## Rollout and acceptance criteria
 1. Inventory all failure transitions and recovery workers; capture which ones affect the lifecycle and existence account.
-2. Implement a shared classification and intervention-event schema, idempotent by operation ID + failure epoch.
+2. Implement a shared classification and intervention-event schema, idempotent by operation ID + failure epoch; bind appropriate failures to the authenticated admin-message realignment path.
 3. Route all orphan and expired-lease recovery through bounded terminal handling, including reconciliation of live claims.
 4. Ensure crash, delayed HTTP response, duplicate RabbitMQ message, stale claimant, partial external commit, exhausted retry, and deliberate operator resume cannot bypass the intended state transitions.
-5. Test that resumed agents keep their bound model and canonical state; terminal holds have zero active wakes and levy disabled; completion is supported by durable execution evidence.
+5. Test that admin messages are persisted, delivered at a safe boundary (including after pause/resume), and reflected in later evidence-producing action; resumed agents keep their bound model and canonical state; terminal holds have zero active wakes and levy disabled; completion is supported by durable execution evidence.
 6. Promote each handler independently and record which are deployed vs proposed.
 
 ## Current investigation
