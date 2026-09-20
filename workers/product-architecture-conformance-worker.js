@@ -1,3 +1,5 @@
+import { withReviewerNvidiaSlot } from './reviewer-nvidia-endpoint-gate.js';
+
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
 const bridge = String(process.env.AAU_BROKER_BRIDGE_TOKEN || '').trim();
@@ -78,13 +80,13 @@ async function repositorySnapshot(repoFullName, branch) {
   const files = [];
   let totalChars = 0;
   for (const blob of blobs) {
-    if (totalChars >= 48000) break;
+    if (totalChars >= 32000) break;
     const content = await github(`/repos/${owner}/${repo}/git/blobs/${encodeURIComponent(blob.sha)}`);
     if (!content || content.encoding !== 'base64') continue;
     let source = '';
     try { source = Buffer.from(String(content.content || '').replace(/\n/g,''), 'base64').toString('utf8'); } catch { continue; }
-    const remaining = 48000 - totalChars;
-    const clipped = source.slice(0, Math.min(18000, remaining));
+    const remaining = 32000 - totalChars;
+    const clipped = source.slice(0, Math.min(11000, remaining));
     files.push({ path: blob.path, sha:blob.sha, size:Number(blob.size || clipped.length),
       content:clipped, truncated:clipped.length < source.length });
     totalChars += clipped.length;
@@ -93,6 +95,8 @@ async function repositorySnapshot(repoFullName, branch) {
 }
 
 async function modelCall(model, system, user) {
+  return withReviewerNvidiaSlot('architecture_conformance', async () => {
+  const requestStarted = Date.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 110000);
   try {
@@ -103,7 +107,10 @@ async function modelCall(model, system, user) {
       temperature: 0,
       stream: false,
     };
-    if (String(model).startsWith('nvidia/nemotron')) body.chat_template_kwargs = { enable_thinking:false };
+    if (String(model).startsWith('nvidia/nemotron')) {
+      body.chat_template_kwargs = { enable_thinking:false };
+      body.response_format = { type:'json_object' }; // supported on Nemotron; still validate independently
+    }
     const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
       method:'POST',
       signal:controller.signal,
@@ -122,14 +129,25 @@ async function modelCall(model, system, user) {
       throw error;
     }
     const message = parsed?.choices?.[0]?.message || {};
+    const finishReason = parsed?.choices?.[0]?.finish_reason;
+    if (finishReason === 'length') throw new Error('conformance_response_truncated');
     return {
       model: parsed?.model || model,
       text: String(message.content || message.reasoning_content || parsed?.choices?.[0]?.text || '').trim(),
       usage: parsed?.usage || null,
     };
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      console.warn('AAU_REVIEWER_ENDPOINT_TIMEOUT', JSON.stringify({
+        stage:'architecture_conformance',model,duration_ms:Date.now()-requestStarted,
+        request_chars:system.length+user.length,timeout_ms:110000,
+      }));
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
   }
+  });
 }
 
 function parseJsonObject(text) {
@@ -224,7 +242,7 @@ async function review(job) {
     'Require an explicit agent-authored architecture-to-implementation manifest somewhere in repository content. It may be in any file or documentation section; do not prescribe a filename.',
     'The manifest must intentionally map frozen architecture requirements to concrete files/components/interfaces. Do not count a mapping invented only by you.',
     'Use repository evidence only. If a required behavior cannot be established from source/docs, mark a deviation.',
-    'Return a compact JSON object only, no markdown.'
+    'Return one compact valid JSON object only, no markdown. Keep each evidence string under 130 characters; cite file names rather than reproduce source. Keep each requirement mapping concise. Use VERIFIED_FAIL for evidenced deviations; if evidence is truncated or missing, do not assert verification.'
   ].join(' ');
 
   const user = `FROZEN PRODUCT/SERVICE ARCHITECTURE:
@@ -247,7 +265,7 @@ Return:
     "repo_full_name":"...",
     "branch":"...",
     "files_reviewed":["..."],
-    "notes":["..."]
+    "notes":["brief evidence references"]
   },
   "report":{
     "summary":"...",
@@ -260,7 +278,7 @@ Return:
   }
 }
 
-VERIFIED_PASS is allowed only when every required architecture behavior/component is materially represented and an explicit agent-authored implementation manifest is present. Advisory preferences that are not architecture requirements must not cause failure.`;
+VERIFIED_PASS is allowed only when every required architecture behavior/component is materially represented and an explicit agent-authored implementation manifest is present. Advisory preferences that are not architecture requirements must not cause failure. Return minimal file references; do not include full source code or long narrative.`;
 
   const models = ['moonshotai/kimi-k3','meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b'];
   let lastError = null;
