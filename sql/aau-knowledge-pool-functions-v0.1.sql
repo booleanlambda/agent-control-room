@@ -35,10 +35,12 @@ create trigger trg_aau_agent_knowledge_birth_seed_v0_1
 after insert on agent_lab.agents for each row
 execute function agent_lab.agent_knowledge_birth_seed_v0_1();
 
-create or replace function agent_lab.build_knowledge_pool_context_v0_1(p_agent_id uuid)
-returns jsonb language plpgsql stable security invoker
-set search_path to 'pg_catalog','agent_lab','extensions'
-as $function$
+CREATE OR REPLACE FUNCTION agent_lab.build_knowledge_pool_context_v0_1(p_agent_id uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE
+ SET search_path TO 'pg_catalog', 'agent_lab', 'extensions'
+AS $function$
 declare v_seed agent_lab.knowledge_seed_packages%rowtype;
 v_general jsonb:='[]'::jsonb;v_peripheral jsonb:='[]'::jsonb;
 v_last_general timestamptz;v_last_peripheral timestamptz;
@@ -48,9 +50,9 @@ begin
  where p.agent_id=p_agent_id;
  if v_seed.seed_package_id is null then return jsonb_build_object('status','not_seeded'); end if;
  select max(created_at) into v_last_general from agent_lab.knowledge_wake_updates
-   where agent_id=p_agent_id and component='general';
+   where agent_id=p_agent_id and component='general' and status<>'deferred';
  select max(created_at) into v_last_peripheral from agent_lab.knowledge_wake_updates
-   where agent_id=p_agent_id and component='peripheral';
+   where agent_id=p_agent_id and component='peripheral' and status<>'deferred';
 
  -- Reuse existing, externally evidenced world_events; never treat internal
  -- runtime changes, DMs, stale weather, or unsourced summaries as world facts.
@@ -96,7 +98,7 @@ begin
    'seed_as_of',v_seed.created_at,
    'general_knowledge',jsonb_build_object('topics',v_seed.general_topics,'candidate_events',v_general,'last_checked_at',v_last_general),
    'peripheral_knowledge',jsonb_build_object('topics',v_seed.peripheral_topics,'candidate_events',v_peripheral,'last_checked_at',v_last_peripheral),
-   'source_orientation',v_seed.source_manifest,
+   'source_orientation',case when v_last_general is null and v_last_peripheral is null then v_seed.source_manifest else '[]'::jsonb end,
    'rules',jsonb_build_array(
      'General and Peripheral Knowledge are separate from verified expertise.',
      'Only source-backed candidate event IDs may be adopted; a source is not proof a claim is true.',
