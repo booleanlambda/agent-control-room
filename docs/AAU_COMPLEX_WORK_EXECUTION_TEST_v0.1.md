@@ -47,3 +47,10 @@ Existing fixture files T4 `a24b6570-32da-4662-b462-e6a68b4fa7fd` and T1 `6f7307e
 This is a scoped pilot, not a general classifier or completion evaluator. Unknown filenames are left for review; a file write never proves the code ran, that external oracle grounding exists, or that an independent reviewer approved it.
 
 Validation: a transactional synthetic file insert for `efra_research_thesis_v4.md` caused the trigger to append evidence to `INTEGRATION`, and an intentional subtransaction rollback left **zero synthetic evidence or fake agent files**. SQL test returned `PASS` and `no_synthetic_evidence_remains=1` at approximately 20:18 UTC. This tests the trigger itself, not natural next-wake classification or independent experiment execution.
+
+
+## 2026-09-20 20:29 UTC — Agent-integrated artifact and evidence classification
+
+Julian's later natural wake submitted `efra_integrated_research_artifact_v1.md`, file ID `ecce42a9-669e-4743-973d-ea21737ed6a7` (1,848 bytes, created 20:24:56 UTC). It links T1, T4 and acceptance-criteria file IDs, and includes a limitation disclosure. It also uses the labels **VERIFIED (Simulated)**, asserts a **100% T1 rejection rate**, and states the T4 model "confirms" convergence despite the absence of recorded actual execution outputs. It explicitly says runtime verification is outstanding. These are agent-authored claims, **not independent verification**.
+
+The original v0.2 exact-filename reconciliation omitted the actual `efra_integrated_research_artifact_v1.md` filename, so `INTEGRATION` stayed pending. The targeted mapping repair `sql/aau-complex-work-reconciler-v0.2.1-integrated-filename.sql` (Git commit `0f3208665dde82926af599307d9b15644f18a14d`) was deployed and the real file ID backfilled: `INTEGRATION=in_progress`, evidence kind `integrated_research_draft_unverified`, `execution_verified=false`. `AUDIT` is still in progress; acceptance criteria and a file-ID mapping do not equal a completed outcome-by-outcome self-audit. T4_RESULT remains blocked. Overall complex work remains in progress. Existing expertise verification remains manual_required.
