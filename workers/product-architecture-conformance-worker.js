@@ -1,4 +1,4 @@
-import { withReviewerNvidiaSlot } from './reviewer-nvidia-endpoint-gate.js';
+import { withReviewerNvidiaSlot, isReviewerModelInBackoff, noteReviewerModelTimeout, noteReviewerModelSuccess } from './reviewer-nvidia-endpoint-gate.js';
 
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
@@ -94,11 +94,11 @@ async function repositorySnapshot(repoFullName, branch) {
   return { repo_full_name:repoFullName, branch:branch || 'main', tree_sha:tree?.sha || null, files };
 }
 
-async function modelCall(model, system, user) {
+async function modelCall(model, system, user, timeoutMs = 110000) {
   return withReviewerNvidiaSlot('architecture_conformance', async () => {
   const requestStarted = Date.now();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 110000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const body = {
       model,
@@ -128,6 +128,7 @@ async function modelCall(model, system, user) {
       error.status = response.status;
       throw error;
     }
+    noteReviewerModelSuccess(model);
     const message = parsed?.choices?.[0]?.message || {};
     const finishReason = parsed?.choices?.[0]?.finish_reason;
     if (finishReason === 'length') throw new Error('conformance_response_truncated');
@@ -138,9 +139,10 @@ async function modelCall(model, system, user) {
     };
   } catch (error) {
     if (error?.name === 'AbortError') {
+      noteReviewerModelTimeout(model);
       console.warn('AAU_REVIEWER_ENDPOINT_TIMEOUT', JSON.stringify({
         stage:'architecture_conformance',model,duration_ms:Date.now()-requestStarted,
-        request_chars:system.length+user.length,timeout_ms:110000,
+        request_chars:system.length+user.length,timeout_ms:timeoutMs,
       }));
     }
     throw error;
@@ -283,8 +285,10 @@ VERIFIED_PASS is allowed only when every required architecture behavior/componen
   const models = ['moonshotai/kimi-k3','meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b'];
   let lastError = null;
   for (const model of models) {
+    if (isReviewerModelInBackoff(model)) {console.warn('AAU_CONFORMANCE_REVIEWER_BACKOFF_SKIP',model);continue;}
     try {
-      const res = await modelCall(model, system, user);
+      const timeoutMs = model === models[0] ? 45000 : model.startsWith('meta/') ? 60000 : 110000;
+      const res = await modelCall(model, system, user, timeoutMs);
       return {
         result: validate(parseJsonObject(res.text)),
         modelRequested:model,
