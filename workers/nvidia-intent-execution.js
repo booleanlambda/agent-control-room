@@ -151,6 +151,7 @@ belief_updates:array
 associations:array
 identity_update:object
 embodiment_update:object
+knowledge_pool_update:{general:{status:string,event_ids:array,note:string},peripheral:{status:string,event_ids:array,note:string}}|null. If the packet has knowledge_pool_context, review each component and use only the provided source-backed candidate event IDs; unchanged is a valid result. Never claim expertise from this.
 next_intents:array. For every non-sleep cognition it must contain either a standalone {intent_kind:"time",after_minutes:5,intent_reason:string,priority:number 0..1,estimated_cost:number} or one valid {intent_kind:"group",group_id:string,members:array,execution:"independent_members_together",continuation:"on_result_or_blocker",fallback_after_minutes:5,intent_reason:string}. For an eligible sleep/rest/hibernate decision, omit ordinary time and group intents; the runtime owns the exact five-minute sleep-complete wake.`;
 
 const INTENT_CORRECTION = `Your previous JSON did not satisfy next_intent_protocol_v0_1. Return the FULL JSON object again. For a non-sleep cognition, next_intents must contain either a time intent with after_minutes:5 or one valid group intent with fallback_after_minutes:5 and one to four allowed independent members. The interval is fixed by runtime policy and is not your choice. If you are validly choosing sleep/rest/hibernate and sleep_eligibility_context.sleep_valid is true, omit time and group intents. Sleep duration is exactly five minutes and is runtime-owned. Do not use next_wakes or wake_kind.`;
@@ -291,6 +292,24 @@ function normalizeEmbodimentUpdate(value) {
   return update;
 }
 
+function sanitizeKnowledgePoolUpdate(value) {
+  const input = obj(value);
+  const statuses = new Set(['added','revised','revalidated','unchanged','stale','deferred']);
+  const result = {};
+  for (const key of ['general','peripheral']) {
+    const field = obj(input[key]);
+    if (!Object.keys(field).length) continue;
+    const status = String(field.status || 'deferred').trim();
+    result[key] = {
+      status: statuses.has(status) ? status : 'deferred',
+      event_ids: arr(field.event_ids,4)
+        .filter((id) => typeof id === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id)),
+      note: typeof field.note === 'string' ? field.note.slice(0,800) : '',
+    };
+  }
+  return result;
+}
+
 function sanitizeDecision(x) {
   const outbound = obj(x?.outbound_message);
   const cp = obj(x?.codeusd_purchase); const usd = Number(cp?.usd_amount);
@@ -320,6 +339,7 @@ function sanitizeDecision(x) {
     identity_update: obj(x?.identity_update),
     embodiment_update: normalizeEmbodimentUpdate(x?.embodiment_update),
     developmental_inquiry_updates: arr(x?.developmental_inquiry_updates,8),
+    knowledge_pool_update: sanitizeKnowledgePoolUpdate(x?.knowledge_pool_update),
     next_intents: sanitizeNextIntents(x?.next_intents),
   };
 }
