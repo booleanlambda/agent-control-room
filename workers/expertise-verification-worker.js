@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { withReviewerNvidiaSlot } from './reviewer-nvidia-endpoint-gate.js';
 
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
@@ -75,7 +76,9 @@ async function nvidiaCall({ model, system, user, maxTokens = 1200, temperature =
   if (model === 'z-ai/glm-5.3') body.chat_template_kwargs = { enable_thinking: false }; // glm_auth_no_thinking_v0_1
   else if (String(model || '').startsWith('nvidia/nemotron')) body.chat_template_kwargs = { enable_thinking: false }; // candidate_no_thinking_v0_1
   if (model === 'deepseek-ai/deepseek-v4-flash-0731') body.chat_template_kwargs = { thinking: false, reasoning_effort: 'low' };
+  return withReviewerNvidiaSlot('expertise_verification', async () => {
   const controller = new AbortController();
+  const requestStarted = Date.now();
   const timer = setTimeout(() => controller.abort(), Math.max(15000, Number(timeoutMs) || 180000));
   try {
     const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
@@ -101,9 +104,18 @@ async function nvidiaCall({ model, system, user, maxTokens = 1200, temperature =
       model: parsed.body?.model || model,
       usage: parsed.body?.usage || null,
     };
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      console.warn('AAU_REVIEWER_ENDPOINT_TIMEOUT', JSON.stringify({
+        stage:'expertise', model, duration_ms:Date.now()-requestStarted,
+        request_chars:system.length+user.length, timeout_ms:timeoutMs,
+      }));
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
   }
+  });
 }
 
 function parseJsonObject(text) {
