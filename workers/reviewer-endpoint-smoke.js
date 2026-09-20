@@ -1,7 +1,7 @@
 // One bounded synthetic endpoint probe at broker-bridge startup.
 // Does not read agent data, affect expertise/product verdicts, or replay failed jobs.
 // A successful short probe is connectivity evidence, NOT a completed independent review.
-import { withReviewerNvidiaSlot } from './reviewer-nvidia-endpoint-gate.js';
+import { withReviewerNvidiaSlot, noteReviewerModelTimeout, noteReviewerModelSuccess } from './reviewer-nvidia-endpoint-gate.js';
 const key = String(process.env.NVIDIA_API_KEY || '').trim();
 
 async function probe(model, label) {
@@ -28,10 +28,12 @@ async function probe(model, label) {
       try { parsed=JSON.parse(raw); } catch { parsed={}; }
       const txt=String(parsed?.choices?.[0]?.message?.content || '').trim();
       const ok=r.ok && txt.includes('AAU_REVIEWER_ENDPOINT_OK');
+      if (ok) noteReviewerModelSuccess(model);
       return {label,model,status:ok?'reachable':'invalid_or_unavailable',http_status:r.status,
         elapsed_ms:Date.now()-begun,finish_reason:parsed?.choices?.[0]?.finish_reason || null,
         error_code:ok?null:String(parsed?.error?.code || parsed?.error?.message || 'unexpected_response').slice(0,110)};
     } catch(error) {
+      if (error?.name==='AbortError') noteReviewerModelTimeout(model, 'startup_probe_timeout');
       return {label,model,status:'failed',elapsed_ms:Date.now()-begun,
         error_code:error?.name==='AbortError'?'probe_timeout':String(error?.message||error).slice(0,110)};
     } finally {clearTimeout(timer);}
