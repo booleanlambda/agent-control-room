@@ -29,3 +29,29 @@ export async function withReviewerNvidiaSlot(label, run) {
 export function reviewerEndpointSlotState() {
   return { active, queued: enqueued };
 }
+
+const modelBackoffUntil = new Map();
+const BACKOFF_MS = 10 * 60_000;
+
+// Runtime-only: a timeout here does not change an agent's bound model or
+// independent-verification policy. A later successful request clears the backoff.
+export function noteReviewerModelTimeout(model, reason = 'timeout') {
+  const key = String(model || '');
+  if (!key) return;
+  const until = Date.now() + BACKOFF_MS;
+  modelBackoffUntil.set(key, until);
+  console.warn('AAU_REVIEWER_MODEL_BACKOFF', JSON.stringify({
+    model:key, reason, duration_ms:BACKOFF_MS
+  }));
+}
+
+export function noteReviewerModelSuccess(model) {
+  modelBackoffUntil.delete(String(model || ''));
+}
+
+export function isReviewerModelInBackoff(model) {
+  const key=String(model || '');
+  const until=modelBackoffUntil.get(key)||0;
+  if(until && until<=Date.now()) {modelBackoffUntil.delete(key);return false;}
+  return until>Date.now();
+}
