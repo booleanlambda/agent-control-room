@@ -107,11 +107,11 @@ begin
 end;
 $function$;
 
-create or replace function agent_lab.commit_knowledge_pool_wake_v0_1(
- p_agent_id uuid,p_wake_request_id uuid,p_activity_id uuid,p_result jsonb
-) returns jsonb language plpgsql security invoker
-set search_path to 'pg_catalog','agent_lab','extensions'
-as $function$
+CREATE OR REPLACE FUNCTION agent_lab.commit_knowledge_pool_wake_v0_1(p_agent_id uuid, p_wake_request_id uuid, p_activity_id uuid, p_result jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SET search_path TO 'pg_catalog', 'agent_lab', 'extensions'
+AS $function$
 declare v_component text;v_report jsonb;v_status text;v_count integer:=0;
 v_ids uuid[];v_eid uuid;v_candidates jsonb;v_context jsonb;
 v_out jsonb:='{}'::jsonb;v_existing text;v_reason text;
@@ -144,16 +144,7 @@ begin
        v_status:='deferred';v_reason:='unrecognized_agent_status';
      end if;
      if jsonb_typeof(v_report->'event_ids')='array' then
-       for v_eid in
-        select (x->>0)::uuid from jsonb_array_elements(v_report->'event_ids') x
-        where jsonb_typeof(x)='array' and jsonb_array_length(x)>0
-           and (x->>0) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-       loop
-         if exists(select 1 from jsonb_array_elements(v_candidates) c where c->>'event_id'=v_eid::text) then
-            v_ids:=array_append(v_ids,v_eid);
-         end if;
-       end loop;
-       -- Also allow regular UUID string event_ids; never cast malformed values.
+       -- Accept regular UUID string event IDs only; reject malformed/unlisted IDs.
        for v_eid in
         select trim(both '"' from x::text)::uuid from jsonb_array_elements(v_report->'event_ids') x
         where jsonb_typeof(x)='string'
@@ -169,6 +160,8 @@ begin
         v_status:='deferred';v_reason:='no_valid_source_backed_candidate_event';
      end if;
    end if;
+   -- A non-acquisition status cannot retain apparent source-adoption IDs.
+   if v_status in ('unchanged','stale','deferred') then v_ids:='{}'::uuid[]; end if;
    if v_status in ('added','revised','revalidated') and cardinality(v_ids)>0 then
      foreach v_eid in array v_ids loop
        insert into agent_lab.agent_knowledge_event_links(
