@@ -40,7 +40,7 @@ button,input,textarea,select{font:inherit}.wrap{max-width:1480px;margin:auto;pad
 <div class="login" id="login"><div class="loginbox"><h2>AAU Agent Control Room</h2><div class="sub">Admin console for autonomous agents, chat and files.</div><input id="pw" type="password" placeholder="Control Room password"><button id="loginBtn">Open Control Room</button><div id="loginMsg" class="badtext"></div></div></div>
 <div class="wrap">
   <div class="top"><div><h1>AAU Agent Control Room</h1><div class="sub">Next Intent · lifecycle · existence · expertise · admin chat · bidirectional files</div></div><div class="live"><span id="dot" class="dot"></span><span id="liveText">Locked</span></div></div>
-  <div id="error" class="error"></div><div id="banner" class="banner"></div><div id="metrics" class="metrics"></div>
+  <div id="error" class="error"></div><div id="banner" class="banner"></div><section id="verificationAlerts" class="banner" role="status" style="display:none"></section><div id="metrics" class="metrics"></div>
   <div class="dashboard-main"><section class="panel"><h2>Current agent</h2><div id="experiment"></div></section><details class="panel runtime-fold"><summary><span>Runtime details</span><span class="muted">system</span></summary><div id="runtime" class="kv"></div></details></div>
   <details class="panel" id="monitorFold" style="margin-top:12px"><summary style="cursor:pointer"><span>Runtime Monitor</span> <span class="muted">manual · models · Render · DB · responses</span></summary><div style="margin-top:10px"><div class="monitorbar"><span class="muted" id="monitorStamp">Not checked yet.</span><button class="monitorbtn" id="monitorCheck">Check now</button></div><div id="monitorBody"><div class="empty">Open the monitor and press Check now.</div></div></div></details>
   <div class="toolbar"><input id="search" placeholder="Search agents, stage, focus or action…"><select id="filter"><option value="current">Current experiment</option><option value="paused">Paused population</option><option value="all">All agents</option><option value="archived">Archived</option></select><button id="refresh">Refresh</button></div>
@@ -49,7 +49,7 @@ button,input,textarea,select{font:inherit}.wrap{max-width:1480px;margin:auto;pad
 <div id="drawerbg" class="drawerbg"></div><aside id="drawer" class="drawer"><div id="drawerbody"></div></aside>
 <script>
 const API='https://mgtilfgygzymxiyixjit.supabase.co/functions/v1/agent-control-room-api';
-const st={pw:null,snap:null,sys:null,monitor:null,monitorLoading:false,filter:'current',q:'',timer:null,drawerAgentId:null,drawerTimer:null,drawerMountedFor:null,refreshPending:false,drawerPending:false,refreshFailures:0,lastHealthyAt:null};
+const st={pw:null,snap:null,sys:null,verificationAlerts:null,monitor:null,monitorLoading:false,filter:'current',q:'',timer:null,drawerAgentId:null,drawerTimer:null,drawerMountedFor:null,refreshPending:false,drawerPending:false,refreshFailures:0,lastHealthyAt:null};
 const $=x=>document.querySelector(x), raw=x=>String(x??''), esc=x=>raw(x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const nice=x=>raw(x).replace(/^agent_/,'Agent ').split('_').map(y=>y.charAt(0).toUpperCase()+y.slice(1)).join(' ');
 const when=x=>x?new Date(x).toLocaleString():'none', rel=x=>{if(!x)return'none';const s=(new Date(x)-Date.now())/1000,a=Math.abs(s);let v,u;if(a<60){v=Math.round(a);u='sec'}else if(a<3600){v=Math.round(a/60);u='min'}else if(a<86400){v=Math.round(a/3600);u='hr'}else{v=Math.round(a/86400);u='day'}return s>=0?`in ${v} ${u}${v===1?'':'s'}`:`${v} ${u}${v===1?'':'s'} ago`};
@@ -97,7 +97,25 @@ async function loadMonitor(){
  finally{st.monitorLoading=false;if(btn)btn.disabled=false;renderMonitor()}
 }
 
+function renderVerificationAlerts(){
+ const el=$('#verificationAlerts');if(!el)return;
+ const alerts=Array.isArray(st.verificationAlerts?.alerts)?st.verificationAlerts.alerts:[];
+ if(st.verificationAlerts?.error){
+   el.style.display='block';el.classList.add('bad');
+   el.innerHTML='<b>Verification alerts unavailable.</b> <span class="muted">Check the Control Room API before assuming there are no interventions.</span>';
+   return;
+ }
+ if(!alerts.length){el.style.display='none';el.classList.remove('bad');el.innerHTML='';return;}
+ el.style.display='block';el.classList.add('bad');
+ el.innerHTML='<b>MANUAL VERIFICATION INTERVENTION REQUIRED · '+alerts.length+'</b>'
+   +'<div class="muted" style="margin:6px 0">Verification is frozen, not failed. Copy the run ID and call on ChatGPT to inspect and recover the saved authentication/adjudication evidence. No manual action is triggered automatically.</div>'
+   +alerts.map(a=>'<div style="padding:8px 0;border-top:1px solid #51313d"><b>'
+     +esc(a.agent_name||a.agent_id)+'</b> · '+esc(a.failed_stage)+' · '+esc(a.error_code)
+     +'<div class="muted">Run ID: <code>'+esc(a.verification_run_id)+'</code> · '
+     +esc(a.automatic_attempts)+' attempt(s) · '+esc(a.status)+'</div></div>').join('');
+}
 function render(){
+ renderVerificationAlerts();
  const agents=st.snap?.agents||[], cur=st.sys?.current_agent||{}, exp=st.sys?.experimental_runtime||{};
  $('#banner').innerHTML=`<b>AAU live.</b> <span class="muted">File channel ${esc(st.sys?.file_channel_version||'agent_file_channel_v0_1')} · brain packet ${esc(exp.brain_packet_version||cur.brain_packet_version||'—')}</span>`;
  $('#metrics').innerHTML=[metric('Agents',agents.length,'known population'),metric('Current',cur.public_name||cur.internal_label||'—',cur.current_stage||''),metric('Compute',fmt(cur.compute_balance??cur.compute_credits),'current balance'),metric('Wakes',fmt(cur.wake_number??cur.intent_execution_count),'executions'),metric('Stage',nice(cur.current_stage||'—'),'mandatory lifecycle'),metric('Next',rel(cur.next_wake_at||cur.next_intent_at),'autonomous intent')].join('');
@@ -152,7 +170,7 @@ function renderDrawer(d,c,fdata){const a=d?.status||d?.agent||d||{},messages=c?.
  st.drawerMountedFor=a.agent_id||st.drawerAgentId;bindControls(a,'drawer');bindDrawerTabs(prior);const closeInner=$('#closeInner');if(closeInner)closeInner.onclick=closeDrawer;const send=$('#sendBtn');if(send){send.onclick=()=>sendChat(a.agent_id);$('#chatText').addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();sendChat(a.agent_id)}})}const upload=$('#uploadBtn');if(upload)upload.onclick=()=>uploadFile(a.agent_id);bindFileButtons($('#drawerbody'));const log=$('#chatlog');if(log)log.scrollTop=log.scrollHeight}
 async function openAgent(id,silent=false){const changed=st.drawerAgentId!==id;st.drawerAgentId=id;if(changed)st.drawerMountedFor=null;$('#drawer').classList.add('open');$('#drawerbg').classList.add('open');try{await reloadDrawer(id,changed);clearInterval(st.drawerTimer);st.drawerTimer=setInterval(()=>{if(document.visibilityState!=='hidden')void reloadDrawer(id,false).catch(()=>{})},15000)}catch(e){if(!silent)showError(e.message)}}
 function closeDrawer(){st.drawerAgentId=null;st.drawerMountedFor=null;clearInterval(st.drawerTimer);$('#drawer').classList.remove('open');$('#drawerbg').classList.remove('open')}
-async function refresh(silent=false){if(st.refreshPending)return Boolean(st.snap&&st.sys);st.refreshPending=true;try{const [snap,sys]=await Promise.all([api('mode=snapshot'),api('mode=system')]);st.snap=snap;st.sys=sys;st.refreshFailures=0;st.lastHealthyAt=new Date().toISOString();$('#dot').classList.remove('bad');$('#liveText').textContent='Live';render();return true}catch(e){st.refreshFailures++;$('#dot').classList.add('bad');$('#liveText').textContent=st.snap?'Data delayed · last good '+when(st.lastHealthyAt):'API unavailable';if(!silent)showError(e.message);return false}finally{st.refreshPending=false}}
+async function refresh(silent=false){if(st.refreshPending)return Boolean(st.snap&&st.sys);st.refreshPending=true;try{const [snap,sys,alerts]=await Promise.all([api('mode=snapshot'),api('mode=system'),api('mode=verification_alerts').catch(e=>({error:e.message}))]);st.snap=snap;st.sys=sys;st.verificationAlerts=alerts;st.refreshFailures=0;st.lastHealthyAt=new Date().toISOString();$('#dot').classList.remove('bad');$('#liveText').textContent='Live';render();return true}catch(e){st.refreshFailures++;$('#dot').classList.add('bad');$('#liveText').textContent=st.snap?'Data delayed · last good '+when(st.lastHealthyAt):'API unavailable';if(!silent)showError(e.message);return false}finally{st.refreshPending=false}}
 async function login(){st.pw=$('#pw').value;$('#loginMsg').textContent='';const ok=await refresh();if(!ok){$('#loginMsg').textContent='Control Room API is unavailable or timed out. Check Supabase and retry.';st.pw=null;return}$('#login').style.display='none';clearInterval(st.timer);st.timer=setInterval(()=>{if(document.visibilityState!=='hidden')void refresh(true)},20000)}
 $('#loginBtn').onclick=login;$('#pw').addEventListener('keydown',e=>{if(e.key==='Enter')login()});$('#refresh').onclick=()=>refresh();$('#monitorCheck').onclick=()=>loadMonitor();$('#filter').onchange=e=>{st.filter=e.target.value;renderGrid()};$('#search').oninput=e=>{st.q=e.target.value;renderGrid()};$('#drawerbg').onclick=closeDrawer;
 </script>
