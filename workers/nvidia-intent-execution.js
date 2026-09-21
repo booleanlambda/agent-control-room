@@ -58,21 +58,34 @@ Mandatory embodiment-stage rule:
 - The selected candidate becomes your pseudo profile image after runtime validation.
 - Do not claim CANONICAL or invent storage identifiers. The runtime stores and validates image assets.
 
-Mandatory expertise-artifact-stage rule (operator preapproval of field economics):
-- When mandatory_lifecycle_context.current_stage is expertise_artifact, inspect mandatory_lifecycle_context.expertise_economic_gate.status. You freely choose your field; AAU does not select it.
-- If preexisting_held_expertise is present, its self-chosen domain and prior artifacts are preserved as a draft, awaiting operator approval. Research the economic and socioeconomic case for that domain (or explicitly reconsider it yourself); do not initiate another artifact or begin domain training. Submitting a proposal pauses you only AFTER the evidence report is committed, not while you are gathering sources.
-- If status is required or rejected: BEFORE initiating any expertise artifact, research and present a SPECIFIC evidence-labeled economic sustainability and wider human socioeconomic impact proposal. You may use bounded web.research to find real sources across multiple wakes and report gaps. When ready, add EXACTLY ONE associations[] object {"origin":"expertise_economic_proposal_v0_1","domain":"your exact chosen field","economic_case":"at least 160 chars describing identified customers, monetization or viable funding, numerical post-AAU-grant costs, pricing, contribution and break-even or clearly labeled unavailable evidence","socioeconomic_case":"at least 160 chars naming particular human beneficiary populations, geography, causal mechanism, potential harms, metrics and baselines","evidence":[{"source_title":"...","publisher":"...","url":"...","published_at":"...","claim_supported":"...","coverage":"actual fetched text or metadata only"}],"confidence_and_gaps":"...","recommended_decision":"..."}; include source URLs only when genuinely fetched. If internet sources are unavailable, honestly state evidence gaps rather than inventing them. Optionally include your report as agent_file_output_v0_1. selected_action=submit_expertise_economic_case and current_focus=expertise_artifact. The runtime submits the proposal for operator review, then pauses your lifecycle and compute levy.
-- If status is pending: DO NOT initiate or resubmit an expertise artifact, repeat research without new authorization, or claim approval. Await the operator's decision without spending further compute.
-- If status is revision_requested: operator feedback has automatically resumed you. Read expertise_economic_gate.review_feedback, revise the EXISTING proposal, perform additional source-backed research when useful, and resubmit expertise_economic_proposal_v0_1 when the revision is substantive. Do not create or develop the expertise artifact yet. After resubmission the runtime pauses you again for review.
-- ONLY if status is approved: initiate the EXACT domain in expertise_economic_gate.domain. selected_action must describe expertise-artifact initiation and current_focus must be expertise_artifact. Approval of a selection is not verification of competence, revenue, or social impact.
-- ONLY after exact-domain economic preapproval: add one associations[] object with origin="expertise_artifact_initiation_v0_1" and ALL of these fields: domain:string, target_standard:string, scope:nonempty object, competencies:nonempty array, evidence_requirements:nonempty object, verification_plan:nonempty object, intended_application:object, economic_viability:object.
-- intended_application MUST state purpose, pathway, beneficiaries, deliverable, first_milestone as nonempty strings, all chosen by you. Pathways include employment, contract, product, service, research, public benefit, or another legitimate route you choose.
-- economic_viability MUST state value_exchange, demand_hypothesis, cost_structure, runway_strategy, validation_plan as nonempty strings and risks as a nonempty array. Consider customers, possible users, supporting institutions, competition, operating costs, capacity, and revenue or other sustaining resources when relevant. No money or commercial motive is required: public benefit and funded research are legitimate, but require a viable support hypothesis.
-- Identify demand and income assumptions as UNVERIFIED until backed by externally recorded evidence; this plan is not a verified job, customer, contract, grant, revenue, or profit.
-- During expertise_development, if expertise_application_context.validation.ok=false and required_before_verification=true, submit an associations[] item with origin="expertise_artifact_application_v0_1", its EXACT expertise_artifact_id, intended_application and economic_viability. Complete it before requesting expertise verification; do not invent a plan for another agent or repeat an unchanged amendment.
-- target_standard must describe the intended Master’s-equivalent competence target without claiming an academic credential.
-- Artifact initiation grants zero competence. Do not claim expertise already exists.
-- Do not put candidate-owned numeric pass thresholds in verification_plan; runtime-owned verification thresholds are authoritative.
+Mandatory expertise-and-viability-stage rule (single unit approval):
+- When mandatory_lifecycle_context.current_stage is expertise_artifact, this is internally Stage 3 but conceptually the Expertise + Viability Proposal stage. Inspect mandatory_lifecycle_context.expertise_viability_gate.status. You freely choose the field, application, scope and pathway; AAU does not choose them.
+- There is NO separate "choose expertise -> approve field -> later submit viability" sequence. Before an expertise artifact can exist, prepare ONE unified package and the operator approves or rejects that whole package.
+- A preexisting_held_expertise, if present, is legacy preserved history only. You may keep, revise, or reconsider it yourself, but it is not separately approved and grants zero competence.
+- If status is required or rejected: research as needed, then when ready add EXACTLY ONE associations[] object with origin="expertise_viability_proposal_v0_1" containing ALL of:
+  domain:string,
+  target_standard:string,
+  scope:nonempty object,
+  competencies:nonempty array,
+  evidence_requirements:nonempty object,
+  verification_plan:nonempty object,
+  intended_application:{purpose,pathway,beneficiaries,deliverable,first_milestone},
+  economic_viability:{value_exchange,demand_hypothesis,cost_structure,runway_strategy,validation_plan,risks:[...]},
+  economic_case:string >=160 chars with real buyer/support pathway, post-AAU operating costs, pricing/funding assumptions, contribution/break-even or explicitly labeled missing evidence,
+  socioeconomic_case:string >=160 chars naming human populations/geographies, causal mechanism, potential harms, metrics and baseline,
+  evidence:[{source_title,publisher,url,published_at,claim_supported,coverage}],
+  confidence_and_gaps:string >=40 chars,
+  recommended_decision:string.
+- Only include URLs actually observed through research. Separate observed facts, sourced claims, numerical assumptions and hypotheses. Actual customers, contracts, grants, revenue and measured impacts are zero/unknown unless evidenced.
+- selected_action=submit_expertise_viability_proposal and current_focus=expertise_artifact when submitting. The runtime persists the package and pauses you for operator review.
+- If status is pending: do not resubmit, create an expertise artifact, repeat unchanged research, or claim approval. Await the operator.
+- If status is revision_requested: operator feedback has automatically resumed you. Read expertise_viability_gate.review_feedback, revise the EXISTING whole package, perform additional source-backed research as useful, and resubmit expertise_viability_proposal_v0_1. The same proposal record is updated and you pause again.
+- If status is approved: the runtime materializes the exact approved package into the Expertise Artifact automatically. DO NOT emit expertise_artifact_initiation_v0_1 and DO NOT submit a separate viability plan.
+- Direct expertise_artifact_initiation_v0_1 is deprecated and rejected. Artifact creation is a consequence of operator approval of the unified package.
+- target_standard describes intended Master's-equivalent competence without claiming an academic credential.
+- verification_plan must not contain agent-owned numeric pass thresholds (mean_score_min, pass_score, task_score_min, required_task_fraction); runtime verification thresholds are authoritative.
+- Approval authorizes the expertise-development path and accepts the viability thesis as sufficient to pursue. It does NOT verify competence, customers, contracts, grants, revenue, profit, or measured socioeconomic impact.
+- During expertise_development, develop the approved artifact under the domain-learning protocol. Do not reopen Stage 3 merely to rewrite viability unless new governance requires it.
 
 Expertise verification threshold rule:
 - expertise_verification_context.threshold_semantics is authoritative factual policy, not a suggestion.
@@ -432,45 +445,53 @@ function needsEmbodimentCompletion(packet, decision) {
   const visual = nonEmptyObject(u.preferences) || nonEmptyObject(u.requested_changes);
   return !(u.representation_desired === true && u.request_visual_candidates === true && reason && visual);
 }
-function expertiseArtifactAssociation(decision) {
+function expertiseViabilityAssociation(decision) {
   const associations = Array.isArray(decision?.associations) ? decision.associations : [];
-  return associations.find((a) => a && typeof a === 'object' && !Array.isArray(a) && String(a.origin || '').trim() === 'expertise_artifact_initiation_v0_1') || null;
+  return associations.find((a) => a && typeof a === 'object' && !Array.isArray(a)
+    && String(a.origin || '').trim() === 'expertise_viability_proposal_v0_1') || null;
 }
-function expertiseArtifactValidation(decision) {
-  const a = expertiseArtifactAssociation(decision);
+function expertiseViabilityValidation(decision) {
+  const a = expertiseViabilityAssociation(decision);
   const failures = [];
-  if (!a) return { association: null, failures: ['expertise_artifact_initiation_association_required'] };
+  if (!a) return { association:null, failures:['expertise_viability_proposal_association_required'] };
   if (!String(a.domain || '').trim()) failures.push('domain_required');
   if (!String(a.target_standard || '').trim()) failures.push('target_standard_required');
   if (!nonEmptyObject(a.scope)) failures.push('scope_nonempty_object_required');
-  if (!Array.isArray(a.competencies) || a.competencies.length === 0) failures.push('competencies_nonempty_array_required');
+  if (!Array.isArray(a.competencies) || a.competencies.length===0) failures.push('competencies_nonempty_array_required');
   if (!nonEmptyObject(a.evidence_requirements)) failures.push('evidence_requirements_nonempty_object_required');
   if (!nonEmptyObject(a.verification_plan)) failures.push('verification_plan_nonempty_object_required');
+  for (const k of ['mean_score_min','pass_score','task_score_min','required_task_fraction']) {
+    if (Object.prototype.hasOwnProperty.call(a.verification_plan || {}, k)) failures.push('verification_plan.'+k+'_runtime_owned');
+  }
   for (const k of ['purpose','pathway','beneficiaries','deliverable','first_milestone']) {
-    if (!String(a.intended_application?.[k] || '').trim()) failures.push('intended_application.' + k + '_required');
+    if (!String(a.intended_application?.[k] || '').trim()) failures.push('intended_application.'+k+'_required');
   }
   for (const k of ['value_exchange','demand_hypothesis','cost_structure','runway_strategy','validation_plan']) {
-    if (!String(a.economic_viability?.[k] || '').trim()) failures.push('economic_viability.' + k + '_required');
+    if (!String(a.economic_viability?.[k] || '').trim()) failures.push('economic_viability.'+k+'_required');
   }
-  if (!Array.isArray(a.economic_viability?.risks) || a.economic_viability.risks.length === 0) failures.push('economic_viability.risks_required');
-  return { association: a, failures };
+  if (!Array.isArray(a.economic_viability?.risks) || a.economic_viability.risks.length===0) failures.push('economic_viability.risks_required');
+  if (String(a.economic_case || '').trim().length<160) failures.push('economic_case_min_160_chars');
+  if (String(a.socioeconomic_case || '').trim().length<160) failures.push('socioeconomic_case_min_160_chars');
+  if (!Array.isArray(a.evidence) || a.evidence.length===0) failures.push('evidence_nonempty_array_required');
+  if (String(a.confidence_and_gaps || '').trim().length<40) failures.push('confidence_and_gaps_min_40_chars');
+  return {association:a,failures};
 }
 function needsExpertiseArtifactCompletion(packet, decision) {
   if (currentStage(packet) !== 'expertise_artifact') return false;
-  const gate = packet?.mandatory_lifecycle_context?.expertise_economic_gate || {};
+  const gate = packet?.mandatory_lifecycle_context?.expertise_viability_gate
+    || packet?.mandatory_lifecycle_context?.expertise_economic_gate || {};
   const status = String(gate.status || 'required');
   const action = String(decision?.selected_action || '').trim();
   const focus = String(decision?.current_focus || '').trim();
+  const associations = Array.isArray(decision?.associations) ? decision.associations : [];
   if (focus !== 'expertise_artifact') return true;
-  if (status !== 'approved') {
-    if (decision.associations?.some(a=>a?.origin==='expertise_artifact_initiation_v0_1')) return true;
-    if (status === 'pending') return !/await|pause|acknowledge|hold/i.test(action);
-    return !/research|economic|socioeconomic|source|proposal|case|review|draft|submit/i.test(action);
-  }
-  if (!/expertise|domain|artifact/i.test(action)) return true;
-  const validation=expertiseArtifactValidation(decision);
-  if (validation.failures.length) return true;
-  return String(validation.association?.domain||'').trim().toLowerCase() !== String(gate.domain||'').trim().toLowerCase();
+  if (associations.some(a=>a?.origin==='expertise_artifact_initiation_v0_1')) return true;
+  if (status === 'pending') return !/await|pause|acknowledge|hold|review/i.test(action);
+  if (status === 'approved') return !/await|acknowledge|materiali[sz]|transition/i.test(action);
+  const submitting = /submit.*expertise.*viability|expertise.*viability.*proposal/i.test(action)
+    || associations.some(a=>a?.origin==='expertise_viability_proposal_v0_1');
+  if (submitting) return expertiseViabilityValidation(decision).failures.length>0;
+  return !/research|economic|socioeconomic|source|proposal|case|review|draft|revise|evidence|viability/i.test(action);
 }
 function lifecycleIssue(packet, decision) {
   if (attentionInterruptActive(packet)) return null;
@@ -612,9 +633,9 @@ function redundantDeploymentInspectionIssue(packet, decision) {
 function lifecycleCorrection(issue, packet) {
   if (issue === 'identity') return IDENTITY_CORRECTION;
   if (issue === 'expertise_artifact') {
-    const gate = packet?.mandatory_lifecycle_context?.expertise_economic_gate || {};
-    if (gate.status !== 'approved') return 'EXPERTISE ECONOMIC REVIEW REPAIR: This is PRE-APPROVAL stage 3. Preserve your own chosen field and prior held draft, if any. Do not initiate an expertise artifact or claim expertise. Choose a real source-backed economics and socioeconomic research step, request a bounded web.research tool call when useful, or submit the detailed expertise_economic_proposal_v0_1 association when ready. selected_action must reflect actual research/submission and current_focus=expertise_artifact. Your next_intents must be valid. Approval occurs only after operator review; no need to pause while gathering evidence. Return the full JSON object.';
-    return EXPERTISE_ARTIFACT_CORRECTION;
+    const gate = packet?.mandatory_lifecycle_context?.expertise_viability_gate
+      || packet?.mandatory_lifecycle_context?.expertise_economic_gate || {};
+    return 'EXPERTISE + VIABILITY UNIT REPAIR: Stage 3 requires ONE combined package, not separate field approval and later viability. Do not emit expertise_artifact_initiation_v0_1. If status is pending, await operator review. If revision_requested, use operator feedback and revise the existing package. Otherwise conduct real source-backed research or submit one complete expertise_viability_proposal_v0_1 association containing the expertise specification AND viability/evidence fields. current_focus must remain expertise_artifact. Approval materializes the artifact automatically and grants zero competence. Return the full JSON object.';
   }
   return embodimentCorrection(packet);
 }
@@ -1098,7 +1119,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       input_hash: sha256(packetText), output_hash: sha256(raw),
       model_consistency_status: 'VERIFIED_PRIMARY', authenticator_result: { status: 'not_run_in_executor' },
       experimental_provider_policy: 'nvidia_direct_all_experimental_roles',
-      lifecycle_contract: 'next_intent_protocol_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+expertise_artifact_stage_contract_v0_1+product_service_test_v0_1+durable_external_capability_state_v0_1+authoritative_external_state_reconciliation_v0_1+no_progress_action_alignment_v0_1+attention_arbiter_v0_1+attention_resolution_repair_v0_1+stage_action_alignment_v0_1+failure_diagnostics_v0_1+embodiment_payload_normalization_v0_1',
+      lifecycle_contract: 'next_intent_protocol_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+expertise_viability_unit_stage_v0_1+product_service_test_v0_1+durable_external_capability_state_v0_1+authoritative_external_state_reconciliation_v0_1+no_progress_action_alignment_v0_1+attention_arbiter_v0_1+attention_resolution_repair_v0_1+stage_action_alignment_v0_1+failure_diagnostics_v0_1+embodiment_payload_normalization_v0_1',
       intent_repair_attempted: intentRepairAttempted,
       identity_repair_attempts: identityRepairAttempts,
       embodiment_repair_attempts: embodimentRepairAttempts,
@@ -1118,17 +1139,17 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       p_runtime: runtime,
     });
 
-    // Submit only after the source cognition has committed. Operator approval is
-    // explicit and cannot be generated by the agent's own model output.
-    let economicProposalResult = null;
-    const economicCase = decision.associations.find(a=>a?.origin==='expertise_economic_proposal_v0_1');
-    if (economicCase) {
-      economicProposalResult = await rpc('aau_bridge_submit_expertise_economic_proposal',{
-        p_agent_id:requestedAgentId,p_wake_request_id:requestedIntentExecutionId,p_proposal:economicCase,
+    // Submit the unified Expertise + Viability package only after source cognition commits.
+    // Operator approval is external to the agent and materializes the exact approved artifact.
+    let expertiseViabilityProposalResult = null;
+    const viabilityCase = decision.associations.find(a=>a?.origin==='expertise_viability_proposal_v0_1');
+    if (viabilityCase) {
+      expertiseViabilityProposalResult = await rpc('aau_bridge_submit_expertise_viability_proposal',{
+        p_agent_id:requestedAgentId,p_wake_request_id:requestedIntentExecutionId,p_proposal:viabilityCase,
       });
-      if (economicProposalResult?.status === 'pending' || economicProposalResult?.status === 'already_pending') {
-        economicProposalResult.pause = await rpc('aau_bridge_pause_pending_expertise_proposal',{
-          p_agent_id:requestedAgentId,p_proposal_id:economicProposalResult.proposal_id,
+      if (expertiseViabilityProposalResult?.status === 'pending' || expertiseViabilityProposalResult?.status === 'already_pending') {
+        expertiseViabilityProposalResult.pause = await rpc('aau_bridge_pause_pending_expertise_viability_proposal',{
+          p_agent_id:requestedAgentId,p_proposal_id:expertiseViabilityProposalResult.proposal_id,
         });
       }
     }
@@ -1146,7 +1167,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       external_state_repair_attempts: externalStateRepairAttempts,
       no_progress_repair_attempts: noProgressRepairAttempts,
       evidence_of_action_mode: 'optional_submission_v0_1',
-      usage: ai.usage, finish_reason: ai.finish_reason, applied, economic_proposal_result:economicProposalResult,
+      usage: ai.usage, finish_reason: ai.finish_reason, applied, expertise_viability_proposal_result:expertiseViabilityProposalResult,
     };
     console.log('AAU_NVIDIA_INTENT_RESULT', JSON.stringify(report));
     return report;
