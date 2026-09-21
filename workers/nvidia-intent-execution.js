@@ -879,8 +879,12 @@ function knowledgePoolReviewPrompt(packet) {
 // is condensed: full latest activities and durable domain/verification/identity/attention
 // context remain available; historical IDs and status remain addressable in the DB.
 export function compactCognitionPacketForInference(packet) {
-  if (!packet || !Array.isArray(packet.recent_activity) || packet.recent_activity.length <= 3) return packet;
-  const recent = packet.recent_activity.map((entry, index) => {
+  if (!packet) return packet;
+  const rawRecent = Array.isArray(packet.recent_activity) ? packet.recent_activity : [];
+  const rawTranscript = Array.isArray(packet.admin_chat_context?.conversation_transcript)
+    ? packet.admin_chat_context.conversation_transcript : [];
+  if (rawRecent.length <= 3 && rawTranscript.length <= 5) return packet;
+  const recent = rawRecent.map((entry, index) => {
     if (index < 3) return entry;
     const memory = entry?.outcome?.memory || {};
     const updates = Array.isArray(memory?.updates) ? memory.updates : memory?.memory_type ? [memory] : [];
@@ -912,7 +916,7 @@ export function compactCognitionPacketForInference(packet) {
     : transcript;
   return {
     ...packet,
-    recent_activity: recent,
+    recent_activity: Array.isArray(packet.recent_activity) ? recent : packet.recent_activity,
     ...(chatHistory !== transcript ? {
       admin_chat_context:{...chat,conversation_transcript:chatHistory},
     } : {}),
@@ -937,7 +941,7 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
   if (inferencePacket !== packet) console.log('AAU_COGNITION_CONTEXT_COMPACTED', JSON.stringify({
     agent_id:agentId, intent_execution_id:intentExecutionId, original_bytes:Buffer.byteLength(JSON.stringify(packet)),
     inference_bytes:Buffer.byteLength(packetText),
-    full_recent_activities:3, summarized_older_activities:Math.max(0,packet.recent_activity.length-3),
+    full_recent_activities:3, summarized_older_activities:Math.max(0,(packet.recent_activity?.length || 0)-3),
     chat_messages:packet.admin_chat_context?.conversation_transcript?.length || 0,
   }));
   const knowledgePrompt = knowledgePoolReviewPrompt(packet);
