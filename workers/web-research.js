@@ -2,6 +2,7 @@
 // No authenticated browser, private network access, credentials in sources, or bypass of site controls.
 import { lookup } from 'node:dns/promises';
 import { createHash } from 'node:crypto';
+import { tavilyConfigured, tavilyDiscover, tavilyExtract } from './tavily-research.js';
 
 const MAX_QUERY = 180, MAX_BODY = 550000, MAX_TEXT = 15000;
 const sha = (s) => createHash('sha256').update(s).digest('hex');
@@ -93,6 +94,24 @@ function primaryRank(item) {
     /(?:^|\.)(?:imf\.org|worldbank\.org|who\.int|oecd\.org|un\.org|doi\.org)$/.test(h)?2:1;
 }
 async function discover(query) {
+  // Authenticated primary provider: fail closed when configured rather than silently
+  // falling through to low-quality public RSS / unrelated scholarly metadata.
+  if (tavilyConfigured()) {
+    try {
+      const found=await tavilyDiscover(query);
+      const items=found.items.filter(item=>{
+        try {
+          const u=new URL(item.url);
+          if(u.pathname==='/' && !query.toLowerCase().includes(u.hostname.toLowerCase())) return false;
+          return relevant(item,query) && (item.relevance_score===null || item.relevance_score>=0.2);
+        } catch{return false;}
+      }).sort((a,b)=>primaryRank(b)-primaryRank(a) || (b.relevance_score??0)-(a.relevance_score??0));
+      return {provider:'tavily_authenticated',items,provider_error:items.length?null:'tavily_results_not_relevant'};
+    } catch(error) {
+      return {provider:'tavily_authenticated',items:[],
+        provider_error:String(error?.message||error).slice(0,160)};
+    }
+  }
   let bingError=null;
   try {
     const url='https://www.bing.com/search?'+new URLSearchParams({q:query,format:'rss'});
@@ -154,7 +173,7 @@ export async function researchWeb({queries,urls}={}) {
   const submitted=Array.isArray(queries)?queries:[];
   const requested=[...new Set(submitted.filter(q=>typeof q==='string').map(q=>clean(q).slice(0,MAX_QUERY)).filter(q=>q.length>=4))].slice(0,3);
   const direct=[...new Set((Array.isArray(urls)?urls:[]).filter(u=>typeof u==='string'&&u.length<1200&&u.startsWith('https://')))].slice(0,4);
-  const report={version:'aau_web_research_v0_1',requested_queries:requested,requested_direct_urls:direct,
+  const report={version:'aau_web_research_v0_2',search_provider_configured:tavilyConfigured()?'tavily_authenticated':'legacy_unconfigured',requested_queries:requested,requested_direct_urls:direct,
     searches:[],sources:[],limits:{queries:3,sources:4,body_bytes:MAX_BODY,excerpt_chars:MAX_TEXT},
     restrictions:'Public HTTPS only; short bounded fetch. HTML text extraction may be incomplete. PDFs, protected pages and paywalls are not read in full.'};
   for(const url of direct) {
@@ -183,6 +202,21 @@ export async function researchWeb({queries,urls}={}) {
       const record={query:q,url:item.url,search_title:item.title,discovery:item.discovery,
         publisher:item.publisher||null,search_publication_date:item.published_at,search_snippet:item.summary||null};
       try {
+        if(item.discovery==='tavily_search_snippet_not_fetched') {
+          // Check public HTTPS & DNS before sending a result URL to the extract tool.
+          const safe=await validateUrl(item.url);
+          try {
+            const extraction=await tavilyExtract(safe.toString());
+            if(extraction.fetch_status==='fetched_text') {
+              Object.assign(record,extraction);
+              report.sources.push(record);
+              continue;
+            }
+            record.provider_extract_error=extraction.fetch_error||'tavily_extract_empty';
+          } catch(error) {
+            record.provider_extract_error=String(error?.message||error).slice(0,160);
+          }
+        }
         const page=await boundedGet(item.url,'text/html, text/plain, application/xhtml+xml, application/pdf',9000);
         record.url=page.url;record.mime_type=page.type.split(';')[0];
         if (/html|text\/plain|xhtml/i.test(page.type)) {
@@ -212,5 +246,5 @@ export async function smokeWebResearch() {
   }
   const direct=await researchWeb({urls:['https://www.usa.gov/voter-registration/']});
   const direct_probe={status:direct.status,ok:direct.status==='fetched_text',sources:direct.sources.map(({url,fetch_status,coverage,bytes,fetch_error})=>({url,fetch_status,coverage,bytes,fetch_error}))};
-  return {ok:direct_probe.ok,probes,direct_probe};
+  return {ok:direct_probe.ok && (tavilyConfigured() ? probes.some(p=>p.searches.some(s=>s.provider==='tavily_authenticated' && s.result_count>0) && p.sources.some(s=>s.fetch_status==='fetched_text')) : true),tavily_key_configured:tavilyConfigured(),probes,direct_probe};
 }
