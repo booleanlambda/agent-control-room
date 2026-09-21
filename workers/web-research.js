@@ -171,13 +171,12 @@ function htmlSource(page) {
 }
 export async function researchWeb({queries,urls}={}) {
   const submitted=Array.isArray(queries)?queries:[];
-  const requested=[...new Set(submitted.filter(q=>typeof q==='string').map(q=>clean(q).slice(0,MAX_QUERY)).filter(q=>q.length>=4))].slice(0,3);
-  const direct=[...new Set((Array.isArray(urls)?urls:[]).filter(u=>typeof u==='string'&&u.length<1200&&u.startsWith('https://')))].slice(0,4);
+  const requested=[...new Set(submitted.filter(q=>typeof q==='string').map(q=>clean(q).slice(0,MAX_QUERY)).filter(q=>q.length>=4))];
+  const direct=[...new Set((Array.isArray(urls)?urls:[]).filter(u=>typeof u==='string'&&u.length<1200&&u.startsWith('https://')))];
   const report={version:'aau_web_research_v0_2',search_provider_configured:tavilyConfigured()?'tavily_authenticated':'legacy_unconfigured',requested_queries:requested,requested_direct_urls:direct,
-    searches:[],sources:[],limits:{queries:3,sources:4,body_bytes:MAX_BODY,excerpt_chars:MAX_TEXT},
+    searches:[],sources:[],limits:{queries:'provider/runtime only',sources:'provider/runtime only',body_bytes:MAX_BODY,excerpt_chars:MAX_TEXT},
     restrictions:'Public HTTPS only; short bounded fetch. HTML text extraction may be incomplete. PDFs, protected pages and paywalls are not read in full.'};
   for(const url of direct) {
-    if(report.sources.length>=4) break;
     const record={query:null,url,discovery:'agent_requested_direct_url',search_title:null,search_snippet:null};
     try {
       const page=await boundedGet(url,'text/html, text/plain, application/xhtml+xml, application/pdf',9000);
@@ -197,8 +196,8 @@ export async function researchWeb({queries,urls}={}) {
   for (const q of requested) {
     const discovery=await discover(q);
     report.searches.push({query:q,provider:discovery.provider,result_count:discovery.items.length,provider_error:discovery.provider_error});
-    for (const item of discovery.items.slice(0,2)) {
-      if (report.sources.length>=4 || report.sources.some(s=>s.url===item.url)) continue;
+    for (const item of discovery.items) {
+      if (report.sources.some(s=>s.url===item.url)) continue;
       const record={query:q,url:item.url,search_title:item.title,discovery:item.discovery,
         publisher:item.publisher||null,search_publication_date:item.published_at,search_snippet:item.summary||null};
       try {
