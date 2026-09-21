@@ -898,16 +898,35 @@ export function compactCognitionPacketForInference(packet) {
       history_detail: 'archived_in_durable_activity_log_not_independently_verified',
     };
   });
+  const chat = packet.admin_chat_context;
+  const transcript = Array.isArray(chat?.conversation_transcript) ? chat.conversation_transcript : null;
+  const chatHistory = transcript && transcript.length > 5
+    ? transcript.map((entry,index) => index >= transcript.length-5 ? entry : {
+        message_id:entry?.message_id || null,
+        created_at:entry?.created_at || null,
+        sender_kind:entry?.sender_kind || null,
+        delivery_status:entry?.delivery_status || null,
+        content_preview:String(entry?.content || '').slice(0,180),
+        historical_full_text_in_durable_chat:true,
+      })
+    : transcript;
   return {
     ...packet,
     recent_activity: recent,
+    ...(chatHistory !== transcript ? {
+      admin_chat_context:{...chat,conversation_transcript:chatHistory},
+    } : {}),
     inference_history_coverage: {
-      contract:'recent_activity_compaction_v0_1',
+      contract:'recent_activity_and_chat_compaction_v0_2',
       recent_full_count:3,
       older_summary_count:Math.max(0,recent.length-3),
+      latest_full_chat_count:chatHistory && chatHistory !== transcript ? 5 : transcript?.length || 0,
+      older_chat_summary_count:chatHistory && chatHistory !== transcript ? transcript.length-5 : 0,
       canonical_activity_records_preserved:true,
+      canonical_chat_records_preserved:true,
+      current_admin_message_preserved:true,
       authoritative_state_and_evidence_sections_preserved:true,
-      warning:'Summaries are navigational only; retrieve canonical activity evidence before making a verification claim.',
+      warning:'Summaries are navigational only; retrieve canonical records before making a verification claim.',
     },
   };
 }
@@ -919,6 +938,7 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
     agent_id:agentId, intent_execution_id:intentExecutionId, original_bytes:Buffer.byteLength(JSON.stringify(packet)),
     inference_bytes:Buffer.byteLength(packetText),
     full_recent_activities:3, summarized_older_activities:Math.max(0,packet.recent_activity.length-3),
+    chat_messages:packet.admin_chat_context?.conversation_transcript?.length || 0,
   }));
   const knowledgePrompt = knowledgePoolReviewPrompt(packet);
   let baseMessages = [{ role: 'system', content: SYSTEM_PROMPT },
@@ -1252,7 +1272,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       requested_model_id: model, returned_model_id: ai.model_returned,
       continuity_mode: false, transition_mode: false,
       executor_version: 'executor_v0_24_fixed_five_minute_sleep',
-      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_24_bounded_history',
+      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_25_bounded_history_chat',
       response_id: ai.response_id, raw_model_output: raw.slice(0,50000),
       input_tokens: Number(usage.prompt_tokens ?? usage.input_tokens ?? 0),
       output_tokens: Number(usage.completion_tokens ?? usage.output_tokens ?? 0),
