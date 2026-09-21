@@ -247,7 +247,7 @@ begin
 
   return v_id;
 end
-$function$
+$function$;
 
 CREATE OR REPLACE FUNCTION agent_lab.build_expertise_portfolio_context_v0_2(p_agent_id uuid)
  RETURNS jsonb
@@ -351,7 +351,7 @@ begin
     'gate',v_gate
   );
 end
-$function$
+$function$;
 
 CREATE OR REPLACE FUNCTION agent_lab.get_cognition_packet(p_agent_id uuid, p_wake_request_id uuid)
  RETURNS jsonb
