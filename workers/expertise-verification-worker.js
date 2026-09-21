@@ -101,8 +101,9 @@ async function nvidiaCall({ model, system, user, maxTokens = 1200, temperature =
     noteReviewerModelSuccess(model);
     const message = parsed.body?.choices?.[0]?.message || {};
     return {
-      text: String(message.content || message.reasoning_content || parsed.body?.choices?.[0]?.text || '').trim(),
+      text: String(message.content || parsed.body?.choices?.[0]?.text || '').trim(),
       model: parsed.body?.model || model,
+      finish_reason: parsed.body?.choices?.[0]?.finish_reason || null,
       usage: parsed.body?.usage || null,
     };
   } catch (error) {
@@ -273,7 +274,7 @@ function parseGrade(text) {
 
   const field = (name) => {
     if (obj && Object.prototype.hasOwnProperty.call(obj, name)) return obj[name];
-    const re = new RegExp('\\b' + name + '\s*[:=]\s*([A-Za-z0-9_.%-]+)', 'i');
+    const re = new RegExp('\\b' + name + '\\s*[:=]\\s*([A-Za-z0-9_.%-]+)', 'i');
     const m = re.exec(raw);
     return m ? m[1] : null;
   };
@@ -323,6 +324,7 @@ async function gradeAnswer(run, task, answer) {
     primaryAuthenticator,
     'meta/muse-glimmer-30b',
     'nvidia/nemotron-3.5-lightning-30b-a3b',
+    'openai/gpt-oss-20b',
   ].filter((x, i, a) => x && a.indexOf(x) === i && x !== run.candidate_model_id);
   let lastAuthError = null;
   for (const model of authModels) {
@@ -330,11 +332,20 @@ async function gradeAnswer(run, task, answer) {
       console.warn('AAU_EXPERTISE_AUTHENTICATOR_BACKOFF_SKIP',model);
       continue;
     }
-    for (let attempt = 1; attempt <= 1; attempt++) {
+    const maxAttempts = model === primaryAuthenticator || model === 'openai/gpt-oss-20b' ? 2 : 1;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const result = await nvidiaCall({ model, system, user, maxTokens: 320, temperature: 0, timeoutMs: model === primaryAuthenticator ? 45000 : model.startsWith('meta/') ? 60000 : 110000, jsonMode: false });
+        const result = await nvidiaCall({
+          model, system, user, maxTokens: 650, temperature: 0,
+          timeoutMs: model === primaryAuthenticator ? 45000 : model.startsWith('meta/') ? 60000 : 110000,
+          jsonMode: false,
+        });
         const grade = parseGrade(result.text);
         if (grade) return { ...grade, id: task.id, verifier_model: result.model || model, verifier_requested_model: model, authenticator_fallback_used: model !== primaryAuthenticator, raw_sha256: sha256(result.text) };
+        console.warn('AAU_EXPERTISE_AUTHENTICATOR_UNUSABLE_GRADE', JSON.stringify({
+          model, task_id:task.id, attempt, raw_sha256:sha256(result.text), response_chars:result.text.length,
+          finish_reason:result.finish_reason || null,
+        }));
         lastAuthError = new Error(`authenticator_unusable_grade:${task.id}:${model}`);
       } catch (error) {
         lastAuthError = error;
@@ -342,7 +353,7 @@ async function gradeAnswer(run, task, answer) {
         const retryable = error?.name === 'AbortError' || status === 429 || status >= 500;
         if (!retryable) break;
       }
-      if (attempt < 2) await sleep(1500 * attempt);
+      if (attempt < maxAttempts) await sleep(1500 * attempt);
     }
     console.warn('AAU_EXPERTISE_AUTHENTICATOR_MODEL_FAILED', model, String(lastAuthError?.message || lastAuthError || 'unusable_grade').slice(0, 500));
   }
