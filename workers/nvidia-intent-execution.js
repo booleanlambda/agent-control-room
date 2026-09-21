@@ -875,8 +875,51 @@ function knowledgePoolReviewPrompt(packet) {
     + 'This is a low-cost review inside the existing cognition, not a separate external action.';
 }
 
+// Keep the canonical database packet intact. Only the model-facing duplicate history
+// is condensed: full latest activities and durable domain/verification/identity/attention
+// context remain available; historical IDs and status remain addressable in the DB.
+export function compactCognitionPacketForInference(packet) {
+  if (!packet || !Array.isArray(packet.recent_activity) || packet.recent_activity.length <= 3) return packet;
+  const recent = packet.recent_activity.map((entry, index) => {
+    if (index < 3) return entry;
+    const memory = entry?.outcome?.memory || {};
+    const updates = Array.isArray(memory?.updates) ? memory.updates : memory?.memory_type ? [memory] : [];
+    const associations = Array.isArray(entry?.outcome?.associations) ? entry.outcome.associations : [];
+    return {
+      activity_id: entry?.activity_id || null,
+      created_at: entry?.created_at || null,
+      event_type: entry?.event_type || null,
+      selected_action: entry?.selected_action || null,
+      stated_reason: String(entry?.stated_reason || '').slice(0, 420),
+      study_topics: updates.filter(u=>u?.memory_type==='study_session')
+        .map(u=>String(u.topic || '').slice(0, 120)).slice(0,3),
+      association_origins: associations.map(a=>String(a?.origin || '')).filter(Boolean).slice(0,5),
+      resource_cost: entry?.resource_cost || null,
+      history_detail: 'archived_in_durable_activity_log_not_independently_verified',
+    };
+  });
+  return {
+    ...packet,
+    recent_activity: recent,
+    inference_history_coverage: {
+      contract:'recent_activity_compaction_v0_1',
+      recent_full_count:3,
+      older_summary_count:Math.max(0,recent.length-3),
+      canonical_activity_records_preserved:true,
+      authoritative_state_and_evidence_sections_preserved:true,
+      warning:'Summaries are navigational only; retrieve canonical activity evidence before making a verification claim.',
+    },
+  };
+}
+
 async function getDecision(packet, model, agentId, intentExecutionId) {
-  const packetText = JSON.stringify(packet);
+  const inferencePacket = compactCognitionPacketForInference(packet);
+  const packetText = JSON.stringify(inferencePacket);
+  if (inferencePacket !== packet) console.log('AAU_COGNITION_CONTEXT_COMPACTED', JSON.stringify({
+    agent_id:agentId, intent_execution_id:intentExecutionId, original_bytes:Buffer.byteLength(JSON.stringify(packet)),
+    inference_bytes:Buffer.byteLength(packetText),
+    full_recent_activities:3, summarized_older_activities:Math.max(0,packet.recent_activity.length-3),
+  }));
   const knowledgePrompt = knowledgePoolReviewPrompt(packet);
   let baseMessages = [{ role: 'system', content: SYSTEM_PROMPT },
     ...(knowledgePrompt ? [{ role: 'system', content: knowledgePrompt }] : []),
@@ -1209,7 +1252,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       requested_model_id: model, returned_model_id: ai.model_returned,
       continuity_mode: false, transition_mode: false,
       executor_version: 'executor_v0_24_fixed_five_minute_sleep',
-      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_23_persistent_expertise_memory',
+      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_24_bounded_history',
       response_id: ai.response_id, raw_model_output: raw.slice(0,50000),
       input_tokens: Number(usage.prompt_tokens ?? usage.input_tokens ?? 0),
       output_tokens: Number(usage.completion_tokens ?? usage.output_tokens ?? 0),
