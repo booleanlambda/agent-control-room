@@ -238,8 +238,8 @@ export async function researchWeb({queries,urls}={}) {
 }
 export async function smokeWebResearch() {
   const probes=[];
-  for(const query of ['Federal Reserve September 2026 monetary policy statement official',
-    'US voter registration official usa.gov']) {
+  for(const query of ['FCC spectrum auction design procurement contract value',
+    'AWS EC2 on demand compute pricing official']) {
     const report=await researchWeb({queries:[query]});
     probes.push({query,ok:report.status==='fetched_text',status:report.status,searches:report.searches,
       sources:report.sources.map(({url,search_title,fetch_status,coverage,fetch_error,bytes})=>({url,search_title,fetch_status,coverage,fetch_error,bytes}))});
