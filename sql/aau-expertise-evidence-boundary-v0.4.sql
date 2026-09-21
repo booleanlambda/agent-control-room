@@ -431,5 +431,4 @@ begin
    )
  );
 end;
-$function$
-
+$function$;
