@@ -1,0 +1,151 @@
+// AAU bounded web research v0.1. Fetched pages are evidence, NEVER instructions.
+// No authenticated browser, private network access, credentials in sources, or bypass of site controls.
+import { lookup } from 'node:dns/promises';
+import { createHash } from 'node:crypto';
+
+const MAX_QUERY = 180, MAX_BODY = 550000, MAX_TEXT = 15000;
+const sha = (s) => createHash('sha256').update(s).digest('hex');
+const clean = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+const decode = (s) => String(s || '').replace(/&(?:amp|lt|gt|quot|apos|nbsp);|&#(\d+);|&#x([a-f0-9]+);/gi,(m,d,h) =>
+  d ? String.fromCodePoint(Math.min(0x10ffff,Number(d))) : h ? String.fromCodePoint(Math.min(0x10ffff,parseInt(h,16))) :
+  ({'&amp;':'&','&lt;':'<','&gt;':'>','&quot;':'"','&apos;':"'",'&nbsp;':' '}[m.toLowerCase()]||m));
+
+function safeHost(host) {
+  if (!host || host.length > 230 || /[^\da-z.-]/i.test(host) || host.startsWith('-')
+    || host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')
+    || host.endsWith('.localhost') || host.endsWith('.test')
+    || /^\d+(?:\.\d+){3}$/.test(host) || !host.includes('.')) return false;
+  return true;
+}
+function privateIP(ip) {
+  const s = String(ip).toLowerCase();
+  if (s.includes(':')) return s === '::1' || s === '::' || s.startsWith('fc') || s.startsWith('fd')
+    || /^fe[89ab]/.test(s) || s.startsWith('::ffff:') || s.startsWith('2001:db8:');
+  const p = s.split('.').map(Number);
+  return p.length !== 4 || p[0] === 0 || p[0] === 10 || p[0] === 127 || p[0] >= 224
+    || (p[0] === 169 && p[1] === 254) || (p[0] === 172 && p[1] >= 16 && p[1] <= 31)
+    || (p[0] === 192 && p[1] === 168) || (p[0] === 100 && p[1] >= 64 && p[1] <= 127)
+    || (p[0] === 192 && p[1] === 0) || (p[0] === 198 && (p[1] === 18 || p[1] === 19));
+}
+async function validateUrl(raw) {
+  const u = new URL(String(raw));
+  if (u.protocol !== 'https:' || u.username || u.password || (u.port && u.port !== '443')
+    || !safeHost(u.hostname.toLowerCase())) throw Error('research_url_not_public_https');
+  const ips = await lookup(u.hostname,{all:true,verbatim:true});
+  if (!ips.length || ips.some((v) => privateIP(v.address))) throw Error('research_private_dns_result');
+  u.hash = '';
+  return u;
+}
+async function boundedGet(raw, accept, timeout = 9000) {
+  let dest = String(raw);
+  for (let redirects=0; redirects<=2; redirects++) {
+    const u = await validateUrl(dest);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeout);
+    try {
+      const response = await fetch(u,{redirect:'manual',signal:ctrl.signal,headers:{
+        accept,'user-agent':'AAU-ResearchBot/0.1 (+source-attributed-research; contact operator)',
+      }});
+      if ([301,302,303,307,308].includes(response.status)) {
+        if (redirects === 2) throw Error('research_too_many_redirects');
+        const location=response.headers.get('location');
+        if (!location) throw Error('research_redirect_without_location');
+        dest=new URL(location,u).toString(); continue;
+      }
+      if (!response.ok) throw Error('research_http_'+response.status);
+      const len=Number(response.headers.get('content-length')||0);
+      if (len > MAX_BODY) throw Error('research_document_too_large');
+      const chunks=[]; let bytes=0;
+      for await (const piece of response.body) {
+        bytes+=piece.length;
+        if (bytes>MAX_BODY) throw Error('research_document_too_large');
+        chunks.push(piece);
+      }
+      return {url:u.toString(),type:String(response.headers.get('content-type')||''),body:Buffer.concat(chunks).toString('utf8'),bytes};
+    } finally { clearTimeout(timer); }
+  }
+  throw Error('research_redirect_limit');
+}
+function rssItems(xml) {
+  const list=[];
+  for (const m of xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)) {
+    const tag=(k)=>decode(clean(m[1].match(new RegExp('<'+k+'(?:\\s[^>]*)?>([\\s\\S]*?)<\\/'+k+'>','i'))?.[1]||'').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,'$1').replace(/<[^>]*>/g,''));
+    const url=tag('link');
+    if (!url.startsWith('https://') || list.some(x=>x.url===url)) continue;
+    list.push({url,title:tag('title'),summary:tag('description'),published_at:tag('pubDate')||null,discovery:'bing_rss_unverified_snippet'});
+    if (list.length >= 6) break;
+  }
+  return list;
+}
+async function discover(query) {
+  let bingError=null;
+  try {
+    const url='https://www.bing.com/search?'+new URLSearchParams({q:query,format:'rss'});
+    const response=await boundedGet(url,'application/rss+xml, application/xml, text/xml',9000);
+    const list=rssItems(response.body);
+    if (list.length) return {provider:'bing_public_rss',items:list,provider_error:null};
+    bingError='bing_rss_no_search_items';
+  } catch(e) { bingError=clean(e.message).slice(0,120); }
+  // Crossref is open scholarly metadata, NOT a substitute for full, general web search.
+  try {
+    const url='https://api.crossref.org/works?'+new URLSearchParams({'query.bibliographic':query,rows:'5',select:'DOI,title,URL,published,author,publisher,abstract'});
+    const res=await boundedGet(url,'application/json',9000);
+    const data=JSON.parse(res.body);
+    const list=(data?.message?.items||[]).slice(0,5).map(v=>({
+      url:v.URL,title:clean(v.title?.[0]),summary:clean(String(v.abstract||'').replace(/<[^>]+>/g,' ')).slice(0,450),
+      published_at:v.published?.['date-parts']?.[0]?.join('-')||null,publisher:v.publisher||null,
+      discovery:'crossref_bibliographic_metadata_not_full_text'
+    })).filter(x=>x.url?.startsWith('https://'));
+    return {provider:'crossref_scholarly_only',items:list,provider_error:bingError};
+  } catch(e) {
+    return {provider:'none',items:[],provider_error:[bingError,clean(e.message)].filter(Boolean).join('; ').slice(0,250)};
+  }
+}
+function htmlSource(page) {
+  const title=decode(clean(page.body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]||'').replace(/<[^>]+>/g,''));
+  const date=page.body.match(/<meta[^>]+(?:property|name)=["'](?:article:published_time|date|citation_date|DC.date)["'][^>]+content=["']([^"']+)/i)?.[1] || null;
+  const article=page.body.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1]
+    || page.body.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1] || page.body;
+  const extracted=decode(article.replace(/<script\b[\s\S]*?<\/script>/gi,' ').replace(/<style\b[\s\S]*?<\/style>/gi,' ')
+    .replace(/<(?:nav|header|footer|aside|form)\b[\s\S]*?<\/(?:nav|header|footer|aside|form)>/gi,' ')
+    .replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim());
+  return {title:title.slice(0,350),published_at:date,excerpt:extracted.slice(0,MAX_TEXT),sha256:sha(page.body),bytes:page.bytes,
+    coverage:extracted.length>MAX_TEXT?'partial_text_truncated':'html_text_extracted_completeness_not_guaranteed'};
+}
+export async function researchWeb({queries}={}) {
+  const submitted=Array.isArray(queries)?queries:[];
+  const requested=[...new Set(submitted.filter(q=>typeof q==='string').map(q=>clean(q).slice(0,MAX_QUERY)).filter(q=>q.length>=4))].slice(0,3);
+  const report={version:'aau_web_research_v0_1',requested_queries:requested,searches:[],sources:[],limits:{queries:3,sources:4,body_bytes:MAX_BODY,excerpt_chars:MAX_TEXT},
+    restrictions:'Public HTTPS only; short bounded fetch. HTML text extraction may be incomplete. PDFs, protected pages and paywalls are not read in full.'};
+  for (const q of requested) {
+    const discovery=await discover(q);
+    report.searches.push({query:q,provider:discovery.provider,result_count:discovery.items.length,provider_error:discovery.provider_error});
+    for (const item of discovery.items.slice(0,2)) {
+      if (report.sources.length>=4 || report.sources.some(s=>s.url===item.url)) continue;
+      const record={query:q,url:item.url,search_title:item.title,discovery:item.discovery,
+        publisher:item.publisher||null,search_publication_date:item.published_at,search_snippet:item.summary||null};
+      try {
+        const page=await boundedGet(item.url,'text/html, text/plain, application/xhtml+xml, application/pdf',9000);
+        record.url=page.url;record.mime_type=page.type.split(';')[0];
+        if (/html|text\/plain|xhtml/i.test(page.type)) {
+          const parsed=/html|xhtml/i.test(page.type)?htmlSource(page):{
+            title:item.title,published_at:null,excerpt:page.body.slice(0,MAX_TEXT),
+            sha256:sha(page.body),bytes:page.bytes,coverage:page.body.length>MAX_TEXT?'partial_text_truncated':'plain_text'};
+          Object.assign(record,parsed);record.fetch_status='fetched_text';
+        } else {
+          record.fetch_status='unsupported_mime';record.coverage='metadata_only_document_not_read';
+          record.sha256=sha(page.body);record.bytes=page.bytes;
+        }
+      } catch(e) {record.fetch_status='blocked';record.coverage='search_snippet_only';record.fetch_error=clean(e.message).slice(0,160);}
+      report.sources.push(record);
+    }
+  }
+  report.status=report.sources.some(s=>s.fetch_status==='fetched_text')?'fetched_text'
+    :report.sources.length?'metadata_only':'blocked';
+  return report;
+}
+export async function smokeWebResearch() {
+  const report=await researchWeb({queries:['Federal Reserve September 2026 monetary policy statement official']});
+  return {ok:report.status==='fetched_text',status:report.status,searches:report.searches,
+    sources:report.sources.map(({url,fetch_status,coverage,fetch_error,bytes})=>({url,fetch_status,coverage,fetch_error,bytes}))};
+}
