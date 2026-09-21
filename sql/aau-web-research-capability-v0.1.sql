@@ -15,7 +15,7 @@ ALTER TABLE agent_lab.agent_web_research_batches ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON agent_lab.agent_web_research_batches FROM PUBLIC,anon,authenticated;
 GRANT SELECT ON agent_lab.agent_web_research_batches TO service_role;
 INSERT INTO agent_lab.capability_definitions (capability_code,display_name,provider,route_mode,side_effect_level,durability_required,grant_required,autonomous_default,approval_policy,queue_name,timeout_class,retry_policy,idempotency_required,cost_class,execution_adapter,version,enabled,metadata)
-VALUES ('web.research','Search and fetch public web sources','aau','sync_runtime','external',true,false,true,'none',null,'medium','{"max_attempts":1}'::jsonb,true,'variable','nvidia_research_tool_v0_1','v0_1',true,'{"category":"research","scope":"all_agents_from_inception","legal_gate_required":false,"max_queries_per_wake":3,"max_sources_per_wake":4,"no_inferred_mastery":true}'::jsonb)
+VALUES ('web.research','Search and fetch public web sources','aau','sync_runtime','external',true,false,true,'none',null,'medium','{"max_attempts":1}'::jsonb,true,'variable','nvidia_research_tool_v0_1','v0_1',true,'{"category":"research","scope":"all_agents_from_inception","legal_gate_required":false,"no_inferred_mastery":true}'::jsonb)
 ON CONFLICT(capability_code) DO UPDATE SET enabled=true,autonomous_default=true,grant_required=false,metadata=agent_lab.capability_definitions.metadata || EXCLUDED.metadata,updated_at=now();
 CREATE OR REPLACE FUNCTION public.aau_bridge_record_web_research(p_bridge_token text, p_agent_id uuid, p_wake_request_id uuid, p_research jsonb)
  RETURNS uuid
