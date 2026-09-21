@@ -77,14 +77,30 @@ function rssItems(xml) {
   }
   return list;
 }
+function relevanceTokens(v) {
+  const stop=new Set(['about','with','from','2026','2025','2024','2023','official','latest','current','report','study','evidence','data','source','what','when','where','this','that','the','and','for','into','how','does','find','paper','research']);
+  return [...new Set(clean(v).toLowerCase().split(/[^a-z0-9]+/).filter(x=>x.length>=4&&!stop.has(x)))];
+}
+function relevant(item,query) {
+  const terms=relevanceTokens(query);
+  const corpus=clean([item.title,item.summary,new URL(item.url).hostname].join(' ')).toLowerCase();
+  const hits=terms.filter(t=>corpus.includes(t)).length;
+  return hits>=Math.min(2,terms.length) && hits>0;
+}
+function primaryRank(item) {
+  const h=new URL(item.url).hostname;
+  return /(?:^|\.)(?:gov|edu)$/.test(h)?3:
+    /(?:^|\.)(?:imf\.org|worldbank\.org|who\.int|oecd\.org|un\.org|doi\.org)$/.test(h)?2:1;
+}
 async function discover(query) {
   let bingError=null;
   try {
     const url='https://www.bing.com/search?'+new URLSearchParams({q:query,format:'rss'});
     const response=await boundedGet(url,'application/rss+xml, application/xml, text/xml',9000);
     const list=rssItems(response.body);
-    if (list.length) return {provider:'bing_public_rss',items:list,provider_error:null};
-    bingError='bing_rss_no_search_items';
+    const relevantItems=list.filter(item=>relevant(item,query)).sort((a,b)=>primaryRank(b)-primaryRank(a));
+    if (relevantItems.length) return {provider:'bing_public_rss',items:relevantItems,provider_error:null};
+    bingError=list.length?'bing_rss_results_not_relevant':'bing_rss_no_search_items';
   } catch(e) { bingError=clean(e.message).slice(0,120); }
   // Crossref is open scholarly metadata, NOT a substitute for full, general web search.
   try {
@@ -95,7 +111,8 @@ async function discover(query) {
       url:v.URL,title:clean(v.title?.[0]),summary:clean(String(v.abstract||'').replace(/<[^>]+>/g,' ')).slice(0,450),
       published_at:v.published?.['date-parts']?.[0]?.join('-')||null,publisher:v.publisher||null,
       discovery:'crossref_bibliographic_metadata_not_full_text'
-    })).filter(x=>x.url?.startsWith('https://'));
+    })).filter(x=>x.url?.startsWith('https://')&&relevant(x,query))
+      .sort((a,b)=>primaryRank(b)-primaryRank(a));
     return {provider:'crossref_scholarly_only',items:list,provider_error:bingError};
   } catch(e) {
     return {provider:'none',items:[],provider_error:[bingError,clean(e.message)].filter(Boolean).join('; ').slice(0,250)};
@@ -147,5 +164,5 @@ export async function researchWeb({queries}={}) {
 export async function smokeWebResearch() {
   const report=await researchWeb({queries:['Federal Reserve September 2026 monetary policy statement official']});
   return {ok:report.status==='fetched_text',status:report.status,searches:report.searches,
-    sources:report.sources.map(({url,fetch_status,coverage,fetch_error,bytes})=>({url,fetch_status,coverage,fetch_error,bytes}))};
+    sources:report.sources.map(({url,search_title,fetch_status,coverage,fetch_error,bytes})=>({url,search_title,fetch_status,coverage,fetch_error,bytes}))};
 }
