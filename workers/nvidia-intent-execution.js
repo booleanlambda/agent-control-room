@@ -684,7 +684,7 @@ function embodimentValidationDetails(packet, decision) {
 function lifecycleValidationDetails(packet, decision, issue) {
   if (issue === 'embodiment') return embodimentValidationDetails(packet, decision);
   if (issue === 'expertise_artifact') {
-    const v = expertiseArtifactValidation(decision);
+    const v = expertiseViabilityValidation(decision);
     return {
       current_stage: currentStage(packet),
       selected_action: decision?.selected_action || null,
