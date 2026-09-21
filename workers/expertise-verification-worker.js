@@ -312,6 +312,7 @@ async function adjudicate(run, task, answer, prior) {
     run.adjudicator_model,
     'z-ai/glm-5.3',
     'meta/muse-glimmer-30b',
+    'nvidia/nemotron-3.5-lightning-30b-a3b',
   ].filter((x, i, a) => x && a.indexOf(x) === i && x !== run.authenticator_model && x !== prior.verifier_model && x !== run.candidate_model_id);
   for (const model of candidates) {
     if (isReviewerModelInBackoff(model)) {console.warn('AAU_EXPERTISE_ADJUDICATOR_BACKOFF_SKIP',model);continue;}
@@ -483,5 +484,5 @@ export function startExpertiseVerificationWorker() {
   const missing = [['AAU_SUPABASE_ANON_KEY', anon], ['AAU_BROKER_BRIDGE_TOKEN', bridge], ['NVIDIA_API_KEY', nvidiaKey]].filter(([, v]) => !v).map(([k]) => k);
   if (missing.length) return { ok: false, ready: false, missing };
   if (!running) { running = true; loop().catch((e) => console.error('AAU_EXPERTISE_VERIFIER_FATAL', e)); }
-  return { ok: true, ready: true, executor_id: executorId, poll_ms: pollMs, provider: 'nvidia_direct', task_authority: 'deterministic:aau-task-authority-v0.1', authenticator: 'moonshotai/kimi-k3', authenticator_fallbacks: ['meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b'], adjudicator: 'openai/gpt-oss-20b', adjudicator_fallbacks: ['z-ai/glm-5.3','meta/muse-glimmer-30b'] };
+  return { ok: true, ready: true, executor_id: executorId, poll_ms: pollMs, provider: 'nvidia_direct', task_authority: 'deterministic:aau-task-authority-v0.1', authenticator: 'moonshotai/kimi-k3', authenticator_fallbacks: ['meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b'], adjudicator: 'openai/gpt-oss-20b', adjudicator_fallbacks: ['z-ai/glm-5.3','meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b'] };
 }
