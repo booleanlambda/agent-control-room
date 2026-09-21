@@ -39,7 +39,7 @@ async function post(route,payload,timeoutMs=12000) {
 
 export async function tavilyDiscover(query) {
   const data=await post('/search',{
-    query,topic:'general',search_depth:'basic',max_results:6,
+    query,topic:'general',search_depth:'basic',max_results:20,
     include_answer:false,include_raw_content:false,include_images:false,
   });
   const items=(Array.isArray(data.results)?data.results:[]).map(v=>({
