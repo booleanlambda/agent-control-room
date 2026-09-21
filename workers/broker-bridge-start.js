@@ -45,6 +45,17 @@ if (true || isEnabled('AAU_CONTROL_ROOM_INTENT_VISIBILITY_PATCH')) {
   }
 }
 
+// Operator-only bounded source discovery probe. Does not wake an agent.
+if (isEnabled('AAU_WEB_RESEARCH_SMOKE_TEST')) {
+  try {
+    const {smokeWebResearch} = await import('./web-research.js');
+    const result = await smokeWebResearch();
+    console.log('AAU_WEB_RESEARCH_SMOKE', JSON.stringify(result));
+  } catch (error) {
+    console.error('AAU_WEB_RESEARCH_SMOKE', JSON.stringify({ok:false,error:String(error?.message||error).slice(0,500)}));
+  }
+}
+
 const nvidiaSmokeEnabled = isEnabled('AAU_NVIDIA_SMOKE_TEST');
 if (nvidiaSmokeEnabled) {
   try {
