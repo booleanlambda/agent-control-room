@@ -883,6 +883,8 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
     { role: 'user', content: packetText }];
   let ai = await complete(model, baseMessages);
   let decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
+  let currentResearchLedger = [];
+  let researchObserved = false;
   // One source request per cognition. The first model response is an agent-authored research
   // REQUEST only; actual network evidence and an audit receipt precede any evidence claim.
   const firstRequest = decision.associations.find((v) => v?.origin === 'web_research_request_v0_1');
@@ -905,6 +907,15 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
     } catch(error) {
       observed.audit_error=String(error?.message || error).slice(0,300);
     }
+    researchObserved = true;
+    currentResearchLedger = (observed.sources || [])
+      .filter(s => s && s.fetch_status === 'fetched_text' && typeof s.url === 'string'
+        && /^[a-f0-9]{64}$/i.test(String(s.sha256 || '')))
+      .map(s => ({
+        url:s.url, sha256:s.sha256, title:s.title || s.search_title || null,
+        coverage:s.coverage || null, published_at:s.published_at || null,
+        fetch_status:'fetched_text',
+      }));
     const evidenceForModel = {
       ...observed,
       sources:(observed.sources || []).map(source => ({
@@ -920,11 +931,70 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
         + '\nApply the retrieve-verify-revise procedure now. Audit each material claim against these observations, classify support as SUPPORTED / QUALIFIED / CONTRADICTED / INSUFFICIENT, revise unsupported claims, and persist a source_manifest derived only from observed receipts when recording a research-based study_session. Complete your original mandatory lifecycle work, or honestly report blocked evidence. The prior requested searches are now '
         + observed.status + '. Cite only URLs actually present and distinguish snippets, partial HTML and unsupported PDFs. '
         + 'Do not repeat web_research_request_v0_1 in this response; choose any further research in a later wake. '
-        + 'Never treat the research receipt as independent expertise verification.'},
+        + 'Never treat the research receipt as independent expertise verification.'
+        + '\\nAUDITED FETCHED SOURCE LEDGER (exact URL and SHA-256, never infer claim support from inclusion):\\n'
+        + JSON.stringify(currentResearchLedger).slice(0,21000)
+        + '\\nUse only exact URL+SHA pairs from this ledger in source_manifest and expertise_knowledge_unit_v0_1. The ledger proves retrieval, NOT the correctness of a claim.'},
     ];
     ai = await complete(model, baseMessages);
     decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
     decision.associations = decision.associations.filter(v=>v?.origin !== 'web_research_request_v0_1');
+    // A research-based study with no source_manifest remains untrusted. Give the bound
+    // model one bounded correction turn to provide genuine receipt-backed provenance.
+    const studyUpdates = Array.isArray(decision?.memory?.updates) ? decision.memory.updates
+      : decision?.memory?.memory_type === 'study_session' ? [decision.memory] : [];
+    const ungroundedStudy = studyUpdates.some(u => u?.memory_type === 'study_session'
+      && (!Array.isArray(u.source_manifest) || !u.source_manifest.length));
+    const hasKnowledgeUnits = decision.associations.some(a => a?.origin === 'expertise_knowledge_unit_v0_1');
+    if (currentResearchLedger.length && (ungroundedStudy || !hasKnowledgeUnits)) {
+      const repair = [
+        ...baseMessages,
+        {role:'assistant',content:String(ai.content || '').slice(0,50000)},
+        {role:'user',content:
+          'PROVENANCE CONTRACT REPAIR: Your latest result contains '
+          + (ungroundedStudy ? 'a research-derived study_session without source_manifest. ' : '')
+          + (!hasKnowledgeUnits ? 'no structured expertise_knowledge_unit_v0_1 claim. ' : '')
+          + 'Return the complete decision JSON again, preserving all substantive decisions and next_intents. '
+          + 'For each independently supported or qualified atomic claim, supply the relevant exact fetched URL and sha256 from the AUDITED FETCHED SOURCE LEDGER. '
+          + 'Add a source_manifest to each evidence-based study_session. If the research supports a narrow technical claim in the active expertise domain, '
+          + 'you may add an expertise_knowledge_unit_v0_1 association with the exact artifact competency, claim, assumptions, invalidation_conditions, '
+          + 'evidence_status=supported or qualified, confidence and source_manifest. '
+          + 'Do not add units when evidence is insufficient, snippet-only or not linked to this claim. '
+          + 'Do not guess sources, omit unsupported claims rather than manufacturing evidence; empty provenance will remain explicitly untrusted. '
+          + 'SOURCE LEDGER: '+JSON.stringify(currentResearchLedger).slice(0,21000)},
+      ];
+      try {
+        ai = await complete(model, repair);
+        decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
+        decision.associations = decision.associations.filter(v=>v?.origin !== 'web_research_request_v0_1');
+      } catch(error) {
+        console.warn('AAU_EXPERTISE_PROVENANCE_REPAIR_FAILED', String(error?.message || error).slice(0,300));
+      }
+    }
+    // Only observed fetched URL+SHA combinations may appear as research provenance.
+    const matchedReceipt = s => Boolean(s && currentResearchLedger.some(r=>r.url===s.url && r.sha256===s.sha256));
+    const canonicalizeSources = raw => Array.isArray(raw)
+      ? raw.filter(matchedReceipt).slice(0,12) : [];
+    const memoryUpdates = Array.isArray(decision?.memory?.updates) ? decision.memory.updates
+      : decision?.memory?.memory_type === 'study_session' ? [decision.memory] : [];
+    for (const item of memoryUpdates) {
+      if (item?.memory_type === 'study_session') {
+        const priorCount = Array.isArray(item.source_manifest) ? item.source_manifest.length : 0;
+        item.source_manifest = canonicalizeSources(item.source_manifest);
+        if (priorCount && !item.source_manifest.length)
+          console.warn('AAU_EXPERTISE_STUDY_PROVENANCE_REJECTED', JSON.stringify({agent_id:agentId,reason:'no_fetched_receipt_matches'}));
+      }
+    }
+    decision.associations = decision.associations.filter(a => {
+      if (a?.origin !== 'expertise_knowledge_unit_v0_1') return true;
+      const priorCount = Array.isArray(a.source_manifest) ? a.source_manifest.length : 0;
+      a.source_manifest = canonicalizeSources(a.source_manifest);
+      if (priorCount && !a.source_manifest.length) {
+        console.warn('AAU_EXPERTISE_KNOWLEDGE_PROVENANCE_REJECTED', JSON.stringify({agent_id:agentId,competency:a.competency || null}));
+        return false;
+      }
+      return true;
+    });
   }
   let intentRepairAttempted = false;
   let identityRepairAttempts = 0;
