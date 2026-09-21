@@ -564,7 +564,30 @@ function capabilityRequestsFromDecision(decision) {
     .filter((a) => a && typeof a === 'object' && !Array.isArray(a) && String(a.origin || '').trim() === 'capability_request_v0_1');
 }
 
+export function expertiseDevelopmentNoProgressIssue(packet, decision) {
+  if (currentStage(packet) !== 'expertise_development') return false;
+  // Detect repeated unproductive wakes, without disallowing reflection, sleep,
+  // genuine study or the agent's own choice of how to make progress.
+  const recent = Array.isArray(packet?.recent_activity) ? packet.recent_activity.slice(0,2) : [];
+  if (recent.length < 2 || recent.some(a => !['nothing_is_valid_action','do_nothing'].includes(
+    String(a?.selected_action || '').toLowerCase()))) return false;
+  const action = String(decision?.selected_action || '').toLowerCase();
+  if (!['nothing_is_valid_action','do_nothing'].includes(action)) return false;
+  if (Array.isArray(decision?.associations) && decision.associations.some(a => [
+    'web_research_request_v0_1',
+    'expertise_knowledge_unit_v0_1',
+    'domain_practice_submission_v0_1',
+    'expertise_portfolio_submission_v0_2',
+    'agent_file_output_v0_1',
+    'capability_request_v0_1',
+  ].includes(a?.origin))) return false;
+  if (isEligibleSleepDecision(packet, decision)) return false;
+  return true;
+}
+
 function noProgressLoopIssue(packet, decision) {
+  if (currentStage(packet) === 'expertise_development')
+    return expertiseDevelopmentNoProgressIssue(packet, decision);
   if (currentStage(packet) !== 'product_service_test') return false;
   const ctx = productServiceContext(packet);
   const deployment = ctx?.external_workflow?.states?.production_deployment || {};
@@ -600,6 +623,19 @@ function externalActionMissingCapabilityIssue(packet, decision) {
 }
 
 function noProgressLoopCorrection(packet, decision) {
+  if (currentStage(packet) === 'expertise_development') {
+    const feedback = packet?.expertise_action_feedback || {};
+    const gate = packet?.expertise_portfolio_context?.repeat_verification_gate || {};
+    return 'EXPERTISE ACTION ALIGNMENT: Your last two wakes selected nothing_is_valid_action and this proposal does not execute a new action. '
+      + 'Return the full JSON again. You retain autonomy to choose a substantive direction, but take the chosen step in THIS cognition, '
+      + 'for example actual web_research_request_v0_1 with targeted questions, a genuine practice/execution record, or an independently checkable original artifact. '
+      + 'Alternatively acknowledge the exact blocked dependency and choose rest/sleep when permitted. '
+      + 'Do not restate an intent to research or claim persistence without a canonical acceptance ID. '
+      + 'The repeat-exam gate is '+JSON.stringify(gate).slice(0,2000)
+      + '; authoritative recent knowledge-unit submission feedback is '+JSON.stringify(feedback).slice(0,1800)
+      + '. Do not request another exam while verification_request_allowed=false. '
+      + 'No particular research conclusion, action choice, or identity is imposed by the runtime.';
+  }
   const ctx = productServiceContext(packet);
   const deployment = ctx?.external_workflow?.states?.production_deployment || {};
   const lastAction = String(packet?.state?.state_payload?.last_action || '').trim();
@@ -1185,7 +1221,8 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
   }
 
   let noProgressRepairAttempts = 0;
-  for (let i = 0; i < 2 && (noProgressLoopIssue(packet, decision) || externalActionMissingCapabilityIssue(packet, decision)); i += 1) {
+  const maxNoProgressRepairs = currentStage(packet) === 'expertise_development' ? 1 : 2;
+  for (let i = 0; i < maxNoProgressRepairs && (noProgressLoopIssue(packet, decision) || externalActionMissingCapabilityIssue(packet, decision)); i += 1) {
     noProgressRepairAttempts += 1;
     const correction = noProgressLoopIssue(packet, decision)
       ? noProgressLoopCorrection(packet, decision)
@@ -1198,10 +1235,13 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
     decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
   }
   if (noProgressLoopIssue(packet, decision) || externalActionMissingCapabilityIssue(packet, decision)) {
-    const error = new Error('stage_action_alignment_failed:no_progress_external_action_loop');
+    const expertiseLoop = currentStage(packet) === 'expertise_development';
+    const error = new Error(expertiseLoop
+      ? 'stage_action_alignment_failed:expertise_development_no_progress'
+      : 'stage_action_alignment_failed:no_progress_external_action_loop');
     error.failureDetails = {
       schema: 'aau.no_progress_loop_failure.v0_1',
-      error_code: 'NO_PROGRESS_EXTERNAL_ACTION_LOOP',
+      error_code: expertiseLoop ? 'EXPERTISE_DEVELOPMENT_NO_PROGRESS' : 'NO_PROGRESS_EXTERNAL_ACTION_LOOP',
       stage: currentStage(packet),
       selected_action: decision?.selected_action || null,
       stated_reason: decision?.stated_reason || null,
@@ -1337,6 +1377,24 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
           error:String(error?.message || error).slice(0,500),
         });
       }
+    }
+    // The cognition has already committed; persist the *actual* canonical unit
+    // submission results before allowing the next wake to infer progress.
+    if (knowledgeUnits.length) {
+      const feedback = expertiseKnowledgeUnitResults.map((result, index) => ({
+        status: result?.status === 'accepted' ? 'accepted' : 'rejected',
+        competency: knowledgeUnits[index]?.competency || null,
+        knowledge_unit_id: result?.status === 'accepted' ? result?.knowledge_unit_id || null : null,
+        reason: result?.status === 'accepted' ? 'canonical_persistence_confirmed'
+          : String(result?.error || 'knowledge_unit_not_accepted').slice(0,500),
+      }));
+      const receipt = await rpc('aau_bridge_record_expertise_action_feedback', {
+        p_agent_id:requestedAgentId,
+        p_intent_execution_id:requestedIntentExecutionId,
+        p_source_activity_id:applied?.activity_id || null,
+        p_results:feedback,
+      });
+      console.log('AAU_EXPERTISE_ACTION_FEEDBACK_RECORDED', JSON.stringify(receipt));
     }
 
     const report = {
