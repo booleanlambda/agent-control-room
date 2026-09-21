@@ -28,9 +28,9 @@ BEGIN
  PERFORM agent_lab.assert_broker_bridge_token(p_bridge_token);
  IF NOT EXISTS(SELECT 1 FROM agent_lab.wake_queue WHERE wake_request_id=p_wake_request_id AND agent_id=p_agent_id AND status IN('running','claimed'))
  THEN RAISE EXCEPTION 'web_research_wake_not_running_or_agent_mismatch';END IF;
- IF p_research IS NULL OR jsonb_typeof(p_research)<>'object' OR octet_length(p_research::text)>90000
-  OR jsonb_typeof(p_research->'requested_queries')<>'array' OR jsonb_array_length(p_research->'requested_queries')>3
-  OR jsonb_typeof(p_research->'sources')<>'array' OR jsonb_array_length(p_research->'sources')>4
+ IF p_research IS NULL OR jsonb_typeof(p_research)<>'object'
+  OR jsonb_typeof(p_research->'requested_queries')<>'array'
+  OR jsonb_typeof(p_research->'sources')<>'array'
  THEN RAISE EXCEPTION 'web_research_invalid_payload';END IF;
  v_status:=p_research->>'status';
  IF v_status NOT IN('fetched_text','metadata_only','blocked') THEN RAISE EXCEPTION 'web_research_invalid_status';END IF;
