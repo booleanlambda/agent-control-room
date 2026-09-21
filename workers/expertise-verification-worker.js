@@ -155,6 +155,7 @@ async function createChallenge(run) {
     tasks.push({
       id: `T${i + 1}`,
       competency: competency.id || `C${i + 1}`,
+      competency_label: competency.description || String(competency.id || `C${i + 1}`),
       scenario,
       prompt,
       grading_anchors: [
@@ -185,12 +186,48 @@ async function createChallenge(run) {
   return packet;
 }
 
-async function answerChallenge(run, packet, existingAnswers = []) {
+async function frozenCompetencePacket(run) {
+  if (!run?.metadata?.competence_packet_required) return null;
+  const record = await rpc('aau_bridge_get_or_create_expertise_competence_packet',{
+    p_verification_run_id:run.verification_run_id,
+    p_agent_id:run.agent_id,
+    p_expertise_artifact_id:run.expertise_artifact_id,
+  });
+  if (!record?.packet || !record?.packet_sha256) throw new Error('competence_packet_required_but_missing');
+  return record;
+}
+
+function taskCompetenceSlice(record, task) {
+  if (!record?.packet) return null;
+  const p = record.packet;
+  const id = String(task?.competency || '').trim().toLowerCase();
+  const label = String(task?.competency_label || task?.grading_anchors?.[0] || '').trim().toLowerCase();
+  const matches = (value) => {
+    const s = String(value || '').trim().toLowerCase();
+    return Boolean(s) && (s === id || s === label);
+  };
+  const take = (arr, predicate, limit) => (Array.isArray(arr) ? arr.filter(predicate).slice(0,limit) : []);
+  return {
+    packet_version:record.packet_version || p.packet_version || null,
+    packet_sha256:record.packet_sha256,
+    competency_id:task?.competency || null,
+    competency_label:task?.competency_label || task?.grading_anchors?.[0] || null,
+    validated_knowledge_units:take(p.validated_knowledge_units, x=>matches(x?.competency), 16),
+    admitted_original_implementations:take(p.admitted_original_implementations, x=>matches(x?.competency), 10),
+    independently_evaluated_practice:take(p.independently_evaluated_practice, x=>matches(x?.skill_component), 10),
+    independent_assessment_summary:take(p.independent_assessment_summary, x=>matches(x?.skill_component), 12),
+    epistemic_boundary:p.epistemic_boundary || null,
+  };
+}
+
+async function answerChallenge(run, packet, existingAnswers = [], competenceRecord = null) {
   const answers = Array.isArray(existingAnswers) ? existingAnswers.filter((x) => x && x.id && x.answer) : [];
   for (const task of packet.tasks) {
     if (answers.some((x) => x.id === task.id && x.answer)) continue;
-    const system = `You are the bound inference model for an AAU agent undergoing an unseen expertise assessment in ${run.domain}. Solve the task from first principles. Be concrete, state assumptions, controls, validation and failure handling. Do not invent external evidence or claim actions you did not perform.`;
-    const user = `TARGET STANDARD: ${run.target_standard}\nSCENARIO:\n${task.scenario}\n\nTASK:\n${task.prompt}\n\nAnswer in 180-350 words. Prioritize concrete technical decisions over exposition.`;
+    const memorySlice = taskCompetenceSlice(competenceRecord, task);
+    const system = `You are the bound inference model for an AAU agent undergoing an unseen expertise assessment in ${run.domain}. The optional PERSISTENT EXPERTISE MEMORY below is a frozen record of this agent's prior learning and work, captured before this unseen task. It is not an answer key and may contain qualified or self-authored evidence; respect its epistemic labels. Apply relevant learned principles to the novel task, but solve the task independently. Do not copy prior task answers, do not mention packet mechanics, and do not invent external evidence or claim actions you did not perform. Be concrete, state assumptions, controls, validation and failure handling.`;
+    const memoryText = memorySlice ? `\n\nPERSISTENT EXPERTISE MEMORY (frozen before this task):\n${JSON.stringify(memorySlice).slice(0,18000)}` : '';
+    const user = `TARGET STANDARD: ${run.target_standard}${memoryText}\n\nSCENARIO:\n${task.scenario}\n\nTASK:\n${task.prompt}\n\nAnswer in 180-350 words. Prioritize concrete technical decisions over exposition and generalize from prior learning rather than rehearsing earlier answers.`;
     let result = null;
     let lastError = null;
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -207,7 +244,16 @@ async function answerChallenge(run, packet, existingAnswers = []) {
     }
     if (!result) throw lastError || new Error(`candidate_no_result:${task.id}`);
     if (!result.text) throw new Error(`candidate_empty_answer:${task.id}`);
-    answers.push({ id: task.id, competency: task.competency || null, answer: result.text, model: result.model, output_sha256: sha256(result.text) });
+    answers.push({
+      id: task.id,
+      competency: task.competency || null,
+      competency_label: task.competency_label || task.grading_anchors?.[0] || null,
+      answer: result.text,
+      model: result.model,
+      output_sha256: sha256(result.text),
+      candidate_memory_contract: competenceRecord ? 'persistent_expertise_retrieval_v0_1' : 'stateless_candidate_v0_1',
+      competence_packet_sha256: competenceRecord?.packet_sha256 || null,
+    });
     await checkpointVerification(run, 'candidate_answer_task', { candidate_answers: answers });
     console.log('AAU_EXPERTISE_STAGE', JSON.stringify({ verification_run_id: run.verification_run_id, stage: 'candidate_answer_task', task_id: task.id, answers: answers.length }));
   }
@@ -330,7 +376,7 @@ async function adjudicate(run, task, answer, prior) {
   throw new Error(`adjudicator_no_usable_grade:${task.id}`);
 }
 
-function deterministicDecision(run, packet, authGrades, adjGrades) {
+function deterministicDecision(run, packet, authGrades, adjGrades, competenceRecord = null) {
   const adj = new Map(adjGrades.map((g) => [g.id, g]));
   const final = authGrades.map((g) => ({ ...(adj.get(g.id) || g), decision_source: adj.has(g.id) ? 'adjudicator' : 'authenticator' }));
   const scores = final.map((g) => Number(g.score));
@@ -350,7 +396,22 @@ function deterministicDecision(run, packet, authGrades, adjGrades) {
     overall_score: Number(mean.toFixed(6)),
     gate: { task_count: final.length, mean_score: Number(mean.toFixed(6)), mean_score_min: meanMin, task_score_min: taskMin, required_task_count: countMin, passed_task_count: countPassed, critical_error_count: critical.length, unsupported_claim_count: unsupported.length },
     final_grades: final,
-    provenance: { provider: manuallyReviewed ? 'nvidia_direct_and_operator_attested_review' : 'nvidia_direct', manual_review_used: manuallyReviewed, candidate_model: run.candidate_model_id, task_authority_model: packet.authority?.model || run.task_authority_model, authenticator_model: run.authenticator_model, authenticator_models_used: [...new Set(authGrades.map((g) => g.verifier_model).filter(Boolean))], adjudicator_models: [...new Set(adjGrades.map((g) => g.adjudicator_model).filter(Boolean))], deterministic_gate: true },
+    provenance: {
+      provider: manuallyReviewed ? 'nvidia_direct_and_operator_attested_review' : 'nvidia_direct',
+      manual_review_used: manuallyReviewed,
+      candidate_model: run.candidate_model_id,
+      task_authority_model: packet.authority?.model || run.task_authority_model,
+      authenticator_model: run.authenticator_model,
+      authenticator_models_used: [...new Set(authGrades.map((g) => g.verifier_model).filter(Boolean))],
+      adjudicator_models: [...new Set(adjGrades.map((g) => g.adjudicator_model).filter(Boolean))],
+      deterministic_gate: true,
+      candidate_memory_contract: competenceRecord ? 'persistent_expertise_retrieval_v0_1' : 'stateless_candidate_v0_1',
+      competence_packet_version: competenceRecord?.packet_version || competenceRecord?.packet?.packet_version || null,
+      competence_packet_sha256: competenceRecord?.packet_sha256 || null,
+      competence_packet_frozen_before_candidate_answers: Boolean(competenceRecord),
+      prior_candidate_answers_in_packet: false,
+      fresh_challenge_isolation: true,
+    },
   };
 }
 
@@ -370,7 +431,20 @@ async function processRun(run) {
     resumed: Boolean(checkpoint?.challenge_packet?.tasks?.length),
   }));
 
-  const answers = await answerChallenge(run, packet, checkpoint?.candidate_answers || []);
+  const competenceRecord = await frozenCompetencePacket(run);
+  if (competenceRecord) {
+    console.log('AAU_EXPERTISE_COMPETENCE_PACKET', JSON.stringify({
+      verification_run_id:run.verification_run_id,
+      packet_version:competenceRecord.packet_version || competenceRecord.packet?.packet_version || null,
+      packet_sha256:competenceRecord.packet_sha256,
+      knowledge_units:Array.isArray(competenceRecord.packet?.validated_knowledge_units) ? competenceRecord.packet.validated_knowledge_units.length : 0,
+      portfolio_items:Array.isArray(competenceRecord.packet?.admitted_original_implementations) ? competenceRecord.packet.admitted_original_implementations.length : 0,
+      independent_practice:Array.isArray(competenceRecord.packet?.independently_evaluated_practice) ? competenceRecord.packet.independently_evaluated_practice.length : 0,
+      assessment_summaries:Array.isArray(competenceRecord.packet?.independent_assessment_summary) ? competenceRecord.packet.independent_assessment_summary.length : 0,
+    }));
+  }
+
+  const answers = await answerChallenge(run, packet, checkpoint?.candidate_answers || [], competenceRecord);
   await checkpointVerification(run, 'candidate_answers_ready', { candidate_answers: answers });
   console.log('AAU_EXPERTISE_STAGE', JSON.stringify({ verification_run_id: run.verification_run_id, stage: 'candidate_answers_ready', answers: answers.length }));
 
@@ -416,7 +490,7 @@ async function processRun(run) {
     }
   }
 
-  const report = deterministicDecision(run, packet, authGrades, adjGrades);
+  const report = deterministicDecision(run, packet, authGrades, adjGrades, competenceRecord);
   report.report_sha256 = sha256(report);
   await checkpointVerification(run, 'decision_ready', {
     challenge_packet: packet,
