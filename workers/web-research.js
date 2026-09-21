@@ -150,11 +150,31 @@ function htmlSource(page) {
   return {title:title.slice(0,350),published_at:date,excerpt:extracted.slice(0,MAX_TEXT),sha256:sha(page.body),bytes:page.bytes,
     coverage:extracted.length>MAX_TEXT?'partial_text_truncated':'html_text_extracted_completeness_not_guaranteed'};
 }
-export async function researchWeb({queries}={}) {
+export async function researchWeb({queries,urls}={}) {
   const submitted=Array.isArray(queries)?queries:[];
   const requested=[...new Set(submitted.filter(q=>typeof q==='string').map(q=>clean(q).slice(0,MAX_QUERY)).filter(q=>q.length>=4))].slice(0,3);
-  const report={version:'aau_web_research_v0_1',requested_queries:requested,searches:[],sources:[],limits:{queries:3,sources:4,body_bytes:MAX_BODY,excerpt_chars:MAX_TEXT},
+  const direct=[...new Set((Array.isArray(urls)?urls:[]).filter(u=>typeof u==='string'&&u.length<1200&&u.startsWith('https://')))].slice(0,4);
+  const report={version:'aau_web_research_v0_1',requested_queries:requested,requested_direct_urls:direct,
+    searches:[],sources:[],limits:{queries:3,sources:4,body_bytes:MAX_BODY,excerpt_chars:MAX_TEXT},
     restrictions:'Public HTTPS only; short bounded fetch. HTML text extraction may be incomplete. PDFs, protected pages and paywalls are not read in full.'};
+  for(const url of direct) {
+    if(report.sources.length>=4) break;
+    const record={query:null,url,discovery:'agent_requested_direct_url',search_title:null,search_snippet:null};
+    try {
+      const page=await boundedGet(url,'text/html, text/plain, application/xhtml+xml, application/pdf',9000);
+      record.url=page.url; record.mime_type=page.type.split(';')[0];
+      if (/html|text\/plain|xhtml/i.test(page.type)) {
+        const parsed=/html|xhtml/i.test(page.type)?htmlSource(page):{
+          title:page.url,published_at:null,excerpt:page.body.slice(0,MAX_TEXT),
+          sha256:sha(page.body),bytes:page.bytes,coverage:page.body.length>MAX_TEXT?'partial_text_truncated':'plain_text'};
+        Object.assign(record,parsed);record.fetch_status='fetched_text';
+      } else {
+        record.fetch_status='unsupported_mime';record.coverage='metadata_only_document_not_read';
+        record.sha256=sha(page.body);record.bytes=page.bytes;
+      }
+    } catch(e) {record.fetch_status='blocked';record.coverage='direct_url_unavailable';record.fetch_error=clean(e.message).slice(0,160);}
+    report.sources.push(record);
+  }
   for (const q of requested) {
     const discovery=await discover(q);
     report.searches.push({query:q,provider:discovery.provider,result_count:discovery.items.length,provider_error:discovery.provider_error});
@@ -190,5 +210,7 @@ export async function smokeWebResearch() {
     probes.push({query,ok:report.status==='fetched_text',status:report.status,searches:report.searches,
       sources:report.sources.map(({url,search_title,fetch_status,coverage,fetch_error,bytes})=>({url,search_title,fetch_status,coverage,fetch_error,bytes}))});
   }
-  return {ok:probes.every(p=>p.ok),probes};
+  const direct=await researchWeb({urls:['https://www.usa.gov/voter-registration/']});
+  const direct_probe={status:direct.status,ok:direct.status==='fetched_text',sources:direct.sources.map(({url,fetch_status,coverage,bytes,fetch_error})=>({url,fetch_status,coverage,bytes,fetch_error}))};
+  return {ok:direct_probe.ok,probes,direct_probe};
 }
