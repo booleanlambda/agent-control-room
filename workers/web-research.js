@@ -102,6 +102,21 @@ async function discover(query) {
     if (relevantItems.length) return {provider:'bing_public_rss',items:relevantItems,provider_error:null};
     bingError=list.length?'bing_rss_results_not_relevant':'bing_rss_no_search_items';
   } catch(e) { bingError=clean(e.message).slice(0,120); }
+  // Official U.S. government dataset discovery. Data.gov contains metadata, not datasets themselves.
+  // Require direct source fetch below; never claim the metadata alone is a full research document.
+  try {
+    const u='https://catalog.data.gov/api/3/action/package_search?'+new URLSearchParams({q:query,rows:'6'});
+    const data=JSON.parse((await boundedGet(u,'application/json',9000)).body);
+    const items=(data?.result?.results||[]).slice(0,6).map(v=>({
+      url:v.url||('https://catalog.data.gov/dataset/'+encodeURIComponent(v.name||'')),
+      title:clean(v.title),summary:clean(v.notes).replace(/<[^>]+>/g,' ').slice(0,450),
+      published_at:v.metadata_modified||null,publisher:v.organization?.title||null,
+      discovery:'data_gov_catalog_metadata_not_underlying_dataset'
+    })).filter(x=>x.url?.startsWith('https://')&&relevant(x,query));
+    if(items.length) return {provider:'data_gov_catalog',items,provider_error:bingError};
+  } catch(e) {
+    bingError=[bingError,'data_gov:'+clean(e.message).slice(0,100)].filter(Boolean).join('; ');
+  }
   // Crossref is open scholarly metadata, NOT a substitute for full, general web search.
   try {
     const url='https://api.crossref.org/works?'+new URLSearchParams({'query.bibliographic':query,rows:'5',select:'DOI,title,URL,published,author,publisher,abstract'});
@@ -111,8 +126,14 @@ async function discover(query) {
       url:v.URL,title:clean(v.title?.[0]),summary:clean(String(v.abstract||'').replace(/<[^>]+>/g,' ')).slice(0,450),
       published_at:v.published?.['date-parts']?.[0]?.join('-')||null,publisher:v.publisher||null,
       discovery:'crossref_bibliographic_metadata_not_full_text'
-    })).filter(x=>x.url?.startsWith('https://')&&relevant(x,query))
-      .sort((a,b)=>primaryRank(b)-primaryRank(a));
+    })).filter(x=> {
+      if(!x.url?.startsWith('https://')||!relevant(x,query))return false;
+      // A generic historical paper is not evidence for a dated current-event query.
+      const years=query.match(/\b20\d{2}\b/g)||[];
+      return years.length===0 || years.some(year=>
+        String(x.published_at||'').startsWith(year) || [x.title,x.summary].some(v=>String(v||'').includes(year))
+      );
+    }).sort((a,b)=>primaryRank(b)-primaryRank(a));
     return {provider:'crossref_scholarly_only',items:list,provider_error:bingError};
   } catch(e) {
     return {provider:'none',items:[],provider_error:[bingError,clean(e.message)].filter(Boolean).join('; ').slice(0,250)};
