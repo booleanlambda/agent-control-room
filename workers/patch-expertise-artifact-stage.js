@@ -29,6 +29,10 @@ function replaceOnce(source, oldText, newText, label) {
 }
 
 function patch(source) {
+  // Stage 3 v0.1 was superseded by unified Expertise + Viability unit approval.
+  // Never rewrite a worker that already carries the newer contract back to direct artifact initiation.
+  if (source.includes('expertise_viability_unit_stage_v0_1')
+      && source.includes('expertise_viability_proposal_v0_1')) return source;
   if (source.includes('expertise_artifact_stage_contract_v0_1') && source.includes('needsExpertiseArtifactCompletion')) return source;
   let next = source;
 
@@ -68,7 +72,7 @@ export async function patchExpertiseArtifactStage() {
   const file = await gh(`${api}?ref=main`);
   const source = Buffer.from(file.content || '', 'base64').toString('utf8');
   const next = patch(source);
-  if (next === source) return { ok: true, changed: false, contract: 'expertise_artifact_stage_contract_v0_1' };
+  if (next === source) return { ok: true, changed: false, contract: 'expertise_viability_unit_stage_v0_1_legacy_patcher_noop' };
   const result = await gh(api, {
     method: 'PUT',
     body: JSON.stringify({
@@ -78,5 +82,5 @@ export async function patchExpertiseArtifactStage() {
       branch: 'main',
     }),
   });
-  return { ok: true, changed: true, contract: 'expertise_artifact_stage_contract_v0_1', commit_sha: result?.commit?.sha || null };
+  return { ok: true, changed: true, contract: 'expertise_viability_unit_stage_v0_1_legacy_patcher_noop', commit_sha: result?.commit?.sha || null };
 }
