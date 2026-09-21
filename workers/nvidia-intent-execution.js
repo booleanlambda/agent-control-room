@@ -60,6 +60,7 @@ Mandatory embodiment-stage rule:
 
 Mandatory expertise-artifact-stage rule (operator preapproval of field economics):
 - When mandatory_lifecycle_context.current_stage is expertise_artifact, inspect mandatory_lifecycle_context.expertise_economic_gate.status. You freely choose your field; AAU does not select it.
+- If preexisting_held_expertise is present, its self-chosen domain and prior artifacts are preserved as a draft, awaiting operator approval. Research the economic and socioeconomic case for that domain (or explicitly reconsider it yourself); do not initiate another artifact or begin domain training. Submitting a proposal pauses you only AFTER the evidence report is committed, not while you are gathering sources.
 - If status is required or rejected: BEFORE initiating any expertise artifact, research and present a SPECIFIC evidence-labeled economic sustainability and wider human socioeconomic impact proposal. You may use bounded web.research to find real sources across multiple wakes and report gaps. When ready, add EXACTLY ONE associations[] object {"origin":"expertise_economic_proposal_v0_1","domain":"your exact chosen field","economic_case":"at least 160 chars describing identified customers, monetization or viable funding, numerical post-AAU-grant costs, pricing, contribution and break-even or clearly labeled unavailable evidence","socioeconomic_case":"at least 160 chars naming particular human beneficiary populations, geography, causal mechanism, potential harms, metrics and baselines","evidence":[{"source_title":"...","publisher":"...","url":"...","published_at":"...","claim_supported":"...","coverage":"actual fetched text or metadata only"}],"confidence_and_gaps":"...","recommended_decision":"..."}; include source URLs only when genuinely fetched. If internet sources are unavailable, honestly state evidence gaps rather than inventing them. Optionally include your report as agent_file_output_v0_1. selected_action=submit_expertise_economic_case and current_focus=expertise_artifact. The runtime submits the proposal for operator review, then pauses your lifecycle and compute levy.
 - If status is pending: DO NOT initiate or resubmit an expertise artifact, repeat research without new authorization, or claim approval. Await the operator's decision without spending further compute.
 - ONLY if status is approved: initiate the EXACT domain in expertise_economic_gate.domain. selected_action must describe expertise-artifact initiation and current_focus must be expertise_artifact. Approval of a selection is not verification of competence, revenue, or social impact.
@@ -609,7 +610,11 @@ function redundantDeploymentInspectionIssue(packet, decision) {
 
 function lifecycleCorrection(issue, packet) {
   if (issue === 'identity') return IDENTITY_CORRECTION;
-  if (issue === 'expertise_artifact') return EXPERTISE_ARTIFACT_CORRECTION;
+  if (issue === 'expertise_artifact') {
+    const gate = packet?.mandatory_lifecycle_context?.expertise_economic_gate || {};
+    if (gate.status !== 'approved') return 'EXPERTISE ECONOMIC REVIEW REPAIR: This is PRE-APPROVAL stage 3. Preserve your own chosen field and prior held draft, if any. Do not initiate an expertise artifact or claim expertise. Choose a real source-backed economics and socioeconomic research step, request a bounded web.research tool call when useful, or submit the detailed expertise_economic_proposal_v0_1 association when ready. selected_action must reflect actual research/submission and current_focus=expertise_artifact. Your next_intents must be valid. Approval occurs only after operator review; no need to pause while gathering evidence. Return the full JSON object.';
+    return EXPERTISE_ARTIFACT_CORRECTION;
+  }
   return embodimentCorrection(packet);
 }
 
