@@ -183,7 +183,12 @@ export async function researchWeb({queries}={}) {
   return report;
 }
 export async function smokeWebResearch() {
-  const report=await researchWeb({queries:['Federal Reserve September 2026 monetary policy statement official']});
-  return {ok:report.status==='fetched_text',status:report.status,searches:report.searches,
-    sources:report.sources.map(({url,search_title,fetch_status,coverage,fetch_error,bytes})=>({url,search_title,fetch_status,coverage,fetch_error,bytes}))};
+  const probes=[];
+  for(const query of ['Federal Reserve September 2026 monetary policy statement official',
+    'US voter registration official usa.gov']) {
+    const report=await researchWeb({queries:[query]});
+    probes.push({query,ok:report.status==='fetched_text',status:report.status,searches:report.searches,
+      sources:report.sources.map(({url,search_title,fetch_status,coverage,fetch_error,bytes})=>({url,search_title,fetch_status,coverage,fetch_error,bytes}))});
+  }
+  return {ok:probes.every(p=>p.ok),probes};
 }
