@@ -350,27 +350,39 @@ async function gradeAnswer(run, task, answer) {
 }
 
 async function adjudicate(run, task, answer, prior) {
-  const system = 'You are the operationally distinct AAU expertise adjudicator. Re-grade a flagged assessment independently. Do not default to the prior verifier. Return one GRADE line; reasoning may precede it.';
-  const user = `DOMAIN: ${run.domain}\nTARGET: ${run.target_standard}\nSCENARIO: ${task.scenario}\nTASK: ${task.prompt}\nANCHORS: ${JSON.stringify(task.grading_anchors)}\nANSWER:\n${answer.answer}\nPRIOR FLAGGED GRADE: ${JSON.stringify(prior)}\n\nReturn: GRADE execution=NN method=NN security=NN validation=NN communication=NN critical=NONE confidence=0.00 unsupported=NONE`;
+  const system = 'You are the operationally distinct AAU expertise adjudicator. Re-grade a flagged assessment independently. Do not default to the prior verifier. Return exactly one JSON object and no prose.';
+  const user = `DOMAIN: ${run.domain}\nTARGET: ${run.target_standard}\nSCENARIO: ${task.scenario}\nTASK: ${task.prompt}\nANCHORS: ${JSON.stringify(task.grading_anchors)}\nCRITICAL FAILURES: ${JSON.stringify(task.critical_failures || [])}\nANSWER:\n${answer.answer}\nPRIOR FLAGGED GRADE: ${JSON.stringify(prior)}\n\nReturn exactly: {"execution":NN,"method":NN,"security":NN,"validation":NN,"communication":NN,"critical":"none","confidence":0.00,"unsupported":false}. Scores are integers 0-100. Set unsupported=true for a material unsupported claim. Use a critical failure label only when the answer actually triggers one of the supplied critical failures.`;
   const primaryAdjudicator = 'openai/gpt-oss-20b';
   const candidates = [
     primaryAdjudicator,
     run.adjudicator_model,
-    'z-ai/glm-5.3',
     'meta/muse-glimmer-30b',
+    'z-ai/glm-5.3',
     'nvidia/nemotron-3.5-lightning-30b-a3b',
   ].filter((x, i, a) => x && a.indexOf(x) === i && x !== run.authenticator_model && x !== prior.verifier_model && x !== run.candidate_model_id);
   for (const model of candidates) {
-    if (isReviewerModelInBackoff(model)) {console.warn('AAU_EXPERTISE_ADJUDICATOR_BACKOFF_SKIP',model);continue;}
-    for (let attempt = 1; attempt <= 1; attempt++) {
+    if (isReviewerModelInBackoff(model)) { console.warn('AAU_EXPERTISE_ADJUDICATOR_BACKOFF_SKIP', model); continue; }
+    const maxAttempts = model === primaryAdjudicator ? 2 : 1;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const result = await nvidiaCall({ model, system, user, maxTokens: 650, temperature: 0, timeoutMs: 60000 });
+        const result = await nvidiaCall({
+          model,
+          system,
+          user,
+          maxTokens: 360,
+          temperature: 0,
+          timeoutMs: model === primaryAdjudicator ? 90000 : model.startsWith('meta/') ? 75000 : 90000,
+        });
         const grade = parseGrade(result.text);
-        if (grade) return { ...grade, id: task.id, adjudicator_model: result.model || model, supersedes_score: prior.score, raw_sha256: sha256(result.text) };
+        if (grade) {
+          noteReviewerModelSuccess(model);
+          return { ...grade, id: task.id, adjudicator_model: result.model || model, supersedes_score: prior.score, raw_sha256: sha256(result.text) };
+        }
+        console.warn('AAU_EXPERTISE_ADJUDICATOR_UNUSABLE_GRADE', model, task.id, 'attempt', attempt, 'raw_sha256', sha256(result.text || ''));
       } catch (e) {
         console.warn('AAU_EXPERTISE_ADJUDICATOR_MODEL_FAILED', model, String(e?.message || e).slice(0, 500));
       }
-      if (attempt < 2) await sleep(1500 * attempt);
+      if (attempt < maxAttempts) await sleep(1500 * attempt);
     }
   }
   throw new Error(`adjudicator_no_usable_grade:${task.id}`);
