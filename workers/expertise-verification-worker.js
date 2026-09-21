@@ -73,6 +73,15 @@ async function nvidiaCall({ model, system, user, maxTokens = 1200, temperature =
     stream: false,
   };
   if (jsonMode === true) body.response_format = { type: 'json_object' }; // glm_json_grade_mode_v0_1
+  // Reasoning consumes max_tokens. Tune each model's documented knob without
+  // treating reasoning_content as a final grade.
+  if (model === 'meta/muse-glimmer-30b') {
+    body.chat_template_kwargs = { reasoning_strength: 'low' };
+    body.reasoning_effort = 'low';
+    body.temperature = 0.95;
+  } else if (model === 'openai/gpt-oss-20b') {
+    body.reasoning_effort = 'low';
+  }
   if (model === 'z-ai/glm-5.3') body.chat_template_kwargs = { enable_thinking: false }; // glm_auth_no_thinking_v0_1
   else if (String(model || '').startsWith('nvidia/nemotron')) body.chat_template_kwargs = { enable_thinking: false }; // candidate_no_thinking_v0_1
   if (model === 'deepseek-ai/deepseek-v4-flash-0731') body.chat_template_kwargs = { thinking: false, reasoning_effort: 'low' };
@@ -336,8 +345,12 @@ async function gradeAnswer(run, task, answer) {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         const result = await nvidiaCall({
-          model, system, user, maxTokens: 650, temperature: 0,
-          timeoutMs: model === primaryAuthenticator ? 45000 : model.startsWith('meta/') ? 60000 : 110000,
+          model, system, user,
+          maxTokens: model.startsWith('meta/') ? 2500
+            : model === 'openai/gpt-oss-20b' ? (attempt === 1 ? 1800 : 3200)
+            : model === primaryAuthenticator ? 1800 : 1200,
+          temperature: 0,
+          timeoutMs: model === primaryAuthenticator ? 65000 : model.startsWith('meta/') ? 90000 : 120000,
           jsonMode: false,
         });
         const grade = parseGrade(result.text);
@@ -380,9 +393,10 @@ async function adjudicate(run, task, answer, prior) {
           model,
           system,
           user,
-          maxTokens: 360,
+          maxTokens: model.startsWith('meta/') ? 2500
+            : model === 'openai/gpt-oss-20b' ? (attempt === 1 ? 1800 : 3200) : 1400,
           temperature: 0,
-          timeoutMs: model === primaryAdjudicator ? 90000 : model.startsWith('meta/') ? 75000 : 90000,
+          timeoutMs: model === primaryAdjudicator ? 120000 : model.startsWith('meta/') ? 90000 : 110000,
         });
         const grade = parseGrade(result.text);
         if (grade) {
@@ -581,5 +595,5 @@ export function startExpertiseVerificationWorker() {
   const missing = [['AAU_SUPABASE_ANON_KEY', anon], ['AAU_BROKER_BRIDGE_TOKEN', bridge], ['NVIDIA_API_KEY', nvidiaKey]].filter(([, v]) => !v).map(([k]) => k);
   if (missing.length) return { ok: false, ready: false, missing };
   if (!running) { running = true; loop().catch((e) => console.error('AAU_EXPERTISE_VERIFIER_FATAL', e)); }
-  return { ok: true, ready: true, executor_id: executorId, poll_ms: pollMs, provider: 'nvidia_direct', task_authority: 'deterministic:aau-task-authority-v0.1', authenticator: 'moonshotai/kimi-k3', authenticator_fallbacks: ['meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b'], adjudicator: 'openai/gpt-oss-20b', adjudicator_fallbacks: ['z-ai/glm-5.3','meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b'] };
+  return { ok: true, ready: true, executor_id: executorId, poll_ms: pollMs, provider: 'nvidia_direct', task_authority: 'deterministic:aau-task-authority-v0.1', authenticator: 'moonshotai/kimi-k3', authenticator_fallbacks: ['meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b','openai/gpt-oss-20b'], adjudicator: 'openai/gpt-oss-20b', adjudicator_fallbacks: ['z-ai/glm-5.3','meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b'] };
 }
