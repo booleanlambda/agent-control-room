@@ -838,12 +838,26 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
   const firstRequest = decision.associations.find((v) => v?.origin === 'web_research_request_v0_1');
   if (firstRequest) {
     let observed;
+    const wantedQueries=Array.isArray(firstRequest.queries)?firstRequest.queries.slice(0,3):[];
+    let quota={allowed_queries:0,policy:'fail_closed_no_unmetered_search'};
     try {
-      observed = await researchWeb({ queries: firstRequest.queries, urls: firstRequest.urls });
+      quota=await rpc('aau_bridge_web_research_quota',{
+        p_agent_id:agentId,p_requested_queries:wantedQueries.length,
+      });
+    } catch(error) {
+      quota={allowed_queries:0,policy:'quota_check_failed_search_blocked',
+        error:String(error?.message||error).slice(0,160)};
+    }
+    const limitedQueries=wantedQueries.slice(0,Math.max(0,Math.min(3,Number(quota.allowed_queries)||0)));
+    try {
+      observed = await researchWeb({ queries: limitedQueries, urls: firstRequest.urls });
+      observed.quota=quota;
+      observed.unexecuted_queries_due_to_quota=wantedQueries.slice(limitedQueries.length);
     } catch (error) {
-      observed = { version:'aau_web_research_v0_1', status:'blocked',
-        requested_queries:Array.isArray(firstRequest.queries) ? firstRequest.queries.slice(0,3) : [],
-        searches:[], sources:[], execution_error:String(error?.message || error).slice(0,400) };
+      observed = { version:'aau_web_research_v0_2', status:'blocked',
+        requested_queries:limitedQueries,
+        searches:[], sources:[],quota,unexecuted_queries_due_to_quota:wantedQueries.slice(limitedQueries.length),
+        execution_error:String(error?.message || error).slice(0,400) };
     }
     try {
       observed.audit_batch_id = await rpc('aau_bridge_record_web_research',{
