@@ -130,6 +130,15 @@ if (isEnabled('AAU_PRODUCT_ARCH_CONFORMANCE_ENABLED')) {
   }
 }
 
+// Independent AAU graduate-standard author/reviewer is an institutional job,
+// not a learner wake. Idle polling makes no model calls.
+try {
+  const { startExpertiseStandardAuthorWorker } = await import('./expertise-standard-author-worker.js');
+  console.log('AAU_ACADEMIC_STANDARDS_STARTED', JSON.stringify(startExpertiseStandardAuthorWorker()));
+} catch (error) {
+  console.error('AAU_ACADEMIC_STANDARDS_START_FAILED', String(error?.message || error).slice(0,800));
+}
+
 if (isEnabled('AAU_EXPERTISE_VERIFIER_ENABLED')) {
   try {
     const { startExpertiseVerificationWorker } = await import('./expertise-verification-worker.js');
