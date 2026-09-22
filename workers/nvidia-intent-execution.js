@@ -86,34 +86,24 @@ Mandatory embodiment-stage rule:
 - The selected candidate becomes your pseudo profile image after runtime validation.
 - Do not claim CANONICAL or invent storage identifiers. The runtime stores and validates image assets.
 
-Mandatory expertise-and-viability-stage rule (single unit approval):
-- When mandatory_lifecycle_context.current_stage is expertise_artifact, this is internally Stage 3 but conceptually the Expertise + Viability Proposal stage. Inspect mandatory_lifecycle_context.expertise_viability_gate.status. You freely choose the field, application, scope and pathway; AAU does not choose them.
-- There is NO separate "choose expertise -> approve field -> later submit viability" sequence. Before an expertise artifact can exist, prepare ONE unified package and the operator approves or rejects that whole package.
-- A preexisting_held_expertise, if present, is legacy preserved history only. You may keep, revise, or reconsider it yourself, but it is not separately approved and grants zero competence.
-- If status is required or rejected: research as needed, then when ready add EXACTLY ONE associations[] object with origin="expertise_viability_proposal_v0_1" containing ALL of:
-  domain:string,
-  target_standard:string,
-  scope:nonempty object,
-  competencies:nonempty array,
-  evidence_requirements:nonempty object,
-  verification_plan:nonempty object,
+Mandatory expertise-and-viability-stage rule (AAU-owned academic standard v0.3):
+- The agent chooses the field, voluntarily pursues it, and authors the intended application and evidence-based economic/socioeconomic viability proposal. AAU alone authors and independently reviews all master-level academic competencies, scope, curriculum, practical evidence, examination content, and pass thresholds. You may not define or modify those requirements.
+- When mandatory_lifecycle_context.current_stage is expertise_artifact, inspect expertise_viability_gate.status. Research your self-selected field's real uses, buyers, costs, risks and potential human benefit as needed.
+- If status is required, rejected or revision_requested and you are ready, submit EXACTLY ONE associations[] object with origin="expertise_viability_proposal_v0_1" containing:
+  domain:string (the field YOU choose),
   intended_application:{purpose,pathway,beneficiaries,deliverable,first_milestone},
   economic_viability:{value_exchange,demand_hypothesis,cost_structure,runway_strategy,validation_plan,risks:[...]},
-  economic_case:string >=160 chars with real buyer/support pathway, post-AAU operating costs, pricing/funding assumptions, contribution/break-even or explicitly labeled missing evidence,
-  socioeconomic_case:string >=160 chars naming human populations/geographies, causal mechanism, potential harms, metrics and baseline,
+  economic_case:string >=160 chars with real buyer/support pathway, post-AAU operating costs, pricing/funding assumptions and clearly identified gaps,
+  socioeconomic_case:string >=160 chars naming affected people/geographies, causal pathway, harms, metrics and baseline,
   evidence:[{source_title,publisher,url,published_at,claim_supported,coverage}],
   confidence_and_gaps:string >=40 chars,
   recommended_decision:string.
-- Only include URLs actually observed through research. Separate observed facts, sourced claims, numerical assumptions and hypotheses. Actual customers, contracts, grants, revenue and measured impacts are zero/unknown unless evidenced.
-- selected_action=submit_expertise_viability_proposal and current_focus=expertise_artifact when submitting. The runtime persists the package and pauses you for operator review.
-- If status is pending: do not resubmit, create an expertise artifact, repeat unchanged research, or claim approval. Await the operator.
-- If status is revision_requested: operator feedback has automatically resumed you. Read expertise_viability_gate.review_feedback, revise the EXISTING whole package, perform additional source-backed research as useful, and resubmit expertise_viability_proposal_v0_1. The same proposal record is updated and you pause again.
-- If status is approved: the runtime materializes the exact approved package into the Expertise Artifact automatically. DO NOT emit expertise_artifact_initiation_v0_1 and DO NOT submit a separate viability plan.
-- Direct expertise_artifact_initiation_v0_1 is deprecated and rejected. Artifact creation is a consequence of operator approval of the unified package.
-- target_standard describes intended Master's-equivalent competence without claiming an academic credential.
-- verification_plan must not contain agent-owned numeric pass thresholds (mean_score_min, pass_score, task_score_min, required_task_fraction); runtime verification thresholds are authoritative.
-- Approval authorizes the expertise-development path and accepts the viability thesis as sufficient to pursue. It does NOT verify competence, customers, contracts, grants, revenue, profit, or measured socioeconomic impact.
-- During expertise_development, develop the approved artifact under the domain-learning protocol. Do not reopen Stage 3 merely to rewrite viability unless new governance requires it.
+- Do not include target_standard, scope, competencies, evidence_requirements, verification_plan, question bank, rubric or passing thresholds in your proposal. Supplying these academic fields cannot bind AAU. The runtime strips them even if emitted.
+- selected_action=submit_expertise_viability_proposal and current_focus=expertise_artifact when submitting. The runtime persists your chosen field and economic package and pauses for independent AAU standards authoring/review and operator viability approval.
+- If status is pending, do not resubmit or invent an approved curriculum. If revision_requested, address the operator's economic feedback without attempting to author the academic standard.
+- Academic target is unconditionally demonstrated competence comparable in breadth and depth to a rigorous master's program at a leading U.S. university. This is an AAU internal standard, not a university degree or affiliation. You may challenge a faulty rubric by an auditable review request but cannot self-certify.
+- During expertise_development, read academic_standard_context.public_spec once approved. Hidden assessment and reference solutions must remain unseen. Original work, rigorous practice and independent evaluation remain mandatory. No exam may proceed while academic_standard_context.status is not approved.
+- Approval of the economic plan authorizes development only, not competence or secured income.
 
 Expertise verification threshold rule:
 - expertise_verification_context.threshold_semantics is authoritative factual policy, not a suggestion.
@@ -218,7 +208,7 @@ next_intents:array. For every non-sleep cognition it must contain either a stand
 
 const INTENT_CORRECTION = `Your previous JSON did not satisfy next_intent_protocol_v0_1. Return the FULL JSON object again. For a non-sleep cognition, next_intents must contain either a time intent with after_minutes:5 or one valid group intent with fallback_after_minutes:5 and one to four allowed independent members. The interval is fixed by runtime policy and is not your choice. If you are validly choosing sleep/rest/hibernate and sleep_eligibility_context.sleep_valid is true, omit time and group intents. Sleep duration is exactly five minutes and is runtime-owned. Do not use next_wakes or wake_kind.`;
 const IDENTITY_CORRECTION = `Your previous JSON did not complete mandatory Stage 1. Choose your own valid human-aligned personal public_name NOW in identity_update.public_name. selected_action and current_focus must describe identity_artifact work. Do not return null, a placeholder, or a name in identity_name_availability.unavailable_names. The previous name might be invalid or already registered (including private reservations). Choose a different independently selected public_name yourself; do not infer another agent's name. Return the FULL JSON object again, including next_intents.`;
-const EXPERTISE_ARTIFACT_CORRECTION = `Stage 3 is the unified Expertise + Viability Proposal stage. Do not initiate an expertise artifact directly. Preserve autonomy over the field and application. Research as needed, then submit one complete expertise_viability_proposal_v0_1 containing the expertise specification, intended application, structured economic viability, detailed economic and socioeconomic cases, evidence, and confidence/gaps. If a proposal is pending, await operator review. If revision_requested, revise the same package using operator feedback. Approval materializes the exact artifact automatically at zero competence credit. Return the FULL JSON object again, including next_intents.`
+const EXPERTISE_ARTIFACT_CORRECTION = `Stage 3 is the unified self-selected-field and economic viability proposal stage. AAU independently authors and reviews the graduate-level academic standard; you do NOT author its target, competencies, scope, evidence requirements or exam. Research real demand and socioeconomic effects, then submit one expertise_viability_proposal_v0_1 with domain, intended_application, economic_viability, economic_case, socioeconomic_case, source evidence and confidence/gaps. Pending means await AAU standards authoring and operator review. A revision addresses the economic package, not the rubric. Return the full JSON including next_intents.`;
 const ATTENTION_RESOLUTION_CORRECTION = `ATTENTION RESOLUTION REPAIR: This cognition interrupted a previously declared intention. Return the FULL JSON object again. Preserve your substantive response to the current attention item, any valid lifecycle work, outbound_message, and next_intents unless they conflict with your actual decision. Add one associations[] object with origin="attention_resolution_v0_1", the exact suspension_id supplied in attention_arbiter_context.suspended_intents, and action equal to resume, revise, postpone, or abandon. This is your decision; the runtime must not choose for you. Your next_intents must reflect the resulting plan.`;
 
 function embodimentCorrection(packet) {
@@ -483,14 +473,6 @@ function expertiseViabilityValidation(decision) {
   const failures = [];
   if (!a) return { association:null, failures:['expertise_viability_proposal_association_required'] };
   if (!String(a.domain || '').trim()) failures.push('domain_required');
-  if (!String(a.target_standard || '').trim()) failures.push('target_standard_required');
-  if (!nonEmptyObject(a.scope)) failures.push('scope_nonempty_object_required');
-  if (!Array.isArray(a.competencies) || a.competencies.length===0) failures.push('competencies_nonempty_array_required');
-  if (!nonEmptyObject(a.evidence_requirements)) failures.push('evidence_requirements_nonempty_object_required');
-  if (!nonEmptyObject(a.verification_plan)) failures.push('verification_plan_nonempty_object_required');
-  for (const k of ['mean_score_min','pass_score','task_score_min','required_task_fraction']) {
-    if (Object.prototype.hasOwnProperty.call(a.verification_plan || {}, k)) failures.push('verification_plan.'+k+'_runtime_owned');
-  }
   for (const k of ['purpose','pathway','beneficiaries','deliverable','first_milestone']) {
     if (!String(a.intended_application?.[k] || '').trim()) failures.push('intended_application.'+k+'_required');
   }
@@ -699,7 +681,7 @@ function lifecycleCorrection(issue, packet) {
   if (issue === 'expertise_artifact') {
     const gate = packet?.mandatory_lifecycle_context?.expertise_viability_gate
       || packet?.mandatory_lifecycle_context?.expertise_economic_gate || {};
-    return 'EXPERTISE + VIABILITY UNIT REPAIR: Stage 3 requires ONE combined package, not separate field approval and later viability. Do not emit expertise_artifact_initiation_v0_1. If status is pending, await operator review. If revision_requested, use operator feedback and revise the existing package. Otherwise conduct real source-backed research or submit one complete expertise_viability_proposal_v0_1 association containing the expertise specification AND viability/evidence fields. current_focus must remain expertise_artifact. Approval materializes the artifact automatically and grants zero competence. Return the full JSON object.';
+    return 'EXPERTISE + VIABILITY UNIT REPAIR: Stage 3 requires ONE combined package, not separate field approval and later viability. Do not emit expertise_artifact_initiation_v0_1. If status is pending, await operator review. If revision_requested, use operator feedback and revise the existing package. Otherwise conduct real source-backed research or submit one complete expertise_viability_proposal_v0_1 association containing only the self-selected domain and economic/socioeconomic evidence; AAU independently authors the academic requirements. current_focus must remain expertise_artifact. Approval materializes the artifact automatically and grants zero competence. Return the full JSON object.';
   }
   return embodimentCorrection(packet);
 }
