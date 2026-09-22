@@ -1,4 +1,4 @@
-import { withReviewerNvidiaSlot, noteReviewerModelTimeout, noteReviewerModelSuccess } from './reviewer-nvidia-endpoint-gate.js';
+import { withReviewerNvidiaSlot, noteReviewerModelTimeout, noteReviewerModelSuccess, isReviewerModelInBackoff } from './reviewer-nvidia-endpoint-gate.js';
 
 const SB=String(process.env.AAU_SUPABASE_URL||'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/,'');
 const anon=String(process.env.AAU_SUPABASE_ANON_KEY||'').trim();
@@ -77,6 +77,12 @@ function modelOrder(task){
 async function gradeClaim(task){
   let lastError=null;
   for(const model of modelOrder(task)){
+    if(isReviewerModelInBackoff(model)){
+      console.warn('AAU_ENTREPRENEURSHIP_ASSESSOR_MODEL_SKIPPED_BACKOFF',JSON.stringify({
+        task_type:task.task_type,assessment_id:task.assessment_id||task.final_assessment_id,model
+      }));
+      continue;
+    }
     try{
       const result=await modelCall(model,task.task_type,task.payload);
       const assessorId=`nvidia_direct/${result.model}`;
