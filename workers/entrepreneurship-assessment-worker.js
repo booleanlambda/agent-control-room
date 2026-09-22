@@ -10,7 +10,7 @@ let timer=null,working=false;
 
 const MODELS={
   kimi:'moonshotai/kimi-k3',
-  meta:'meta/llama-3.3-70b-instruct',
+  meta:'meta/llama-3.1-70b-instruct',
   nemotron:'nvidia/nemotron-3.5-lightning-30b-a3b',
 };
 
