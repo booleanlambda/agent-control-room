@@ -149,6 +149,16 @@ if (isEnabled('AAU_EXPERTISE_VERIFIER_ENABLED')) {
   }
 }
 
+if (isEnabled('AAU_ENTREPRENEURSHIP_ASSESSOR_ENABLED')) {
+  try {
+    const { startEntrepreneurshipAssessmentWorker } = await import('./entrepreneurship-assessment-worker.js');
+    const result = startEntrepreneurshipAssessmentWorker();
+    console.log('AAU_ENTREPRENEURSHIP_ASSESSOR_STARTED', JSON.stringify(result));
+  } catch (error) {
+    console.error('AAU_ENTREPRENEURSHIP_ASSESSOR_START_FAILED', JSON.stringify({ error_name: error?.name || null, message: String(error?.message || error).slice(0, 1600) }));
+  }
+}
+
 if (isEnabled('AAU_EMBODIMENT_RENDERER_ENABLED')) {
   try {
     const { startEmbodimentRenderWorker } = await import('./embodiment-render-worker.js');
