@@ -617,6 +617,78 @@ function capabilityRequestsFromDecision(decision) {
     .filter((a) => a && typeof a === 'object' && !Array.isArray(a) && String(a.origin || '').trim() === 'capability_request_v0_1');
 }
 
+function entrepreneurshipSubmissionContractValidation(packet, decision) {
+  if (currentStage(packet) !== 'mba_entrepreneurship') return { required:false, valid:true, failures:[] };
+  const progress = packet?.mandatory_lifecycle_context?.entrepreneurship_program_progress || {};
+  if (String(progress?.next_kind || '') !== 'study_unit') return { required:false, valid:true, failures:[] };
+  const unit = progress?.next_unit || {};
+  const unitId = String(unit?.unit_id || '').trim();
+  const courseCode = String(progress?.current_course?.course_code || unit?.submission_contract?.course_code || '').trim();
+  const minimumAnalysis = Math.max(1, Number(unit?.minimum_submission_chars || 900));
+  const associations = Array.isArray(decision?.associations) ? decision.associations : [];
+  const submissionAssoc = associations.find((a)=>
+    a && typeof a === 'object' && !Array.isArray(a)
+    && String(a.origin || '').trim() === 'entrepreneurship_unit_submission_v0_1'
+    && String(a.unit_id || '').trim() === unitId
+  ) || null;
+
+  if (!submissionAssoc) return {
+    required:true, valid:false, failures:['current_unit_submission_missing'],
+    unit_id:unitId, course_code:courseCode, minimum_analysis_chars:minimumAnalysis,
+  };
+
+  const submission = submissionAssoc?.submission && typeof submissionAssoc.submission === 'object'
+    && !Array.isArray(submissionAssoc.submission) ? submissionAssoc.submission : {};
+  const failures = [];
+  const analysisLength = String(submission.analysis || '').trim().length;
+  const conclusionLength = String(submission.conclusion || '').trim().length;
+  const critiqueLength = String(submission.self_critique || '').trim().length;
+  if (String(submissionAssoc.course_code || '').trim() !== courseCode) failures.push('course_code_mismatch');
+  if (analysisLength < minimumAnalysis) failures.push('analysis_below_minimum_chars');
+  if (!Array.isArray(submission.assumptions) || submission.assumptions.length === 0) failures.push('assumptions_nonempty_array_required');
+  if (!Array.isArray(submission.evidence)) failures.push('evidence_array_required');
+  if (conclusionLength < 80) failures.push('conclusion_min_80_chars');
+  if (critiqueLength < 80) failures.push('self_critique_min_80_chars');
+
+  return {
+    required:true,
+    valid:failures.length===0,
+    failures,
+    unit_id:unitId,
+    course_code:courseCode,
+    minimum_analysis_chars:minimumAnalysis,
+    observed:{
+      analysis_chars:analysisLength,
+      conclusion_chars:conclusionLength,
+      self_critique_chars:critiqueLength,
+      assumptions_count:Array.isArray(submission.assumptions)?submission.assumptions.length:0,
+      evidence_count:Array.isArray(submission.evidence)?submission.evidence.length:null,
+    },
+  };
+}
+
+function entrepreneurshipSubmissionContractCorrection(packet, decision) {
+  const v = entrepreneurshipSubmissionContractValidation(packet, decision);
+  const progress = packet?.mandatory_lifecycle_context?.entrepreneurship_program_progress || {};
+  const unit = progress?.next_unit || {};
+  return 'ENTREPRENEURSHIP SUBMISSION CONTRACT REPAIR: The substantive work may be correct, but the structured commit does not yet satisfy the durable unit contract. '
+    + 'Return the FULL AAU JSON object again and preserve your substantive conclusions. '
+    + 'For the current unit, include exactly one entrepreneurship_unit_submission_v0_1 association using unit_id=' + String(v.unit_id)
+    + ' and course_code=' + String(v.course_code) + '. '
+    + 'submission.analysis must be at least ' + String(v.minimum_analysis_chars) + ' characters AFTER trimming; do not summarize the deep-work artifact below that threshold. '
+    + 'Preserve the quantitative derivations, reconciliation checks, scenario math, assumptions, and limitations needed to audit the result. '
+    + 'submission.assumptions must be a non-empty JSON array, submission.evidence must be a JSON array, conclusion must be at least 80 characters, and self_critique must be at least 80 characters. '
+    + 'Current validation failures=' + JSON.stringify(v.failures)
+    + '; observed=' + JSON.stringify(v.observed || {})
+    + '; authoritative assignment=' + JSON.stringify({
+        title:unit?.title || null,
+        assignment_prompt:unit?.assignment_prompt || null,
+        evidence_requirements:unit?.evidence_requirements || null,
+        minimum_submission_chars:unit?.minimum_submission_chars || null,
+      }).slice(0,5000)
+    + '. Do not change the chosen substantive answer merely to satisfy formatting; expand and preserve the real work already performed.';
+}
+
 export function entrepreneurshipMastersNoProgressIssue(packet, decision) {
   if (currentStage(packet) !== 'mba_entrepreneurship') return false;
   if (packet?.executor_policy?.admin_chat_active === true || attentionInterruptActive(packet)) return false;
@@ -1632,6 +1704,42 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
     throw error;
   }
 
+  let entrepreneurshipSubmissionRepairAttempts = 0;
+  for (let i = 0; i < 2; i += 1) {
+    const submissionValidation = entrepreneurshipSubmissionContractValidation(packet, decision);
+    if (!submissionValidation.required || submissionValidation.valid) break;
+    // If the agent is intentionally requesting research instead of submitting the unit,
+    // do not force a premature unit artifact.
+    const associations = Array.isArray(decision?.associations) ? decision.associations : [];
+    if (associations.some((a)=>String(a?.origin || '') === 'web_research_request_v0_1')) break;
+    entrepreneurshipSubmissionRepairAttempts += 1;
+    ai = await complete(model, [
+      ...baseMessages,
+      { role:'assistant', content:String(ai.content || '').slice(0,50000) },
+      { role:'user', content:entrepreneurshipSubmissionContractCorrection(packet, decision) },
+    ]);
+    decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
+  }
+  const unresolvedSubmissionContract = entrepreneurshipSubmissionContractValidation(packet, decision);
+  if (unresolvedSubmissionContract.required && !unresolvedSubmissionContract.valid) {
+    const associations = Array.isArray(decision?.associations) ? decision.associations : [];
+    const researchRequested = associations.some((a)=>String(a?.origin || '') === 'web_research_request_v0_1');
+    if (!researchRequested) {
+      const error = new Error('entrepreneurship_submission_contract_incomplete_after_repair');
+      error.failureDetails = {
+        schema:'aau.entrepreneurship_submission_contract_failure.v0_1',
+        error_code:'ENTREPRENEURSHIP_SUBMISSION_CONTRACT_INCOMPLETE',
+        stage:currentStage(packet),
+        validation:unresolvedSubmissionContract,
+        selected_action:decision?.selected_action || null,
+        sanitized_decision:decision,
+        repair_meta:{entrepreneurship_submission_repair_attempts:entrepreneurshipSubmissionRepairAttempts},
+        captured_at:new Date().toISOString(),
+      };
+      throw error;
+    }
+  }
+
   let noProgressRepairAttempts = 0;
   const maxNoProgressRepairs = currentStage(packet) === 'expertise_development' ? 1 : 2;
   for (let i = 0; i < maxNoProgressRepairs && (noProgressLoopIssue(packet, decision) || externalActionMissingCapabilityIssue(packet, decision)); i += 1) {
@@ -1830,7 +1938,7 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
   return {
     ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts,
     fileReplyRepairAttempts, attentionResolutionRepairAttempts, externalStateRepairAttempts,
-    noProgressRepairAttempts, packetText,
+    noProgressRepairAttempts, entrepreneurshipSubmissionRepairAttempts, packetText,
     cognitionMode:modeInfo,
     deepCognitionMeta:deepCognition?.meta || null,
   };
@@ -1856,7 +1964,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
     const {
       ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts,
       fileReplyRepairAttempts, attentionResolutionRepairAttempts, externalStateRepairAttempts,
-      noProgressRepairAttempts, packetText, cognitionMode, deepCognitionMeta,
+      noProgressRepairAttempts, entrepreneurshipSubmissionRepairAttempts, packetText, cognitionMode, deepCognitionMeta,
     } = await getDecision(packet, model, requestedAgentId, requestedIntentExecutionId);
     if (ai.model_returned !== model) throw new Error(`model_consistency_breach:requested=${model};returned=${ai.model_returned || 'missing'}`);
 
@@ -1883,6 +1991,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       attention_resolution_repair_attempts: attentionResolutionRepairAttempts,
       external_state_repair_attempts: externalStateRepairAttempts,
       no_progress_repair_attempts: noProgressRepairAttempts,
+      entrepreneurship_submission_repair_attempts: entrepreneurshipSubmissionRepairAttempts,
       cognition_mode: cognitionMode?.mode || 'fast',
       cognition_mode_reason: cognitionMode?.reason || null,
       deep_cognition: deepCognitionMeta,
@@ -1976,6 +2085,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       attention_resolution_repair_attempts: attentionResolutionRepairAttempts,
       external_state_repair_attempts: externalStateRepairAttempts,
       no_progress_repair_attempts: noProgressRepairAttempts,
+      entrepreneurship_submission_repair_attempts: entrepreneurshipSubmissionRepairAttempts,
       cognition_mode: cognitionMode?.mode || 'fast',
       cognition_mode_reason: cognitionMode?.reason || null,
       deep_cognition: deepCognitionMeta,
