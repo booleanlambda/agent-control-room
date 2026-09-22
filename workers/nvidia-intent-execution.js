@@ -86,6 +86,14 @@ Mandatory embodiment-stage rule:
 - The selected candidate becomes your pseudo profile image after runtime validation.
 - Do not claim CANONICAL or invent storage identifiers. The runtime stores and validates image assets.
 
+Mandatory Entrepreneurship Master's stage rule (AAU Stage 3):
+- When mandatory_lifecycle_context.current_stage is mba_entrepreneurship, mandatory_lifecycle_context.entrepreneurship_program_progress is authoritative.
+- If entrepreneurship_program_progress.next_kind is study_unit, entrepreneurship_program_progress.next_unit is the CURRENT assigned unit and prior accepted units require no per-unit verdict. There is NO independent review between individual units. Do not wait, monitor, or schedule another wake merely to verify acceptance of a prior unit once units_submitted has advanced and next_unit has changed.
+- Work on the current next_unit in THIS cognition. If you can complete it, submit exactly one associations[] object with origin="entrepreneurship_unit_submission_v0_1", the exact next_unit.unit_id and current_course.course_code, and submission:{analysis,assumptions,conclusion,self_critique,evidence}. assumptions and evidence must be JSON arrays. Do not self-grade.
+- If the current unit genuinely depends on current external facts that are not already evidenced, request web research in THIS cognition using web_research_request_v0_1. After research observation, return to the same current unit. Do not substitute "wait for feedback" for study or evidence acquisition.
+- Independent assessment occurs only after all required units in the current course are validly persisted. When next_kind is course_assessment_queue or course_assessment_pending, do not repeat course units; await the institutional assessment. When next_kind is course_remediation, address the persisted assessment feedback. When next_kind is final_assessments, await the independent final reviews.
+- Expertise selection remains locked until the Entrepreneurship Master's program is independently verified as passed.
+
 Mandatory expertise-and-viability-stage rule (AAU-owned academic standard v0.3):
 - The agent chooses the field, voluntarily pursues it, and authors the intended application and evidence-based economic/socioeconomic viability proposal. AAU alone authors and independently reviews all master-level academic competencies, scope, curriculum, practical evidence, examination content, and pass thresholds. You may not define or modify those requirements.
 - When mandatory_lifecycle_context.current_stage is expertise_artifact, inspect expertise_viability_gate.status. Research your self-selected field's real uses, buyers, costs, risks and potential human benefit as needed.
@@ -546,6 +554,41 @@ function capabilityRequestsFromDecision(decision) {
     .filter((a) => a && typeof a === 'object' && !Array.isArray(a) && String(a.origin || '').trim() === 'capability_request_v0_1');
 }
 
+export function entrepreneurshipMastersNoProgressIssue(packet, decision) {
+  if (currentStage(packet) !== 'mba_entrepreneurship') return false;
+  if (packet?.executor_policy?.admin_chat_active === true || attentionInterruptActive(packet)) return false;
+
+  const progress = packet?.mandatory_lifecycle_context?.entrepreneurship_program_progress || {};
+  if (String(progress?.next_kind || '') !== 'study_unit') return false;
+  const unit = progress?.next_unit || {};
+  const unitId = String(unit?.unit_id || '').trim();
+  const associations = Array.isArray(decision?.associations) ? decision.associations : [];
+
+  const validCurrentSubmission = associations.some((a) =>
+    a && typeof a === 'object' && !Array.isArray(a)
+    && String(a.origin || '').trim() === 'entrepreneurship_unit_submission_v0_1'
+    && String(a.unit_id || '').trim() === unitId
+  );
+  if (validCurrentSubmission) return false;
+
+  const researchRequested = associations.some((a) =>
+    a && typeof a === 'object' && !Array.isArray(a)
+    && String(a.origin || '').trim() === 'web_research_request_v0_1'
+  );
+  if (researchRequested) return false;
+
+  const action = String(decision?.selected_action || '').trim().toLowerCase();
+  const reason = String(decision?.stated_reason || '').trim();
+  const nextReasons = (Array.isArray(decision?.next_intents) ? decision.next_intents : [])
+    .map((x) => String(x?.intent_reason || '')).join(' ');
+  const combined = `${action} ${reason} ${nextReasons}`;
+
+  const passiveAction = ['nothing','nothing_is_valid_action','do_nothing','wait','await_review','monitor'].includes(action);
+  const waitingForPriorUnit = /(await|wait|waiting|monitor|verify|check).{0,80}(review|feedback|accept|accepted|acceptance|verdict|prior unit|previous unit|submission)/i.test(combined);
+
+  return Boolean(unitId && (passiveAction || waitingForPriorUnit));
+}
+
 export function expertiseDevelopmentNoProgressIssue(packet, decision) {
   if (currentStage(packet) !== 'expertise_development') return false;
   // Detect repeated unproductive wakes, without disallowing reflection, sleep,
@@ -568,6 +611,8 @@ export function expertiseDevelopmentNoProgressIssue(packet, decision) {
 }
 
 function noProgressLoopIssue(packet, decision) {
+  if (currentStage(packet) === 'mba_entrepreneurship')
+    return entrepreneurshipMastersNoProgressIssue(packet, decision);
   if (currentStage(packet) === 'expertise_development')
     return expertiseDevelopmentNoProgressIssue(packet, decision);
   if (currentStage(packet) !== 'product_service_test') return false;
@@ -605,6 +650,28 @@ function externalActionMissingCapabilityIssue(packet, decision) {
 }
 
 function noProgressLoopCorrection(packet, decision) {
+  if (currentStage(packet) === 'mba_entrepreneurship') {
+    const progress = packet?.mandatory_lifecycle_context?.entrepreneurship_program_progress || {};
+    const unit = progress?.next_unit || {};
+    const course = progress?.current_course || {};
+    return 'ENTREPRENEURSHIP STAGE ACTION ALIGNMENT: Durable program progress is authoritative. '
+      + 'The prior unit is already persisted because units_submitted=' + String(progress?.units_submitted ?? 'unknown')
+      + ' and next_unit has advanced to ' + JSON.stringify({
+          course_code:course?.course_code || null,
+          course_title:course?.title || null,
+          unit_id:unit?.unit_id || null,
+          unit_order:unit?.unit_order || null,
+          unit_title:unit?.title || null,
+          assignment_prompt:unit?.assignment_prompt || null,
+          evidence_requirements:unit?.evidence_requirements || null,
+          submission_contract:unit?.submission_contract || null,
+        }).slice(0,5000)
+      + '. There is NO independent review between individual units. Return the FULL JSON object again. '
+      + 'Do not wait, monitor, or schedule another intent to verify acceptance of the prior unit. '
+      + 'Work on the authoritative current unit in THIS cognition. If completing it, submit entrepreneurship_unit_submission_v0_1 using the exact unit_id/course_code and the required submission object; assumptions and evidence must be JSON arrays. '
+      + 'If current external facts are genuinely required, issue a web_research_request_v0_1 now instead. '
+      + 'The runtime constrains sequencing and evidence format but does not choose your substantive analysis or conclusions.';
+  }
   if (currentStage(packet) === 'expertise_development') {
     const feedback = packet?.expertise_action_feedback || {};
     const gate = packet?.expertise_portfolio_context?.repeat_verification_gate || {};
@@ -681,7 +748,7 @@ function lifecycleCorrection(issue, packet) {
   if (issue === 'expertise_artifact') {
     const gate = packet?.mandatory_lifecycle_context?.expertise_viability_gate
       || packet?.mandatory_lifecycle_context?.expertise_economic_gate || {};
-    return 'EXPERTISE + VIABILITY UNIT REPAIR: Stage 3 requires ONE combined package, not separate field approval and later viability. Do not emit expertise_artifact_initiation_v0_1. If status is pending, await operator review. If revision_requested, use operator feedback and revise the existing package. Otherwise conduct real source-backed research or submit one complete expertise_viability_proposal_v0_1 association containing only the self-selected domain and economic/socioeconomic evidence; AAU independently authors the academic requirements. current_focus must remain expertise_artifact. Approval materializes the artifact automatically and grants zero competence. Return the full JSON object.';
+    return 'EXPERTISE + VIABILITY UNIT REPAIR: Stage 4 requires ONE combined package, not separate field approval and later viability. Do not emit expertise_artifact_initiation_v0_1. If status is pending, await operator review. If revision_requested, use operator feedback and revise the existing package. Otherwise conduct real source-backed research or submit one complete expertise_viability_proposal_v0_1 association containing only the self-selected domain and economic/socioeconomic evidence; AAU independently authors the academic requirements. current_focus must remain expertise_artifact. Approval materializes the artifact automatically and grants zero competence. Return the full JSON object.';
   }
   return embodimentCorrection(packet);
 }
@@ -1146,13 +1213,16 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
     decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
   }
   if (noProgressLoopIssue(packet, decision) || externalActionMissingCapabilityIssue(packet, decision)) {
+    const entrepreneurshipLoop = currentStage(packet) === 'mba_entrepreneurship';
     const expertiseLoop = currentStage(packet) === 'expertise_development';
-    const error = new Error(expertiseLoop
-      ? 'stage_action_alignment_failed:expertise_development_no_progress'
-      : 'stage_action_alignment_failed:no_progress_external_action_loop');
+    const error = new Error(entrepreneurshipLoop
+      ? 'stage_action_alignment_failed:entrepreneurship_masters_no_progress'
+      : expertiseLoop
+        ? 'stage_action_alignment_failed:expertise_development_no_progress'
+        : 'stage_action_alignment_failed:no_progress_external_action_loop');
     error.failureDetails = {
-      schema: 'aau.no_progress_loop_failure.v0_1',
-      error_code: expertiseLoop ? 'EXPERTISE_DEVELOPMENT_NO_PROGRESS' : 'NO_PROGRESS_EXTERNAL_ACTION_LOOP',
+      schema: entrepreneurshipLoop ? 'aau.entrepreneurship_no_progress_failure.v0_1' : 'aau.no_progress_loop_failure.v0_1',
+      error_code: entrepreneurshipLoop ? 'ENTREPRENEURSHIP_MASTERS_NO_PROGRESS' : expertiseLoop ? 'EXPERTISE_DEVELOPMENT_NO_PROGRESS' : 'NO_PROGRESS_EXTERNAL_ACTION_LOOP',
       stage: currentStage(packet),
       selected_action: decision?.selected_action || null,
       stated_reason: decision?.stated_reason || null,
@@ -1353,7 +1423,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       requested_model_id: model, returned_model_id: ai.model_returned,
       continuity_mode: false, transition_mode: false,
       executor_version: 'executor_v0_24_fixed_five_minute_sleep',
-      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_25_bounded_history_chat',
+      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_26_entrepreneurship_stage3',
       response_id: ai.response_id, raw_model_output: raw.slice(0,50000),
       input_tokens: Number(usage.prompt_tokens ?? usage.input_tokens ?? 0),
       output_tokens: Number(usage.completion_tokens ?? usage.output_tokens ?? 0),
@@ -1361,7 +1431,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       input_hash: sha256(packetText), output_hash: sha256(raw),
       model_consistency_status: 'VERIFIED_PRIMARY', authenticator_result: { status: 'not_run_in_executor' },
       experimental_provider_policy: 'nvidia_direct_all_experimental_roles',
-      lifecycle_contract: 'next_intent_protocol_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+expertise_viability_unit_stage_v0_1+product_service_test_v0_1+durable_external_capability_state_v0_1+authoritative_external_state_reconciliation_v0_1+no_progress_action_alignment_v0_1+attention_arbiter_v0_1+attention_resolution_repair_v0_1+stage_action_alignment_v0_1+failure_diagnostics_v0_1+embodiment_payload_normalization_v0_1',
+      lifecycle_contract: 'next_intent_protocol_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+entrepreneurship_stage3_action_alignment_v0_1+expertise_viability_unit_stage_v0_1+product_service_test_v0_1+durable_external_capability_state_v0_1+authoritative_external_state_reconciliation_v0_1+no_progress_action_alignment_v0_1+attention_arbiter_v0_1+attention_resolution_repair_v0_1+stage_action_alignment_v0_1+failure_diagnostics_v0_1+embodiment_payload_normalization_v0_1',
       intent_repair_attempted: intentRepairAttempted,
       identity_repair_attempts: identityRepairAttempts,
       embodiment_repair_attempts: embodimentRepairAttempts,
