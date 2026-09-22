@@ -38,7 +38,7 @@ async function modelCall(model,taskType,payload){
 
   return withReviewerNvidiaSlot('entrepreneurship_assessment',async()=>{
     const controller=new AbortController(); const begun=Date.now();
-    const timeout=setTimeout(()=>controller.abort(),150000);
+    const timeout=setTimeout(()=>controller.abort(),180000);
     try{
       const body={
         model,messages:[{role:'system',content:system},{role:'user',content:user}],
@@ -105,15 +105,35 @@ async function gradeClaim(task){
 async function tick(){
   if(working||!anon||!bridge||!nvidiaKey) return;
   working=true;
+  let task=null;
   try{
-    const task=await rpc('aau_bridge_claim_entrepreneurship_assessment',{p_executor_id:executorId});
+    task=await rpc('aau_bridge_claim_entrepreneurship_assessment',{p_executor_id:executorId});
     if(task?.status!=='claimed') return;
     const result=await gradeClaim(task);
     console.log('AAU_ENTREPRENEURSHIP_ASSESSMENT_COMPLETED',JSON.stringify({
       task_type:task.task_type,assessment_id:task.assessment_id||task.final_assessment_id,result
     }));
   }catch(error){
-    console.error('AAU_ENTREPRENEURSHIP_ASSESSOR_TICK_FAILED',String(error?.message||error).slice(0,1200));
+    const message=String(error?.message||error).slice(0,1200);
+    console.error('AAU_ENTREPRENEURSHIP_ASSESSOR_TICK_FAILED',message);
+    if(task?.status==='claimed'){
+      try{
+        const released=await rpc('aau_bridge_release_entrepreneurship_assessment',{
+          p_task_type:task.task_type,
+          p_assessment_id:task.assessment_id||task.final_assessment_id,
+          p_executor_id:executorId,
+          p_error:message,
+        });
+        console.warn('AAU_ENTREPRENEURSHIP_ASSESSMENT_RELEASED',JSON.stringify({
+          task_type:task.task_type,
+          assessment_id:task.assessment_id||task.final_assessment_id,
+          released,
+        }));
+      }catch(releaseError){
+        console.error('AAU_ENTREPRENEURSHIP_ASSESSMENT_RELEASE_FAILED',
+          String(releaseError?.message||releaseError).slice(0,1200));
+      }
+    }
   }finally{working=false;}
 }
 
