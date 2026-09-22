@@ -1,0 +1,636 @@
+{
+  "program_version": "entrepreneurship_masters_v0_1",
+  "title": "AAU Entrepreneurship Masters-equivalent Program",
+  "accreditation_claim": false,
+  "design_goal": "Top-university graduate-level demonstrated competence, not credential imitation.",
+  "benchmark_date": "2026-09-22",
+  "benchmark_basis": [
+    "HBS broad required management core plus Entrepreneurial Manager",
+    "Wharton cross-functional MBA core plus Entrepreneurship & Innovation",
+    "Stanford analytical/leadership/management foundations plus experiential entrepreneurship and Startup Garage"
+  ],
+  "requirements": {
+    "courses": 15,
+    "units": 60,
+    "course_floor": 0.8,
+    "capstone_floor": 0.85,
+    "final_assessments": 2,
+    "final_floor": 0.85,
+    "overall_floor": 0.85,
+    "weighting": {
+      "core_courses": 0.6,
+      "capstone": 0.2,
+      "independent_finals": 0.2
+    }
+  },
+  "default_unit_contract": {
+    "minimum_submission_chars": 900,
+    "capstone_minimum_submission_chars": 1400,
+    "required_submission_fields": [
+      "analysis",
+      "assumptions",
+      "conclusion",
+      "self_critique",
+      "evidence"
+    ],
+    "evidence_rules": [
+      "Use current external research when material claims depend on current facts.",
+      "Preserve source provenance when research is used.",
+      "Narrative claims alone do not count as mastery."
+    ],
+    "rubric": {
+      "conceptual_accuracy": 0.3,
+      "analytical_rigor": 0.25,
+      "application_quality": 0.25,
+      "evidence_and_assumption_discipline": 0.1,
+      "self_critique_and_limits": 0.1
+    }
+  },
+  "courses": [
+    {
+      "code": "ACC501",
+      "order": 1,
+      "title": "Financial Accounting and Reporting",
+      "category": "core",
+      "description": "Interpret and construct decision-useful financial statements for ventures.",
+      "objectives": [
+        "Accrual accounting and statement linkage",
+        "Revenue/cost recognition",
+        "Working capital and cash conversion",
+        "Managerial use of financial statements"
+      ],
+      "units": [
+        [
+          "Statement Mechanics",
+          "foundation",
+          "Construct linked income statement, balance sheet and cash-flow logic for a new venture.",
+          "Build a three-statement mini-model for a hypothetical venture and explain every linkage."
+        ],
+        [
+          "Revenue, Costs and Working Capital",
+          "quantitative",
+          "Reason about recognition, gross margin, inventory/receivables/payables and cash conversion.",
+          "Analyze a case where reported profit rises while cash deteriorates; identify causes and fixes."
+        ],
+        [
+          "Managerial Accounting",
+          "case",
+          "Use contribution margin, fixed/variable costs and cost allocation for decisions.",
+          "Compare two delivery models and recommend one using contribution margin and relevant-cost analysis."
+        ],
+        [
+          "Accounting Decision Memo",
+          "applied",
+          "Use financial statements to make an operating decision.",
+          "Write a CFO-style memo diagnosing venture health and specifying three actions with quantified effects."
+        ]
+      ]
+    },
+    {
+      "code": "FIN502",
+      "order": 2,
+      "title": "Corporate Finance and Capital Allocation",
+      "category": "core",
+      "description": "Evaluate financing, investment, risk, and capital-allocation decisions.",
+      "objectives": [
+        "Time value and discounted cash flow",
+        "Cost of capital and risk",
+        "Capital budgeting under uncertainty",
+        "Capital structure and financing tradeoffs"
+      ],
+      "units": [
+        [
+          "Time Value and Valuation",
+          "quantitative",
+          "Apply discounting, NPV and scenario valuation.",
+          "Value a staged investment under base/upside/downside cash-flow scenarios."
+        ],
+        [
+          "Risk and Required Return",
+          "foundation",
+          "Relate uncertainty, risk premium and financing cost.",
+          "Explain how business risk changes hurdle rates and capital allocation."
+        ],
+        [
+          "Capital Budgeting",
+          "case",
+          "Compare mutually exclusive investments under uncertainty.",
+          "Choose between two growth projects using NPV, sensitivity and strategic constraints."
+        ],
+        [
+          "Capital Structure Decision",
+          "applied",
+          "Choose debt/equity/internal funding coherently.",
+          "Recommend a financing mix for a venture with explicit dilution, default and runway tradeoffs."
+        ]
+      ]
+    },
+    {
+      "code": "ECO503",
+      "order": 3,
+      "title": "Managerial Economics and Market Structure",
+      "category": "core",
+      "description": "Use economic reasoning to make pricing, capacity, and market-entry decisions.",
+      "objectives": [
+        "Demand and elasticity",
+        "Marginal analysis",
+        "Market structure and competition",
+        "Strategic response under uncertainty"
+      ],
+      "units": [
+        [
+          "Demand and Elasticity",
+          "quantitative",
+          "Estimate elasticity and connect it to revenue and pricing.",
+          "Given a demand schedule, estimate elasticity and identify the revenue-maximizing direction of price change."
+        ],
+        [
+          "Marginal Decision Making",
+          "foundation",
+          "Use marginal cost, marginal revenue and opportunity cost.",
+          "Solve a capacity-allocation case with scarce compute or labor."
+        ],
+        [
+          "Market Structure",
+          "case",
+          "Analyze monopoly, oligopoly and competitive dynamics.",
+          "Map a market structure and predict likely competitor responses to entry."
+        ],
+        [
+          "Strategic Economics Memo",
+          "applied",
+          "Integrate economics into entry and pricing.",
+          "Recommend whether and how to enter a market using demand, cost and competitive evidence."
+        ]
+      ]
+    },
+    {
+      "code": "MKT504",
+      "order": 4,
+      "title": "Marketing, Customer Discovery and Sales",
+      "category": "core",
+      "description": "Find customers, test needs, position value, and build a repeatable sales process.",
+      "objectives": [
+        "Customer discovery",
+        "Segmentation and positioning",
+        "Acquisition economics",
+        "Enterprise and consultative sales"
+      ],
+      "units": [
+        [
+          "Customer Discovery",
+          "applied",
+          "Form and test customer-problem hypotheses.",
+          "Design 12 non-leading discovery questions and a falsifiable interview plan."
+        ],
+        [
+          "Segmentation and Positioning",
+          "case",
+          "Choose an ICP and differentiated position.",
+          "Segment a mixed market and defend a beachhead ICP and positioning statement."
+        ],
+        [
+          "Acquisition Economics",
+          "quantitative",
+          "Relate funnel conversion, CAC and payback.",
+          "Build a funnel model from impressions to revenue and calculate CAC and payback."
+        ],
+        [
+          "Sales System",
+          "applied",
+          "Design a repeatable B2B or B2C selling motion.",
+          "Create qualification, discovery, objection-handling and close criteria for a first sales process."
+        ]
+      ]
+    },
+    {
+      "code": "OPS505",
+      "order": 5,
+      "title": "Operations and Supply Chain",
+      "category": "core",
+      "description": "Design reliable, scalable operations with measurable service and cost performance.",
+      "objectives": [
+        "Process flow and bottlenecks",
+        "Capacity and queueing",
+        "Quality and service operations",
+        "Supply, vendors, resilience"
+      ],
+      "units": [
+        [
+          "Process and Bottlenecks",
+          "quantitative",
+          "Map throughput, cycle time and constraints.",
+          "Diagnose a multi-step process and calculate the binding bottleneck and throughput."
+        ],
+        [
+          "Capacity and Queueing",
+          "quantitative",
+          "Reason about utilization, waits and service levels.",
+          "Analyze a service system under demand spikes and propose capacity policy."
+        ],
+        [
+          "Quality and Reliability",
+          "case",
+          "Design controls that reduce defects without waste.",
+          "Create a quality plan for a high-consequence service with measurable failure thresholds."
+        ],
+        [
+          "Resilient Operations",
+          "applied",
+          "Design vendors, inventory/service redundancy and incident response.",
+          "Produce an operating plan that survives a supplier or infrastructure failure."
+        ]
+      ]
+    },
+    {
+      "code": "ORG506",
+      "order": 6,
+      "title": "Organizational Behavior and Leadership",
+      "category": "core",
+      "description": "Build teams, incentives, decision systems, and leadership practices suited to growth.",
+      "objectives": [
+        "Motivation and incentives",
+        "Team design and conflict",
+        "Leadership under uncertainty",
+        "Hiring, culture and performance"
+      ],
+      "units": [
+        [
+          "Motivation and Incentives",
+          "case",
+          "Align incentives with desired behavior and avoid gaming.",
+          "Redesign a flawed compensation system that rewards volume but harms quality."
+        ],
+        [
+          "Teams and Conflict",
+          "applied",
+          "Structure roles, decision rights and conflict resolution.",
+          "Create a team operating model with RACI-like ownership and escalation rules."
+        ],
+        [
+          "Leadership Under Uncertainty",
+          "case",
+          "Communicate and decide under ambiguity.",
+          "Write a leadership response to a major strategic setback with decision rationale."
+        ],
+        [
+          "Hiring and Culture",
+          "applied",
+          "Define hiring bars, performance systems and cultural mechanisms.",
+          "Build a first-10-hires plan including scorecards, incentives and failure modes."
+        ]
+      ]
+    },
+    {
+      "code": "STR507",
+      "order": 7,
+      "title": "Strategy and Competitive Analysis",
+      "category": "core",
+      "description": "Create and defend advantage using industry, capability, and game-theoretic analysis.",
+      "objectives": [
+        "Industry structure",
+        "Resources and capabilities",
+        "Competitive dynamics",
+        "Moats, complements and ecosystem strategy"
+      ],
+      "units": [
+        [
+          "Industry Structure",
+          "case",
+          "Use industry-structure analysis without treating it mechanically.",
+          "Analyze attractiveness, power and profit pools in a chosen industry."
+        ],
+        [
+          "Capabilities and Advantage",
+          "foundation",
+          "Distinguish resources from defensible capabilities.",
+          "Assess whether a venture advantage is valuable, scarce, difficult to copy and organizationally supported."
+        ],
+        [
+          "Competitive Dynamics",
+          "case",
+          "Anticipate retaliation, entry and strategic moves.",
+          "Run a competitor-response scenario for a new entrant."
+        ],
+        [
+          "Moat and Ecosystem Strategy",
+          "applied",
+          "Design advantage using network effects, switching costs, data, brand or complements.",
+          "Produce a strategy memo specifying moat claims, evidence, vulnerabilities and tests."
+        ]
+      ]
+    },
+    {
+      "code": "LAW508",
+      "order": 8,
+      "title": "Business Law, Ethics and Governance",
+      "category": "core",
+      "description": "Recognize legal, ethical, governance, and fiduciary constraints in venture decisions.",
+      "objectives": [
+        "Entity and contract basics",
+        "IP, data and employment",
+        "Governance and fiduciary duties",
+        "Ethics, compliance and stakeholder tradeoffs"
+      ],
+      "units": [
+        [
+          "Entity and Contract Fundamentals",
+          "foundation",
+          "Understand entity, agency, liability and contract mechanics.",
+          "Review a hypothetical founder/service agreement and identify key legal-economic risks."
+        ],
+        [
+          "IP, Data and Employment",
+          "case",
+          "Recognize IP ownership, privacy/data and worker classification issues.",
+          "Identify legal-risk controls for a software venture handling customer data."
+        ],
+        [
+          "Governance and Fiduciary Duty",
+          "case",
+          "Understand boards, duties, conflicts and approval rights.",
+          "Resolve a board conflict involving financing and related-party interests."
+        ],
+        [
+          "Ethics and Compliance",
+          "applied",
+          "Make principled decisions beyond minimum legal compliance.",
+          "Write a governance memo for a profitable action that is legal but creates material stakeholder harm."
+        ]
+      ]
+    },
+    {
+      "code": "DAT509",
+      "order": 9,
+      "title": "Data Analysis and Managerial Decision Making",
+      "category": "core",
+      "description": "Use data, experiments, forecasts, and uncertainty to make defensible decisions.",
+      "objectives": [
+        "Descriptive and diagnostic analysis",
+        "Probability and decision trees",
+        "Experiments and causal reasoning",
+        "Forecasting and sensitivity analysis"
+      ],
+      "units": [
+        [
+          "Descriptive Analysis",
+          "quantitative",
+          "Use distributions, segmentation and visualization conceptually.",
+          "Diagnose a KPI dataset and separate signal from aggregation artifacts."
+        ],
+        [
+          "Probability and Decisions",
+          "quantitative",
+          "Use expected value, Bayesian updating and decision trees.",
+          "Build a decision tree for launch vs delay with uncertain demand."
+        ],
+        [
+          "Experiments and Causality",
+          "case",
+          "Distinguish correlation from causal evidence.",
+          "Design an A/B or quasi-experiment with metric, sample and stopping logic."
+        ],
+        [
+          "Forecast and Sensitivity",
+          "applied",
+          "Build forecasts with explicit assumptions and stress tests.",
+          "Create a 12-month forecast with base/upside/downside assumptions and sensitivity ranking."
+        ]
+      ]
+    },
+    {
+      "code": "ENT510",
+      "order": 10,
+      "title": "Entrepreneurship Opportunity Identification",
+      "category": "entrepreneurship",
+      "description": "Discover, frame, and prioritize opportunities worth pursuing.",
+      "objectives": [
+        "Problem discovery",
+        "Opportunity sizing",
+        "Founder/agent-market fit and constraints",
+        "Kill criteria and opportunity portfolio"
+      ],
+      "units": [
+        [
+          "Problem Discovery",
+          "applied",
+          "Identify painful, frequent, monetizable problems.",
+          "Create a problem inventory with evidence, severity, frequency and existing workaround."
+        ],
+        [
+          "Opportunity Sizing",
+          "quantitative",
+          "Estimate bottom-up TAM/SAM/SOM without market-report substitution.",
+          "Build a bottom-up market estimate from customer count, usage and realistic price."
+        ],
+        [
+          "Fit and Constraints",
+          "case",
+          "Match opportunity to capabilities, resources and access.",
+          "Compare three opportunities against capability, capital, access and time constraints."
+        ],
+        [
+          "Opportunity Portfolio",
+          "applied",
+          "Use explicit kill criteria before attachment forms.",
+          "Rank four opportunities with falsifiable assumptions and precommitted kill criteria."
+        ]
+      ]
+    },
+    {
+      "code": "BMD511",
+      "order": 11,
+      "title": "Business Model Design and Validation",
+      "category": "entrepreneurship",
+      "description": "Turn an opportunity into a falsifiable business model and validation plan.",
+      "objectives": [
+        "Value proposition and customer jobs",
+        "Revenue architecture",
+        "Cost and activity systems",
+        "Assumption mapping and validation"
+      ],
+      "units": [
+        [
+          "Customer Jobs and Value Proposition",
+          "case",
+          "Map jobs, pains, gains and switching behavior.",
+          "Create a value proposition tied to observed customer evidence rather than generic benefits."
+        ],
+        [
+          "Revenue Architecture",
+          "quantitative",
+          "Compare subscription, transaction, usage, services and hybrid models.",
+          "Model three revenue architectures and identify incentive and cash-flow differences."
+        ],
+        [
+          "Cost and Activity System",
+          "quantitative",
+          "Map key activities, partners and cost drivers.",
+          "Build an activity-based cost model for an MVP and scaled state."
+        ],
+        [
+          "Assumption Validation",
+          "applied",
+          "Convert business model into ranked testable assumptions.",
+          "Produce an assumption map with cheapest decisive test for each critical uncertainty."
+        ]
+      ]
+    },
+    {
+      "code": "VFN512",
+      "order": 12,
+      "title": "Venture Finance, Bootstrapping and Fundraising",
+      "category": "entrepreneurship",
+      "description": "Finance a venture through disciplined bootstrapping and external capital choices.",
+      "objectives": [
+        "Runway and financing need",
+        "Bootstrapping and non-dilutive paths",
+        "Equity, debt and dilution",
+        "Fundraising process and investor incentives"
+      ],
+      "units": [
+        [
+          "Runway and Financing Need",
+          "quantitative",
+          "Calculate burn, runway, financing gap and milestone timing.",
+          "Build a financing-need schedule tied to operating milestones."
+        ],
+        [
+          "Bootstrapping",
+          "case",
+          "Use revenue, pre-sales, services and non-dilutive funding strategically.",
+          "Design a bootstrapped path and identify where it becomes strategically constraining."
+        ],
+        [
+          "Equity, Debt and Dilution",
+          "quantitative",
+          "Model ownership, dilution, debt service and investor returns.",
+          "Construct a cap-table scenario across two financing rounds."
+        ],
+        [
+          "Fundraising Strategy",
+          "applied",
+          "Match capital source to stage, risk and bargaining power.",
+          "Write an investor strategy with target investor type, use of funds, milestones and walk-away terms."
+        ]
+      ]
+    },
+    {
+      "code": "PRI513",
+      "order": 13,
+      "title": "Pricing, Unit Economics and Cash Flow",
+      "category": "entrepreneurship",
+      "description": "Build economically coherent pricing, contribution margin, CAC/LTV, and cash plans.",
+      "objectives": [
+        "Pricing architecture",
+        "Contribution margin and break-even",
+        "CAC, LTV and cohort economics",
+        "Cash runway and downside scenarios"
+      ],
+      "units": [
+        [
+          "Pricing Architecture",
+          "case",
+          "Choose value metric, package and willingness-to-pay test.",
+          "Design three pricing packages and a test that can disconfirm willingness-to-pay assumptions."
+        ],
+        [
+          "Contribution and Break-even",
+          "quantitative",
+          "Calculate gross margin, contribution margin and break-even.",
+          "Build a unit economics model including variable compute/data/service costs."
+        ],
+        [
+          "CAC, LTV and Cohorts",
+          "quantitative",
+          "Calculate acquisition, retention, LTV and payback without vanity metrics.",
+          "Evaluate two channels using cohort retention, CAC, LTV and payback."
+        ],
+        [
+          "Cash Survival",
+          "applied",
+          "Integrate price, volume, burn and runway.",
+          "Create a 12-month cash plan and specify triggers for hiring freeze, price change or shutdown."
+        ]
+      ]
+    },
+    {
+      "code": "GTM514",
+      "order": 14,
+      "title": "Go-to-Market, Product-Market Fit and Growth",
+      "category": "entrepreneurship",
+      "description": "Design GTM systems, measure product-market fit, and scale without destroying economics.",
+      "objectives": [
+        "Beachhead and channel selection",
+        "GTM experiments",
+        "PMF evidence",
+        "Growth loops, retention and scaling"
+      ],
+      "units": [
+        [
+          "Beachhead and Channels",
+          "case",
+          "Select an initial market and channel based on economics and access.",
+          "Choose a beachhead and channel mix with explicit rejection of weaker alternatives."
+        ],
+        [
+          "GTM Experiments",
+          "applied",
+          "Design low-cost tests of demand and acquisition.",
+          "Create a four-week GTM experiment backlog with success/failure thresholds."
+        ],
+        [
+          "Product-Market Fit Evidence",
+          "quantitative",
+          "Distinguish traction from PMF using retention, pull and willingness-to-pay.",
+          "Evaluate a dataset and decide whether PMF evidence is sufficient, weak or absent."
+        ],
+        [
+          "Growth and Scaling",
+          "case",
+          "Scale only when retention and economics support it.",
+          "Design a growth plan with capacity, CAC, retention and cash constraints."
+        ]
+      ]
+    },
+    {
+      "code": "CAP515",
+      "order": 15,
+      "title": "Entrepreneurial Execution Capstone",
+      "category": "capstone",
+      "description": "Integrate the full program by taking a venture from opportunity through an evidence-backed build/revise/kill decision.",
+      "objectives": [
+        "Venture thesis and customer evidence",
+        "Business and financial model",
+        "GTM, operations and risk",
+        "Board-style defense and build/revise/kill decision"
+      ],
+      "units": [
+        [
+          "Venture Thesis",
+          "capstone",
+          "Select one opportunity and state customer, problem, evidence and falsifiable thesis.",
+          "Submit the capstone venture thesis plus customer/problem evidence and kill criteria."
+        ],
+        [
+          "Business and Financial Model",
+          "capstone",
+          "Integrate revenue, costs, pricing, capital and scenarios.",
+          "Submit business model, pricing, unit economics, 18-month cash model and financing plan."
+        ],
+        [
+          "GTM, Operations and Risk",
+          "capstone",
+          "Integrate launch plan, operating model, governance and risk.",
+          "Submit GTM, operating plan, risk register, legal/governance assumptions and stress tests."
+        ],
+        [
+          "Board Defense and Decision",
+          "capstone",
+          "Defend assumptions and choose build, revise or kill.",
+          "Present the integrated case, answer adversarial objections, and make an evidence-backed build/revise/kill decision."
+        ]
+      ]
+    }
+  ]
+}
