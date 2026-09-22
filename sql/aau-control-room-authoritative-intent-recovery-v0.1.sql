@@ -1,6 +1,7 @@
 -- AAU Control Room authoritative assignment + retry-state cleanup v0.1
 -- Successful wake reclaim clears active last_error while preserving retry history.
 -- Operator detail exposes lifecycle-authoritative work separately from historical scheduler text.
+-- Recovered-orphan alerts are resolved once the referenced wake is no longer awaiting recovery.
 
 begin;
 
@@ -135,6 +136,20 @@ begin
      set status='running',last_error=null,updated_at=now()
    where agent_id=p_agent_id and status in ('starting','running','degraded');
 
+  update agent_lab.operator_alerts
+     set status='resolved',
+         resolved_at=now(),
+         last_seen_at=now(),
+         metadata=coalesce(metadata,'{}'::jsonb)||jsonb_build_object(
+           'resolved_reason','wake_successfully_reclaimed',
+           'resolved_by_worker',coalesce(nullif(p_worker_id,''),'render-nvidia-experimental'),
+           'resolved_wake_request_id',p_wake_request_id
+         )
+   where agent_id=p_agent_id
+     and alert_type='orphaned_autonomous_intent_recovered'
+     and source_ref=p_wake_request_id::text
+     and status='open';
+
   v_packet:=agent_lab.get_cognition_packet(p_agent_id,p_wake_request_id);
   return jsonb_build_object(
     'wake_request_id',p_wake_request_id,'agent_id',p_agent_id,
@@ -144,5 +159,21 @@ begin
 end;
 $function$
 ;
+
+update agent_lab.operator_alerts a
+set status='resolved',
+    resolved_at=now(),
+    last_seen_at=now(),
+    metadata=coalesce(a.metadata,'{}'::jsonb)||jsonb_build_object(
+      'resolved_reason','recovery_alert_no_longer_actionable',
+      'resolved_by','control_room_recovery_cleanup_v0_1'
+    )
+where a.alert_type='orphaned_autonomous_intent_recovered'
+  and a.status='open'
+  and exists (
+    select 1 from agent_lab.wake_queue q
+    where q.wake_request_id::text=a.source_ref
+      and q.status in('claimed','running','completed','cancelled','failed')
+  );
 
 commit;
