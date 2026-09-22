@@ -993,16 +993,59 @@ function relevantDeepAssociations(entry) {
 }
 
 function deepRecentActivity(packet) {
-  const recent = Array.isArray(packet?.recent_activity) ? packet.recent_activity.slice(0,8) : [];
-  return recent.map((entry)=>({
+  const recent = Array.isArray(packet?.recent_activity) ? packet.recent_activity.slice(0,16) : [];
+  const currentUnitId = String(
+    packet?.mandatory_lifecycle_context?.entrepreneurship_program_progress?.next_unit?.unit_id || ''
+  );
+  const summaries = recent.slice(0,4).map((entry)=>({
     activity_id:entry?.activity_id || null,
     created_at:entry?.created_at || null,
     event_type:entry?.event_type || null,
     selected_action:entry?.selected_action || null,
-    stated_reason:String(entry?.stated_reason || '').slice(0,1200),
+    stated_reason:String(entry?.stated_reason || '').slice(0,700),
     current_focus:entry?.outcome?.current_focus || null,
-    associations:relevantDeepAssociations(entry),
+    association_origins:(Array.isArray(entry?.outcome?.associations) ? entry.outcome.associations : [])
+      .map((a)=>String(a?.origin || '')).filter(Boolean).slice(0,6),
   }));
+
+  let currentUnitPriorSubmission = null;
+  if (currentUnitId) {
+    for (const entry of recent) {
+      const associations = Array.isArray(entry?.outcome?.associations) ? entry.outcome.associations : [];
+      const match = associations.find((a)=>
+        String(a?.origin || '') === 'entrepreneurship_unit_submission_v0_1'
+        && String(a?.unit_id || '') === currentUnitId
+      );
+      if (match) {
+        currentUnitPriorSubmission = {
+          source_activity_id:entry?.activity_id || null,
+          created_at:entry?.created_at || null,
+          association:match,
+        };
+        break;
+      }
+    }
+  }
+
+  const latestExternalEvidence = [];
+  for (const entry of recent.slice(0,8)) {
+    for (const assoc of relevantDeepAssociations(entry)) {
+      if (String(assoc?.origin || '') === 'entrepreneurship_unit_submission_v0_1') continue;
+      latestExternalEvidence.push({
+        source_activity_id:entry?.activity_id || null,
+        created_at:entry?.created_at || null,
+        association:assoc,
+      });
+      if (latestExternalEvidence.length >= 3) break;
+    }
+    if (latestExternalEvidence.length >= 3) break;
+  }
+
+  return {
+    recent_summaries:summaries,
+    current_unit_prior_submission:currentUnitPriorSubmission,
+    latest_relevant_external_evidence:latestExternalEvidence,
+  };
 }
 
 function compactDeepAdminContext(packet) {
@@ -1019,19 +1062,24 @@ function compactDeepAdminContext(packet) {
 }
 
 export function buildDeepCognitionPacket(packet, modeInfo = null) {
-  const keys = [
-    'brain_packet_version','generated_at','agent','identity_context','identity_assertions',
-    'continuity','traits','interests','goals','aspirations','beliefs','commitments','projects',
-    'state','mandatory_lifecycle_context','academic_standard_context',
-    'evidence_first_cognition_contract','evidence_first_system_contract','evidence_provenance',
+  const stage = currentStage(packet);
+  const commonKeys = [
+    'brain_packet_version','generated_at','agent','identity_context','continuity','traits','interests',
+    'state','mandatory_lifecycle_context','evidence_first_cognition_contract','evidence_provenance',
     'intent_execution_context','intent_trigger','next_intent_context','sleep_eligibility_context',
-    'attention_arbiter_context','executor_policy','recent_capability_results','capability_surface',
-    'agent_file_context','domain_learning_context','expertise_action_feedback',
-    'expertise_application_context','expertise_portfolio_context','expertise_verification_context',
-    'embodiment_context','developmental_self_observation',
+    'attention_arbiter_context','recent_capability_results',
   ];
+  const stageKeys = stage === 'mba_entrepreneurship'
+    ? ['academic_standard_context']
+    : stage === 'expertise_artifact' || stage === 'expertise_development'
+      ? ['domain_learning_context','expertise_action_feedback','expertise_application_context',
+         'expertise_portfolio_context','expertise_verification_context','capability_surface','agent_file_context']
+      : stage === 'product_service_test'
+        ? ['projects','goals','capability_surface','agent_file_context','expertise_application_context']
+        : ['goals','aspirations','projects','capability_surface'];
+
   const out = {};
-  for (const key of keys) {
+  for (const key of [...commonKeys,...stageKeys]) {
     if (packet?.[key] !== undefined && packet?.[key] !== null) out[key] = packet[key];
   }
   out.admin_chat_context = compactDeepAdminContext(packet);
@@ -1043,6 +1091,7 @@ export function buildDeepCognitionPacket(packet, modeInfo = null) {
     same_bound_model:true,
     private_reasoning_not_durable:true,
     structured_commit_follows:true,
+    context_policy:'task_relevant_minimal_v0_2',
   };
   return out;
 }
@@ -1057,11 +1106,11 @@ async function completeStructured(model, messages) {
   return nvidiaChatCompletion({ model, messages, maxTokens: 4096, temperature: 0.2, jsonMode: true, enableThinking: false });
 }
 
-async function completeDeepPass(model, messages, maxTokens = 4096) {
+async function completeDeepPass(model, messages, maxTokens = 3000) {
   return nvidiaChatCompletion({ model, messages, maxTokens, temperature: 0.15, jsonMode: false, enableThinking: true });
 }
 
-async function completeDeepFallback(model, messages, maxTokens = 4096) {
+async function completeDeepFallback(model, messages, maxTokens = 3000) {
   return nvidiaChatCompletion({ model, messages, maxTokens, temperature: 0.15, jsonMode: false, enableThinking: false });
 }
 
@@ -1080,14 +1129,14 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
     { role:'user', content:deepPacketText },
   ];
   try {
-    draft = await completeDeepPass(model, draftMessages, 4096);
+    draft = await completeDeepPass(model, draftMessages, 3000);
   } catch (error) {
     thinkingFallback = true;
     fallbackReason = String(error?.message || error).slice(0,800);
     console.warn('AAU_DEEP_COGNITION_THINKING_FALLBACK', JSON.stringify({
       agent_id:agentId,intent_execution_id:intentExecutionId,error:fallbackReason,
     }));
-    draft = await completeDeepFallback(model, draftMessages, 4096);
+    draft = await completeDeepFallback(model, draftMessages, 3000);
   }
 
   let draftArtifact = String(draft?.content || '').trim();
@@ -1102,19 +1151,28 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
 
   const criticMessages = [
     { role:'system', content:DEEP_CRITIC_SYSTEM_PROMPT },
-    { role:'user', content:JSON.stringify({task_packet:deepPacket,draft_work_artifact:draftArtifact}).slice(0,90000) },
+    { role:'user', content:JSON.stringify({task_packet:deepPacket,draft_work_artifact:draftArtifact}).slice(0,60000) },
   ];
-  try {
-    critic = await completeDeepPass(model, criticMessages, 3000);
-  } catch (error) {
+  if (thinkingFallback) {
     criticFallback = true;
-    console.warn('AAU_DEEP_CRITIC_THINKING_FALLBACK', JSON.stringify({
-      agent_id:agentId,intent_execution_id:intentExecutionId,error:String(error?.message || error).slice(0,800),
-    }));
     try {
-      critic = await completeDeepFallback(model, criticMessages, 3000);
+      critic = await completeDeepFallback(model, criticMessages, 1800);
     } catch {
       critic = null;
+    }
+  } else {
+    try {
+      critic = await completeDeepPass(model, criticMessages, 1800);
+    } catch (error) {
+      criticFallback = true;
+      console.warn('AAU_DEEP_CRITIC_THINKING_FALLBACK', JSON.stringify({
+        agent_id:agentId,intent_execution_id:intentExecutionId,error:String(error?.message || error).slice(0,800),
+      }));
+      try {
+        critic = await completeDeepFallback(model, criticMessages, 1800);
+      } catch {
+        critic = null;
+      }
     }
   }
 
