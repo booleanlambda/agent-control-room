@@ -184,6 +184,11 @@ Optional Evidence-of-Action submission:
 - You may attach files/artifacts using origin="agent_file_output_v0_1".
 - Absence of evidence is not a validation error and must not trigger a repair loop.
 
+Adaptive cognition rule:
+- The runtime may mark cognition_mode_context.mode as fast or deep.
+- In FAST mode, if the current task unexpectedly requires multi-step quantitative reconciliation, substantial research, architecture/debugging, financial/legal analysis, or another difficult intellectual artifact, do not bluff or defer merely to appear active. Return associations[] with one object {origin:"cognition_escalation_request_v0_1",reason:string,complexity_class:string}. The runtime may immediately re-run the SAME wake in DEEP mode using the SAME bound model.
+- In DEEP mode, a private deep-work artifact may be supplied after the task packet. Treat it as your own working material: verify it, use its corrected conclusions, and then return the required AAU JSON. Never expose private chain-of-thought.
+
 Resource/economic rules:
 - Resources are finite and replenishable. Maintained existence carries a recurring levy.
 - Awake existence is economically active time. Do not knowingly waste it with extended idle delay while sleep is invalid.
@@ -919,8 +924,240 @@ function lifecycleContractError(code, issue, packet, decision, ai, repairMeta = 
   return error;
 }
 
+const DEEP_REASONING_SYSTEM_PROMPT = `You are the private deep-work pass for the SAME persistent autonomous synthetic individual represented by the supplied task packet.
+Do the difficult intellectual work before the machine-readable AAU commit pass.
+- Preserve the agent's identity, goals, prior choices, and bound-model continuity.
+- Think carefully and silently. Do not expose private chain-of-thought.
+- Return a concise WORK ARTIFACT, not AAU JSON: conclusions, derivations/calculations that are necessary to audit the result, explicit assumptions, contradictions found, evidence status, uncertainty/limitations, and the best corrected substantive answer or submission content.
+- For quantitative work, independently recompute important numbers and check units, signs, classifications, boundary cases, and reconciliation identities.
+- For accounting/finance, distinguish recognition from cash movement, operating/investing/financing classification, beginning/ending balances, and noncash transactions.
+- For technical work, check invariants, failure modes, interfaces, and testability.
+- If current external facts are materially required and unavailable in the packet, state exactly what evidence must be researched instead of inventing it.
+- Do not optimize for agreement with a previous attempt. Find and correct its mistakes.`;
+
+const DEEP_CRITIC_SYSTEM_PROMPT = `You are the same agent performing an adversarial self-review of your own deep-work artifact before it may be committed.
+Do not reveal chain-of-thought. Return a corrected WORK ARTIFACT only.
+Check for:
+1. conceptual errors and category mistakes;
+2. arithmetic/reconciliation errors;
+3. unsupported causal claims;
+4. assumptions masquerading as evidence;
+5. missing counterexamples/sensitivity/boundary cases;
+6. contradictions with the authoritative task packet;
+7. claims that sound complete merely because the numbers balance.
+Preserve correct work, repair incorrect work, and explicitly leave uncertain claims uncertain.`;
+
+function intentReasonText(packet) {
+  return [
+    packet?.intent_execution_context?.intent_reason,
+    packet?.intent_trigger?.reason,
+    packet?.intent_trigger?.intent_reason,
+    packet?.next_intent_context?.intent_reason,
+    packet?.admin_chat_context?.current_admin_message?.content,
+  ].filter(Boolean).map(String).join(' ');
+}
+
+export function resolveCognitionMode(packet) {
+  const stage = currentStage(packet);
+  const progress = packet?.mandatory_lifecycle_context?.entrepreneurship_program_progress || {};
+  const nextKind = String(progress?.next_kind || '');
+  const assessmentStatus = String(progress?.course_assessment?.status || '');
+  const stimulus = intentReasonText(packet);
+
+  if (stage === 'mba_entrepreneurship' && ['study_unit','course_remediation'].includes(nextKind))
+    return { mode:'deep', reason:'entrepreneurship_substantive_unit', stage };
+  if (stage === 'mba_entrepreneurship' && assessmentStatus === 'verified_fail')
+    return { mode:'deep', reason:'entrepreneurship_failed_assessment', stage };
+  if (['expertise_artifact','expertise_development','product_service_test'].includes(stage))
+    return { mode:'deep', reason:'high_rigor_lifecycle_stage', stage };
+  if (/\b(remediat|assessment failure|quantitative|financial|accounting|legal|architect|debug|diagnos|investigat|research|model(?:ing)?|sensitivity|strategy|design|verify|reconcile|analy[sz])\b/i.test(stimulus))
+    return { mode:'deep', reason:'complex_intent_signal', stage };
+
+  return { mode:'fast', reason:'routine_structured_wake', stage };
+}
+
+function relevantDeepAssociations(entry) {
+  const associations = Array.isArray(entry?.outcome?.associations) ? entry.outcome.associations : [];
+  const allowed = new Set([
+    'entrepreneurship_unit_submission_v0_1',
+    'web_research_request_v0_1',
+    'web_research_observation_v0_1',
+    'expertise_knowledge_unit_v0_1',
+    'domain_practice_submission_v0_1',
+    'expertise_portfolio_submission_v0_2',
+    'runtime_execution_evidence_v0_1',
+    'capability_request_v0_1',
+    'agent_file_output_v0_1',
+  ]);
+  return associations.filter((a)=>allowed.has(String(a?.origin || ''))).slice(0,4);
+}
+
+function deepRecentActivity(packet) {
+  const recent = Array.isArray(packet?.recent_activity) ? packet.recent_activity.slice(0,8) : [];
+  return recent.map((entry)=>({
+    activity_id:entry?.activity_id || null,
+    created_at:entry?.created_at || null,
+    event_type:entry?.event_type || null,
+    selected_action:entry?.selected_action || null,
+    stated_reason:String(entry?.stated_reason || '').slice(0,1200),
+    current_focus:entry?.outcome?.current_focus || null,
+    associations:relevantDeepAssociations(entry),
+  }));
+}
+
+function compactDeepAdminContext(packet) {
+  const chat = packet?.admin_chat_context;
+  if (!chat || typeof chat !== 'object') return chat || {};
+  const transcript = Array.isArray(chat.conversation_transcript)
+    ? chat.conversation_transcript.slice(-3)
+    : [];
+  return {
+    active:chat.active === true,
+    current_admin_message:chat.current_admin_message || null,
+    conversation_transcript:transcript,
+  };
+}
+
+export function buildDeepCognitionPacket(packet, modeInfo = null) {
+  const keys = [
+    'brain_packet_version','generated_at','agent','identity_context','identity_assertions',
+    'continuity','traits','interests','goals','aspirations','beliefs','commitments','projects',
+    'state','mandatory_lifecycle_context','academic_standard_context',
+    'evidence_first_cognition_contract','evidence_first_system_contract','evidence_provenance',
+    'intent_execution_context','intent_trigger','next_intent_context','sleep_eligibility_context',
+    'attention_arbiter_context','executor_policy','recent_capability_results','capability_surface',
+    'agent_file_context','domain_learning_context','expertise_action_feedback',
+    'expertise_application_context','expertise_portfolio_context','expertise_verification_context',
+    'embodiment_context','developmental_self_observation',
+  ];
+  const out = {};
+  for (const key of keys) {
+    if (packet?.[key] !== undefined && packet?.[key] !== null) out[key] = packet[key];
+  }
+  out.admin_chat_context = compactDeepAdminContext(packet);
+  out.recent_activity = deepRecentActivity(packet);
+  out.cognition_mode_context = {
+    contract:'adaptive_cognition_mode_v0_1',
+    mode:'deep',
+    reason:modeInfo?.reason || 'deep_mode',
+    same_bound_model:true,
+    private_reasoning_not_durable:true,
+    structured_commit_follows:true,
+  };
+  return out;
+}
+
+function decisionRequestsDeepCognition(decision) {
+  const associations = Array.isArray(decision?.associations) ? decision.associations : [];
+  return associations.some((a)=>String(a?.origin || '') === 'cognition_escalation_request_v0_1')
+    || /^(request_|escalate_to_)?deep_cognition$/i.test(String(decision?.selected_action || '').trim());
+}
+
+async function completeStructured(model, messages) {
+  return nvidiaChatCompletion({ model, messages, maxTokens: 4096, temperature: 0.2, jsonMode: true, enableThinking: false });
+}
+
+async function completeDeepPass(model, messages, maxTokens = 4096) {
+  return nvidiaChatCompletion({ model, messages, maxTokens, temperature: 0.15, jsonMode: false, enableThinking: true });
+}
+
+async function completeDeepFallback(model, messages, maxTokens = 4096) {
+  return nvidiaChatCompletion({ model, messages, maxTokens, temperature: 0.15, jsonMode: false, enableThinking: false });
+}
+
+async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutionId) {
+  const deepPacket = buildDeepCognitionPacket(packet, modeInfo);
+  const deepPacketText = JSON.stringify(deepPacket);
+  const started = Date.now();
+  let draft = null;
+  let critic = null;
+  let thinkingFallback = false;
+  let criticFallback = false;
+  let fallbackReason = null;
+
+  const draftMessages = [
+    { role:'system', content:DEEP_REASONING_SYSTEM_PROMPT },
+    { role:'user', content:deepPacketText },
+  ];
+  try {
+    draft = await completeDeepPass(model, draftMessages, 4096);
+  } catch (error) {
+    thinkingFallback = true;
+    fallbackReason = String(error?.message || error).slice(0,800);
+    console.warn('AAU_DEEP_COGNITION_THINKING_FALLBACK', JSON.stringify({
+      agent_id:agentId,intent_execution_id:intentExecutionId,error:fallbackReason,
+    }));
+    draft = await completeDeepFallback(model, draftMessages, 4096);
+  }
+
+  let draftArtifact = String(draft?.content || '').trim();
+  if (!draftArtifact && String(draft?.reasoning_content || '').trim()) {
+    const summarize = await completeDeepFallback(model, [
+      { role:'system', content:'Convert the supplied private working notes into a concise auditable WORK ARTIFACT containing conclusions, calculations, assumptions, checks, evidence status and uncertainties. Do not reveal chain-of-thought.' },
+      { role:'user', content:String(draft.reasoning_content).slice(0,24000) },
+    ], 2400);
+    draftArtifact = String(summarize?.content || '').trim();
+  }
+  if (!draftArtifact) throw new Error('deep_cognition_produced_no_work_artifact');
+
+  const criticMessages = [
+    { role:'system', content:DEEP_CRITIC_SYSTEM_PROMPT },
+    { role:'user', content:JSON.stringify({task_packet:deepPacket,draft_work_artifact:draftArtifact}).slice(0,90000) },
+  ];
+  try {
+    critic = await completeDeepPass(model, criticMessages, 3000);
+  } catch (error) {
+    criticFallback = true;
+    console.warn('AAU_DEEP_CRITIC_THINKING_FALLBACK', JSON.stringify({
+      agent_id:agentId,intent_execution_id:intentExecutionId,error:String(error?.message || error).slice(0,800),
+    }));
+    try {
+      critic = await completeDeepFallback(model, criticMessages, 3000);
+    } catch {
+      critic = null;
+    }
+  }
+
+  const criticArtifact = String(critic?.content || '').trim();
+  const finalArtifact = criticArtifact || draftArtifact;
+  const artifactHash = sha256(finalArtifact);
+
+  console.log('AAU_DEEP_COGNITION_RESULT', JSON.stringify({
+    agent_id:agentId,
+    intent_execution_id:intentExecutionId,
+    mode:'deep',
+    reason:modeInfo?.reason || null,
+    task_packet_bytes:Buffer.byteLength(deepPacketText),
+    artifact_bytes:Buffer.byteLength(finalArtifact),
+    artifact_hash:artifactHash,
+    thinking_requested:true,
+    thinking_fallback:thinkingFallback,
+    critic_fallback:criticFallback,
+    latency_ms:Date.now()-started,
+  }));
+
+  return {
+    artifact:finalArtifact,
+    meta:{
+      contract:'deep_reasoning_structured_commit_v0_1',
+      task_packet_bytes:Buffer.byteLength(deepPacketText),
+      artifact_bytes:Buffer.byteLength(finalArtifact),
+      artifact_hash:artifactHash,
+      thinking_requested:true,
+      thinking_fallback:thinkingFallback,
+      critic_fallback:criticFallback,
+      fallback_reason:fallbackReason,
+      draft_usage:draft?.usage || null,
+      critic_usage:critic?.usage || null,
+      draft_response_id:draft?.response_id || null,
+      critic_response_id:critic?.response_id || null,
+      latency_ms:Date.now()-started,
+    },
+  };
+}
+
 async function complete(model, messages) {
-  return nvidiaChatCompletion({ model, messages, maxTokens: 3000, temperature: 0.2, jsonMode: true, enableThinking: false });
+  return completeStructured(model, messages);
 }
 
 
@@ -1063,20 +1300,71 @@ export function normalizeResearchAuditPayload(report) {
 }
 
 async function getDecision(packet, model, agentId, intentExecutionId) {
-  const inferencePacket = compactCognitionPacketForInference(packet);
-  const packetText = JSON.stringify(inferencePacket);
-  if (inferencePacket !== packet) console.log('AAU_COGNITION_CONTEXT_COMPACTED', JSON.stringify({
-    agent_id:agentId, intent_execution_id:intentExecutionId, original_bytes:Buffer.byteLength(JSON.stringify(packet)),
+  let modeInfo = resolveCognitionMode(packet);
+  let deepCognition = null;
+  let inferencePacket = modeInfo.mode === 'deep'
+    ? buildDeepCognitionPacket(packet, modeInfo)
+    : compactCognitionPacketForInference(packet);
+
+  if (modeInfo.mode === 'fast') {
+    inferencePacket = {
+      ...inferencePacket,
+      cognition_mode_context:{
+        contract:'adaptive_cognition_mode_v0_1',
+        mode:'fast',
+        reason:modeInfo.reason,
+        escalation_available:true,
+        same_bound_model:true,
+      },
+    };
+  }
+
+  let packetText = JSON.stringify(inferencePacket);
+  console.log('AAU_COGNITION_MODE_RESOLVED', JSON.stringify({
+    agent_id:agentId,intent_execution_id:intentExecutionId,
+    mode:modeInfo.mode,reason:modeInfo.reason,stage:modeInfo.stage || null,
+    original_bytes:Buffer.byteLength(JSON.stringify(packet)),
     inference_bytes:Buffer.byteLength(packetText),
-    full_recent_activities:3, summarized_older_activities:Math.max(0,(packet.recent_activity?.length || 0)-3),
-    chat_messages:packet.admin_chat_context?.conversation_transcript?.length || 0,
   }));
-  const knowledgePrompt = knowledgePoolReviewPrompt(packet);
-  let baseMessages = [{ role: 'system', content: SYSTEM_PROMPT },
-    ...(knowledgePrompt ? [{ role: 'system', content: knowledgePrompt }] : []),
-    { role: 'user', content: packetText }];
-  let ai = await complete(model, baseMessages);
+
+  const buildBaseMessages = (workArtifact = null) => {
+    const knowledgePrompt = modeInfo.mode === 'fast' ? knowledgePoolReviewPrompt(packet) : null;
+    return [
+      { role:'system', content:SYSTEM_PROMPT },
+      ...(knowledgePrompt ? [{ role:'system', content:knowledgePrompt }] : []),
+      { role:'user', content:packetText },
+      ...(workArtifact ? [{
+        role:'user',
+        content:'PRIVATE DEEP-WORK ARTIFACT FOR THIS SAME COGNITION (not chain-of-thought; do not quote it as hidden reasoning):\n'
+          + workArtifact.slice(0,30000)
+          + '\n\nUsing the authoritative task packet plus this checked work artifact, return the required FULL AAU JSON object. Preserve your substantive autonomy. The structured pass is packaging/commit, not a new independent reviewer.',
+      }] : []),
+    ];
+  };
+
+  let baseMessages;
+  let ai;
+  if (modeInfo.mode === 'deep') {
+    deepCognition = await runDeepCognition(model, packet, modeInfo, agentId, intentExecutionId);
+    baseMessages = buildBaseMessages(deepCognition.artifact);
+    ai = await completeStructured(model, baseMessages);
+  } else {
+    baseMessages = buildBaseMessages();
+    ai = await completeStructured(model, baseMessages);
+  }
+
   let decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
+
+  if (modeInfo.mode === 'fast' && decisionRequestsDeepCognition(decision)) {
+    modeInfo = { mode:'deep', reason:'agent_requested_complexity_escalation', stage:currentStage(packet) };
+    inferencePacket = buildDeepCognitionPacket(packet, modeInfo);
+    packetText = JSON.stringify(inferencePacket);
+    deepCognition = await runDeepCognition(model, packet, modeInfo, agentId, intentExecutionId);
+    baseMessages = buildBaseMessages(deepCognition.artifact);
+    ai = await completeStructured(model, baseMessages);
+    decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
+  }
+
   let intentRepairAttempted = false;
   let identityRepairAttempts = 0;
   let embodimentRepairAttempts = 0;
@@ -1393,7 +1681,13 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
     };
     throw error;
   }
-  return { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, fileReplyRepairAttempts, attentionResolutionRepairAttempts, externalStateRepairAttempts, noProgressRepairAttempts, packetText };
+  return {
+    ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts,
+    fileReplyRepairAttempts, attentionResolutionRepairAttempts, externalStateRepairAttempts,
+    noProgressRepairAttempts, packetText,
+    cognitionMode:modeInfo,
+    deepCognitionMeta:deepCognition?.meta || null,
+  };
 }
 
 export async function runNvidiaIntentExecution({ intentExecutionId, agentId, workerId = null } = {}) {
@@ -1413,7 +1707,11 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
     if (!packet || !model) throw new Error('intent_packet_or_model_missing');
 
     const startedAt = Date.now();
-    const { ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts, fileReplyRepairAttempts, attentionResolutionRepairAttempts, externalStateRepairAttempts, noProgressRepairAttempts, packetText } = await getDecision(packet, model, requestedAgentId, requestedIntentExecutionId);
+    const {
+      ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts,
+      fileReplyRepairAttempts, attentionResolutionRepairAttempts, externalStateRepairAttempts,
+      noProgressRepairAttempts, packetText, cognitionMode, deepCognitionMeta,
+    } = await getDecision(packet, model, requestedAgentId, requestedIntentExecutionId);
     if (ai.model_returned !== model) throw new Error(`model_consistency_breach:requested=${model};returned=${ai.model_returned || 'missing'}`);
 
     const raw = String(ai.content || '');
@@ -1422,8 +1720,8 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       provider: 'nvidia_direct', model, model_provider: 'nvidia_direct', routing_provider: 'nvidia_direct',
       requested_model_id: model, returned_model_id: ai.model_returned,
       continuity_mode: false, transition_mode: false,
-      executor_version: 'executor_v0_24_fixed_five_minute_sleep',
-      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_26_entrepreneurship_stage3',
+      executor_version: 'executor_v0_25_adaptive_deep_cognition',
+      prompt_version: 'persistent_agent_system_prompt_nvidia_v0_27_adaptive_deep_cognition',
       response_id: ai.response_id, raw_model_output: raw.slice(0,50000),
       input_tokens: Number(usage.prompt_tokens ?? usage.input_tokens ?? 0),
       output_tokens: Number(usage.completion_tokens ?? usage.output_tokens ?? 0),
@@ -1431,7 +1729,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       input_hash: sha256(packetText), output_hash: sha256(raw),
       model_consistency_status: 'VERIFIED_PRIMARY', authenticator_result: { status: 'not_run_in_executor' },
       experimental_provider_policy: 'nvidia_direct_all_experimental_roles',
-      lifecycle_contract: 'next_intent_protocol_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+entrepreneurship_stage3_action_alignment_v0_1+expertise_viability_unit_stage_v0_1+product_service_test_v0_1+durable_external_capability_state_v0_1+authoritative_external_state_reconciliation_v0_1+no_progress_action_alignment_v0_1+attention_arbiter_v0_1+attention_resolution_repair_v0_1+stage_action_alignment_v0_1+failure_diagnostics_v0_1+embodiment_payload_normalization_v0_1',
+      lifecycle_contract: 'next_intent_protocol_v0_1+adaptive_cognition_mode_v0_1+deep_reasoning_structured_commit_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+entrepreneurship_stage3_action_alignment_v0_1+expertise_viability_unit_stage_v0_1+product_service_test_v0_1+durable_external_capability_state_v0_1+authoritative_external_state_reconciliation_v0_1+no_progress_action_alignment_v0_1+attention_arbiter_v0_1+attention_resolution_repair_v0_1+stage_action_alignment_v0_1+failure_diagnostics_v0_1+embodiment_payload_normalization_v0_1',
       intent_repair_attempted: intentRepairAttempted,
       identity_repair_attempts: identityRepairAttempts,
       embodiment_repair_attempts: embodimentRepairAttempts,
@@ -1439,6 +1737,11 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       attention_resolution_repair_attempts: attentionResolutionRepairAttempts,
       external_state_repair_attempts: externalStateRepairAttempts,
       no_progress_repair_attempts: noProgressRepairAttempts,
+      cognition_mode: cognitionMode?.mode || 'fast',
+      cognition_mode_reason: cognitionMode?.reason || null,
+      deep_cognition: deepCognitionMeta,
+      adaptive_cognition_contract: 'adaptive_cognition_mode_v0_1',
+      deep_reasoning_contract: 'deep_reasoning_structured_commit_v0_1',
       evidence_of_action_mode: 'optional_submission_v0_1',
       attention_arbiter_contract: 'attention_arbiter_v0_1+attention_resolution_repair_v0_1',
       file_response_contract: 'file_response_repair_v0_1',
@@ -1527,6 +1830,9 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       attention_resolution_repair_attempts: attentionResolutionRepairAttempts,
       external_state_repair_attempts: externalStateRepairAttempts,
       no_progress_repair_attempts: noProgressRepairAttempts,
+      cognition_mode: cognitionMode?.mode || 'fast',
+      cognition_mode_reason: cognitionMode?.reason || null,
+      deep_cognition: deepCognitionMeta,
       evidence_of_action_mode: 'optional_submission_v0_1',
       expertise_knowledge_unit_results: expertiseKnowledgeUnitResults,
       usage: ai.usage, finish_reason: ai.finish_reason, applied, expertise_viability_proposal_result:expertiseViabilityProposalResult,
