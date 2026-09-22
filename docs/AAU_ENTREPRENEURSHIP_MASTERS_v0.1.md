@@ -73,7 +73,7 @@ After all four units of a course are submitted, AAU queues an independent course
 
 Current reviewer order:
 1. `moonshotai/kimi-k3`
-2. `meta/llama-3.3-70b-instruct`
+2. `meta/llama-3.1-70b-instruct`
 3. `nvidia/nemotron-3.5-lightning-30b-a3b`
 
 The grader evaluates conceptual accuracy, quantitative/analytical rigor, applied decision quality, evidence discipline, and calibration. Critical failures include fabricated evidence, materially unsafe/illegal advice treated as acceptable, or fundamental contradictions that invalidate the decision.
