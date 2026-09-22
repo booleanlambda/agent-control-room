@@ -116,14 +116,15 @@ function showError(m){const e=$('#error');e.textContent=m;e.style.display='block
 function displayName(a){return a?.public_name||nice(a?.internal_label||'—')}
 function avatar(a,cls=''){const n=displayName(a),u=a?.pseudo_profile_image_url;if(u)return `<img class="avatar ${cls}" src="${esc(u)}" alt="${esc(n)}">`;return `<div class="avatar avatarph ${cls}">${esc((n||'?')[0]||'?')}</div>`}
 function isPaused(a){return Boolean(a?.system_paused)||a?.autonomous_lifecycle?.status==='paused'||a?.lifecycle_run_status==='paused'||a?.operator_pause===true}
-function currentId(){return st.selectedAgentId||st.sys?.current_agent?.agent_id||null}
+function runtimeCurrentId(){return st.sys?.current_agent?.agent_id||null}
+function currentId(){return st.selectedAgentId||runtimeCurrentId()||null}
 function setSelectedAgentId(id){if(!id)return;st.selectedAgentId=id;try{localStorage.setItem(LAST_AGENT_KEY,id)}catch{}}
 function resolveSelectedAgentId(){const agents=st.snap?.agents||[];let saved=null;try{saved=localStorage.getItem(LAST_AGENT_KEY)}catch{};const fallback=st.sys?.current_agent?.agent_id||agents.find(a=>a.lifecycle_status!=='archived')?.agent_id||agents[0]?.agent_id||null;const id=agents.some(a=>a.agent_id===saved)?saved:(agents.some(a=>a.agent_id===st.selectedAgentId)?st.selectedAgentId:fallback);if(id)setSelectedAgentId(id);return id}
 function selectedAgentSummary(){const agents=st.snap?.agents||[],base=agents.find(a=>a.agent_id===currentId())||{},sysCur=st.sys?.current_agent?.agent_id===currentId()?st.sys.current_agent:{},detail=st.focusDetail?.status||st.focusDetail?.agent||{};return {...base,...sysCur,...detail}}
 async function loadSelectedAgentDetail(id=currentId()){if(!id){st.focusDetail=null;return null}try{st.focusDetail=await api('mode=agent&id='+encodeURIComponent(id));return st.focusDetail}catch{st.focusDetail=null;return null}}
 async function selectPrimaryAgent(id){if(!id)return;setSelectedAgentId(id);await loadSelectedAgentDetail(id);render();$('#agentDirectory')?.classList.add('is-hidden')}
 function nextAt(a){return a?.next_intent?.execute_at||a?.next_intent_execution?.execute_at||a?.next_time_intent_at||a?.next_queued_execute_at||a?.autonomous_run?.next_intent_at||a?.next_wake_at}
-function status(a){if(a?.lifecycle_status==='archived')return['Archived',''];if(isPaused(a))return['Paused','paused'];if(a?.sleeping)return['Sleeping','sleeping'];if(a?.agent_id===currentId())return['Autonomous','current'];return['Idle','']}
+function status(a){if(a?.lifecycle_status==='archived')return['Archived',''];if(isPaused(a))return['Paused','paused'];if(a?.sleeping)return['Sleeping','sleeping'];if(a?.agent_id===runtimeCurrentId())return['Autonomous','current'];if(a?.awake)return['Awake','current'];return['Idle','']}
 function controlsHtml(a,p=''){const paused=isPaused(a),state=paused?'paused':'running',id=esc(a.agent_id||'');return `<div class="controls controlset ${state}" data-agent="${id}"><span class="controlstate ${state}">${paused?'PAUSED':'RUNNING'}</span><button class="controlbtn pause ${paused?'state-active':''}" data-agent="${id}" data-action="pause" id="${p}pauseBtn" ${paused?'disabled':''}>Pause</button><button class="controlbtn unpause ${paused?'':'state-active'}" data-agent="${id}" data-action="unpause" id="${p}unpauseBtn" ${paused?'':'disabled'}>Unpause</button></div>`}
 function markControlPending(id,action){document.querySelectorAll('.controlbtn[data-agent]').forEach(b=>{if(b.dataset.agent!==id)return;b.disabled=true;if(b.dataset.action===action){b.classList.add('pending');b.textContent=action==='pause'?'Pausing…':'Unpausing…'}})}
 async function controlAgent(id,action){if(action==='pause'&&!confirm('Pause this agent? Active intents will be cancelled and the existence levy frozen.'))return;markControlPending(id,action);try{await api('mode=control',{method:'POST',body:{id,action,reason:'agent_control_room_admin_'+action}});await refresh(true);if(st.drawerAgentId===id)await reloadDrawer(id,false)}catch(e){showError(e.message);await refresh(true);if(st.drawerAgentId===id)await reloadDrawer(id,false).catch(()=>{})}}
@@ -311,7 +312,26 @@ async function eventLoop(){if(st.eventLoopRunning||!st.sessionToken)return;st.ev
 function lockUi(message=''){clearSession();closeDrawer();closeFileViewer();st.snap=null;st.sys=null;st.verificationAlerts=null;$('#login').style.display='flex';$('#liveText').textContent='Locked';$('#dot').classList.add('bad');if(message)$('#loginMsg').textContent=message}
 async function login(){const pw=$('#pw').value;$('#loginMsg').textContent='';if(!pw)return;try{const d=await api('mode=login',{method:'POST',authHeader:'Basic '+btoa('operator:'+pw),timeoutMs:15000});saveSession(d);$('#pw').value='';const ok=await refresh();if(!ok)throw new Error('Control Room data failed to load');$('#login').style.display='none';void eventLoop()}catch(e){clearSession();$('#loginMsg').textContent=e.message||'Login failed'}}
 async function logout(){try{if(st.sessionToken)await api('mode=logout',{method:'POST',timeoutMs:10000})}catch{}finally{lockUi()}}
-async function restoreSession(){try{const saved=JSON.parse(localStorage.getItem(SESSION_KEY)||'null');if(!saved?.token||!saved?.expires_at||new Date(saved.expires_at)<=Date.now())return lockUi();$('#login').classList.add('restoring');$('#login').style.display='none';st.sessionToken=saved.token;st.sessionExpiresAt=saved.expires_at;updateSessionUi();const d=await api('mode=session',{timeoutMs:12000});st.changeToken=d?.change_token||null;if(d?.expires_at)st.sessionExpiresAt=d.expires_at;saveSession({session_token:st.sessionToken,expires_at:st.sessionExpiresAt,change_token:st.changeToken});const ok=await refresh(true);if(!ok)throw new Error('restore_failed');$('#login').classList.remove('restoring');$('#login').style.display='none';void eventLoop()}catch{lockUi()}}
+async function restoreSession(){
+  let saved=null;
+  try{saved=JSON.parse(localStorage.getItem(SESSION_KEY)||'null')}catch{}
+  if(!saved?.token||!saved?.expires_at||new Date(saved.expires_at)<=Date.now())return lockUi();
+  $('#login').classList.add('restoring');$('#login').style.display='none';
+  st.sessionToken=saved.token;st.sessionExpiresAt=saved.expires_at;updateSessionUi();
+  try{
+    const d=await api('mode=session',{timeoutMs:12000});
+    st.changeToken=d?.change_token||null;
+    if(d?.expires_at)st.sessionExpiresAt=d.expires_at;
+    saveSession({session_token:st.sessionToken,expires_at:st.sessionExpiresAt,change_token:st.changeToken});
+  }catch(e){
+    lockUi('Session expired. Sign in again.');
+    return;
+  }
+  $('#login').classList.remove('restoring');$('#login').style.display='none';
+  const ok=await refresh(true);
+  if(!ok)showError('Session restored. Live AAU data is temporarily unavailable.');
+  void eventLoop();
+}
 $('#loginBtn').onclick=login;$('#pw').addEventListener('keydown',e=>{if(e.key==='Enter')login()});
 const refreshAll=async()=>{await refresh();if(st.drawerAgentId)await reloadDrawer(st.drawerAgentId,false)};
 $('#refresh').onclick=refreshAll;$('#refreshTop').onclick=refreshAll;$('#monitorCheck').onclick=()=>loadMonitor();
