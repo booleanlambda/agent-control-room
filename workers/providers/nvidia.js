@@ -21,7 +21,10 @@ function envBool(name) {
   return null;
 }
 
-function resolveTimeoutMs() {
+function resolveTimeoutMs(overrideMs = null) {
+  const override = Number(overrideMs);
+  if (Number.isFinite(override) && override > 0)
+    return Math.max(5000, Math.min(Math.floor(override), 180000));
   const raw = Number(process.env.AAU_NVIDIA_TIMEOUT_MS);
   if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_NVIDIA_TIMEOUT_MS;
   return Math.max(5000, Math.min(Math.floor(raw), 180000));
@@ -272,6 +275,7 @@ export async function nvidiaChatCompletion({
   temperature = 0.2,
   jsonMode = null,
   enableThinking = null,
+  timeoutMs = null,
 } = {}) {
   const config = resolveConfig();
   if (!config.apiKey) throw new Error('NVIDIA_API_KEY is not configured');
@@ -293,8 +297,8 @@ export async function nvidiaChatCompletion({
   if (resolvedJsonMode === true) requestBody.response_format = { type: 'json_object' };
   if (typeof resolvedThinking === 'boolean') requestBody.chat_template_kwargs = { enable_thinking: resolvedThinking };
 
-  const timeoutMs = resolveTimeoutMs();
-  let body = await requestNvidia(config, requestBody, timeoutMs, 'AAU-NVIDIA-Experimental-Adapter/0.7-admin-chat-repair');
+  const resolvedTimeoutMs = resolveTimeoutMs(timeoutMs);
+  let body = await requestNvidia(config, requestBody, resolvedTimeoutMs, 'AAU-NVIDIA-Experimental-Adapter/0.8-adaptive-cognition');
   let choice = body?.choices?.[0]?.message || {};
   let content = typeof choice?.content === 'string' ? choice.content : '';
   let reasoningContent = typeof choice?.reasoning_content === 'string' ? choice.reasoning_content : '';
@@ -312,7 +316,7 @@ export async function nvidiaChatCompletion({
           { role: 'user', content: correctionMessage(envelope.adminText) },
         ],
       };
-      body = await requestNvidia(config, repairBody, timeoutMs, 'AAU-NVIDIA-Experimental-Adapter/0.7-admin-chat-repair');
+      body = await requestNvidia(config, repairBody, resolvedTimeoutMs, 'AAU-NVIDIA-Experimental-Adapter/0.8-adaptive-cognition');
       choice = body?.choices?.[0]?.message || {};
       content = typeof choice?.content === 'string' ? choice.content : '';
       reasoningContent = typeof choice?.reasoning_content === 'string' ? choice.reasoning_content : '';
