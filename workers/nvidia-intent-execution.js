@@ -971,6 +971,48 @@ export function compactCognitionPacketForInference(packet) {
   };
 }
 
+// PostgreSQL JSONB rejects U+0000 and unpaired UTF-16 surrogates. Normalize
+// provider text at the audit boundary, never invent hashes or mark corrupt
+// extracted evidence as fetched_text.
+export function normalizeResearchAuditPayload(report) {
+  let normalizedFields = 0;
+  let invalidSourceCount = 0;
+  const sanitize = value => {
+    if (typeof value === 'string') {
+      const clean = value.replace(/\u0000/g, '')
+        .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD');
+      if (clean !== value) normalizedFields += 1;
+      return clean;
+    }
+    if (Array.isArray(value)) return value.map(sanitize);
+    if (value && typeof value === 'object')
+      return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key,sanitize(entry)]));
+    return value;
+  };
+  const normalized = sanitize(report);
+  if (Array.isArray(report?.sources)) {
+    normalized.sources = normalized.sources.map((source,i) => {
+      const original = report.sources[i] || {};
+      const corruptedText = ['excerpt','body','text','extracted_text','content']
+        .some(key => typeof original[key] === 'string' && original[key] !== source[key]);
+      if (!corruptedText) return source;
+      invalidSourceCount += 1;
+      return {
+        ...source,fetch_status:'invalid_text',coverage:'invalid_extracted_text_not_admissible',
+        audit_text_normalized:true,
+      };
+    });
+  }
+  if (normalizedFields > 0)
+    normalized.audit_text_sanitization = {
+      contract:'postgres_jsonb_valid_utf8_v0_1',normalized_field_count:normalizedFields,
+      invalid_extracted_sources:invalidSourceCount,
+      source_hashes_preserved:true,
+      warning:'Malformed source text is not admissible as fetched_text.',
+    };
+  return normalized;
+}
+
 async function getDecision(packet, model, agentId, intentExecutionId) {
   const inferencePacket = compactCognitionPacketForInference(packet);
   const packetText = JSON.stringify(inferencePacket);
@@ -1167,6 +1209,12 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
         searches:[], sources:[],usage_policy:'no_aau_search_or_source_count_quota',
         execution_error:String(error?.message || error).slice(0,400) };
     }
+    observed = normalizeResearchAuditPayload(observed);
+    if (observed.audit_text_sanitization)
+      console.warn('AAU_WEB_RESEARCH_TEXT_NORMALIZED', JSON.stringify({
+        agent_id:agentId,intent_execution_id:intentExecutionId,
+        ...observed.audit_text_sanitization,
+      }));
     try {
       observed.audit_batch_id = await rpc('aau_bridge_record_web_research',{
         p_agent_id:agentId,p_wake_request_id:intentExecutionId,p_research:observed,
