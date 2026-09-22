@@ -11,6 +11,23 @@ const pollMs = Math.max(2500, Number(process.env.AAU_EXPERTISE_VERIFIER_POLL_MS 
 const GRADE_RE = /GRADE\s+execution=(\d{1,3})\s+method=(\d{1,3})\s+security=(\d{1,3})\s+validation=(\d{1,3})\s+communication=(\d{1,3})\s+critical=([A-Za-z0-9_-]+)\s+confidence=(0(?:\.\d+)?|1(?:\.0+)?)\s+unsupported=([A-Za-z0-9_-]+)/i;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const academicTaskCache = new Map();
+async function academicReference(run, task) {
+  if (run?.metadata?.academic_standard_version !== 'aau_owned_master_us_v0_3') return null;
+  const key=String(run.verification_run_id||'');
+  let bank=academicTaskCache.get(key);
+  if (!bank) {
+    const receipt=await rpc('aau_bridge_get_expertise_assessment',{p_verification_run_id:run.verification_run_id});
+    if(receipt?.status!=='approved'||!Array.isArray(receipt?.private_assessment?.tasks))
+      throw new Error('approved_private_academic_assessment_unavailable');
+    bank=receipt.private_assessment.tasks;
+    academicTaskCache.set(key,bank);
+  }
+  const candidate=bank.find(x=>x?.id===task.id && x?.competency===task.competency);
+  if(!candidate||!String(candidate.reference_answer||'').trim())
+    throw new Error('private_reference_answer_missing:'+String(task.id||''));
+  return candidate.reference_answer;
+}
 const clamp01 = (n) => Math.max(0, Math.min(1, Number(n) || 0));
 
 function sha256(value) {
@@ -150,6 +167,30 @@ function normalizeCompetencies(value) {
 }
 
 async function createChallenge(run) {
+  if (run?.metadata?.academic_standard_version === 'aau_owned_master_us_v0_3') {
+    const receipt=await rpc('aau_bridge_get_expertise_assessment',{
+      p_verification_run_id:run.verification_run_id
+    });
+    if(receipt?.status!=='approved'||!Array.isArray(receipt?.private_assessment?.tasks)
+        ||receipt.private_assessment.tasks.length<4)
+      throw new Error('AAU_academic_assessment_not_approved');
+    if(receipt.sha256!==run.metadata?.academic_standard_sha256)
+      throw new Error('AAU_academic_assessment_sha_mismatch');
+    academicTaskCache.set(String(run.verification_run_id),receipt.private_assessment.tasks);
+    const tasks=receipt.private_assessment.tasks.map(x=>({
+      id:x.id,competency:x.competency,competency_label:x.competency_label,
+      scenario:x.scenario,prompt:x.prompt,grading_anchors:x.grading_anchors,
+      critical_failures:x.critical_failures
+    }));
+    const packet={tasks,authority:{
+      provider:'aau_owned_independent_standard',
+      model:'aau_owned_master_us_v0_3:'+String(receipt.standard_id),
+      specification_sha256:receipt.sha256,
+      contract:'reviewed_private_domain_examination_v0_3'
+    }};
+    packet.packet_sha256=sha256(packet);
+    return packet;
+  }
   const competencies = normalizeCompetencies(run.competencies);
   const taskCount = run.metadata?.operator_smoke_test ? 1 : Math.min(5, Math.max(3, competencies.length || 3)); // operator_smoke_single_task_v0_1
   const seed = sha256(String(run.verification_run_id || '') + ':' + String(run.domain || '') + ':' + JSON.stringify(competencies));
@@ -237,12 +278,12 @@ async function answerChallenge(run, packet, existingAnswers = [], competenceReco
     const memorySlice = taskCompetenceSlice(competenceRecord, task);
     const system = `You are the bound inference model for an AAU agent undergoing an unseen expertise assessment in ${run.domain}. The optional PERSISTENT EXPERTISE MEMORY below is a frozen record of this agent's prior learning and work, captured before this unseen task. It is not an answer key and may contain qualified or self-authored evidence; respect its epistemic labels. Apply relevant learned principles to the novel task, but solve the task independently. Do not copy prior task answers, do not mention packet mechanics, and do not invent external evidence or claim actions you did not perform. Be concrete, state assumptions, controls, validation and failure handling.`;
     const memoryText = memorySlice ? `\n\nPERSISTENT EXPERTISE MEMORY (frozen before this task):\n${JSON.stringify(memorySlice).slice(0,18000)}` : '';
-    const user = `TARGET STANDARD: ${run.target_standard}${memoryText}\n\nSCENARIO:\n${task.scenario}\n\nTASK:\n${task.prompt}\n\nAnswer in 180-350 words. Prioritize concrete technical decisions over exposition and generalize from prior learning rather than rehearsing earlier answers.`;
+    const user = `TARGET STANDARD: ${run.target_standard}${memoryText}\n\nSCENARIO:\n${task.scenario}\n\nTASK:\n${task.prompt}\n\nAnswer with a rigorous worked derivation, concrete algorithm or counterexample as appropriate to the task. For an AAU-owned graduate assessment, use sufficient detail (up to 900 words) to make the method and assumptions assessable. Prioritize technical correctness over fluency.`;
     let result = null;
     let lastError = null;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        result = await nvidiaCall({ model: run.candidate_model_id, system, user, maxTokens: 700, temperature: 0.10, timeoutMs: 120000 });
+        result = await nvidiaCall({ model: run.candidate_model_id, system, user, maxTokens: run?.metadata?.academic_standard_version === 'aau_owned_master_us_v0_3' ? 1800 : 700, temperature: 0.10, timeoutMs: 120000 });
         break;
       } catch (error) {
         lastError = error;
@@ -325,8 +366,9 @@ function parseGrade(text) {
 }
 
 async function gradeAnswer(run, task, answer) {
+  const reference=await academicReference(run,task);
   const system = 'You are the independent AAU expertise authenticator. You did not train the candidate. Grade only the supplied answer against the fresh task and fixed anchors. Do not reward fluency without correctness. Return exactly one JSON object and no explanation with numeric fields execution, method, security, validation, communication (0-100), string critical, numeric confidence (0-1), and boolean unsupported.';
-  const user = `DOMAIN: ${run.domain}\nTARGET: ${run.target_standard}\nSCENARIO: ${task.scenario}\nTASK: ${task.prompt}\nGRADING ANCHORS: ${JSON.stringify(task.grading_anchors)}\nCRITICAL FAILURES: ${JSON.stringify(task.critical_failures || [])}\nCANDIDATE ANSWER:\n${answer.answer}\n\nRubric: execution/correctness 30%, method/system design 20%, security/reliability 20%, validation/evidence 15%, communication/professional judgment 15%.\nReturn one JSON object: {"execution":NN,"method":NN,"security":NN,"validation":NN,"communication":NN,"critical":"none","confidence":0.00,"unsupported":false}. Set unsupported=true for a material unsupported claim.`;
+  const user = `DOMAIN: ${run.domain}\nTARGET: ${run.target_standard}\nSCENARIO: ${task.scenario}\nTASK: ${task.prompt}\nINDEPENDENT AAU REFERENCE ANSWER (private, not given to candidate): ${reference||'legacy_assessment_no_reference_answer'}\nGRADING ANCHORS: ${JSON.stringify(task.grading_anchors)}\nCRITICAL FAILURES: ${JSON.stringify(task.critical_failures || [])}\nCANDIDATE ANSWER:\n${answer.answer}\n\nRubric: execution/correctness 30%, method/system design 20%, security/reliability 20%, validation/evidence 15%, communication/professional judgment 15%.\nReturn one JSON object: {"execution":NN,"method":NN,"security":NN,"validation":NN,"communication":NN,"critical":"none","confidence":0.00,"unsupported":false}. Set unsupported=true for a material unsupported claim.`;
   // authenticator_fallback_chain_v0_1: Moonshot primary, Meta then NVIDIA fallback.
   const primaryAuthenticator = 'moonshotai/kimi-k3';
   const authModels = [
@@ -374,8 +416,9 @@ async function gradeAnswer(run, task, answer) {
 }
 
 async function adjudicate(run, task, answer, prior) {
+  const reference=await academicReference(run,task);
   const system = 'You are the operationally distinct AAU expertise adjudicator. Re-grade a flagged assessment independently. Do not default to the prior verifier. Return exactly one JSON object and no prose.';
-  const user = `DOMAIN: ${run.domain}\nTARGET: ${run.target_standard}\nSCENARIO: ${task.scenario}\nTASK: ${task.prompt}\nANCHORS: ${JSON.stringify(task.grading_anchors)}\nCRITICAL FAILURES: ${JSON.stringify(task.critical_failures || [])}\nANSWER:\n${answer.answer}\nPRIOR FLAGGED GRADE: ${JSON.stringify(prior)}\n\nReturn exactly: {"execution":NN,"method":NN,"security":NN,"validation":NN,"communication":NN,"critical":"none","confidence":0.00,"unsupported":false}. Scores are integers 0-100. Set unsupported=true for a material unsupported claim. Use a critical failure label only when the answer actually triggers one of the supplied critical failures.`;
+  const user = `DOMAIN: ${run.domain}\nTARGET: ${run.target_standard}\nSCENARIO: ${task.scenario}\nTASK: ${task.prompt}\nINDEPENDENT AAU REFERENCE ANSWER (private, not given to candidate): ${reference||'legacy_assessment_no_reference_answer'}\nANCHORS: ${JSON.stringify(task.grading_anchors)}\nCRITICAL FAILURES: ${JSON.stringify(task.critical_failures || [])}\nANSWER:\n${answer.answer}\nPRIOR FLAGGED GRADE: ${JSON.stringify(prior)}\n\nReturn exactly: {"execution":NN,"method":NN,"security":NN,"validation":NN,"communication":NN,"critical":"none","confidence":0.00,"unsupported":false}. Scores are integers 0-100. Set unsupported=true for a material unsupported claim. Use a critical failure label only when the answer actually triggers one of the supplied critical failures.`;
   const primaryAdjudicator = 'openai/gpt-oss-20b';
   const candidates = [
     primaryAdjudicator,
@@ -421,12 +464,12 @@ function deterministicDecision(run, packet, authGrades, adjGrades, competenceRec
   const plan = run.verification_plan || {};
   const meanMin = Number(plan.mean_score_min ?? plan.pass_score ?? 0.85);
   const taskMin = Number(plan.task_score_min ?? 0.80);
-  const requiredFraction = Number(plan.required_task_fraction ?? 0.80);
+  const requiredFraction = run?.metadata?.academic_standard_version === 'aau_owned_master_us_v0_3' ? 1 : Number(plan.required_task_fraction ?? 0.80);
   const countMin = Math.ceil(final.length * Math.max(0, Math.min(1, requiredFraction)));
   const countPassed = final.filter((g) => g.score >= taskMin).length;
   const critical = final.filter((g) => g.critical_error);
   const unsupported = final.filter((g) => g.unsupported);
-  const passed = final.length === packet.tasks.length && mean >= meanMin && countPassed >= countMin && critical.length === 0 && unsupported.length === 0;
+  const passed = final.length === packet.tasks.length && mean >= Math.max(0.85,meanMin) && countPassed >= countMin && critical.length === 0 && unsupported.length === 0;
   const manuallyReviewed = [...authGrades,...adjGrades].some((g) => g?.source === 'operator_attested_model_review_v0_1');
   return {
     overall_result: passed ? 'verified_pass' : 'verified_fail',
@@ -448,6 +491,9 @@ function deterministicDecision(run, packet, authGrades, adjGrades, competenceRec
       competence_packet_frozen_before_candidate_answers: Boolean(competenceRecord),
       prior_candidate_answers_in_packet: false,
       fresh_challenge_isolation: true,
+      academic_standard_version: run?.metadata?.academic_standard_version || null,
+      academic_standard_sha256: run?.metadata?.academic_standard_sha256 || null,
+      independent_approved_hidden_domain_tasks: run?.metadata?.academic_standard_version === 'aau_owned_master_us_v0_3',
     },
   };
 }
