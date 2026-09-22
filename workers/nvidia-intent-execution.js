@@ -964,6 +964,8 @@ export function resolveCognitionMode(packet) {
   const assessmentStatus = String(progress?.course_assessment?.status || '');
   const stimulus = intentReasonText(packet);
 
+  if (stage === 'mba_entrepreneurship' && ['course_assessment_queue','course_assessment_pending','final_assessments'].includes(nextKind))
+    return { mode:'fast', reason:'institutional_assessment_wait', stage };
   if (stage === 'mba_entrepreneurship' && ['study_unit','course_remediation'].includes(nextKind))
     return { mode:'deep', reason:'entrepreneurship_substantive_unit', stage };
   if (stage === 'mba_entrepreneurship' && assessmentStatus === 'verified_fail')
