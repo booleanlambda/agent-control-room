@@ -1109,7 +1109,10 @@ async function completeStructured(model, messages) {
 }
 
 async function completeDeepPass(model, messages, maxTokens = 3000) {
-  return nvidiaChatCompletion({ model, messages, maxTokens, temperature: 0.15, jsonMode: false, enableThinking: true });
+  return nvidiaChatCompletion({
+    model, messages, maxTokens, temperature: 0.15,
+    jsonMode: false, enableThinking: true, timeoutMs: 180000,
+  });
 }
 
 async function completeDeepFallback(model, messages, maxTokens = 3000) {
