@@ -442,6 +442,63 @@ function isLikelyHumanAlignedName(value) {
   return true;
 }
 function currentStage(packet) { return packet?.mandatory_lifecycle_context?.current_stage || packet?.mandatory_lifecycle_context?.stage || null; }
+
+function entrepreneurshipUnitSubmissionValidation(packet, decision) {
+  if (currentStage(packet) !== 'mba_entrepreneurship')
+    return { submitting:false, association:null, failures:[] };
+  const progress = packet?.mandatory_lifecycle_context?.entrepreneurship_program_progress || {};
+  if (String(progress?.next_kind || '') !== 'study_unit')
+    return { submitting:false, association:null, failures:[] };
+
+  const unit = progress?.next_unit || {};
+  const course = progress?.current_course || {};
+  const unitId = String(unit?.unit_id || '').trim();
+  const courseCode = String(course?.course_code || '').trim();
+  const associations = Array.isArray(decision?.associations) ? decision.associations : [];
+  const association = associations.find((a) =>
+    a && typeof a === 'object' && !Array.isArray(a)
+    && String(a.origin || '').trim() === 'entrepreneurship_unit_submission_v0_1'
+  ) || null;
+  if (!association) return { submitting:false, association:null, failures:[] };
+
+  const submission = obj(association.submission);
+  const failures = [];
+  const minimumAnalysisChars = Math.max(0, Number(unit?.minimum_submission_chars || 0));
+  const analysis = String(submission.analysis || '').trim();
+  const conclusion = String(submission.conclusion || '').trim();
+  const critique = String(submission.self_critique || '').trim();
+
+  if (String(association.unit_id || '').trim() !== unitId) failures.push('exact_current_unit_id_required');
+  if (String(association.course_code || '').trim() !== courseCode) failures.push('exact_current_course_code_required');
+  if (analysis.length < minimumAnalysisChars)
+    failures.push('analysis_min_' + String(minimumAnalysisChars) + '_chars_required_current_' + String(analysis.length));
+  if (!Array.isArray(submission.assumptions) || submission.assumptions.length === 0)
+    failures.push('assumptions_nonempty_array_required');
+  if (conclusion.length < 80)
+    failures.push('conclusion_min_80_chars_required_current_' + String(conclusion.length));
+  if (critique.length < 80)
+    failures.push('self_critique_min_80_chars_required_current_' + String(critique.length));
+  if (!Array.isArray(submission.evidence))
+    failures.push('evidence_json_array_required');
+
+  return {
+    submitting:true, association, submission, failures,
+    expected:{
+      unit_id:unitId,
+      course_code:courseCode,
+      analysis_min_chars:minimumAnalysisChars,
+      conclusion_min_chars:80,
+      self_critique_min_chars:80,
+      assumptions:'non-empty JSON array',
+      evidence:'JSON array',
+    },
+  };
+}
+
+function needsEntrepreneurshipUnitSubmissionRepair(packet, decision) {
+  const v = entrepreneurshipUnitSubmissionValidation(packet, decision);
+  return v.submitting && v.failures.length > 0;
+}
 function needsIdentityCompletion(packet, decision) {
   if (currentStage(packet) !== 'identity_artifact') return false;
   const chosen = String(decision?.identity_update?.public_name || '').trim().toLowerCase();
@@ -520,6 +577,7 @@ function lifecycleIssue(packet, decision) {
   if (attentionInterruptActive(packet)) return null;
   if (needsIdentityCompletion(packet, decision)) return 'identity';
   if (needsEmbodimentCompletion(packet, decision)) return 'embodiment';
+  if (needsEntrepreneurshipUnitSubmissionRepair(packet, decision)) return 'entrepreneurship_unit_submission';
   if (needsExpertiseArtifactCompletion(packet, decision)) return 'expertise_artifact';
   return null;
 }
@@ -750,6 +808,20 @@ function redundantDeploymentInspectionIssue(packet, decision) {
 
 function lifecycleCorrection(issue, packet) {
   if (issue === 'identity') return IDENTITY_CORRECTION;
+  if (issue === 'entrepreneurship_unit_submission') {
+    const progress = packet?.mandatory_lifecycle_context?.entrepreneurship_program_progress || {};
+    const unit = progress?.next_unit || {};
+    const course = progress?.current_course || {};
+    return 'ENTREPRENEURSHIP UNIT SUBMISSION CONTRACT REPAIR: Your proposed current-unit submission does not satisfy the durable Stage 3 contract. '
+      + 'Return the FULL AAU JSON object again using the SAME substantive work; do not abandon, defer, or replace the current unit. '
+      + 'Use exactly origin="entrepreneurship_unit_submission_v0_1", unit_id=' + JSON.stringify(unit?.unit_id || null)
+      + ', course_code=' + JSON.stringify(course?.course_code || null)
+      + '. submission.analysis must contain at least ' + String(unit?.minimum_submission_chars || 0)
+      + ' characters. Do NOT compress the checked deep-work artifact below that minimum; retain the material derivations, scenario arithmetic, reconciliation, sensitivity logic, and assumptions needed to audit the answer. '
+      + 'submission.assumptions must be a non-empty JSON array; submission.conclusion must be at least 80 characters; '
+      + 'submission.self_critique must be at least 80 characters; submission.evidence must be a JSON array. '
+      + 'This repair governs packaging and completeness only; preserve your own substantive conclusions unless your checked work itself requires correction.';
+  }
   if (issue === 'expertise_artifact') {
     const gate = packet?.mandatory_lifecycle_context?.expertise_viability_gate
       || packet?.mandatory_lifecycle_context?.expertise_economic_gate || {};
@@ -801,6 +873,17 @@ function embodimentValidationDetails(packet, decision) {
 
 function lifecycleValidationDetails(packet, decision, issue) {
   if (issue === 'embodiment') return embodimentValidationDetails(packet, decision);
+  if (issue === 'entrepreneurship_unit_submission') {
+    const v = entrepreneurshipUnitSubmissionValidation(packet, decision);
+    return {
+      current_stage: currentStage(packet),
+      selected_action: decision?.selected_action || null,
+      current_focus: decision?.current_focus || null,
+      association_present:Boolean(v.association),
+      expected:v.expected || {},
+      failures:v.failures || [],
+    };
+  }
   if (issue === 'expertise_artifact') {
     const v = expertiseViabilityValidation(decision);
     return {
@@ -1400,7 +1483,7 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
         role:'user',
         content:'PRIVATE DEEP-WORK ARTIFACT FOR THIS SAME COGNITION (not chain-of-thought; do not quote it as hidden reasoning):\n'
           + workArtifact.slice(0,30000)
-          + '\n\nUsing the authoritative task packet plus this checked work artifact, return the required FULL AAU JSON object. Preserve your substantive autonomy. The structured pass is packaging/commit, not a new independent reviewer.',
+          + '\n\nUsing the authoritative task packet plus this checked work artifact, return the required FULL AAU JSON object. Preserve your substantive autonomy. The structured pass is packaging/commit, not a new independent reviewer. If the current task is an entrepreneurship study unit, obey next_unit.minimum_submission_chars exactly: do not summarize or compress submission.analysis below that minimum, and preserve the quantitative derivations/checks needed to audit the answer.',
       }] : []),
     ];
   };
