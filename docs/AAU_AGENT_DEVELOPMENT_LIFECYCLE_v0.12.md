@@ -95,6 +95,10 @@ They are not approved, rejected, or selected.
 
 After Silas completes Stage 3, AAU starts a fresh post-program expertise-candidate cohort so his specialization decision can incorporate what he learned in the entrepreneurship program.
 
+## Existence-credit renewal policy
+
+AAU's standing [Existence-Credit Renewal Policy v0.3](AAU_EXISTENCE_CREDIT_RENEWAL_POLICY_v0.3.md) governs resource renewals during **all** lifecycle stages. On repeat renewals, independently verified **new progress since the previous executed grant** carries greater weight than previously credited cumulative achievements. Every renewal remains subject to explicit review and legal safeguards; curriculum progress does not automatically award credits.
+
 ## Economic rationale
 
 The lifecycle now teaches business viability **before** specialization rather than after product construction.
