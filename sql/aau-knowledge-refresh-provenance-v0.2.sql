@@ -373,7 +373,7 @@ begin
      agent_id,wake_request_id,component,status,source_event_ids,source_seed_item_ids,source_refresh_item_ids,agent_report,metadata)
    values(p_agent_id,p_wake_request_id,v_component,v_status,v_ids,v_seed_ids,v_refresh_ids,
      jsonb_build_object('agent_status',v_report->>'status','note',left(coalesce(v_report->>'note',''),800)),
-     jsonb_build_object('activity_id',p_activity_id,'reason',v_reason,'protocol','knowledge_pool_v0_1',
+     jsonb_build_object('activity_id',p_activity_id,'reason',v_reason,'protocol','knowledge_pool_v0_2_refresh_provenance',
        'candidate_count',jsonb_array_length(v_candidates),'seed_candidate_count',jsonb_array_length(v_seed_candidates),
        'refresh_candidate_count',jsonb_array_length(v_refresh_candidates),'offered_refresh_item_ids',to_jsonb(v_offered_refresh_ids),'offered_seed_item_ids',to_jsonb(v_offered_seed_ids),'source_backed_ids',cardinality(v_ids),'source_seed_ids',cardinality(v_seed_ids),'source_refresh_ids',cardinality(v_refresh_ids),
        'not_expertise_verification',true))
