@@ -1327,7 +1327,7 @@ async function completeStructured(model, messages, { maxTokens = 4096, timeoutMs
 async function completeDeepPass(model, messages, maxTokens = 3000) {
   return nvidiaChatCompletion({
     model, messages, maxTokens, temperature: 0.15,
-    jsonMode: false, enableThinking: true, timeoutMs: 180000,
+    jsonMode: false, enableThinking: true, timeoutMs: 300000,
   });
 }
 
@@ -1598,7 +1598,7 @@ async function completeDeepStructured(model, messages, agentId, intentExecutionI
     const started=Date.now();
     try{
       const result=await completeStructured(model,messages,{
-        maxTokens:2600,timeoutMs:180000,
+        maxTokens:2600,timeoutMs: 300000,
       });
       console.log('AAU_STRUCTURED_COMMIT_RESULT',JSON.stringify({
         agent_id:agentId,intent_execution_id:intentExecutionId,
