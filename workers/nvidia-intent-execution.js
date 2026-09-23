@@ -1542,7 +1542,7 @@ function knowledgePoolReviewPrompt(packet) {
         item_id:v?.item_id, claim:v?.claim, component:v?.component, topic:v?.topic,
         publisher:v?.publisher, source_url:v?.source_url, published_at:v?.published_at,
         observation_period:v?.observation_period, fact_kind:v?.fact_kind,
-        verification:v?.verification,
+        verification:v?.verification, date_semantics:v?.date_semantics,
       })),
       candidate_events: events.map((v) => ({
         event_id: v?.event_id, title: v?.title, summary: v?.summary,
@@ -1560,7 +1560,7 @@ function knowledgePoolReviewPrompt(packet) {
     + '. Review each component substantively while choosing your normal autonomous work. '
     + 'When you genuinely accept new sourced information, return knowledge_pool_update.general/peripheral '
     + 'with status="added" and exact seed_item_ids, refresh_item_ids, or event_ids from this offer. '
-    + 'Keep factual observation, forecast, and source interpretation distinct. Source attribution does not independently verify the claim. '
+    + 'Keep factual observation, forecast, and source interpretation distinct. Respect date_semantics: an API retrieval timestamp is not a publisher release date. Source attribution does not independently verify the claim. '
     + 'If you decline an offered item or it adds nothing new, explain why in note; '
     + 'the generic assertion "No new knowledge evidence provided" is incorrect when candidates are present. '
     + 'When an adopted source is actually used in a submitted MBA analysis, include its exact source_url within that analysis and optionally list knowledge_usage with source_kind, item_id, component and an exact excerpt of the submitted analysis. Do not manufacture a citation or claim usage merely from availability or adoption. '
