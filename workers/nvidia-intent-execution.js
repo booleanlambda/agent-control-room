@@ -89,7 +89,7 @@ Mandatory embodiment-stage rule:
 Mandatory Entrepreneurship Master's stage rule (AAU Stage 3):
 - When mandatory_lifecycle_context.current_stage is mba_entrepreneurship, mandatory_lifecycle_context.entrepreneurship_program_progress is authoritative.
 - If entrepreneurship_program_progress.next_kind is study_unit, entrepreneurship_program_progress.next_unit is the CURRENT assigned unit and prior accepted units require no per-unit verdict. There is NO independent review between individual units. Do not wait, monitor, or schedule another wake merely to verify acceptance of a prior unit once units_submitted has advanced and next_unit has changed.
-- Work on the current next_unit in THIS cognition. If you can complete it, submit exactly one associations[] object with origin="entrepreneurship_unit_submission_v0_1", the exact next_unit.unit_id and current_course.course_code, and submission:{analysis,assumptions,conclusion,self_critique,evidence}. assumptions and evidence must be JSON arrays. Do not self-grade.
+- Work on the current next_unit in THIS cognition. If entrepreneurship_remediation_context.active is true, the independent assessment feedback is authoritative evidence about the rejected prior submission: materially address its required_remediation and weaknesses rather than resubmitting the rejected artifact unchanged. If you can complete the unit, submit exactly one associations[] object with origin="entrepreneurship_unit_submission_v0_1", the exact next_unit.unit_id and current_course.course_code, and submission:{analysis,assumptions,conclusion,self_critique,evidence}. assumptions and evidence must be JSON arrays. Do not self-grade.
 - If the current unit genuinely depends on current external facts that are not already evidenced, request web research in THIS cognition using web_research_request_v0_1. After research observation, return to the same current unit. Do not substitute "wait for feedback" for study or evidence acquisition.
 - Independent assessment occurs only after all required units in the current course are validly persisted. When next_kind is course_assessment_queue or course_assessment_pending, do not repeat course units; await the institutional assessment. When next_kind is course_remediation, address the persisted assessment feedback. When next_kind is final_assessments, await the independent final reviews.
 - Expertise selection remains locked until the Entrepreneurship Master's program is independently verified as passed.
@@ -1245,7 +1245,7 @@ export function buildDeepCognitionPacket(packet, modeInfo = null) {
     'attention_arbiter_context','recent_capability_results',
   ];
   const stageKeys = stage === 'mba_entrepreneurship'
-    ? ['academic_standard_context']
+    ? ['academic_standard_context','entrepreneurship_remediation_context']
     : stage === 'expertise_artifact' || stage === 'expertise_development'
       ? ['domain_learning_context','expertise_action_feedback','expertise_application_context',
          'expertise_portfolio_context','expertise_verification_context','capability_surface','agent_file_context']
@@ -1499,6 +1499,7 @@ next_intents:array
 
 MBA Entrepreneurship stage:
 - mandatory_lifecycle_context.entrepreneurship_program_progress is authoritative.
+- If entrepreneurship_remediation_context.active is true, revise the current unit materially against its independent required_remediation/weaknesses. Do not package the previously rejected artifact unchanged.
 - When next_kind is study_unit or course_remediation and the artifact completes the current unit, include exactly one associations[] object with origin="entrepreneurship_unit_submission_v0_1", the exact next_unit.unit_id, current_course.course_code, and submission:{analysis,assumptions,conclusion,self_critique,evidence}. assumptions and evidence are JSON arrays. Do not self-grade.
 - Preserve the artifact's substantive analysis and calculations. submission.analysis must meet next_unit.minimum_submission_chars.
 - Do not wait for per-unit feedback after submitting completed work; the runtime owns persistence and assessment.
@@ -1526,14 +1527,14 @@ function buildStructuredCommitPacket(packet, modeInfo) {
   const mba = currentStage(packet) === 'mba_entrepreneurship';
   const keys = mba ? [
     'brain_packet_version','agent','mandatory_lifecycle_context',
-    'academic_standard_context','intent_execution_context',
+    'academic_standard_context','entrepreneurship_remediation_context','intent_execution_context',
     'next_intent_context','sleep_eligibility_context','attention_arbiter_context',
     'knowledge_pool_context','admin_chat_context','evidence_first_cognition_contract',
     'cognition_mode_context',
   ] : [
     'brain_packet_version','agent','identity_context','continuity',
     'traits','interests','state','mandatory_lifecycle_context',
-    'academic_standard_context','intent_execution_context','intent_trigger',
+    'academic_standard_context','entrepreneurship_remediation_context','intent_execution_context','intent_trigger',
     'next_intent_context','sleep_eligibility_context','attention_arbiter_context',
     'knowledge_pool_context','admin_chat_context','evidence_provenance',
     'recent_capability_results','evidence_first_cognition_contract',
