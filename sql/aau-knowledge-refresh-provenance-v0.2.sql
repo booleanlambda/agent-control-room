@@ -188,7 +188,8 @@ begin
  select coalesce(jsonb_agg(to_jsonb(t)),'[]'::jsonb) into v_refresh_general from (
     select k.item_id,k.claim,k.component,k.topic,k.publisher,k.source_url,
       k.published_at,k.observation_period,k.fact_kind,
-      k.metadata->>'verification' verification,k.ingested_at
+      k.metadata->>'verification' verification,
+      k.metadata->>'date_semantics' date_semantics,k.ingested_at
     from agent_lab.knowledge_refresh_items k
     join agent_lab.knowledge_refresh_sources src on src.source_key=k.source_key
     where k.component='general' and src.enabled
@@ -205,7 +206,8 @@ begin
  select coalesce(jsonb_agg(to_jsonb(t)),'[]'::jsonb) into v_refresh_peripheral from (
     select k.item_id,k.claim,k.component,k.topic,k.publisher,k.source_url,
       k.published_at,k.observation_period,k.fact_kind,
-      k.metadata->>'verification' verification,k.ingested_at
+      k.metadata->>'verification' verification,
+      k.metadata->>'date_semantics' date_semantics,k.ingested_at
     from agent_lab.knowledge_refresh_items k
     join agent_lab.knowledge_refresh_sources src on src.source_key=k.source_key
     where k.component='peripheral' and src.enabled
