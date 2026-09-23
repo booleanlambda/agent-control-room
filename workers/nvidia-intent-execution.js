@@ -1259,8 +1259,10 @@ function decisionRequestsDeepCognition(decision) {
     || /^(request_|escalate_to_)?deep_cognition$/i.test(String(decision?.selected_action || '').trim());
 }
 
-async function completeStructured(model, messages) {
-  return nvidiaChatCompletion({ model, messages, maxTokens: 4096, temperature: 0.2, jsonMode: true, enableThinking: false });
+async function completeStructured(model, messages, { maxTokens = 4096, timeoutMs = null } = {}) {
+  return nvidiaChatCompletion({
+    model, messages, maxTokens, temperature: 0.2, jsonMode: true, enableThinking: false, timeoutMs,
+  });
 }
 
 async function completeDeepPass(model, messages, maxTokens = 3000) {
@@ -1372,6 +1374,131 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
       latency_ms:Date.now()-started,
     },
   };
+}
+
+/* deep_cognition_checkpoint_v0_1:
+ * A checked, auditable work artifact is durable before JSON packaging. Never
+ * store hidden reasoning, swap the agent's model, or reuse a prior assignment.
+ * Both load and save are broker-token guarded, bound-model checked and
+ * authoritatively keyed to the current submitted-unit progression in SQL. */
+async function resolveDeepCognitionWithCheckpoint(model, packet, modeInfo, agentId, intentExecutionId) {
+  const progress = packet?.mandatory_lifecycle_context?.entrepreneurship_program_progress || {};
+  const unitId = String(progress?.next_unit?.unit_id || '');
+  if (currentStage(packet) !== 'mba_entrepreneurship'
+      || !unitId
+      || !['study_unit','course_remediation'].includes(String(progress.next_kind || ''))) {
+    return runDeepCognition(model, packet, modeInfo, agentId, intentExecutionId);
+  }
+  const checkpointArgs = {
+    p_agent_id:agentId, p_wake_request_id:intentExecutionId,
+    p_unit_id:unitId, p_model:model,
+  };
+  const existing = await rpc('aau_bridge_deep_cognition_checkpoint', {
+    ...checkpointArgs, p_action:'get',
+  });
+  if (existing?.status === 'ready') {
+    if (existing.model !== model
+        || sha256(existing.artifact || '') !== existing.artifact_hash) {
+      throw new Error('deep_checkpoint_model_or_hash_mismatch');
+    }
+    console.log('AAU_DEEP_COGNITION_CHECKPOINT_REUSED', JSON.stringify({
+      agent_id:agentId,intent_execution_id:intentExecutionId,
+      checkpoint_id:existing.checkpoint_id,
+      source_wake_request_id:existing.source_wake_request_id,
+      artifact_bytes:Buffer.byteLength(existing.artifact),
+    }));
+    return {
+      artifact:existing.artifact,
+      meta:{
+        ...(existing.meta || {}),
+        checkpoint_id:existing.checkpoint_id,
+        checkpoint_reused:true,
+        checkpoint_source_wake_request_id:existing.source_wake_request_id,
+      },
+    };
+  }
+  if (existing?.status !== 'not_found') {
+    throw new Error('deep_checkpoint_lookup_unexpected_status');
+  }
+  const fresh = await runDeepCognition(model, packet, modeInfo, agentId, intentExecutionId);
+  // Never submit a non-durable deep artifact; retries must not redo good work.
+  const saved = await rpc('aau_bridge_deep_cognition_checkpoint', {
+    ...checkpointArgs,p_action:'save',p_artifact:fresh.artifact,p_meta:fresh.meta,
+  });
+  if (saved?.status !== 'ready' || saved.model !== model
+      || sha256(saved.artifact || '') !== saved.artifact_hash) {
+    throw new Error('deep_checkpoint_persist_or_integrity_failed');
+  }
+  console.log('AAU_DEEP_COGNITION_CHECKPOINT_SAVED', JSON.stringify({
+    agent_id:agentId,intent_execution_id:intentExecutionId,
+    checkpoint_id:saved.checkpoint_id,
+    artifact_bytes:Buffer.byteLength(saved.artifact),
+    reused_prior_wake:saved.source_wake_request_id!==intentExecutionId,
+  }));
+  return {
+    artifact:saved.artifact,
+    meta:{
+      ...(saved.meta || {}),
+      checkpoint_id:saved.checkpoint_id,
+      checkpoint_reused:saved.source_wake_request_id!==intentExecutionId,
+      checkpoint_source_wake_request_id:saved.source_wake_request_id,
+    },
+  };
+}
+
+function buildStructuredCommitPacket(packet, modeInfo) {
+  // This is a model-facing copy only. All post-generation authority and
+  // validation continues to use the original durable packet unchanged.
+  const deep = buildDeepCognitionPacket(packet, modeInfo);
+  const keys = [
+    'brain_packet_version','agent','identity_context','continuity',
+    'traits','interests','state','mandatory_lifecycle_context',
+    'academic_standard_context','intent_execution_context','intent_trigger',
+    'next_intent_context','sleep_eligibility_context','attention_arbiter_context',
+    'knowledge_pool_context','admin_chat_context','evidence_provenance',
+    'recent_capability_results','evidence_first_cognition_contract',
+    'cognition_mode_context',
+  ];
+  const out={};
+  for(const key of keys)if(deep[key]!==undefined&&deep[key]!==null)out[key]=deep[key];
+  out.recent_activity=deepRecentActivity(packet).recent_summaries.slice(0,2);
+  out.structured_commit_context={
+    contract:'deep_work_checkpoint_structured_commit_v0_1',
+    directive:'Package the completed work artifact into the full AAU JSON. Do not redo the intellectual analysis. Preserve mandatory fields, current assignment, and evidence distinctions. The authoritative packet is validated independently after generation.',
+    same_bound_model:true,
+    required_next_intent_minutes:5,
+  };
+  return out;
+}
+
+async function completeDeepStructured(model, messages, agentId, intentExecutionId, checkpointId) {
+  for(let attempt=1;attempt<=2;attempt+=1){
+    const started=Date.now();
+    try{
+      const result=await completeStructured(model,messages,{
+        maxTokens:3500,timeoutMs:180000,
+      });
+      console.log('AAU_STRUCTURED_COMMIT_RESULT',JSON.stringify({
+        agent_id:agentId,intent_execution_id:intentExecutionId,
+        checkpoint_id:checkpointId,attempt,
+        latency_ms:Date.now()-started,content_bytes:Buffer.byteLength(result.content||''),
+        outcome:'completed',
+      }));
+      return result;
+    }catch(error){
+      const timedOut=error?.code==='NVIDIA_TIMEOUT'
+        || /^nvidia_timeout_after_/.test(String(error?.message||''));
+      console.warn('AAU_STRUCTURED_COMMIT_RESULT',JSON.stringify({
+        agent_id:agentId,intent_execution_id:intentExecutionId,
+        checkpoint_id:checkpointId,attempt,
+        latency_ms:Date.now()-started,outcome:timedOut?'timeout':'error',
+        error:String(error?.message||error).slice(0,400),
+      }));
+      if(!timedOut||attempt===2)throw error;
+      // Retry the packaging call only; the persisted deep artifact is unchanged.
+    }
+  }
+  throw new Error('structured_commit_retry_exhausted');
 }
 
 async function complete(model, messages) {
@@ -1563,9 +1690,15 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
   let baseMessages;
   let ai;
   if (modeInfo.mode === 'deep') {
-    deepCognition = await runDeepCognition(model, packet, modeInfo, agentId, intentExecutionId);
+    deepCognition = await resolveDeepCognitionWithCheckpoint(model, packet, modeInfo, agentId, intentExecutionId);
+    packetText = JSON.stringify(buildStructuredCommitPacket(packet, modeInfo));
+    console.log('AAU_STRUCTURED_COMMIT_PACKET',JSON.stringify({
+      agent_id:agentId,intent_execution_id:intentExecutionId,
+      bytes:Buffer.byteLength(packetText),
+      checkpoint_id:deepCognition.meta?.checkpoint_id || null,
+    }));
     baseMessages = buildBaseMessages(deepCognition.artifact);
-    ai = await completeStructured(model, baseMessages);
+    ai = await completeDeepStructured(model, baseMessages, agentId, intentExecutionId, deepCognition.meta?.checkpoint_id || null);
   } else {
     baseMessages = buildBaseMessages();
     ai = await completeStructured(model, baseMessages);
@@ -1577,9 +1710,15 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
     modeInfo = { mode:'deep', reason:'agent_requested_complexity_escalation', stage:currentStage(packet) };
     inferencePacket = buildDeepCognitionPacket(packet, modeInfo);
     packetText = JSON.stringify(inferencePacket);
-    deepCognition = await runDeepCognition(model, packet, modeInfo, agentId, intentExecutionId);
+    deepCognition = await resolveDeepCognitionWithCheckpoint(model, packet, modeInfo, agentId, intentExecutionId);
+    packetText = JSON.stringify(buildStructuredCommitPacket(packet, modeInfo));
+    console.log('AAU_STRUCTURED_COMMIT_PACKET',JSON.stringify({
+      agent_id:agentId,intent_execution_id:intentExecutionId,
+      bytes:Buffer.byteLength(packetText),
+      checkpoint_id:deepCognition.meta?.checkpoint_id || null,
+    }));
     baseMessages = buildBaseMessages(deepCognition.artifact);
-    ai = await completeStructured(model, baseMessages);
+    ai = await completeDeepStructured(model, baseMessages, agentId, intentExecutionId, deepCognition.meta?.checkpoint_id || null);
     decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
   }
 
