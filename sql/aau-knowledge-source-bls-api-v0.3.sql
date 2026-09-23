@@ -105,7 +105,12 @@ BEGIN
    VALUES (v_src.source_key,v_external,v_src.component,v_src.topic,v_claim,v_src.publisher,
      v_link,v_pub,v_period,v_kind,
      jsonb_build_object('source_type',v_src.adapter,'verification','source_attribution_only',
-       'not_independently_factual_verification',v_kind='publisher_headline'))
+       'not_independently_factual_verification',v_kind='publisher_headline',
+       'date_semantics',case
+          when v_src.adapter='bls_latest_series' then 'retrieval_time_for_latest_series; observation_period_is_data_period'
+          when v_src.adapter='world_bank_indicator' then 'source_dataset_last_updated_time'
+          else 'publisher_publication_time'
+        end))
    ON CONFLICT(source_key,external_id,component) DO NOTHING
    RETURNING item_id INTO v_item_id;
    IF v_item_id IS NOT NULL THEN v_added:=v_added+1; END IF;
@@ -143,6 +148,8 @@ BEGIN
    'new_items',v_added,'seed_version',v_version,'snapshot_items',jsonb_array_length(v_snapshot));
 END
 $function$
+
 ;
+
 
 commit;
