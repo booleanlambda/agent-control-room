@@ -1242,7 +1242,7 @@ export function buildDeepCognitionPacket(packet, modeInfo = null) {
     'brain_packet_version','generated_at','agent','identity_context','continuity','traits','interests',
     'state','mandatory_lifecycle_context','evidence_first_cognition_contract','evidence_provenance',
     'intent_execution_context','intent_trigger','next_intent_context','sleep_eligibility_context',
-    'attention_arbiter_context','recent_capability_results',
+    'attention_arbiter_context','recent_capability_results','knowledge_pool_context',
   ];
   const stageKeys = stage === 'mba_entrepreneurship'
     ? ['academic_standard_context','entrepreneurship_remediation_context']
@@ -1594,12 +1594,18 @@ function knowledgePoolReviewPrompt(packet) {
     const seed = arr(section.seed_candidates, 2);
     const events = arr(section.candidate_events, 4);
     const refresh = arr(section.refresh_candidates, 3);
+    const adopted = arr(section.adopted_items, name === 'general_knowledge' ? 8 : 5);
     return {
       seed_candidates: seed.map((v) => ({
         item_id: v?.item_id, claim: v?.claim, topic: v?.topic,
         publisher: v?.publisher, published_at: v?.published_at,
         observation_period: v?.observation_period, fact_kind: v?.fact_kind,
         source_url: v?.source_url,
+      })),
+      adopted_items: adopted.map((v) => ({
+        source_kind:v?.source_kind,item_id:v?.item_id,claim:v?.claim,topic:v?.topic,
+        publisher:v?.publisher,source_url:v?.source_url,published_at:v?.published_at,
+        observation_period:v?.observation_period,fact_kind:v?.fact_kind,adopted_at:v?.adopted_at,
       })),
       refresh_candidates: refresh.map((v) => ({
         item_id:v?.item_id, claim:v?.claim, component:v?.component, topic:v?.topic,
@@ -1618,7 +1624,7 @@ function knowledgePoolReviewPrompt(packet) {
   const general = collect('general_knowledge');
   const peripheral = collect('peripheral_knowledge');
   return 'AAU KNOWLEDGE POOL REVIEW (two mandatory per-wake components, independent of expertise): '
-    + 'Here are the actual dated, sourced candidates available in THIS packet: '
+    + 'Here are the agent’s bounded recent adopted items plus the actual dated, sourced candidates available in THIS packet: '
     + JSON.stringify({ general, peripheral })
     + '. Review each component substantively while choosing your normal autonomous work. '
     + 'When you genuinely accept new sourced information, return knowledge_pool_update.general/peripheral '
@@ -1626,7 +1632,7 @@ function knowledgePoolReviewPrompt(packet) {
     + 'Keep factual observation, forecast, and source interpretation distinct. Respect date_semantics: an API retrieval timestamp is not a publisher release date. Source attribution does not independently verify the claim. '
     + 'If you decline an offered item or it adds nothing new, explain why in note; '
     + 'the generic assertion "No new knowledge evidence provided" is incorrect when candidates are present. '
-    + 'When an adopted source is actually used in a submitted MBA analysis, include its exact source_url within that analysis and optionally list knowledge_usage with source_kind, item_id, component and an exact excerpt of the submitted analysis. Do not manufacture a citation or claim usage merely from availability or adoption. '
+    + 'Adopted items may be used in later work when relevant; adoption does not compel use. When an adopted or newly accepted source is actually used in a submitted MBA analysis, include its exact source_url within that analysis and list knowledge_usage with source_kind, item_id, component and an exact excerpt of the submitted analysis. Do not manufacture a citation or claim usage merely from availability or adoption. '
     + 'Do not invent facts, imply expertise, or take up an unwanted peripheral interest. '
     + 'This is a low-cost review inside the existing cognition, not a separate external action.';
 }
