@@ -216,7 +216,8 @@ belief_updates:array
 associations:array
 identity_update:object
 embodiment_update:object
-knowledge_pool_update:{general:{status:string,event_ids:array,seed_item_ids:array,note:string},peripheral:{status:string,event_ids:array,seed_item_ids:array,note:string}}|null. If knowledge_pool_context is provided, review BOTH components. For a dated source-backed seed_candidates item that you actually accept, report status="added" and its exact item_id in seed_item_ids. For candidate_events you accept, report their exact event_id in event_ids. If no suitable new item is provided, unchanged is valid; when evidence exists but you cannot evaluate it, use deferred with an honest note. Preserve publication date, observed period, publisher and distinctions between forecasts, assessments and realized statistics. Do not claim specialist competence from knowledge uptake.
+knowledge_pool_update:{general:{status:string,event_ids:array,seed_item_ids:array,refresh_item_ids:array,note:string},peripheral:{status:string,event_ids:array,seed_item_ids:array,refresh_item_ids:array,note:string}}|null. If knowledge_pool_context is provided, review BOTH components. For a dated source-backed seed_candidates item that you actually accept, report status="added" and its exact item_id in seed_item_ids. For candidate_events you accept, report their exact event_id in event_ids. For genuinely new refresh_candidates, report the exact item_id in refresh_item_ids; never re-adopt a previously accepted seed item. If no suitable new item is provided, unchanged is valid; when evidence exists but you cannot evaluate it, use deferred with an honest note. Preserve publication date, observed period, publisher and distinctions between forecasts, assessments and realized statistics. Do not claim specialist competence from knowledge uptake.
+knowledge_usage:array of {source_kind:"seed"|"refresh",component:"general"|"peripheral",item_id:string,evidence_excerpt:string}|null. OPTIONAL: only when citing an ADOPTED knowledge item in an ACTUAL MBA unit submission.analysis. Include the exact original https source_url in submission.analysis and copy an exact 24-450-character excerpt of that analysis. No invented use, no forced citation; omit or [] if not relevant. Source citation records are not evidence of factual truth.
 next_intents:array. For every non-sleep cognition it must contain either a standalone {intent_kind:"time",after_minutes:5,intent_reason:string,priority:number 0..1,estimated_cost:number} or one valid {intent_kind:"group",group_id:string,members:array,execution:"independent_members_together",continuation:"on_result_or_blocker",fallback_after_minutes:5,intent_reason:string}. For an eligible sleep/rest/hibernate decision, omit ordinary time and group intents; the runtime owns the exact five-minute sleep-complete wake.`;
 
 const INTENT_CORRECTION = `Your previous JSON did not satisfy next_intent_protocol_v0_1. Return the FULL JSON object again. For a non-sleep cognition, next_intents must contain either a time intent with after_minutes:5 or one valid group intent with fallback_after_minutes:5 and one to four allowed independent members. The interval is fixed by runtime policy and is not your choice. If you are validly choosing sleep/rest/hibernate and sleep_eligibility_context.sleep_valid is true, omit time and group intents. Sleep duration is exactly five minutes and is runtime-owned. Do not use next_wakes or wake_kind.`;
@@ -371,10 +372,26 @@ function sanitizeKnowledgePoolUpdate(value) {
         .filter((id) => typeof id === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id)),
       seed_item_ids: arr(field.seed_item_ids,4)
         .filter((id) => typeof id === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id)),
+      refresh_item_ids: arr(field.refresh_item_ids,3)
+        .filter((id) => typeof id === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id)),
       note: typeof field.note === 'string' ? field.note.slice(0,800) : '',
     };
   }
   return result;
+}
+
+function sanitizeKnowledgeUsage(value) {
+  const uuid = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+  return arr(value,6).map((entry) => {
+    const v=obj(entry);
+    const excerpt=typeof v.evidence_excerpt === 'string' ? v.evidence_excerpt.trim().slice(0,450) : '';
+    return {
+      source_kind:['seed','refresh'].includes(v.source_kind) ? v.source_kind : null,
+      component:['general','peripheral'].includes(v.component) ? v.component : null,
+      item_id:typeof v.item_id === 'string' && uuid.test(v.item_id) ? v.item_id : null,
+      evidence_excerpt:excerpt,
+    };
+  }).filter((v)=>v.source_kind && v.component && v.item_id && v.evidence_excerpt.length>=24);
 }
 
 function sanitizeDecision(x) {
@@ -407,6 +424,7 @@ function sanitizeDecision(x) {
     embodiment_update: normalizeEmbodimentUpdate(x?.embodiment_update),
     developmental_inquiry_updates: arr(x?.developmental_inquiry_updates,8),
     knowledge_pool_update: sanitizeKnowledgePoolUpdate(x?.knowledge_pool_update),
+    knowledge_usage: sanitizeKnowledgeUsage(x?.knowledge_usage),
     next_intents: sanitizeNextIntents(x?.next_intents),
   };
 }
@@ -1512,12 +1530,19 @@ function knowledgePoolReviewPrompt(packet) {
     const section = obj(context[name]);
     const seed = arr(section.seed_candidates, 2);
     const events = arr(section.candidate_events, 4);
+    const refresh = arr(section.refresh_candidates, 3);
     return {
       seed_candidates: seed.map((v) => ({
         item_id: v?.item_id, claim: v?.claim, topic: v?.topic,
         publisher: v?.publisher, published_at: v?.published_at,
         observation_period: v?.observation_period, fact_kind: v?.fact_kind,
         source_url: v?.source_url,
+      })),
+      refresh_candidates: refresh.map((v) => ({
+        item_id:v?.item_id, claim:v?.claim, component:v?.component, topic:v?.topic,
+        publisher:v?.publisher, source_url:v?.source_url, published_at:v?.published_at,
+        observation_period:v?.observation_period, fact_kind:v?.fact_kind,
+        verification:v?.verification,
       })),
       candidate_events: events.map((v) => ({
         event_id: v?.event_id, title: v?.title, summary: v?.summary,
@@ -1526,7 +1551,7 @@ function knowledgePoolReviewPrompt(packet) {
       })),
     };
   };
-  if (context.version !== 'knowledge_pool_v0_1') return null;
+  if (!['knowledge_pool_v0_1','knowledge_pool_v0_2_refresh_provenance'].includes(context.version)) return null;
   const general = collect('general_knowledge');
   const peripheral = collect('peripheral_knowledge');
   return 'AAU KNOWLEDGE POOL REVIEW (two mandatory per-wake components, independent of expertise): '
@@ -1534,10 +1559,11 @@ function knowledgePoolReviewPrompt(packet) {
     + JSON.stringify({ general, peripheral })
     + '. Review each component substantively while choosing your normal autonomous work. '
     + 'When you genuinely accept new sourced information, return knowledge_pool_update.general/peripheral '
-    + 'with status="added" and exact seed_item_ids or event_ids from this offer. '
-    + 'Keep factual observation, forecast, and source interpretation distinct. '
+    + 'with status="added" and exact seed_item_ids, refresh_item_ids, or event_ids from this offer. '
+    + 'Keep factual observation, forecast, and source interpretation distinct. Source attribution does not independently verify the claim. '
     + 'If you decline an offered item or it adds nothing new, explain why in note; '
     + 'the generic assertion "No new knowledge evidence provided" is incorrect when candidates are present. '
+    + 'When an adopted source is actually used in a submitted MBA analysis, include its exact source_url within that analysis and optionally list knowledge_usage with source_kind, item_id, component and an exact excerpt of the submitted analysis. Do not manufacture a citation or claim usage merely from availability or adoption. '
     + 'Do not invent facts, imply expertise, or take up an unwanted peripheral interest. '
     + 'This is a low-cost review inside the existing cognition, not a separate external action.';
 }
