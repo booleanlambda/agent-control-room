@@ -24,7 +24,7 @@ async function fetchSource(source) {
  const endpoint=String(source.endpoint || '');
  const url=new URL(endpoint);
  if (url.protocol!=='https:' ||
-     !['www.federalreserve.gov','www.bls.gov','api.worldbank.org','apps.bea.gov'].includes(url.hostname))
+     !['www.federalreserve.gov','www.bls.gov','api.bls.gov','api.worldbank.org','apps.bea.gov'].includes(url.hostname))
     throw Error('knowledge_refresh_disallowed_endpoint');
  const resp=await fetch(url,{headers:{accept:source.adapter==='rss'?'application/rss+xml, application/xml, text/xml':'application/json',
     'user-agent':'AAU-KnowledgeRefresh/0.3 (+https://github.com/booleanlambda/agent-control-room)'},
@@ -32,7 +32,10 @@ async function fetchSource(source) {
  if(!resp.ok) throw Error('knowledge_source_http_'+resp.status);
  const body=await resp.text();
  if(body.length>2_000_000) throw Error('knowledge_source_too_large');
- return source.adapter==='rss' ? parseRss(body,source) : parseWorldBank(body,source);
+ if(source.adapter==='rss') return parseRss(body,source);
+ if(source.adapter==='world_bank_indicator') return parseWorldBank(body,source);
+ if(source.adapter==='bls_latest_series') return parseBlsLatest(body,source);
+ throw Error('knowledge_refresh_unknown_adapter');
 }
 export function parseRss(xml, source) {
  if (!/<(?:rss|rdf:RDF)\b/i.test(xml) || !/<item\b/i.test(xml)) throw Error('knowledge_source_not_rss');
@@ -55,6 +58,36 @@ export function parseRss(xml, source) {
  }
  return items;
 }
+export function parseBlsLatest(raw,source) {
+ const parsed=JSON.parse(raw);
+ if(parsed?.status!=='REQUEST_SUCCEEDED' || !Array.isArray(parsed?.Results?.series))
+   throw Error('knowledge_bls_invalid_shape');
+ const series=parsed.Results.series[0];
+ const point=Array.isArray(series?.data)?series.data[0]:null;
+ const id=String(series?.seriesID||'');
+ const year=String(point?.year||'');
+ const period=String(point?.period||'');
+ const periodName=String(point?.periodName||'').trim();
+ const value=Number(point?.value);
+ if(!id || !/^20\d\d$/.test(year) || !/^M(?:0[1-9]|1[0-2])$/.test(period) ||
+    !periodName || !Number.isFinite(value)) throw Error('knowledge_bls_invalid_point');
+ const labels={
+   CUUR0000SA0:{label:'BLS CPI-U all items (U.S. city average, not seasonally adjusted)',unit:'index points'},
+   LNS14000000:{label:'BLS civilian unemployment rate (seasonally adjusted)',unit:'percent'},
+ };
+ const spec=labels[id];
+ if(!spec) throw Error('knowledge_bls_unapproved_series');
+ const suffix=spec.unit==='percent'?'%':' '+spec.unit;
+ return [{
+   external_id:id+':'+year+':'+period+':'+String(point.value),
+   claim:(spec.label+' was '+String(point.value)+suffix+' in '+periodName+' '+year+'.').slice(0,650),
+   source_url:String(source.endpoint),
+   published_at:new Date().toISOString(),
+   observation_period:periodName+' '+year,
+   fact_kind:'dated_reference_statistic',
+ }];
+}
+
 export function parseWorldBank(raw,source) {
  const parsed=JSON.parse(raw);
  if(!Array.isArray(parsed)||!Array.isArray(parsed[1])) throw Error('knowledge_world_bank_invalid_shape');
