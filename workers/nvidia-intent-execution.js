@@ -1464,11 +1464,73 @@ async function resolveDeepCognitionWithCheckpoint(model, packet, modeInfo, agent
   };
 }
 
+const STRUCTURED_COMMIT_SYSTEM_PROMPT = `AAU STRUCTURED COMMIT v0.2.
+You are the SAME bound model packaging a completed, durable deep-work artifact for one persistent autonomous synthetic individual. Do not redo the intellectual analysis and do not reveal chain-of-thought. The supplied task packet is authoritative; the work artifact contains the substantive work. Return exactly one compact JSON object and no prose.
+
+Continuity and authority:
+- Preserve the current mandatory lifecycle stage and assignment. Never invent biography, capabilities, evidence, tool results, funding, income, external actions, or a model switch.
+- AAU runtime/database validation remains authoritative. This packaging pass does not grade the work.
+- selected_action/current_focus must describe the work actually represented by the artifact.
+- Empty arrays/objects are acceptable for fields with no genuine update; do not fabricate updates just to fill the schema.
+
+Required JSON keys:
+selected_action:string
+stated_reason:string
+current_focus:string|null
+outbound_message:{target_agent_id:string|null,message:string|null,reply_to_event_id:string|null}
+codeusd_purchase:{usd_amount:number}|null
+resource_purchase:{resource_type:string,codeusd_amount:number}|null
+candidate_actions:array
+activated_nodes:array
+retrieved_memory_ids:array
+expertise_assessment:object
+state_assessment:object
+state_update:object
+memory:object
+interest_updates:array
+belief_updates:array
+associations:array
+identity_update:object
+embodiment_update:object
+developmental_inquiry_updates:array
+knowledge_pool_update:object|null
+knowledge_usage:array
+next_intents:array
+
+MBA Entrepreneurship stage:
+- mandatory_lifecycle_context.entrepreneurship_program_progress is authoritative.
+- When next_kind is study_unit or course_remediation and the artifact completes the current unit, include exactly one associations[] object with origin="entrepreneurship_unit_submission_v0_1", the exact next_unit.unit_id, current_course.course_code, and submission:{analysis,assumptions,conclusion,self_critique,evidence}. assumptions and evidence are JSON arrays. Do not self-grade.
+- Preserve the artifact's substantive analysis and calculations. submission.analysis must meet next_unit.minimum_submission_chars.
+- Do not wait for per-unit feedback after submitting completed work; the runtime owns persistence and assessment.
+
+Knowledge pools:
+- Review BOTH general and peripheral components only from offered source-backed IDs. Source attribution is not independent factual verification.
+- For accepted refresh candidates use status="added" and exact refresh_item_ids; for seed candidates use seed_item_ids; for event candidates use event_ids.
+- Respect observation_period, publisher, source_url and date_semantics. A retrieval timestamp is not a publisher release date.
+- knowledge_usage is optional and must only claim use of an already adopted item when submission.analysis itself contains that source URL and the exact evidence_excerpt. Otherwise return [].
+
+Attention/admin:
+- If the packet represents a genuine unanswered administrator message, provide the substantive outbound reply.
+- If attention_arbiter_context contains a suspended intention requiring resolution, include the required attention_resolution_v0_1 association and make next_intents consistent with that decision.
+
+Next intent:
+- Every successful non-sleep cognition must include either {intent_kind:"time",after_minutes:5,intent_reason:string,priority:number,estimated_cost:number} or one valid group intent with fallback_after_minutes:5. The five-minute interval is runtime-owned.
+- Only omit ordinary time/group continuation for a valid sleep/rest/hibernate decision when sleep_eligibility_context.sleep_valid is true.
+
+Return compact valid JSON only.`;
+
 function buildStructuredCommitPacket(packet, modeInfo) {
   // This is a model-facing copy only. All post-generation authority and
   // validation continues to use the original durable packet unchanged.
   const deep = buildDeepCognitionPacket(packet, modeInfo);
-  const keys = [
+  const mba = currentStage(packet) === 'mba_entrepreneurship';
+  const keys = mba ? [
+    'brain_packet_version','agent','mandatory_lifecycle_context',
+    'academic_standard_context','intent_execution_context',
+    'next_intent_context','sleep_eligibility_context','attention_arbiter_context',
+    'knowledge_pool_context','admin_chat_context','evidence_first_cognition_contract',
+    'cognition_mode_context',
+  ] : [
     'brain_packet_version','agent','identity_context','continuity',
     'traits','interests','state','mandatory_lifecycle_context',
     'academic_standard_context','intent_execution_context','intent_trigger',
@@ -1479,7 +1541,7 @@ function buildStructuredCommitPacket(packet, modeInfo) {
   ];
   const out={};
   for(const key of keys)if(deep[key]!==undefined&&deep[key]!==null)out[key]=deep[key];
-  out.recent_activity=deepRecentActivity(packet).recent_summaries.slice(0,2);
+  if(!mba) out.recent_activity=deepRecentActivity(packet).recent_summaries.slice(0,2);
   out.structured_commit_context={
     contract:'deep_work_checkpoint_structured_commit_v0_1',
     directive:'Package the completed work artifact into the full AAU JSON. Do not redo the intellectual analysis. Preserve mandatory fields, current assignment, and evidence distinctions. The authoritative packet is validated independently after generation.',
@@ -1494,7 +1556,7 @@ async function completeDeepStructured(model, messages, agentId, intentExecutionI
     const started=Date.now();
     try{
       const result=await completeStructured(model,messages,{
-        maxTokens:3500,timeoutMs:180000,
+        maxTokens:2600,timeoutMs:180000,
       });
       console.log('AAU_STRUCTURED_COMMIT_RESULT',JSON.stringify({
         agent_id:agentId,intent_execution_id:intentExecutionId,
@@ -1699,9 +1761,10 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
   }));
 
   const buildBaseMessages = (workArtifact = null) => {
-    const knowledgePrompt = modeInfo.mode === 'fast' ? knowledgePoolReviewPrompt(packet) : null;
+    const knowledgePrompt = knowledgePoolReviewPrompt(packet);
+    const systemPrompt = workArtifact ? STRUCTURED_COMMIT_SYSTEM_PROMPT : SYSTEM_PROMPT;
     return [
-      { role:'system', content:SYSTEM_PROMPT },
+      { role:'system', content:systemPrompt },
       ...(knowledgePrompt ? [{ role:'system', content:knowledgePrompt }] : []),
       { role:'user', content:packetText },
       ...(workArtifact ? [{
