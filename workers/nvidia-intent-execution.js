@@ -1236,13 +1236,53 @@ function compactDeepAdminContext(packet) {
   };
 }
 
-export function buildDeepCognitionPacket(packet, modeInfo = null) {
+export function compactKnowledgePoolContext(packet) {
+  const context = obj(packet?.knowledge_pool_context);
+  if (!Object.keys(context).length) return null;
+  const compactSection = (name, adoptedLimit) => {
+    const section = obj(context[name]);
+    return {
+      adopted_items: arr(section.adopted_items, adoptedLimit).map((v)=>({
+        source_kind:v?.source_kind,item_id:v?.item_id,claim:v?.claim,topic:v?.topic,
+        publisher:v?.publisher,source_url:v?.source_url,published_at:v?.published_at,
+        observation_period:v?.observation_period,fact_kind:v?.fact_kind,
+      })),
+      refresh_candidates: arr(section.refresh_candidates,3).map((v)=>({
+        item_id:v?.item_id,claim:v?.claim,topic:v?.topic,publisher:v?.publisher,
+        source_url:v?.source_url,published_at:v?.published_at,
+        observation_period:v?.observation_period,fact_kind:v?.fact_kind,
+        verification:v?.verification,
+      })),
+      seed_candidates: arr(section.seed_candidates,2).map((v)=>({
+        item_id:v?.item_id,claim:v?.claim,topic:v?.topic,publisher:v?.publisher,
+        source_url:v?.source_url,published_at:v?.published_at,
+        observation_period:v?.observation_period,fact_kind:v?.fact_kind,
+      })),
+      candidate_events: arr(section.candidate_events,2).map((v)=>({
+        event_id:v?.event_id,title:v?.title,summary:v?.summary,publisher:v?.publisher,
+        source_url:v?.source_url,occurred_at:v?.occurred_at,
+      })),
+    };
+  };
+  return {
+    version:context.version,
+    general_knowledge:compactSection('general_knowledge',8),
+    peripheral_knowledge:compactSection('peripheral_knowledge',5),
+    rules:[
+      'Adopted knowledge may inform work when relevant but does not imply expertise.',
+      'Source attribution is not independent factual verification.',
+      'If an adopted item is used in a submitted MBA analysis, cite its exact source_url and report knowledge_usage.',
+    ],
+  };
+}
+
+function buildDeepCognitionPacket(packet, modeInfo = null) {
   const stage = currentStage(packet);
   const commonKeys = [
     'brain_packet_version','generated_at','agent','identity_context','continuity','traits','interests',
     'state','mandatory_lifecycle_context','evidence_first_cognition_contract','evidence_provenance',
     'intent_execution_context','intent_trigger','next_intent_context','sleep_eligibility_context',
-    'attention_arbiter_context','recent_capability_results','knowledge_pool_context',
+    'attention_arbiter_context','recent_capability_results',
   ];
   const stageKeys = stage === 'mba_entrepreneurship'
     ? ['academic_standard_context','entrepreneurship_remediation_context']
@@ -1257,6 +1297,7 @@ export function buildDeepCognitionPacket(packet, modeInfo = null) {
   for (const key of [...commonKeys,...stageKeys]) {
     if (packet?.[key] !== undefined && packet?.[key] !== null) out[key] = packet[key];
   }
+  out.knowledge_pool_context = compactKnowledgePoolContext(packet);
   out.admin_chat_context = compactDeepAdminContext(packet);
   out.recent_activity = deepRecentActivity(packet);
   out.cognition_mode_context = {
