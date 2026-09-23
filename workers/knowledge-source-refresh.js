@@ -24,7 +24,7 @@ async function fetchSource(source) {
  const endpoint=String(source.endpoint || '');
  const url=new URL(endpoint);
  if (url.protocol!=='https:' ||
-     !['www.federalreserve.gov','www.bls.gov','api.worldbank.org'].includes(url.hostname))
+     !['www.federalreserve.gov','www.bls.gov','api.worldbank.org','apps.bea.gov'].includes(url.hostname))
     throw Error('knowledge_refresh_disallowed_endpoint');
  const resp=await fetch(url,{headers:{accept:source.adapter==='rss'?'application/rss+xml, application/xml, text/xml':'application/json',
     'user-agent':'AAU-KnowledgeRefresh/0.3 (+https://github.com/booleanlambda/agent-control-room)'},
