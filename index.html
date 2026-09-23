@@ -55,6 +55,39 @@ button,input,textarea,select{font:inherit}.wrap{max-width:1480px;margin:auto;pad
 .login.restoring{display:none}
 @media(max-width:760px){.workspace{padding:12px}.hero-stage{min-height:calc(100vh - 160px)}.agent-hero{padding:14px}.hero-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.intent-pair{grid-template-columns:1fr}.agent-action-dock{grid-template-columns:repeat(3,1fr)}.avatar.hero{width:74px;height:74px;border-radius:20px}.agent-state-stack{display:none}.brandtext span{display:none}.topactions .sessionmeta{display:none}}
 
+
+/* agent artifact tree v0.1 */
+.artifact-section{margin-top:12px;border:1px solid #31475d;border-radius:13px;background:#09121d;overflow:hidden;min-width:0}
+.artifact-section summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:9px;min-height:38px;padding:9px 11px;overflow-wrap:anywhere}
+.artifact-section summary::-webkit-details-marker,.artifact-node summary::-webkit-details-marker{display:none}
+.artifact-section summary::before,.artifact-node summary::before{content:"▸";font-size:11px;color:#9bd2ec;transition:transform .12s}
+.artifact-section[open]>summary::before,.artifact-node[open]>summary::before{transform:rotate(90deg)}
+.artifact-section summary:focus-visible,.artifact-node summary:focus-visible{outline:2px solid #86b9de;outline-offset:-2px;border-radius:7px}
+.artifact-section>.artifact-root-summary{background:#122032;justify-content:flex-start;font-size:12px}
+.artifact-root-summary strong{font-size:13px}.artifact-root-summary .artifact-count{margin-left:auto;font-size:10px;color:#b4c9d9;text-align:right}
+.artifact-tree{padding:7px 8px 10px}
+.artifact-node{margin-top:5px;border:1px solid #22344a;border-radius:9px;background:#0c1622;min-width:0}
+.artifact-node>.artifact-node-summary{padding:8px 10px;font-size:11px}
+.artifact-node[data-depth="1"]{background:#0e1a28}
+.artifact-node[data-depth="2"]{background:#0c151f}
+.artifact-node .artifact-name{font-weight:650;flex:1;min-width:0;overflow-wrap:anywhere}
+.artifact-node .artifact-count{font-size:9px;color:#91afc4;flex-shrink:0}
+.artifact-status{font-size:9px;padding:3px 6px;border-radius:7px;border:1px solid #39495d;color:#b6c6d4;background:#14202d;white-space:nowrap}
+.artifact-status.verified_pass,.artifact-status.completed,.artifact-status.active,.artifact-status.submitted{border-color:#2d7054;color:#8fe3b3;background:#10251d}
+.artifact-status.verified_fail,.artifact-status.failed,.artifact-status.rejected{border-color:#8c4e45;color:#ffb0a0;background:#321c20}
+.artifact-status.in_progress,.artifact-status.queued,.artifact-status.running,.artifact-status.initiated{border-color:#876b35;color:#efd08d;background:#2b2414}
+.artifact-children{padding:0 6px 8px 13px;border-top:1px solid #1c2a3b}
+.artifact-content{padding:9px 11px;border-top:1px solid #28394b;font-size:10px;line-height:1.52}
+.artifact-field{margin:8px 0;padding:8px;border:1px solid #23374a;border-radius:8px;background:#07101a;min-width:0}
+.artifact-field b{display:block;color:#a4c4dc;font-size:9px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}
+.artifact-field .artifact-value{white-space:pre-wrap;overflow-wrap:anywhere}
+.artifact-field pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:10px;font-family:inherit}
+.artifact-field ul{margin:0;padding-left:18px}.artifact-field li{margin:4px 0}
+.artifact-emptynode{padding:8px 12px;color:#8196a8;font-size:10px;display:flex;justify-content:space-between;gap:8px}
+.artifact-empty{font-size:10px;color:#7f9ab0;padding:8px 11px}
+.artifact-doc-link{border:1px solid #376b88;background:#142b3f;color:#b0e1ff;border-radius:8px;padding:6px 9px;cursor:pointer;font-size:10px}
+@media(max-width:760px){.artifact-section>.artifact-root-summary{flex-wrap:wrap}.artifact-root-summary .artifact-count{width:100%;margin-left:18px;text-align:left}.artifact-status{font-size:8px}}
+
 </style>
 </head>
 <body>
@@ -102,7 +135,7 @@ button,input,textarea,select{font:inherit}.wrap{max-width:1480px;margin:auto;pad
 const API='https://mgtilfgygzymxiyixjit.supabase.co/functions/v1/agent-control-room-api';
 const SESSION_KEY='aau_control_room_session_v0_1';
 const LAST_AGENT_KEY='aau_last_admin_agent_v0_1';
-const st={sessionToken:null,sessionExpiresAt:null,changeToken:null,eventLoopRunning:false,eventFailures:0,snap:null,sys:null,verificationAlerts:null,monitor:null,monitorLoading:false,filter:'all',q:'',selectedAgentId:null,focusDetail:null,drawerAgentId:null,drawerMountedFor:null,refreshPending:false,drawerPending:false,refreshFailures:0,lastHealthyAt:null};
+const st={sessionToken:null,sessionExpiresAt:null,changeToken:null,eventLoopRunning:false,eventFailures:0,snap:null,sys:null,verificationAlerts:null,monitor:null,monitorLoading:false,filter:'all',q:'',selectedAgentId:null,focusDetail:null,drawerAgentId:null,drawerMountedFor:null,artifactAgentId:null,artifactOpenKeys:null,refreshPending:false,drawerPending:false,refreshFailures:0,lastHealthyAt:null};
 const $=x=>document.querySelector(x), raw=x=>String(x??''), esc=x=>raw(x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const nice=x=>raw(x).replace(/^agent_/,'Agent ').split('_').map(y=>y.charAt(0).toUpperCase()+y.slice(1)).join(' ');
 const when=x=>x?new Date(x).toLocaleString():'none', rel=x=>{if(!x)return'none';const s=(new Date(x)-Date.now())/1000,a=Math.abs(s);let v,u;if(a<60){v=Math.round(a);u='sec'}else if(a<3600){v=Math.round(a/60);u='min'}else if(a<86400){v=Math.round(a/3600);u='hr'}else{v=Math.round(a/86400);u='day'}return s>=0?`in ${v} ${u}${v===1?'':'s'}`:`${v} ${u}${v===1?'':'s'} ago`};
@@ -236,11 +269,13 @@ function render(){
      ['Model',cur.primary_model_id||'—']
    ];
    const paused=isPaused(cur);
+   preserveArtifactExpansion(cur.agent_id);
+   const artifactMarkup=artifactTreeHtml(detail?.artifact_tree);
    $('#experiment').innerHTML=`<div class="agent-card-head"><div class="identity">${avatar(cur,'hero')}<div><div class="focus-name">${esc(displayName(cur))}</div><div class="focus-label">${esc(cur.internal_label||'')}</div><div class="focus-model">${esc(cur.primary_model_id||'')}</div><span class="stage">${esc(nice(cur.current_stage||cur.lifecycle_stage||'—'))}</span></div></div><div class="agent-state-stack"><span class="pill ${stateClass}">${esc(stateLabel)}</span><span class="msgmeta">admin-selected · remembered locally</span></div></div>
    <div class="hero-stat-grid">${stats.map(([k,v])=>`<div class="hero-stat"><div class="k">${esc(k)}</div><div class="value">${esc(v)}</div></div>`).join('')}</div>
    <div class="intent-pair"><div class="intent-box"><div class="k">Last intent</div><div class="intent-text">${esc(lastIntent?intentReason(lastIntent):(cur.last_stated_reason||cur.last_action||'No prior intent recorded.'))}</div><div class="intent-meta">${esc(lastIntent?[nice(lastIntent.status||''),lastIntent.completed_at?when(lastIntent.completed_at):''].filter(Boolean).join(' · '):'')}</div></div>
    <div class="intent-box current"><div class="k">Current intent</div><div class="intent-text">${esc(authoritativeIntent||(currentIntent?intentReason(currentIntent):'No active intent.'))}</div>${authoritativeIntent&&currentIntent&&intentReason(currentIntent)!==authoritativeIntent?`<div class="intent-meta">Scheduled from: ${esc(intentReason(currentIntent))}</div>`:''}<div class="intent-meta">${esc(currentIntent?[nice(currentIntent.status||''),currentIntent.execute_at?when(currentIntent.execute_at):'',currentIntent.execute_at?rel(currentIntent.execute_at):''].filter(Boolean).join(' · '):'')}</div></div></div>
-   <div class="primary-reason"><b>Latest agent statement</b><br>${esc(cur.last_stated_reason||cur.last_action||cur.selected_action||'No recent action summary.')}</div>
+   ${artifactMarkup}<div class="primary-reason"><b>Latest agent statement</b><br>${esc(cur.last_stated_reason||cur.last_action||cur.selected_action||'No recent action summary.')}</div>
    <div class="agent-action-dock">
      <button class="agent-iconbtn" type="button" data-agent-tab="chat"><span class="ico">✉</span><span>Chat</span></button>
      <button class="agent-iconbtn" type="button" data-agent-tab="files"><span class="ico">▤</span><span>Files</span></button>
@@ -250,6 +285,7 @@ function render(){
      <button class="agent-iconbtn" type="button" id="primaryAgents"><span class="ico">◎</span><span>Agents</span></button>
    </div>`;
    document.querySelectorAll('[data-agent-tab]').forEach(b=>b.onclick=()=>openAgent(cur.agent_id,false,b.dataset.agentTab));
+   bindFileButtons($('#experiment'));
    const toggle=$('#primaryToggle');if(toggle)toggle.onclick=()=>controlAgent(cur.agent_id,paused?'unpause':'pause');
    const agentsBtn=$('#primaryAgents');if(agentsBtn)agentsBtn.onclick=()=>$('#agentDirectory')?.classList.toggle('is-hidden');
  }else $('#experiment').innerHTML='<div class="empty">No agent available.</div>';
@@ -264,6 +300,83 @@ function filePreviewHtml(f){const t=raw(f?.inline_text_preview||'');return t?`<d
 function attachmentHtml(f){const agentOut=f?.direction==='outbound'||f?.sender_kind==='agent',preview=f.signed_url&&String(f.mime_type||'').startsWith('image/')?`<img src="${esc(f.signed_url)}" alt="${esc(f.filename)}">`:filePreviewHtml(f);return `<div class="attachment ${agentOut?'agent-output':''}">${preview}<div class="filename">${esc(f.filename)}</div><div class="attmeta"><span class="filedir ${agentOut?'agent':'admin'}">${esc(fileDirectionLabel(f))}</span> · ${esc(f.mime_type||'file')} · ${esc(f.processing_status||'')}</div>${f.caption?`<div class="muted" style="margin-top:5px">${esc(f.caption)}</div>`:''}<div class="fileactions"><button data-file="${esc(f.file_id)}">View file</button></div></div>`}
 function messagesHtml(messages){return messages.length?messages.map(m=>`<div class="msg ${m.sender_kind==='admin'?'admin':'agent'}">${esc(m.content||'')}${(m.attachments||[]).length?`<div class="attachments">${m.attachments.map(attachmentHtml).join('')}</div>`:''}<div class="msgmeta">${esc(m.sender_kind)} · ${esc(m.delivery_status||'')} · ${esc(when(m.created_at))}</div></div>`).join(''):'<div class="empty">No messages yet.</div>'}
 function filesHtml(files){return files.length?files.map(f=>{const agentOut=f?.direction==='outbound'||f?.sender_kind==='agent',owner=f?.agent_name?`<span class="filedir agent">${esc(f.agent_name)}</span> · `:'';return `<div class="fileitem ${agentOut?'agent-output':''}"><div class="filemain"><div class="filename">${esc(f.filename)}</div><div class="attmeta">${owner}<span class="filedir ${agentOut?'agent':'admin'}">${esc(fileDirectionLabel(f))}</span> · ${esc(f.mime_type||'file')} · ${esc(when(f.created_at))}</div>${f.caption?`<div class="muted" style="margin-top:5px">${esc(f.caption)}</div>`:''}${filePreviewHtml(f)}<div class="fileactions"><button data-file="${esc(f.file_id)}">View full file</button></div></div><span class="filetag">${esc(f.purpose||f.processing_status||'file')}</span></div>`}).join(''):'<div class="empty">No files yet.</div>'}
+
+/* Artifact tree: durable lifecycle, submitted studies, independent tests, and product evidence. */
+function artifactFieldHtml(label,value){
+ if(value===null||value===undefined||value===''||(Array.isArray(value)&&!value.length))return '';
+ let body;
+ if(Array.isArray(value)){
+   body='<ul>'+value.map(x=>'<li>'+esc(typeof x==='string'?x:JSON.stringify(x,null,2))+'</li>').join('')+'</ul>';
+ }else if(typeof value==='object'){
+   body='<pre>'+esc(JSON.stringify(value,null,2))+'</pre>';
+ }else{
+   body='<div class="artifact-value">'+esc(value)+'</div>';
+ }
+ return '<div class="artifact-field"><b>'+esc(nice(label))+'</b>'+body+'</div>';
+}
+function artifactContentHtml(n){
+ const d=n?.content;
+ if(!d||typeof d!=='object'||Array.isArray(d)||!Object.keys(d).some(k=>d[k]!=null))return '';
+ let out='';
+ if(d.study_brief)out+=artifactFieldHtml('Study brief',d.study_brief);
+ if(d.assignment_prompt)out+=artifactFieldHtml('Assignment',d.assignment_prompt);
+ const submission=d.submission;
+ if(submission&&typeof submission==='object'&&!Array.isArray(submission)){
+   for(const k of ['analysis','assumptions','evidence','conclusion','self_critique'])out+=artifactFieldHtml(k,submission[k]);
+   for(const [k,v] of Object.entries(submission))if(!['analysis','assumptions','evidence','conclusion','self_critique'].includes(k))out+=artifactFieldHtml(k,v);
+ }
+ if(d.report&&typeof d.report==='object'){
+   for(const k of ['rationale','dimensions','strengths','weaknesses','remediation']){
+     out+=artifactFieldHtml(k,d.report[k]);
+   }
+   for(const [k,v] of Object.entries(d.report))if(!['rationale','dimensions','strengths','weaknesses','remediation'].includes(k))out+=artifactFieldHtml(k,v);
+ }
+ for(const [k,v] of Object.entries(d)){
+   if(['study_brief','assignment_prompt','submission','report','evidence','assessment_report'].includes(k))continue;
+   out+=artifactFieldHtml(k,v);
+ }
+ if(d.assessment_report)out+=artifactFieldHtml('Assessment report',d.assessment_report);
+ if(d.evidence&&!(submission&&submission.evidence))out+=artifactFieldHtml('Evidence',d.evidence);
+ const file=n?.meta?.file_id;
+ if(file)out+='<button type="button" class="artifact-doc-link" data-file="'+esc(file)+'">Open source file</button>';
+ return out?'<div class="artifact-content">'+out+'</div>':'';
+}
+function artifactNodeHtml(n,depth=0){
+ const children=Array.isArray(n?.children)?n.children:[];
+ const content=artifactContentHtml(n);
+ const id=raw(n?.id||n?.label||'artifact');
+ const open=st.artifactOpenKeys?st.artifactOpenKeys.has(id):false;
+ const status=raw(n?.status||'not_started');
+ const cls=status.toLowerCase().replace(/[^a-z0-9_-]/g,'');
+ const meta=n?.meta||{};
+ const tags=[];
+ if(meta.submitted_units!==undefined)tags.push(meta.submitted_units+'/'+(meta.total_units||0)+' units');
+ if(meta.courses_passed!==undefined)tags.push(meta.courses_passed+'/'+(meta.courses_total||0)+' courses');
+ if(meta.score!==null&&meta.score!==undefined&&Number.isFinite(Number(meta.score)))tags.push(Math.round(Number(meta.score)*100)+'%');
+ if(meta.attempts>1)tags.push('revision '+meta.attempts);
+ if(n?.date)tags.push(when(n.date));
+ const mini=tags.length?'<span class="artifact-count">'+esc(tags.join(' · '))+'</span>':'';
+ const statusHtml='<span class="artifact-status '+cls+'">'+esc(nice(status))+'</span>';
+ const head='<span class="artifact-name">'+esc(n?.label||'Artifact')+'</span>'+mini+statusHtml;
+ if(!children.length&&!content)return '<div class="artifact-emptynode" data-depth="'+depth+'"><span>'+esc(n?.label||'Artifact')+'</span>'+statusHtml+'</div>';
+ const nested=children.length?'<div class="artifact-children">'+children.map(child=>artifactNodeHtml(child,depth+1)).join('')+'</div>':'';
+ return '<details class="artifact-node" data-artifact-node="'+esc(id)+'" data-depth="'+depth+'" '+(open?'open':'')+'><summary class="artifact-node-summary">'+head+'</summary>'+content+nested+'</details>';
+}
+function artifactTreeHtml(tree){
+ if(!tree||!Array.isArray(tree.stages))return '<div class="artifact-section"><div class="artifact-empty">Artifact index unavailable for this agent.</div></div>';
+ const s=tree.summary||{};
+ const label=esc((s.units_submitted??0)+'/'+(s.units_total??60)+' units · '+(s.courses_passed??0)+'/'+(s.courses_total??15)+' courses');
+ const open=st.artifactOpenKeys?st.artifactOpenKeys.has('root'):true;
+ return '<details class="artifact-section" id="artifactTree" data-artifact-node="root" '+(open?'open':'')+'><summary class="artifact-root-summary"><strong>▤ Artifacts · Lifecycle</strong><span class="artifact-count">'+label+'</span></summary><div class="artifact-tree">'+tree.stages.map(n=>artifactNodeHtml(n,0)).join('')+'</div></details>';
+}
+function preserveArtifactExpansion(agentId){
+ if(st.artifactAgentId!==agentId){
+   st.artifactAgentId=agentId;st.artifactOpenKeys=null;return;
+ }
+ const nodes=document.querySelectorAll('#artifactTree details[data-artifact-node],#artifactTree[data-artifact-node]');
+ if(nodes.length)st.artifactOpenKeys=new Set([...nodes].filter(el=>el.open).map(el=>el.dataset.artifactNode));
+}
+
 function overviewHtml(d,a){const intents=Array.isArray(d?.next_intents)?d.next_intents:[];const execs=Array.isArray(d?.intent_executions)?d.intent_executions:[];const liveExec=execs.find(x=>['queued','claimed','running'].includes(x?.status))||null;const activeIntent=intents.find(x=>x?.status==='active')||null;const linkedIntent=liveExec?.next_intent_id?intents.find(x=>x?.next_intent_id===liveExec.next_intent_id)||null:null;const ni=activeIntent||linkedIntent||null;const intentView=ni||liveExec;const intentAt=ni?.execute_at||liveExec?.execute_at||liveExec?.due_at||a?.next_queued_execute_at||null;const r=a?.resources||{};const compute=r?.compute?.balance??a?.compute_balance??a?.compute_credits;const state=a?.sleeping?'Sleeping':(a?.awake?'Awake':'Idle');const authoritative=authoritativeAssignmentLabel(d);const reason=authoritative||a?.last_stated_reason||a?.last_action||a?.current_focus||'No recent action summary.';const health=raw(a?.current_intent_health||a?.current_execution_health||'').toLowerCase();const healthClass=/^(healthy|queued|running|retrying|failed|cancelled)$/.test(health)?health:'';const healthBadge=health?`<span class="healthbadge ${healthClass}">${esc(nice(health))}</span>`:'';const retry=a?.current_intent_retry_error||a?.current_retry_error||null;const intentLabel=authoritative||(intentView?intentReason(intentView):(liveExec?'Retrying preserved intent.':'No active next intent.'));const scheduled=intentView?intentReason(intentView):'';const scheduledMeta=authoritative&&scheduled&&scheduled!==authoritative?`<div class="msgmeta">Scheduled from: ${esc(scheduled)}</div>`:'';const execMeta=liveExec?`${nice(liveExec.status||'queued')}${Number.isFinite(Number(liveExec.attempts))?` · attempt ${Number(liveExec.attempts)}`:''}`:'';return `<div class="overview-grid"><div class="overview-card"><div class="k">State</div><div class="ov big">${esc(state)}</div><div class="msgmeta">${esc(nice(a?.current_focus||a?.lifecycle_stage||'—'))}${healthBadge?` · ${healthBadge}`:''}</div>${retry?`<div class="msgmeta warn">Retry preserved after transient execution error.</div>`:''}</div><div class="overview-card"><div class="k">Compute</div><div class="ov big">${esc(fmt(compute))}</div><div class="msgmeta">existence account ${esc(a?.existence_account_state||'—')}</div></div><div class="overview-card wide"><div class="k">Current work</div><div class="ov">${esc(reason)}</div></div><div class="overview-card wide"><div class="k">Next intent</div><div class="ov">${esc(intentLabel)}</div>${scheduledMeta}${intentAt?`<div class="msgmeta">${esc(when(intentAt))} · ${esc(rel(intentAt))}${execMeta?` · ${esc(execMeta)}`:''}</div>`:execMeta?`<div class="msgmeta">${esc(execMeta)}</div>`:''}</div></div>`}
 function tabButton(tab,icon,label){return `<button class="navbtn" type="button" data-tab="${tab}" aria-label="${esc(label)}"><span class="ico" aria-hidden="true">${icon}</span><span class="label">${esc(label)}</span></button>`}
 function bindDrawerTabs(preferred){const root=$('#drawerbody');if(!root)return;const buttons=[...root.querySelectorAll('.navbtn[data-tab]')],tabs=[...root.querySelectorAll('.drawer-tab[data-panel]')];const activate=name=>{buttons.forEach(b=>{const on=b.dataset.tab===name;b.classList.toggle('active',on);b.setAttribute('aria-selected',on?'true':'false')});tabs.forEach(p=>p.classList.toggle('active',p.dataset.panel===name));root.dataset.activeTab=name};buttons.forEach(b=>b.onclick=()=>activate(b.dataset.tab));activate(preferred||root.dataset.activeTab||'overview')}
