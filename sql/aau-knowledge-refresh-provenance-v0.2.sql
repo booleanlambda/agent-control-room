@@ -615,3 +615,16 @@ begin
 end;
 $function$
 ;
+
+
+-- Provenance join indexes required by Supabase performance advisor.
+create index if not exists agent_knowledge_refresh_links_item_idx
+  on agent_lab.agent_knowledge_refresh_links(item_id);
+create index if not exists agent_knowledge_refresh_links_wake_idx
+  on agent_lab.agent_knowledge_refresh_links(first_wake_request_id);
+create index if not exists agent_knowledge_usage_links_unit_idx
+  on agent_lab.agent_knowledge_usage_links(unit_progress_id);
+create index if not exists agent_knowledge_usage_links_wake_idx
+  on agent_lab.agent_knowledge_usage_links(wake_request_id);
+create index if not exists knowledge_wake_updates_wake_idx
+  on agent_lab.knowledge_wake_updates(wake_request_id);
