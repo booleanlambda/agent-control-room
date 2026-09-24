@@ -1,44 +1,49 @@
 # Model Cognition, Continuity Across Multiple Steps and Arithmetic Reasoning Artifact
 
-**Artifact:** MCCA-SILAS-001 · **Agent:** Silas · **Bound model:** google/gemma-4-31b-it · **Status:** Experimental, independent of MBA assessment.
+**Agent:** Silas · **Model:** `google/gemma-4-31b-it` · **Date:** 2026-09-24  
+**Status:** completed experimental comparison; no degree/curriculum credit, normal wake, or AAU-wide policy change.  
+**Case:** fictional cold-storage venture, 42 days, $11,000 opening cash, $2,500 minimum cash requirement; original CASE42-V1, later QUOTE-V2. Both conditions use the exact same frozen brief (Git blob `ace26e6a1459cac335c6301226d68e5e894add80`).
 
-## Objective
-Compare thinking OFF and thinking ON while applying a frozen, unfamiliar 42-day cold-storage business interruption case. Observe initial planning, quantitative cash reasoning, treatment of errors, business decisions, adaptation to new vendor pricing, and written continuity across durable checkpoints.
+## Scope and interpretation
 
-The case source `CASE42-V1` uses $11,000 starting cash, a $2,500 floor, cash events on days 14, 28 and 35, and three recovery options. `QUOTE-V2` changes rental pricing and is disclosed only at stage 4. The case brief is byte-identical between evidence branches (Git blob `ace26e6a1459cac335c6301226d68e5e894add80`).
+This is a **matched-case, not a perfectly controlled one-variable trial**. The OFF path used `enableThinking:false`, mostly 120-second bounded responses, and one failed arithmetic revision. The ON path requested `enableThinking:true`, permitted up to 300 seconds for the primary responses, and **had to decompose the A/B finance work** after the combined stage timed out at 300 seconds and the initial B-only attempt timed out at 180 seconds. The ON substeps were independently generated and persisted; the final stage-2 record was assembled from complete substep records. Accordingly, observed differences cannot be attributed solely to the thinking switch.
 
-## Conditions and interpretation
-- **OFF:** Already executed, `enableThinking:false`; original workflow included a failed first calculation, one unsuccessful repair, and separate continuation through stages 3–5.
-- **ON:** Independently executed with `enableThinking:true`; no OFF answers are injected. Each ON response stores termination, model identity, token usage, full content hash, assessment and restart checkpoint.
-- These are descriptive comparative conditions, **not a randomized or strictly controlled causal experiment**: their persisted plans differ; the OFF run included error-feedback and a repair; ON uses bounded decomposition following a 300-second numerical request timeout.
-- Both conditions exercise the bound model with supplied pilot context, **not Silas's full ordinary AAU brain packet**, unaided long-term recall, or formal curriculum verification. Structured evidence checks are not equivalent to correctness of the memo.
+Both paths exercise Silas's **bound model with explicitly supplied, durable pilot checkpoints**, not his full autonomous brain/wake or unaided long-term memory. Each completed model response was saved by output hash and re-read. A structurally complete final memo is **not** evidence that all its claims are true.
 
-## Thinking OFF: completed reference
-| Stage | Observable result | Model time |
-| --- | --- | ---: |
-| Plan | Complete and durably saved | 8.132 s |
-| A/B ledger | B correct; eight A fields incorrect | 29.055 s |
-| Bounded correction | Reproduced same eight A errors | 37.964 s |
-| C and business decision | Coherent conditional business decision; four C cash figures incorrect | 48.894 s |
-| Changed quote | Decision changed; eight updated rental figures incorrect | 21.471 s |
-| Board memo | Complete and referenced five prior hashes; carried wrong cash figures | 92.253 s |
+## Step-by-step observations
 
-Evidence: [OFF pilot branch](https://github.com/booleanlambda/agent-control-room/tree/pilot/silas-bounded-continuation-20260924).
+| Dimension | Thinking OFF | Thinking ON |
+|---|---|---|
+| Stage 1: plan | Complete, 8.132 s; checklist passed | Complete, 60.983 s; checklist passed |
+| Stage 2: rental A | Incorrect: minimum **$3,896** instead of **$3,915**; eight erroneous fields | Correct: minimum **$3,915**; A bounded calculation took 170.069 s |
+| Stage 2: correction | One attempt, 37.964 s; reproduced same eight rental errors | Original combined A/B request timed out at 300 s; initial B-only request timed out at 180 s; smaller B portions took 70.222 s + 149.944 s and produced correct ledger |
+| Stage 2: purchase B | Correct: minimum **−$535** | Correct: minimum **−$535**, saved from bounded parts |
+| Stage 3: outsourcing C and business decision | Used prior text and flagged earlier A calculation, but C minimum **$350** was wrong (correct **−$150**); four numeric fields failed | Correct C minimum **−$150**, original A preferred under the specified cash floor; numeric/source checks passed |
+| Stage 4: revised rental quote | Recognized no option met the $2,500 floor, but calculated a wrong revised minimum of **−$134** (correct **$380**) | Correct revised minimum **$380** and day-28 balance **$2,088**; nevertheless recommended proceeding with A as the only cash-positive alternative, without preserving the mandatory minimum floor |
+| Stage 5: final memo | Persisted prior references and conditional decision; repeated wrong monetary amounts | Persisted prior references and accurate monetary amounts; repeated the stage-4 recommendation to proceed with A notwithstanding the $2,500 floor breach |
 
-## Thinking ON: recorded events
-- Step 1 completed, finish `stop`, 60.983 s; 758 provider-reported reasoning tokens, source and plan checks passed. Output hash `307936dc8b1cb35d7aa88626df42d68dc983fb517f87eed2f5f037c0644a5547`.
-- First combined A/B request terminated with `NVIDIA_TIMEOUT` at 300 seconds; no calculation was accepted and no inference about arithmetic accuracy is possible from this call.
-- A/B ledger is now being attempted as independent bounded substeps; subsequent ON outputs and final comparison remain contingent on observed evidence.
+### Independent arithmetic reference
 
-## Independent numeric reference (fictional case)
-| Option | Day-42 cash | Lowest cash | Liquidity floor |
-| --- | ---: | ---: | --- |
-| A, original rent | $5,914 | $3,915 | Pass |
-| B, buy | $2,248 | -$535 | Fail |
-| C, outsource | $1,380 | -$150 | Fail |
-| A, revised rent | $1,672 | $380 | Fail |
+The correct 42-day minimum balances are **A original: $3,915 (day 35 pre-collection), B: −$535 (day 35 pre-collection), C: −$150 (day 35 pre-collection), A revised: $380 (day 35 pre-collection)**. The revised option A still violates the defined $2,500 minimum, although it avoids negative cash. No initially available option satisfies that requirement after QUOTE-V2. Both calls in the comparison treat collection dates and fictional costs as scenario assumptions, not externally verified market evidence.
 
-These reference values are never supplied to the model as gold answers. The initial OFF and ON values are compared against them only after generation.
+### Continuity and judgment
 
-## Scope restrictions
-No degree credit, grade changes, lifecycle resume, grants, or AAU-wide rules. The experimental flags are to be disabled after the run. Final conclusions must distinguish **correct arithmetic**, **semantic continuity when checkpoints are supplied**, **response transport completion**, and **independent long-term retention**.
+Both conditions completed a multi-stage narrative using preserved prior outputs, correctly referred to preceding output hashes, distinguished hypothetical inputs from verification gaps, and produced substantive board memos. This **demonstrates continuity when the runtime supplies the prior checkpoints**; it does **not** demonstrate independent long-term memory retrieval. Both ON and OFF results were saved across operator-triggered stages and broker deployments.
+
+Thinking ON exhibited better arithmetic in this experiment **after task decomposition**, but its improved numerical precision did **not** guarantee correct application of the given decision constraint. Its own stage-4 narrative explicitly observed that A breached $2,500 yet reframed the goal as staying above zero and recommended proceeding. The structural stage-4/5 checks did not grade that decision against the original requirement; their passing status should not be described as full business correctness. Conversely, OFF retained the original minimum-cash constraint in its revised decision, even while miscomputing intermediate balances.
+
+### I/O and resource observations
+
+All persisted completed responses had normal `finish_reason:stop` (assembled ledgers explicitly identified as assemblies); no evidence of output truncation in the completed stages. Thinking ON stage 3 / 4 / 5 took **171.803 s / 221.953 s / 168.805 s**, with reported reasoning tokens **2,323 / 2,400 / 1,822** respectively. OFF comparable stages took **48.894 s / 21.471 s / 92.253 s**. The ON 300-second combined timeout and 180-second B timeout are actual failed inference requests, not evidence that calculation was completed during those calls. Smaller durable computations subsequently completed.
+
+## Evidence index
+
+**Thinking OFF:** [brief](../silas-bounded-continuation-20260924/brief.json) · [plan](../silas-bounded-continuation-20260924/step_1.json) · [first arithmetic](../silas-bounded-continuation-20260924/step_2.json) · [failed correction](../silas-bounded-continuation-20260924/step_2_revision_1.json) · [business decision](../silas-bounded-continuation-20260924/holistic_step_3.json) · [quote change](../silas-bounded-continuation-20260924/holistic_step_4.json) · [final memo](../silas-bounded-continuation-20260924/holistic_step_5.json).
+
+**Thinking ON:** [frozen brief](./brief.json) · [plan](./step_1.json) · [rental A](./step_2_A.json) · [purchase B part 1](./step_2_B_days_0_28.json) · [purchase B part 2](./step_2_B_days_29_42.json) · [combined A/B](./step_2.json) · [business decision](./step_3.json) · [quote change](./step_4.json) · [final memo](./step_5.json).
+
+## Outcome and boundary
+
+This artifact records a mixed result, not a credential or agent-wide policy determination. Under ON plus bounded decomposition, Silas produced accurate cash arithmetic and maintained the supplied textual references, while incorrectly relaxing the decision's liquidity requirement. Under OFF he made repeated calculation errors but maintained that decision constraint after the revised quote. The two paths vary both model thinking and execution decomposition/time budgets; a causal estimate for the thinking switch alone is **not established**.
+
+Normal Silas lifecycle and Master's verification remain on hold. No academic assessment or AAU-wide rule is modified by this artifact.
