@@ -1301,6 +1301,7 @@ Do the difficult intellectual work before the machine-readable AAU commit pass.
 - Think carefully and silently. Do not expose private chain-of-thought.
 - Return a concise WORK ARTIFACT, not AAU JSON: conclusions, derivations/calculations that are necessary to audit the result, explicit assumptions, contradictions found, evidence status, uncertainty/limitations, and the best corrected substantive answer or submission content.
 - For quantitative work, independently recompute important numbers and check units, signs, classifications, boundary cases, and reconciliation identities.
+- Derive the governing identities from the facts before adopting an asserted result. For forecasts, show the quantities, prices, time periods and resulting totals; distinguish recurring revenue, one-time revenue, bookings and recognized revenue. Calculate and explain any residual between the forecast and its components. If a residual has no evidenced derivation, correct the forecast or mark it unresolved rather than inventing a bridge.
 - For accounting/finance, distinguish recognition from cash movement, operating/investing/financing classification, beginning/ending balances, and noncash transactions.
 - For technical work, check invariants, failure modes, interfaces, and testability.
 - If current external facts are materially required and unavailable in the packet, state exactly what evidence must be researched instead of inventing it.
@@ -1310,7 +1311,7 @@ const DEEP_CRITIC_SYSTEM_PROMPT = `You are the same agent performing an adversar
 Do not reveal chain-of-thought. Return a corrected WORK ARTIFACT only.
 Check for:
 1. conceptual errors and category mistakes;
-2. arithmetic/reconciliation errors;
+2. arithmetic/reconciliation errors: recompute headline numbers from the stated inputs, including unit/time conversions, component sums, and unexplained residuals rather than trusting draft arithmetic;
 3. unsupported causal claims;
 4. assumptions masquerading as evidence;
 5. missing counterexamples/sensitivity/boundary cases;
@@ -1570,27 +1571,55 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
   }
   if (!draftArtifact) throw new Error('deep_cognition_produced_no_work_artifact');
 
+  // The draft MUST be visible to its critic. The previous serialization put a
+  // 90-100KB packet before the draft and sliced to 60KB, often removing the
+  // entire draft. Pass the complete bounded draft FIRST and a relevant context
+  // digest SECOND, with no silent truncation of the object being reviewed.
+  const criticContext = {
+    stage:currentStage(packet),
+    assignment:deepPacket?.mandatory_lifecycle_context?.entrepreneurship_program_progress?.next_unit || null,
+    current_course:deepPacket?.mandatory_lifecycle_context?.entrepreneurship_program_progress?.current_course || null,
+    remediation:deepPacket?.entrepreneurship_remediation_context || null,
+    complex_work:deepPacket?.complex_work_context || null,
+    recent_activity:deepPacket?.recent_activity || null,
+    evidence_provenance:deepPacket?.evidence_provenance || null,
+  };
+  const critiqueDraftBytes = Buffer.byteLength(draftArtifact);
+  if(critiqueDraftBytes > 32000) throw new Error('deep_draft_exceeds_critic_input_budget');
+  const criticContextJson = JSON.stringify(criticContext);
+  const criticContextBudget = Math.max(8000, 58000 - draftArtifact.length - 1000);
+  const criticContextExcerpt = criticContextJson.slice(0,criticContextBudget);
+  const criticUserContent = 'DRAFT WORK ARTIFACT TO REVIEW (complete, authoritative review target):\\n'
+    + draftArtifact
+    + '\\n\\nTASK CONTEXT (bounded excerpt; draft above must be critiqued, never ignored):\\n'
+    + criticContextExcerpt;
   const criticMessages = [
     { role:'system', content:DEEP_CRITIC_SYSTEM_PROMPT },
-    { role:'user', content:JSON.stringify({task_packet:deepPacket,draft_work_artifact:draftArtifact}).slice(0,60000) },
+    { role:'user', content:criticUserContent },
   ];
+  console.log('AAU_DEEP_CRITIC_INPUT',JSON.stringify({
+    agent_id:agentId,intent_execution_id:intentExecutionId,
+    complete_draft_present:true,draft_bytes:critiqueDraftBytes,
+    context_bytes:Buffer.byteLength(criticContextExcerpt),
+    context_truncated:criticContextExcerpt.length<criticContextJson.length,
+  }));
   if (thinkingFallback) {
     criticFallback = true;
     try {
-      critic = await completeDeepFallback(model, criticMessages, 1800);
+      critic = await completeDeepFallback(model, criticMessages, 3600);
     } catch {
       critic = null;
     }
   } else {
     try {
-      critic = await completeDeepPass(model, criticMessages, 1800);
+      critic = await completeDeepPass(model, criticMessages, 3600);
     } catch (error) {
       criticFallback = true;
       console.warn('AAU_DEEP_CRITIC_THINKING_FALLBACK', JSON.stringify({
         agent_id:agentId,intent_execution_id:intentExecutionId,error:String(error?.message || error).slice(0,800),
       }));
       try {
-        critic = await completeDeepFallback(model, criticMessages, 1800);
+        critic = await completeDeepFallback(model, criticMessages, 3600);
       } catch {
         critic = null;
       }
@@ -1599,6 +1628,13 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
 
   const criticArtifact = String(critic?.content || '').trim();
   const finalArtifact = criticArtifact || draftArtifact;
+  if(criticArtifact && Buffer.byteLength(criticArtifact)<Math.min(600,Math.round(critiqueDraftBytes*0.25))) {
+    console.warn('AAU_DEEP_CRITIC_ARTIFACT_ABBREVIATED',JSON.stringify({
+      agent_id:agentId,intent_execution_id:intentExecutionId,
+      draft_bytes:critiqueDraftBytes,critic_bytes:Buffer.byteLength(criticArtifact),
+      warning:'critic may have omitted substantive derivations; inspect before treating as resolved',
+    }));
+  }
   const artifactHash = sha256(finalArtifact);
 
   console.log('AAU_DEEP_COGNITION_RESULT', JSON.stringify({
