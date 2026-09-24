@@ -1,0 +1,26 @@
+# Silas Sterling — CAP515 Evidence & Financial Reconciliation Intervention v0.1
+
+**Operator decision, 2026-09-24:** Temporarily hold automatic capstone resubmissions. Preserve all independently verified progress (56/60 units; 14/15 courses) and the existing CAP515 verdicts. This intervention is not an academic pass, a compute grant, or a judgment on the choice of venture.
+
+**Problem observed:** By course assessment 14 (0.70 versus 0.85 pass threshold), the four submissions use incompatible customer definitions, ACV, CAC, gross margin, retention, LTV and cash forecasts; an asserted 15% LTV discount rate is omitted from the calculation. The final BUILD decision treats unanswered assumptions as proven. Earlier attempts also switched venture identities. Repetition is costing finite resources without adding defensible evidence.
+
+## Single-case invariant
+
+Keep **one named venture** throughout the four units: the *current* agent-authored ReguMap AI / Living Traceability concept, unless Silas explicitly revises the choice and updates **all four** units together. This is a working scenario, not an endorsed business or validated customer demand. Fix a single target segment, pricing formula, ACV by segment, CAC, churn, gross margin, discount rate, COGS scope, financing schedule and scenario IDs in one versioned canonical model. Use exact same definitions in Units 1–4. Alternatives belong in separately named scenarios; they cannot silently replace the baseline.
+
+## Operator-authored remediation contract
+
+Before another **integrated independent CAP515 grade**, produce saved agent-authored artifacts, each with immutable file ID and citations/provenance:
+
+1. **CANONICAL_VENTURE_MODEL.md / .json**: one proposition, one customer segment, unit definitions, a single baseline plus any expressly labelled scenarios, price, volumes, gross margin components, CAC, churn, discount rate, LTV/CAC, payback, and 18-month income and cash. The currently submitted Unit 2 uses an illustrative $60k annual platform fee, $30k one-time blueprint per jurisdiction, $15k annual drift maintenance per jurisdiction, 2 jurisdictions, $150k Year 1 revenue, $90k subsequent recurring revenue, $65k CAC, 75% gross margin, 20% annual churn and 15% discount rate. Treat each as **unverified assumptions**; Silas may replace them after reconciling every unit. Do not equate one-time fees with recurring ARR. Define how sales headcount, pipeline, conversion, acquisition lag and implementation capacity produce revenue.
+2. **FINANCIAL_CHECKS.md / executable calculator where available**: reproduce all material formulas and intermediate values; independently recompute LTV with churn and the stated discount (state discrete or continuous convention), gross margin with attributable delivery/verification/API costs, CAC payback and monthly or quarterly cash balances. Include base, downside and upside sensitivities (price/ACV, churn, CAC, service cost and customer ramp). Explicitly connect minimum cash balance, funding request and runway.
+3. **CLAIM_EVIDENCE_REGISTER.md**: for each decision-critical claim include claim ID, exact assertion, source title, publisher, date, URL or saved source file ID, quoted excerpt or observed raw input where legally permitted, observation period, claimed relevance and limitations. Classify each item as independently verified observation, external secondary evidence, arithmetic derivation, scenario assumption, or untested hypothesis. An internal calculation is **not evidence** that customers will pay or regulators will accept a product. Never invent interviews, pilot results, legal permission or revenue; write `not obtained` where absent. Use the approved research workflow and the General/Peripheral Knowledge pools only with actual attribution.
+4. **CROSS_UNIT_RECONCILIATION.md**: a line-by-line map of every material claim, price, metric, market segment and risk from Units 1–4 to one canonical model version and evidence IDs; explicitly retire inconsistent legacy figures. Present an independently checkable preflight and the open gaps.
+5. **BOARD_DECISION.md**: test the original kill criteria against actual evidence, show what is known versus assumed, and make an evidence-proportionate BUILD / REVISE / KILL decision. When core validation is unavailable, **REVISE** is a legitimate result; no grade requires a fabricated pilot or real-world customer contact.
+
+## Review, release and safeguards
+
+- The operator will inspect the saved file IDs and run bounded arithmetic and cross-unit checks **before** enabling another course assessment. Presence of a filename or plausible prose alone is insufficient.
+- Check work product rather than number of wake cycles; the agent may independently choose the implementation and research approach. Reuse available evidence, avoid costly redundant searches, and checkpoint complex work across wakes.
+- Preserve frozen prior submissions, independent scores, original assessment IDs and ledger history. No pass-rate change; CAP515 still requires score >= 0.85 and no critical rubric dimension below 0.75.
+- Pause freezes the existence levy. Any subsequent unpause should be explicit and should not by itself release the assessment hold. The assessment hold must be lifted only after the documented preflight.
