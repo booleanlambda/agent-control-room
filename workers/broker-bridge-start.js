@@ -268,3 +268,10 @@ if (isEnabled('AAU_AGENT_COGNITION_IO_TIMEOUT_PROBE')) {
       name:error?.name||null,message:String(error?.message||error).slice(0,300)
     })));
 }
+
+if (isEnabled('AAU_SILAS_CONTINUATION_PILOT')) {
+  // Explicitly opt-in standalone pilot: does not wake, grade, or modify an agent.
+  void import('./silas-continuation-runner.js')
+    .then(m => m.runSilasContinuationPilot())
+    .catch(e => console.error('AAU_SILAS_PILOT_FATAL', JSON.stringify({error: String(e?.message || e).slice(0,180)})));
+}
