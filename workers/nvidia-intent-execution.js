@@ -530,6 +530,19 @@ function capstoneEvidenceIntegrationCorrection(packet, receipts) {
   return `CAP515 RECEIPT INTEGRATION GATE: Research has ALREADY been executed and persisted. Do NOT search again and do NOT write another board/cross-unit artifact yet. Persist a complete non-empty CLAIM_EVIDENCE_REGISTER JSON file now using origin=agent_file_output_v0_1 and the exact nested file schema. Include at least three exact HTTPS URLs from the supplied receipt ledger, but only attach each source to a claim it actually supports or qualifies. Preserve url, sha256, title, coverage, query and limitations; downgrade unsupported claims to ASSUMED / UNTESTED / INSUFFICIENT. Do not call a fetched source proof of customer demand, regulatory approval, or a pilot unless its text actually establishes that. RECEIPT LEDGER: ${JSON.stringify(usable).slice(0,16000)}`;
 }
 
+function preserveRequiredAdminReply(packet, previousDecision, nextDecision) {
+  const active = packet?.admin_chat_context?.active === true
+    || packet?.executor_policy?.admin_chat_active === true
+    || packet?.runtime_interaction_mode === 'direct_admin_conversation';
+  if (!active || !nextDecision || typeof nextDecision!=='object') return nextDecision;
+  const nextMessage=String(nextDecision?.outbound_message?.message || '').trim();
+  const priorMessage=String(previousDecision?.outbound_message?.message || '').trim();
+  if (!nextMessage && priorMessage) {
+    nextDecision.outbound_message = previousDecision.outbound_message;
+  }
+  return nextDecision;
+}
+
 function entrepreneurshipUnitSubmissionValidation(packet, decision) {
   if (currentStage(packet) !== 'mba_entrepreneurship')
     return { submitting:false, association:null, failures:[] };
@@ -2156,7 +2169,8 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
         { role:'assistant', content:String(ai.content || '').slice(0,50000) },
         { role:'user', content:capstoneResearchCorrection(packet) },
       ]);
-      decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
+      const repairedDecision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
+      decision = preserveRequiredAdminReply(packet, decision, repairedDecision);
     }
     if (!hasWebResearchRequest(decision)) {
       const error = new Error('capstone_preflight_research_required');
@@ -2184,7 +2198,8 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
         { role:'assistant', content:String(ai.content || '').slice(0,50000) },
         { role:'user', content:capstoneEvidenceIntegrationCorrection(packet, priorCapstoneReceipts) },
       ], {maxTokens:3000,timeoutMs:300000});
-      decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
+      const repairedDecision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
+      decision = preserveRequiredAdminReply(packet, decision, repairedDecision);
     }
     if (!evidenceFileUsesReceiptUrls(decision, priorCapstoneReceipts)) {
       const error = new Error('capstone_preflight_receipt_integration_required');
@@ -2268,7 +2283,10 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
     ai = capstonePreflightHoldActive(packet)
       ? await completeStructured(model, baseMessages,{maxTokens:3000,timeoutMs:300000})
       : await complete(model, baseMessages);
-    decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
+    {
+      const researchDecision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
+      decision = preserveRequiredAdminReply(packet, decision, researchDecision);
+    }
     decision.associations = decision.associations.filter(v=>v?.origin !== 'web_research_request_v0_1');
 
     if (capstonePreflightHoldActive(packet) && currentResearchLedger.length>=3
@@ -2281,7 +2299,8 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
           {role:'assistant',content:String(ai.content || '').slice(0,50000)},
           {role:'user',content:capstoneEvidenceIntegrationCorrection(packet,currentResearchLedger)},
         ],{maxTokens:3000,timeoutMs:300000});
-        decision = applySleepIntentPolicy(packet,sanitizeDecision(parseDecision(ai.content)));
+        const repairedDecision = applySleepIntentPolicy(packet,sanitizeDecision(parseDecision(ai.content)));
+        decision = preserveRequiredAdminReply(packet, decision, repairedDecision);
         decision.associations = decision.associations.filter(v=>v?.origin !== 'web_research_request_v0_1');
       }
       if (!evidenceFileUsesReceiptUrls(decision,currentResearchLedger)) {
