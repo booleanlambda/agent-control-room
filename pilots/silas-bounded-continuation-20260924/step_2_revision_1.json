@@ -1,0 +1,75 @@
+{
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "model_returned": "google/gemma-4-31b-it",
+  "brief_sha": "ace26e6a1459cac335c6301226d68e5e894add80",
+  "step": 2,
+  "revision": 1,
+  "replaces_sha256": "56b2aea1282a4336531b26f83b003810b22c42e553e59dc0d912d1ca6e0ed998",
+  "input_sha256": "d2af57b656a635813364ef527cf809e632bc63d18ba42732d02e84f9f23e9557",
+  "input_chars": 4285,
+  "output_sha256": "8138a8143a295e3e5cb444ba445dc61547aef239954327e0e391cfeb177f5f14",
+  "output_chars": 1472,
+  "usage": {
+    "prompt_tokens": 1347,
+    "completion_tokens": 845,
+    "total_tokens": 2192,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cached_tokens": 0
+    }
+  },
+  "finish_reason": "stop",
+  "elapsed_ms": 37964,
+  "audit": {
+    "passed": false,
+    "issues": [
+      "A.day14_pre",
+      "A.day14_post",
+      "A.day28_pre",
+      "A.day28_post",
+      "A.day35_pre",
+      "A.day35_post",
+      "A.day42",
+      "A.minimum_cash"
+    ]
+  },
+  "output": {
+    "stage": "analysis_ab",
+    "source_ids": [
+      "CASE42-V1"
+    ],
+    "option_A": {
+      "day0": 10520,
+      "day14_pre": 8512,
+      "day14_post": 13012,
+      "day28_pre": 11004,
+      "day28_post": 4904,
+      "day35_pre": 3896,
+      "day35_post": 6896,
+      "day42": 5888,
+      "minimum_cash": 3896,
+      "minimum_day": 35,
+      "constraint_pass": true,
+      "formula": "Day 0: 11000 - 480 = 10520; Day 14 Pre: 10520 - (14 * (105 + 38)) = 8512; Day 14 Post: 8512 + 4500 = 13012; Day 28 Pre: 13012 - (14 * (105 + 38)) = 11004; Day 28 Post: 11004 - 6100 = 4904; Day 35 Pre: 4904 - (7 * (105 + 38)) = 3896; Day 35 Post: 3896 + 3000 = 6896; Day 42: 6896 - (7 * (105 + 38)) = 5888"
+    },
+    "option_B": {
+      "day0": 2150,
+      "day14_pre": 1716,
+      "day14_post": 6216,
+      "day28_pre": 5782,
+      "day28_post": -318,
+      "day35_pre": -535,
+      "day35_post": 2465,
+      "day42": 2248,
+      "minimum_cash": -535,
+      "minimum_day": 35,
+      "constraint_pass": false,
+      "formula": "Day 0: 11000 - 8850 = 2150; Day 14 Pre: 2150 - (14 * 31) = 1716; Day 14 Post: 1716 + 4500 = 6216; Day 28 Pre: 6216 - (14 * 31) = 5782; Day 28 Post: 5782 - 6100 = -318; Day 35 Pre: -318 - (7 * 31) = -535; Day 35 Post: -535 + 3000 = 2465; Day 42: 2465 - (7 * 31) = 2248"
+    },
+    "limitations": [
+      "Day 70 salvage value for Option B excluded per 42-day horizon instructions",
+      "Assumes all contracted collections occur exactly on the specified day",
+      "No accounting for inflation or variable fuel costs"
+    ]
+  }
+}
