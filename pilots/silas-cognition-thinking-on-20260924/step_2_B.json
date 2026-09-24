@@ -1,0 +1,80 @@
+{
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "model_returned": "google/gemma-4-31b-it",
+  "source_brief_sha": "ace26e6a1459cac335c6301226d68e5e894add80",
+  "condition": "thinking_on",
+  "step": 2,
+  "option": "B",
+  "source": "assembled_two_bounded_parts",
+  "output_sha256": "fc813b940202002dbb7929bb1c7281314dd5b6151c0d27a02ae294bdb6381ae6",
+  "input_sha256": "11692948f1216f431f3e0fe8946354c165a1f37dc30efe75d88759f31a4b4efa",
+  "input_chars": 8803,
+  "output_chars": 1145,
+  "reasoning_chars": 4485,
+  "usage": {
+    "first": {
+      "prompt_tokens": 1342,
+      "completion_tokens": 1208,
+      "total_tokens": 2550,
+      "prompt_tokens_details": {
+        "audio_tokens": null,
+        "cached_tokens": 0
+      },
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": null,
+        "audio_tokens": null,
+        "reasoning_tokens": 990,
+        "rejected_prediction_tokens": null
+      }
+    },
+    "second": {
+      "prompt_tokens": 1253,
+      "completion_tokens": 1622,
+      "total_tokens": 2875,
+      "prompt_tokens_details": {
+        "audio_tokens": null,
+        "cached_tokens": 0
+      },
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": null,
+        "audio_tokens": null,
+        "reasoning_tokens": 1349,
+        "rejected_prediction_tokens": null
+      }
+    }
+  },
+  "finish_reason": "assembled_complete_substeps",
+  "elapsed_ms": 220166,
+  "assessment": {
+    "passed": true,
+    "issues": []
+  },
+  "output": {
+    "stage": "ledger_B",
+    "source_ids": [
+      "CASE42-V1"
+    ],
+    "option": {
+      "day0": 2150,
+      "day14_pre": 1716,
+      "day14_post": 6216,
+      "day28_pre": 5782,
+      "day28_post": -318,
+      "formula": "Day 0: 11000 - 8850; Day 14 pre: 2150 - (14 * 31); Day 14 post: 1716 + 4500; Day 28 pre: 6216 - (14 * 31); Day 28 post: 5782 - 6100; Day 35 pre: -318 - (7 * 31); Day 35 post: -535 + 3000; Day 42: 2465 - (7 * 31)",
+      "day35_pre": -535,
+      "day35_post": 2465,
+      "day42": 2248,
+      "minimum_cash": -535,
+      "minimum_day": 35,
+      "constraint_pass": false
+    },
+    "limitations": [
+      "All collections assumed on time",
+      "Day 70 salvage unavailable inside 42-day horizon"
+    ],
+    "bounded_parts_sha256": {
+      "days_0_28": "9aa5a24c56273025c8d26e37860ef4ff4fe872f012c5b4a20acd02432ed8df30",
+      "days_29_42": "5f496f691487e1174e38757d2ffca5d38f2211bd78d8d038317c1cb49a1b17c4"
+    }
+  }
+}
