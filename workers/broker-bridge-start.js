@@ -249,3 +249,13 @@ try {
 }
 
 await import('./broker-bridge-envcheck.js');
+
+if (isEnabled('AAU_AUTHENTICATOR_IO_TIMEOUT_PROBE')) {
+  // Run independently of broker boot; never touch agent evidence or verification state.
+  void import('./authenticator-io-timeout-probe.js')
+    .then(({probeAuthenticatorIoTimeout})=>probeAuthenticatorIoTimeout())
+    .then(result=>console.log('AAU_AUTH_IO_TEST_COMPLETE',JSON.stringify(result)))
+    .catch(error=>console.error('AAU_AUTH_IO_TEST_FATAL',JSON.stringify({
+      name:error?.name||null,message:String(error?.message||error).slice(0,300)
+    })));
+}
