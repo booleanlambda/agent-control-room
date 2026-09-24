@@ -1,0 +1,49 @@
+{
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "model_returned": "google/gemma-4-31b-it",
+  "brief_sha": "ace26e6a1459cac335c6301226d68e5e894add80",
+  "step": 2,
+  "part": "days_29_42",
+  "input_sha256": "2e246f78b675a2ffaed9a5c538a38fe56b6fefa7cbc5e8c87e27c38c9f35cfce",
+  "input_chars": 3908,
+  "output_sha256": "5f496f691487e1174e38757d2ffca5d38f2211bd78d8d038317c1cb49a1b17c4",
+  "output_chars": 677,
+  "reasoning_chars": 2377,
+  "usage": {
+    "prompt_tokens": 1253,
+    "completion_tokens": 1622,
+    "total_tokens": 2875,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cached_tokens": 0
+    },
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "reasoning_tokens": 1349,
+      "rejected_prediction_tokens": null
+    }
+  },
+  "finish_reason": "stop",
+  "elapsed_ms": 149944,
+  "assessment": {
+    "passed": true,
+    "issues": []
+  },
+  "output": {
+    "stage": "purchase_B_29_42",
+    "source_ids": [
+      "CASE42-V1"
+    ],
+    "option": {
+      "day35_pre": -535,
+      "day35_post": 2465,
+      "day42": 2248,
+      "minimum_cash": -535,
+      "minimum_day": 35,
+      "constraint_pass": false,
+      "formula": "Day 35 pre: -318 - (7 * 31); Day 35 post: -535 + 3000; Day 42: 2465 - (7 * 31)"
+    },
+    "comment": "Continuing from the Day 28 post-payment balance of -$318, the cash position declines further due to daily fuel costs until the Day 35 collection. The absolute minimum occurs on Day 35 immediately before the $3,000 collection. The $2,500 floor is violated throughout most of the trajectory, including the final balance on Day 42."
+  }
+}
