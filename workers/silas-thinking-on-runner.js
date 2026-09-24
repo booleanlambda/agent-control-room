@@ -103,7 +103,7 @@ export async function runSilasThinkingOn(){
   const row=await callStep(brief,f.sha,n,prior);
   if(!row){h.log('ON_RESULT',{status:'blocked',step:n});return;}
   prior.push(row);
-  if(n===2&&!row.assessment.passed){
+  if(n===2&&!row.assessment.passed&&row.stage2_source!=='assembled_bounded_substeps'){
     const revised=await callStep(brief,f.sha,2,prior,{revision:true});
     if(revised)prior.push(revised);
   }
