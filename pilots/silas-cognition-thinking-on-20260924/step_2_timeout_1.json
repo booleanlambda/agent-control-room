@@ -1,0 +1,21 @@
+{
+  "artifact": "Model Cognition, Continuity Across Multiple Steps and Arithmetic Reasoning Artifact",
+  "condition": "thinking_on",
+  "step": 2,
+  "attempt": 1,
+  "mode": "full_A_and_B_ledger_one_call",
+  "status": "blocked_timeout",
+  "model": "google/gemma-4-31b-it",
+  "enableThinking": true,
+  "jsonMode": true,
+  "maxTokens": 4096,
+  "timeoutMs": 300000,
+  "elapsedMs": 300000,
+  "errorCode": "NVIDIA_TIMEOUT",
+  "started_after": "2026-09-24T23:17:57.678941267Z",
+  "completed_at": "2026-09-24T23:22:57.765101797Z",
+  "prior_checkpoint_sha256": "307936dc8b1cb35d7aa88626df42d68dc983fb517f87eed2f5f037c0644a5547",
+  "source_brief_blob_sha": "ace26e6a1459cac335c6301226d68e5e894add80",
+  "output_persisted": false,
+  "interpretation": "transport/time budget outcome, not a scored model arithmetic response"
+}
