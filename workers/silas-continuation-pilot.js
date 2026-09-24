@@ -70,3 +70,4 @@ const asks=[
  'Synthesize final board memo from four immutable checkpoints with original and revised decisions, numerical findings, evidentiary limits and safeguards. Return JSON stage=final_memo, source_ids=[CASE42-V1,QUOTE-V2], base_decision, fresh_decision, checkpoint_sha256 (exact four prior output hashes), memo (900+ characters), unverified_claims (3+).'
 ];
 const stageNames=['','plan','analysis_ab','decision_v1','fresh_transfer','final_memo'];
+export const pilotHelpers={REPO,BRANCH,ROOT,MODEL,AGENT,digest,token,log,read,save,check,asks,stageNames};
