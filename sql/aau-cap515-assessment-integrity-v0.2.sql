@@ -65,8 +65,8 @@ begin
         or length(btrim(coalesce(v_unit->'submission'->>'conclusion','')))<80
         or length(btrim(coalesce(v_unit->'submission'->>'self_critique','')))<80
         or jsonb_typeof(v_unit->'submission'->'assumptions') is distinct from 'array'
-        or case when jsonb_typeof(v_unit->'submission'->'assumptions')='array'
-             then jsonb_array_length(v_unit->'submission'->'assumptions')=0 else true end
+        or jsonb_array_length(case when jsonb_typeof(v_unit->'submission'->'assumptions')='array'
+             then v_unit->'submission'->'assumptions' else '[]'::jsonb end)=0
         or jsonb_typeof(v_unit->'submission'->'evidence') is distinct from 'array'
       then
         v_completion_errors:=v_completion_errors||to_jsonb(format('unit_%s_required_fields_incomplete',v_order));
