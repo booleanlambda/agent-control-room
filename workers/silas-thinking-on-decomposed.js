@@ -42,3 +42,35 @@ async function substep(key,brief,sourceSha,plan){
   checkpoint_sha:saved.blob,commit:saved.commit});
  return rec;
 }
+
+export async function runSilasThinkingOnDecomposed(){
+ if(!h.token||!process.env.NVIDIA_API_KEY)throw Error('missing_pilot_credentials');
+ const f=await h.read(R+'/brief.json'),planF=await h.read(R+'/step_1.json');
+ if(!f||!planF)throw Error('pilot_prerequisite_missing');
+ const brief=JSON.parse(f.text),plan=JSON.parse(planF.text);
+ if(brief.agent_id!==h.AGENT||brief.bound_model!==h.MODEL||plan.model_returned!==h.MODEL||
+    plan.brief_sha!==f.sha||!plan.assessment?.passed)throw Error('pilot_identity_or_prior_invalid');
+ h.log('ON_LEDGER_START',{agent_id:h.AGENT,model:h.MODEL,thinking_requested:true,prior_plan_sha:plan.output_sha256,
+   source_brief_sha:f.sha,initial_combined_timeout_preserved:true});
+ const a=await substep('A',brief,f.sha,plan);
+ if(!a){h.log('ON_LEDGER_RESULT',{status:'blocked',after:'A'});return;}
+ const b=await substep('B',brief,f.sha,plan);
+ if(!b){h.log('ON_LEDGER_RESULT',{status:'blocked',after:'B'});return;}
+ const path=R+'/step_2.json',existing=await h.read(path);
+ if(existing){h.log('ON_LEDGER_RESULT',{status:'combined_already_exists'});return;}
+ const output={stage:'analysis_ab',source_ids:['CASE42-V1'],option_A:a.output.option,option_B:b.output.option,
+    limitations:[...(a.output.limitations||[]),...(b.output.limitations||[])],
+    bounded_substep_sha256:{A:a.output_sha256,B:b.output_sha256}};
+ const assessment=h.check(2,output,brief,[plan]);
+ const row={contract:'model_cognition_continuity_arithmetic_thinking_on_v1',agent_id:h.AGENT,step:2,revision:0,
+   model_returned:h.MODEL,brief_sha:f.sha,thinking_requested:true,stage2_source:'assembled_bounded_substeps',
+   previous_output_sha256:plan.output_sha256,output_sha256:h.digest(JSON.stringify(output)),
+   input_sha256:h.digest(a.input_sha256+b.input_sha256),input_chars:a.input_chars+b.input_chars,
+   output_chars:a.output_chars+b.output_chars,reasoning_chars:a.reasoning_chars+b.reasoning_chars,
+   finish_reason:'assembled_complete_substeps',usage:{A:a.usage,B:b.usage},
+   elapsed_ms:a.elapsed_ms+b.elapsed_ms,assessment,output};
+ const saved=await h.save(path,row);
+ h.log('ON_LEDGER_RESULT',{status:'durable_stage_2_assembled',passed:assessment.passed,issues:assessment.issues,
+   output_sha256:row.output_sha256,checkpoint_sha:saved.blob,commit:saved.commit,
+   option_A_sha:a.output_sha256,option_B_sha:b.output_sha256});
+}
