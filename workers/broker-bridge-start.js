@@ -259,3 +259,12 @@ if (isEnabled('AAU_AUTHENTICATOR_IO_TIMEOUT_PROBE')) {
       name:error?.name||null,message:String(error?.message||error).slice(0,300)
     })));
 }
+
+if (isEnabled('AAU_AGENT_COGNITION_IO_TIMEOUT_PROBE')) {
+  // Synthetic-only, no agent state or grades; explicitly opt-in.
+  void import('./agent-cognition-io-timeout-probe.js')
+    .then(({probeAgentCognitionIoTimeout})=>probeAgentCognitionIoTimeout())
+    .catch(error=>console.error('AAU_AGENT_IO_TEST_FATAL',JSON.stringify({
+      name:error?.name||null,message:String(error?.message||error).slice(0,300)
+    })));
+}
