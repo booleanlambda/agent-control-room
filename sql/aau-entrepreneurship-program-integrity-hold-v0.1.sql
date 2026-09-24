@@ -79,5 +79,4 @@ begin
    'program_version','entrepreneurship_masters_v0_1'
  );
 end
-$function$
-
+$function$;
