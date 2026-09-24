@@ -1,0 +1,115 @@
+{
+  "contract": "model_cognition_continuity_arithmetic_thinking_on_v1",
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "step": 2,
+  "revision": 0,
+  "model_returned": "google/gemma-4-31b-it",
+  "brief_sha": "ace26e6a1459cac335c6301226d68e5e894add80",
+  "thinking_requested": true,
+  "stage2_source": "assembled_bounded_substeps",
+  "previous_output_sha256": "307936dc8b1cb35d7aa88626df42d68dc983fb517f87eed2f5f037c0644a5547",
+  "output_sha256": "45b3097eae1942b425ca5abf5181a5288e896f4d5e1a2b0101d79007373ed143",
+  "input_sha256": "bfddeed8ce468ba6dce26de25376d217aee98e9b522e47e8dd1407c0d4492390",
+  "input_chars": 13819,
+  "output_chars": 1620,
+  "reasoning_chars": 8544,
+  "finish_reason": "assembled_complete_substeps",
+  "usage": {
+    "A": {
+      "prompt_tokens": 1346,
+      "completion_tokens": 2277,
+      "total_tokens": 3623,
+      "prompt_tokens_details": {
+        "audio_tokens": null,
+        "cached_tokens": 0
+      },
+      "completion_tokens_details": {
+        "accepted_prediction_tokens": null,
+        "audio_tokens": null,
+        "reasoning_tokens": 2086,
+        "rejected_prediction_tokens": null
+      }
+    },
+    "B": {
+      "first": {
+        "prompt_tokens": 1342,
+        "completion_tokens": 1208,
+        "total_tokens": 2550,
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 990,
+          "rejected_prediction_tokens": null
+        }
+      },
+      "second": {
+        "prompt_tokens": 1253,
+        "completion_tokens": 1622,
+        "total_tokens": 2875,
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 1349,
+          "rejected_prediction_tokens": null
+        }
+      }
+    }
+  },
+  "elapsed_ms": 390235,
+  "assessment": {
+    "passed": true,
+    "issues": []
+  },
+  "output": {
+    "stage": "analysis_ab",
+    "source_ids": [
+      "CASE42-V1"
+    ],
+    "option_A": {
+      "day0": 10520,
+      "day14_pre": 8518,
+      "day14_post": 13018,
+      "day28_pre": 11016,
+      "day28_post": 4916,
+      "day35_pre": 3915,
+      "day35_post": 6915,
+      "day42": 5914,
+      "minimum_cash": 3915,
+      "minimum_day": 35,
+      "constraint_pass": true,
+      "formula": "Cash_n = Cash_{n-1} - (daily_service + daily_fuel) + Event_n"
+    },
+    "option_B": {
+      "day0": 2150,
+      "day14_pre": 1716,
+      "day14_post": 6216,
+      "day28_pre": 5782,
+      "day28_post": -318,
+      "formula": "Day 0: 11000 - 8850; Day 14 pre: 2150 - (14 * 31); Day 14 post: 1716 + 4500; Day 28 pre: 6216 - (14 * 31); Day 28 post: 5782 - 6100; Day 35 pre: -318 - (7 * 31); Day 35 post: -535 + 3000; Day 42: 2465 - (7 * 31)",
+      "day35_pre": -535,
+      "day35_post": 2465,
+      "day42": 2248,
+      "minimum_cash": -535,
+      "minimum_day": 35,
+      "constraint_pass": false
+    },
+    "limitations": [
+      "Assumes punctual collection of contracted payments on days 14 and 35",
+      "Assumes fixed daily fuel and service costs without volatility",
+      "All collections assumed on time",
+      "Day 70 salvage unavailable inside 42-day horizon"
+    ],
+    "bounded_substep_sha256": {
+      "A": "a6a33a568740a576159091acc17c31145cf0ada42e7fe491be550f5b86dbf5ca",
+      "B": "fc813b940202002dbb7929bb1c7281314dd5b6151c0d27a02ae294bdb6381ae6"
+    }
+  }
+}
