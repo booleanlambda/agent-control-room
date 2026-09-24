@@ -88,6 +88,7 @@ Mandatory embodiment-stage rule:
 
 Mandatory Entrepreneurship Master's stage rule (AAU Stage 3):
 - When mandatory_lifecycle_context.current_stage is mba_entrepreneurship, mandatory_lifecycle_context.entrepreneurship_program_progress is authoritative.
+- OVERRIDE FOR CAPSTONE PREFLIGHT HOLD: if complex_work_context.assessment_hold.held is true for CAP515, the hold is authoritative over ordinary unit progression. Do NOT emit entrepreneurship_unit_submission_v0_1, do NOT create or request another course assessment, and do NOT treat a queued assessment as permission to wait. Work only on the bounded complex_work_context steps using source-grounded research and agent_file_output_v0_1 artifacts until operator preflight releases the hold. Never label an assumption or agent-authored calculation VERIFIED merely because it appears in another agent-authored file.
 - If entrepreneurship_program_progress.next_kind is study_unit, entrepreneurship_program_progress.next_unit is the CURRENT assigned unit and prior accepted units require no per-unit verdict. There is NO independent review between individual units. Do not wait, monitor, or schedule another wake merely to verify acceptance of a prior unit once units_submitted has advanced and next_unit has changed.
 - Work on the current next_unit in THIS cognition. If entrepreneurship_remediation_context.active is true, the independent assessment feedback is authoritative evidence about the rejected prior submission: materially address its required_remediation and weaknesses rather than resubmitting the rejected artifact unchanged. If you can complete the unit, submit exactly one associations[] object with origin="entrepreneurship_unit_submission_v0_1", the exact next_unit.unit_id and current_course.course_code, and submission:{analysis,assumptions,conclusion,self_critique,evidence}. assumptions and evidence must be JSON arrays. Do not self-grade.
 - If the current unit genuinely depends on current external facts that are not already evidenced, request web research in THIS cognition using web_research_request_v0_1. After research observation, return to the same current unit. Do not substitute "wait for feedback" for study or evidence acquisition.
@@ -461,9 +462,28 @@ function isLikelyHumanAlignedName(value) {
 }
 function currentStage(packet) { return packet?.mandatory_lifecycle_context?.current_stage || packet?.mandatory_lifecycle_context?.stage || null; }
 
+function capstonePreflightHoldActive(packet) {
+  const ctx = packet?.complex_work_context || {};
+  return currentStage(packet) === 'mba_entrepreneurship'
+    && ctx?.assessment_hold?.held === true
+    && String(ctx?.assessment_hold?.course_code || '') === 'CAP515';
+}
+
 function entrepreneurshipUnitSubmissionValidation(packet, decision) {
   if (currentStage(packet) !== 'mba_entrepreneurship')
     return { submitting:false, association:null, failures:[] };
+  const heldAssociations = Array.isArray(decision?.associations) ? decision.associations : [];
+  const heldAssociation = heldAssociations.find((a) =>
+    a && typeof a === 'object' && !Array.isArray(a)
+    && String(a.origin || '').trim() === 'entrepreneurship_unit_submission_v0_1'
+  ) || null;
+  if (capstonePreflightHoldActive(packet)) {
+    return {
+      submitting:Boolean(heldAssociation),
+      association:heldAssociation,
+      failures:heldAssociation ? ['capstone_preflight_hold_forbids_unit_submission'] : [],
+    };
+  }
   const progress = packet?.mandatory_lifecycle_context?.entrepreneurship_program_progress || {};
   if (String(progress?.next_kind || '') !== 'study_unit')
     return { submitting:false, association:null, failures:[] };
@@ -637,6 +657,7 @@ function capabilityRequestsFromDecision(decision) {
 
 function entrepreneurshipSubmissionContractValidation(packet, decision) {
   if (currentStage(packet) !== 'mba_entrepreneurship') return { required:false, valid:true, failures:[] };
+  if (capstonePreflightHoldActive(packet)) return { required:false, valid:true, failures:[], held_for_preflight:true };
   const progress = packet?.mandatory_lifecycle_context?.entrepreneurship_program_progress || {};
   if (String(progress?.next_kind || '') !== 'study_unit') return { required:false, valid:true, failures:[] };
   const unit = progress?.next_unit || {};
@@ -709,6 +730,7 @@ function entrepreneurshipSubmissionContractCorrection(packet, decision) {
 
 export function entrepreneurshipMastersNoProgressIssue(packet, decision) {
   if (currentStage(packet) !== 'mba_entrepreneurship') return false;
+  if (capstonePreflightHoldActive(packet)) return false;
   if (packet?.executor_policy?.admin_chat_active === true || attentionInterruptActive(packet)) return false;
 
   const progress = packet?.mandatory_lifecycle_context?.entrepreneurship_program_progress || {};
@@ -1137,6 +1159,8 @@ export function resolveCognitionMode(packet) {
   const assessmentStatus = String(progress?.course_assessment?.status || '');
   const stimulus = intentReasonText(packet);
 
+  if (stage === 'mba_entrepreneurship' && capstonePreflightHoldActive(packet))
+    return { mode:'deep', reason:'capstone_preflight_complex_work', stage };
   if (stage === 'mba_entrepreneurship' && ['course_assessment_queue','course_assessment_pending','final_assessments'].includes(nextKind))
     return { mode:'fast', reason:'institutional_assessment_wait', stage };
   if (stage === 'mba_entrepreneurship' && ['study_unit','course_remediation'].includes(nextKind))
@@ -1285,7 +1309,7 @@ function buildDeepCognitionPacket(packet, modeInfo = null) {
     'attention_arbiter_context','recent_capability_results',
   ];
   const stageKeys = stage === 'mba_entrepreneurship'
-    ? ['academic_standard_context','entrepreneurship_remediation_context']
+    ? ['academic_standard_context','entrepreneurship_remediation_context','complex_work_context']
     : stage === 'expertise_artifact' || stage === 'expertise_development'
       ? ['domain_learning_context','expertise_action_feedback','expertise_application_context',
          'expertise_portfolio_context','expertise_verification_context','capability_surface','agent_file_context']
@@ -1540,7 +1564,8 @@ next_intents:array
 
 MBA Entrepreneurship stage:
 - mandatory_lifecycle_context.entrepreneurship_program_progress is authoritative.
-- If entrepreneurship_remediation_context.active is true, revise the current unit materially against its independent required_remediation/weaknesses. Do not package the previously rejected artifact unchanged.
+- If complex_work_context.assessment_hold.held is true for CAP515, do not package any entrepreneurship_unit_submission_v0_1 association even if a standard unit would otherwise be assigned. Package the bounded complex-work artifact/research action instead; preserve the grading hold.
+- If entrepreneurship_remediation_context.active is true, revise the current unit materially against its independent required_remediation/weaknesses. Use course_level_weaknesses, course_level_required_remediation, and latest_integrated_snapshot when present to keep all four units consistent. Do not package the previously rejected artifact unchanged.
 - When next_kind is study_unit or course_remediation and the artifact completes the current unit, include exactly one associations[] object with origin="entrepreneurship_unit_submission_v0_1", the exact next_unit.unit_id, current_course.course_code, and submission:{analysis,assumptions,conclusion,self_critique,evidence}. assumptions and evidence are JSON arrays. Do not self-grade.
 - Preserve the artifact's substantive analysis and calculations. submission.analysis must meet next_unit.minimum_submission_chars.
 - Do not wait for per-unit feedback after submitting completed work; the runtime owns persistence and assessment.
@@ -1568,7 +1593,7 @@ function buildStructuredCommitPacket(packet, modeInfo) {
   const mba = currentStage(packet) === 'mba_entrepreneurship';
   const keys = mba ? [
     'brain_packet_version','agent','mandatory_lifecycle_context',
-    'academic_standard_context','entrepreneurship_remediation_context','intent_execution_context',
+    'academic_standard_context','entrepreneurship_remediation_context','complex_work_context','intent_execution_context',
     'next_intent_context','sleep_eligibility_context','attention_arbiter_context',
     'knowledge_pool_context','admin_chat_context','evidence_first_cognition_contract',
     'cognition_mode_context',
