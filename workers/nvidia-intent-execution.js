@@ -548,6 +548,7 @@ function capstoneCanonicalReconciliationRequired(packet) {
   const failures=capstonePreflightFailures(packet);
   return failures.includes('canonical_financial_ltv_mismatch')
     || failures.includes('canonical_financial_ltv_cac_mismatch')
+    || failures.includes('canonical_churn_sensitivity_arithmetic_mismatch')
     || failures.includes('required_artifacts_missing');
 }
 function canonicalVentureFileAssociation(decision) {
@@ -565,20 +566,73 @@ function canonicalVentureFileMatchesPreflight(decision,packet) {
   const file=assoc?.file && typeof assoc.file==='object'?assoc.file:assoc;
   let parsed=null;
   try{parsed=JSON.parse(String(file?.content || ''));}catch{return false;}
-  const ue=parsed?.unit_economics || parsed?.canonical_inputs?.unit_economics || {};
-  const ltv=Number(ue?.ltv_calculated ?? ue?.ltv ?? ue?.customer_ltv);
-  const ratio=Number(ue?.ltv_cac_ratio ?? ue?.ltv_cac ?? ue?.ltv_to_cac);
+  const ue=parsed?.unit_economics || parsed?.canonical_inputs?.unit_economics || parsed?.core_economics?.unit_economics || {};
+  const ltvCalc=ue?.ltv_calculation || {};
+  const ltv=Number(ue?.ltv_calculated ?? ue?.ltv ?? ue?.customer_ltv ?? ltvCalc?.ltv_value);
+  const ratio=Number(ue?.ltv_cac_ratio ?? ue?.ltv_cac ?? ue?.ltv_to_cac ?? ltvCalc?.ltv_cac_ratio);
   const checks=packet?.complex_work_context?.preflight?.checks || {};
   const targetLtv=Number(checks?.financial_ltv);
   const targetRatio=Number(checks?.financial_ltv_cac);
-  return Number.isFinite(ltv)&&Number.isFinite(ratio)
+  if(!(Number.isFinite(ltv)&&Number.isFinite(ratio)
     && Number.isFinite(targetLtv)&&Number.isFinite(targetRatio)
     && Math.abs(ltv-targetLtv)<=100
-    && Math.abs(ratio-targetRatio)<=0.02;
+    && Math.abs(ratio-targetRatio)<=0.02)) return false;
+
+  if(capstonePreflightFailures(packet).includes('canonical_churn_sensitivity_arithmetic_mismatch')){
+    const margin=Number(ltvCalc?.annual_margin);
+    const discount=Number(ue?.discount_rate);
+    const cac=Number(parsed?.core_economics?.customer_acquisition?.cac ?? parsed?.customer_acquisition?.cac ?? parsed?.cac);
+    const sens=parsed?.sensitivity_analysis?.churn_sensitivity;
+    if(!Number.isFinite(margin)||!Number.isFinite(discount)||!Number.isFinite(cac)||cac<=0||!sens||typeof sens!=='object') return false;
+    for(const [key,val] of Object.entries(sens)){
+      const m=String(key).match(/^([0-9]+)_percent_churn$/);
+      if(!m) continue;
+      const churn=Number(m[1])/100;
+      const expectedLtv=margin/(churn+discount);
+      const expectedRatio=expectedLtv/cac;
+      const actualLtv=Number(val?.ltv);
+      const actualRatio=Number(val?.ltv_cac);
+      if(!Number.isFinite(actualLtv)||!Number.isFinite(actualRatio)
+        || Math.abs(actualLtv-expectedLtv)>1 || Math.abs(actualRatio-expectedRatio)>0.02) return false;
+    }
+  }
+  return true;
 }
 function capstoneCanonicalCorrection(packet) {
   const checks=packet?.complex_work_context?.preflight?.checks || {};
-  return `CAP515 CANONICAL MODEL GATE: The latest substantive canonical model still conflicts with the corrected financial checks. Do not write a board decision or cross-unit reconciliation yet. Persist ONE complete non-empty CANONICAL_VENTURE_MODEL_v*.json via agent_file_output_v0_1. It must expose numeric unit_economics.ltv_calculated and unit_economics.ltv_cac_ratio and match the corrected financial targets (LTV=${checks.financial_ltv}, LTV/CAC=${checks.financial_ltv_cac}), while preserving the stated churn, discount, CAC, gross-margin, pricing, revenue and cash assumptions consistently. If an assumption remains unverified, label it as such rather than changing it merely to pass a threshold. Return the full file content; do not invent a database file_id.`;
+  return `CAP515 CANONICAL MODEL GATE: The latest substantive canonical model still conflicts with the corrected financial checks or its own sensitivity arithmetic. Do not write a board decision or cross-unit reconciliation yet. Persist ONE complete non-empty CANONICAL_VENTURE_MODEL_v*.json via agent_file_output_v0_1. It may use the current core_economics.unit_economics schema or the legacy unit_economics schema, but must match the corrected financial targets (LTV=${checks.financial_ltv}, LTV/CAC=${checks.financial_ltv_cac}). Recompute EVERY churn-sensitivity scenario from the same stated LTV formula and the same annual margin, discount rate and CAC; do not hand-copy prior values. Preserve pricing, revenue, cash and other assumptions consistently. If an assumption remains unverified, label it as such rather than changing it merely to pass a threshold. Return the full file content; do not invent a database file_id.`;
+}
+
+
+function capstoneBoardDecisionIntegrityRequired(packet) {
+  return capstonePreflightHoldActive(packet)
+    && capstonePreflightFailures(packet).includes('build_decision_overrides_failed_kill_criterion_without_explicit_override');
+}
+function boardDecisionFileAssociation(decision) {
+  const associations=Array.isArray(decision?.associations)?decision.associations:[];
+  return associations.find((a)=>{
+    if(!a || typeof a!=='object' || String(a.origin || '')!=='agent_file_output_v0_1') return false;
+    const file=a?.file && typeof a.file==='object'?a.file:a;
+    return /^BOARD_DECISION/i.test(String(file?.filename || ''))
+      && String(file?.content || '').trim().length>20;
+  }) || null;
+}
+function boardDecisionIntegritySatisfied(decision) {
+  const assoc=boardDecisionFileAssociation(decision);
+  if(!assoc) return false;
+  const file=assoc?.file && typeof assoc.file==='object'?assoc.file:assoc;
+  let parsed=null;
+  try{parsed=JSON.parse(String(file?.content || ''));}catch{return false;}
+  const finalDecision=String(parsed?.final_decision || parsed?.decision || '').toUpperCase();
+  const criteria=Array.isArray(parsed?.kill_criteria_evaluation?.criteria)
+    ? parsed.kill_criteria_evaluation.criteria : [];
+  const failed=criteria.filter((x)=>String(x?.result || '').toUpperCase().includes('FAIL'));
+  if(finalDecision!=='BUILD' || failed.length===0) return true;
+  return String(parsed?.kill_criterion_override_rationale || '').trim().length>=120;
+}
+function capstoneBoardDecisionCorrection(packet) {
+  const pf=packet?.complex_work_context?.preflight || {};
+  return `CAP515 BOARD DECISION INTEGRITY GATE: Your latest Board Decision says BUILD while at least one of your own kill criteria is failed. Do not wait for operator review. Persist a corrected complete non-empty BOARD_DECISION_v*.json. You may choose REVISE, BUILD, or KILL autonomously. If you retain BUILD despite a failed kill criterion, include a top-level kill_criterion_override_rationale of at least 120 characters that explicitly explains why that criterion is being overridden, what evidence remains missing, and what would invalidate the decision. Do not convert ASSUMED/UNTESTED/INSUFFICIENT evidence into VERIFIED merely to justify BUILD. If the evidence does not justify BUILD, REVISE is fully acceptable. Current preflight: ${JSON.stringify(pf).slice(0,9000)}`;
 }
 
 function entrepreneurshipUnitSubmissionValidation(packet, decision) {
@@ -2225,6 +2279,31 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
     }
   }
 
+  let capstoneBoardDecisionRepairAttempts = 0;
+  if (capstoneBoardDecisionIntegrityRequired(packet) && !boardDecisionIntegritySatisfied(decision)) {
+    for(let i=0;i<2 && !boardDecisionIntegritySatisfied(decision);i+=1){
+      capstoneBoardDecisionRepairAttempts+=1;
+      ai=await completeStructured(model,[
+        ...baseMessages,
+        {role:'assistant',content:String(ai.content || '').slice(0,50000)},
+        {role:'user',content:capstoneBoardDecisionCorrection(packet)},
+      ],{maxTokens:3000,timeoutMs:300000});
+      const repairedDecision=applySleepIntentPolicy(packet,sanitizeDecision(parseDecision(ai.content)));
+      decision=preserveRequiredAdminReply(packet,decision,repairedDecision);
+    }
+    if(!boardDecisionIntegritySatisfied(decision)){
+      const error=new Error('capstone_board_decision_integrity_required');
+      error.failureDetails={
+        schema:'aau.cap515_board_decision_integrity_gate.v0_1',
+        error_code:'CAP515_BOARD_DECISION_INTEGRITY_REQUIRED',
+        preflight:packet?.complex_work_context?.preflight || null,
+        repair_attempts:capstoneBoardDecisionRepairAttempts,
+        captured_at:new Date().toISOString(),
+      };
+      throw error;
+    }
+  }
+
   let capstoneResearchRepairAttempts = 0;
   if (capstoneReceiptResearchRequired(packet) && !hasWebResearchRequest(decision)) {
     for (let i=0; i<2 && !hasWebResearchRequest(decision); i+=1) {
@@ -2465,7 +2544,7 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
   return {
     ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts,
     fileReplyRepairAttempts, attentionResolutionRepairAttempts, externalStateRepairAttempts,
-    noProgressRepairAttempts, entrepreneurshipSubmissionRepairAttempts, capstoneCanonicalRepairAttempts, capstoneResearchRepairAttempts, capstoneEvidenceIntegrationRepairAttempts, packetText,
+    noProgressRepairAttempts, entrepreneurshipSubmissionRepairAttempts, capstoneCanonicalRepairAttempts, capstoneBoardDecisionRepairAttempts, capstoneResearchRepairAttempts, capstoneEvidenceIntegrationRepairAttempts, packetText,
     cognitionMode:modeInfo,
     deepCognitionMeta:deepCognition?.meta || null,
   };
