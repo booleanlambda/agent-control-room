@@ -289,3 +289,10 @@ if (isEnabled('AAU_SILAS_THINKING_ON_PILOT')) {
     .then(m => m.runSilasThinkingOn())
     .catch(e => console.error('AAU_SILAS_THINKING_ON_FATAL', JSON.stringify({code:e?.code||e?.name||'error',message:String(e?.message||e).slice(0,180)})));
 }
+
+if (isEnabled('AAU_SILAS_THINKING_ON_PILOT')) {
+  // Silas-only matched-case experiment; no normal wake, grades, credentials or shared policy.
+  void import('./silas-thinking-on-runner.js')
+    .then(m => m.runSilasThinkingOn())
+    .catch(e => console.error('AAU_SILAS_COGNITION_ON_FATAL',JSON.stringify({code:e?.code||e?.name||'error',message:String(e?.message||e).slice(0,180)})));
+}
