@@ -275,3 +275,10 @@ if (isEnabled('AAU_SILAS_CONTINUATION_PILOT')) {
     .then(m => m.runSilasContinuationPilot())
     .catch(e => console.error('AAU_SILAS_PILOT_FATAL', JSON.stringify({error: String(e?.message || e).slice(0,180)})));
 }
+
+if (isEnabled('AAU_SILAS_HOLISTIC_CONTINUATION')) {
+  // Silas-only off-curriculum continuation; previous numeric errors are preserved.
+  void import('./silas-holistic-continuation.js')
+    .then(m => m.runSilasHolisticContinuation())
+    .catch(e => console.error('AAU_SILAS_HOLISTIC_FATAL', JSON.stringify({code:e?.code||e?.name||'error',message:String(e?.message||e).slice(0,180)})));
+}
