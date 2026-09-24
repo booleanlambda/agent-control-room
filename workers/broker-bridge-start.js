@@ -296,3 +296,10 @@ if (isEnabled('AAU_SILAS_THINKING_ON_SPLIT_LEDGER')) {
     .then(m => m.runSilasThinkingOnDecomposed())
     .catch(e => console.error('AAU_SILAS_SPLIT_FATAL', JSON.stringify({code:e?.code||e?.name||'error',message:String(e?.message||e).slice(0,180)})));
 }
+
+if (isEnabled('AAU_SILAS_THINKING_ON_SPLIT_PURCHASE')) {
+  // Silas-only bounded day-28 continuation after purchase timeout.
+  void import('./silas-on-purchase-checkpoints.js')
+    .then(m => m.runSilasPurchaseBContinuation())
+    .catch(e => console.error('AAU_SILAS_B_CONTINUATION_FATAL', JSON.stringify({code:e?.code||e?.name||'error',message:String(e?.message||e).slice(0,180)})));
+}
