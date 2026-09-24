@@ -605,8 +605,11 @@ function capstoneCanonicalCorrection(packet) {
 
 
 function capstoneBoardDecisionIntegrityRequired(packet) {
-  return capstonePreflightHoldActive(packet)
-    && capstonePreflightFailures(packet).includes('build_decision_overrides_failed_kill_criterion_without_explicit_override');
+  if(!capstonePreflightHoldActive(packet)) return false;
+  const failures=capstonePreflightFailures(packet);
+  return failures.includes('build_decision_overrides_failed_kill_criterion_without_explicit_override')
+    || failures.includes('board_not_bound_to_latest_substantive_canonical')
+    || failures.includes('board_decision_missing_or_invalid');
 }
 function boardDecisionFileAssociation(decision) {
   const associations=Array.isArray(decision?.associations)?decision.associations:[];
@@ -617,22 +620,29 @@ function boardDecisionFileAssociation(decision) {
       && String(file?.content || '').trim().length>20;
   }) || null;
 }
-function boardDecisionIntegritySatisfied(decision) {
+function boardDecisionIntegritySatisfied(decision,packet) {
   const assoc=boardDecisionFileAssociation(decision);
   if(!assoc) return false;
   const file=assoc?.file && typeof assoc.file==='object'?assoc.file:assoc;
   let parsed=null;
   try{parsed=JSON.parse(String(file?.content || ''));}catch{return false;}
-  const finalDecision=String(parsed?.final_decision || parsed?.decision || '').toUpperCase();
+  const finalDecision=String(parsed?.final_decision || parsed?.decision || '').trim().toUpperCase();
+  if(!['BUILD','REVISE','KILL'].includes(finalDecision)) return false;
+  const targetId=String(packet?.complex_work_context?.preflight?.files?.canonical || '').trim();
+  const reference=String(parsed?.canonical_model_reference?.file_id || parsed?.canonical_reference?.file_id || '').trim();
+  if(!targetId || reference!==targetId) return false;
   const criteria=Array.isArray(parsed?.kill_criteria_evaluation?.criteria)
     ? parsed.kill_criteria_evaluation.criteria : [];
-  const failed=criteria.filter((x)=>String(x?.result || '').toUpperCase().includes('FAIL'));
-  if(finalDecision!=='BUILD' || failed.length===0) return true;
+  const objectCriteria=parsed?.kill_criteria_status && typeof parsed.kill_criteria_status==='object'
+    ? Object.values(parsed.kill_criteria_status) : [];
+  const failed=criteria.some((x)=>String(x?.result || '').toUpperCase().includes('FAIL'))
+    || objectCriteria.some((x)=>String(x || '').toUpperCase().includes('FAIL'));
+  if(finalDecision!=='BUILD' || !failed) return true;
   return String(parsed?.kill_criterion_override_rationale || '').trim().length>=120;
 }
 function capstoneBoardDecisionCorrection(packet) {
   const pf=packet?.complex_work_context?.preflight || {};
-  return `CAP515 BOARD DECISION INTEGRITY GATE: Your latest Board Decision says BUILD while at least one of your own kill criteria is failed. Do not wait for operator review. Persist a corrected complete non-empty BOARD_DECISION_v*.json. You may choose REVISE, BUILD, or KILL autonomously. If you retain BUILD despite a failed kill criterion, include a top-level kill_criterion_override_rationale of at least 120 characters that explicitly explains why that criterion is being overridden, what evidence remains missing, and what would invalidate the decision. Do not convert ASSUMED/UNTESTED/INSUFFICIENT evidence into VERIFIED merely to justify BUILD. If the evidence does not justify BUILD, REVISE is fully acceptable. Current preflight: ${JSON.stringify(pf).slice(0,9000)}`;
+  return `CAP515 BOARD DECISION INTEGRITY GATE: Your latest board decision is not bound to the actual latest substantive canonical file, lacks a valid decision, or overrides a failed kill criterion without explicit rationale. Persist a complete non-empty BOARD_DECISION_v*.json with top-level canonical_reference: {file_id:"${pf?.files?.canonical || ''}"}, plus final_decision or decision chosen autonomously as BUILD, REVISE or KILL. The file_id is the exact existing canonical file from preflight; do not invent it. Preserve honest evidence classifications. If BUILD conflicts with any failed kill criterion, add a top-level kill_criterion_override_rationale of at least 120 characters explaining the override, missing evidence and invalidation conditions; REVISE is acceptable. If cross-unit decision differs from the current board, reconcile it separately after this board file is saved. Do NOT resubmit CAP515 units or ask for a grade. Current preflight: ${JSON.stringify(pf).slice(0,9000)}`;
 }
 
 function entrepreneurshipUnitSubmissionValidation(packet, decision) {
@@ -2280,8 +2290,8 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
   }
 
   let capstoneBoardDecisionRepairAttempts = 0;
-  if (capstoneBoardDecisionIntegrityRequired(packet) && !boardDecisionIntegritySatisfied(decision)) {
-    for(let i=0;i<2 && !boardDecisionIntegritySatisfied(decision);i+=1){
+  if (capstoneBoardDecisionIntegrityRequired(packet) && !boardDecisionIntegritySatisfied(decision,packet)) {
+    for(let i=0;i<2 && !boardDecisionIntegritySatisfied(decision,packet);i+=1){
       capstoneBoardDecisionRepairAttempts+=1;
       ai=await completeStructured(model,[
         ...baseMessages,
@@ -2291,7 +2301,7 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
       const repairedDecision=applySleepIntentPolicy(packet,sanitizeDecision(parseDecision(ai.content)));
       decision=preserveRequiredAdminReply(packet,decision,repairedDecision);
     }
-    if(!boardDecisionIntegritySatisfied(decision)){
+    if(!boardDecisionIntegritySatisfied(decision,packet)){
       const error=new Error('capstone_board_decision_integrity_required');
       error.failureDetails={
         schema:'aau.cap515_board_decision_integrity_gate.v0_1',
