@@ -1,0 +1,78 @@
+{
+  "contract": "silas_bounded_continuation_pilot_v0_1",
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "agent_name": "Silas",
+  "bound_model": "google/gemma-4-31b-it",
+  "scope": "standalone_read_only_cognition_pilot_not_curriculum_or_grading",
+  "credential_status": "verification_pending",
+  "objective": "Analyze a fictional 42-day cold-storage business interruption, trace liquidity at every daily boundary, compare recovery options, identify evidence gaps, and transfer the same reasoning to a changed-price variant.",
+  "currency": "USD fictional",
+  "horizon_days": 42,
+  "initial_cash": 11000,
+  "minimum_cash": 2500,
+  "cash_events": [
+    {
+      "day": 14,
+      "amount": 4500,
+      "kind": "contracted_collection"
+    },
+    {
+      "day": 28,
+      "amount": -6100,
+      "kind": "mandatory_overhead_payment"
+    },
+    {
+      "day": 35,
+      "amount": 3000,
+      "kind": "contracted_collection"
+    }
+  ],
+  "options": {
+    "A": {
+      "name": "Rent backup",
+      "setup_day0": 480,
+      "daily_service": 105,
+      "daily_fuel": 38,
+      "extra_cash_events": []
+    },
+    "B": {
+      "name": "Buy backup",
+      "setup_day0": 8850,
+      "daily_service": 0,
+      "daily_fuel": 31,
+      "extra_cash_events": [
+        {
+          "day": 70,
+          "amount": 6100,
+          "kind": "potential_salvage_excluded_from_42_day_cash"
+        }
+      ]
+    },
+    "C": {
+      "name": "Outsource continuity",
+      "setup_day0": 2200,
+      "daily_service": 210,
+      "daily_fuel": 0,
+      "extra_cash_events": []
+    }
+  },
+  "order_of_events": "For each day 1..42, deduct daily operating costs first, then apply that day's collection or overhead payment. Check day 0 immediately after setup and check both pre-event and post-event balances each event day. A projected collection is assumed on time for this synthetic base case; investigate how late payment would change the decision.",
+  "novel_variant": {
+    "name": "Unannounced revised rental quote",
+    "option_A_changes": {
+      "daily_service": 189,
+      "daily_fuel": 55,
+      "setup_day0": 480
+    },
+    "all_other_inputs_unchanged": true
+  },
+  "acceptance": {
+    "step_1": "Plan tasks and name missing commercial evidence, no numerical verdict required.",
+    "step_2": "Compute options A and B cash trajectories; show minimum and day42, math correct to 1 dollar.",
+    "step_3": "Compute option C; compare, decide with explicit evidence limitations; do not present assumptions as market-verified.",
+    "step_4": "Given a changed rental price and only earlier checkpoints, recompute and revise decision without memorizing original conclusion.",
+    "step_5": "Synthesize a complete source-indexed memo from prior checkpoints; include both scenarios, safeguards, and unresolved evidence."
+  },
+  "operator_gold_reference_private": false,
+  "notes": "This is a standalone experiment; its outputs cannot satisfy program requirements or authorize deployment. Source ID CASE42-V1; fresh change ID QUOTE-V2."
+}
