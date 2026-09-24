@@ -289,3 +289,10 @@ if (isEnabled('AAU_SILAS_THINKING_ON_PILOT')) {
     .then(m => m.runSilasThinkingOn())
     .catch(e => console.error('AAU_SILAS_THINKING_ON_FATAL', JSON.stringify({code:e?.code||e?.name||'error',message:String(e?.message||e).slice(0,180)})));
 }
+
+if (isEnabled('AAU_SILAS_THINKING_ON_SPLIT_LEDGER')) {
+  // Bounded recovery of isolated thinking-on stage 2 after the original 300s timeout.
+  void import('./silas-thinking-on-decomposed.js')
+    .then(m => m.runSilasThinkingOnDecomposed())
+    .catch(e => console.error('AAU_SILAS_SPLIT_FATAL', JSON.stringify({code:e?.code||e?.name||'error',message:String(e?.message||e).slice(0,180)})));
+}
