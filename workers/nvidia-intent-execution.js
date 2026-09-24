@@ -543,6 +543,44 @@ function preserveRequiredAdminReply(packet, previousDecision, nextDecision) {
   return nextDecision;
 }
 
+function capstoneCanonicalReconciliationRequired(packet) {
+  if (!capstonePreflightHoldActive(packet)) return false;
+  const failures=capstonePreflightFailures(packet);
+  return failures.includes('canonical_financial_ltv_mismatch')
+    || failures.includes('canonical_financial_ltv_cac_mismatch')
+    || failures.includes('required_artifacts_missing');
+}
+function canonicalVentureFileAssociation(decision) {
+  const associations=Array.isArray(decision?.associations)?decision.associations:[];
+  return associations.find((a)=>{
+    if (!a || typeof a!=='object' || String(a.origin || '')!=='agent_file_output_v0_1') return false;
+    const file=a?.file && typeof a.file==='object'?a.file:a;
+    return /^CANONICAL_VENTURE_MODEL/i.test(String(file?.filename || ''))
+      && String(file?.content || '').trim().length>20;
+  }) || null;
+}
+function canonicalVentureFileMatchesPreflight(decision,packet) {
+  const assoc=canonicalVentureFileAssociation(decision);
+  if(!assoc)return false;
+  const file=assoc?.file && typeof assoc.file==='object'?assoc.file:assoc;
+  let parsed=null;
+  try{parsed=JSON.parse(String(file?.content || ''));}catch{return false;}
+  const ue=parsed?.unit_economics || parsed?.canonical_inputs?.unit_economics || {};
+  const ltv=Number(ue?.ltv_calculated ?? ue?.ltv ?? ue?.customer_ltv);
+  const ratio=Number(ue?.ltv_cac_ratio ?? ue?.ltv_cac ?? ue?.ltv_to_cac);
+  const checks=packet?.complex_work_context?.preflight?.checks || {};
+  const targetLtv=Number(checks?.financial_ltv);
+  const targetRatio=Number(checks?.financial_ltv_cac);
+  return Number.isFinite(ltv)&&Number.isFinite(ratio)
+    && Number.isFinite(targetLtv)&&Number.isFinite(targetRatio)
+    && Math.abs(ltv-targetLtv)<=100
+    && Math.abs(ratio-targetRatio)<=0.02;
+}
+function capstoneCanonicalCorrection(packet) {
+  const checks=packet?.complex_work_context?.preflight?.checks || {};
+  return `CAP515 CANONICAL MODEL GATE: The latest substantive canonical model still conflicts with the corrected financial checks. Do not write a board decision or cross-unit reconciliation yet. Persist ONE complete non-empty CANONICAL_VENTURE_MODEL_v*.json via agent_file_output_v0_1. It must expose numeric unit_economics.ltv_calculated and unit_economics.ltv_cac_ratio and match the corrected financial targets (LTV=${checks.financial_ltv}, LTV/CAC=${checks.financial_ltv_cac}), while preserving the stated churn, discount, CAC, gross-margin, pricing, revenue and cash assumptions consistently. If an assumption remains unverified, label it as such rather than changing it merely to pass a threshold. Return the full file content; do not invent a database file_id.`;
+}
+
 function entrepreneurshipUnitSubmissionValidation(packet, decision) {
   if (currentStage(packet) !== 'mba_entrepreneurship')
     return { submitting:false, association:null, failures:[] };
@@ -2160,6 +2198,33 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
     throw error;
   }
 
+  let capstoneCanonicalRepairAttempts = 0;
+  if (capstoneCanonicalReconciliationRequired(packet)
+      && !capstoneEvidenceSourceFailure(packet)
+      && !canonicalVentureFileMatchesPreflight(decision,packet)) {
+    for(let i=0;i<2 && !canonicalVentureFileMatchesPreflight(decision,packet);i+=1){
+      capstoneCanonicalRepairAttempts+=1;
+      ai=await completeStructured(model,[
+        ...baseMessages,
+        {role:'assistant',content:String(ai.content || '').slice(0,50000)},
+        {role:'user',content:capstoneCanonicalCorrection(packet)},
+      ],{maxTokens:3000,timeoutMs:300000});
+      const repairedDecision=applySleepIntentPolicy(packet,sanitizeDecision(parseDecision(ai.content)));
+      decision=preserveRequiredAdminReply(packet,decision,repairedDecision);
+    }
+    if(!canonicalVentureFileMatchesPreflight(decision,packet)){
+      const error=new Error('capstone_preflight_canonical_reconciliation_required');
+      error.failureDetails={
+        schema:'aau.cap515_canonical_reconciliation_gate.v0_1',
+        error_code:'CAP515_CANONICAL_RECONCILIATION_REQUIRED',
+        preflight:packet?.complex_work_context?.preflight || null,
+        repair_attempts:capstoneCanonicalRepairAttempts,
+        captured_at:new Date().toISOString(),
+      };
+      throw error;
+    }
+  }
+
   let capstoneResearchRepairAttempts = 0;
   if (capstoneReceiptResearchRequired(packet) && !hasWebResearchRequest(decision)) {
     for (let i=0; i<2 && !hasWebResearchRequest(decision); i+=1) {
@@ -2400,7 +2465,7 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
   return {
     ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts,
     fileReplyRepairAttempts, attentionResolutionRepairAttempts, externalStateRepairAttempts,
-    noProgressRepairAttempts, entrepreneurshipSubmissionRepairAttempts, capstoneResearchRepairAttempts, capstoneEvidenceIntegrationRepairAttempts, packetText,
+    noProgressRepairAttempts, entrepreneurshipSubmissionRepairAttempts, capstoneCanonicalRepairAttempts, capstoneResearchRepairAttempts, capstoneEvidenceIntegrationRepairAttempts, packetText,
     cognitionMode:modeInfo,
     deepCognitionMeta:deepCognition?.meta || null,
   };
