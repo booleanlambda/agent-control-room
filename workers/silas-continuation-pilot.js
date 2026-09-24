@@ -61,3 +61,12 @@ function check(n,v,brief,prior){
  if(!Array.isArray(v.source_ids)||source.some(id=>!v.source_ids.includes(id)))issues.push('source_coverage');
  return {passed:issues.length===0,issues};
 }
+const asks=[
+ null,
+ 'Return JSON stage=plan, source_ids=[CASE42-V1], plan (4+ steps), evidence_to_validate (3+ distinct sources), method. Do not produce a numerical verdict. Plan the day-by-day cash check.',
+ 'Compute options A and B. Return JSON stage=analysis_ab, source_ids=[CASE42-V1], option_A and option_B each with numeric day0,day14_pre,day14_post,day28_pre,day28_post,day35_pre,day35_post,day42,minimum_cash,minimum_day, boolean constraint_pass, string formula; limitations array. Find minimum over all days, check pre/post events; exclude day70 sale from 42-day cash.',
+ 'Compute option C identically, use prior A/B, decide. Return JSON stage=decision_v1, source_ids=[CASE42-V1], option_C with same numeric fields, recommended_option A|B|C|NONE, decision, critical_assumptions (3+). Only evidence in the fictional case is supported.',
+ 'Fresh number transfer: rental daily_service=189,daily_fuel=55,setup_day0=480; other inputs unchanged. Recompute. Return JSON stage=fresh_transfer, source_ids=[CASE42-V1,QUOTE-V2], revised_A (same fields as option_A), decision_v2, method_retained. No imaginary secured funding.',
+ 'Synthesize final board memo from four immutable checkpoints with original and revised decisions, numerical findings, evidentiary limits and safeguards. Return JSON stage=final_memo, source_ids=[CASE42-V1,QUOTE-V2], base_decision, fresh_decision, checkpoint_sha256 (exact four prior output hashes), memo (900+ characters), unverified_claims (3+).'
+];
+const stageNames=['','plan','analysis_ab','decision_v1','fresh_transfer','final_memo'];
