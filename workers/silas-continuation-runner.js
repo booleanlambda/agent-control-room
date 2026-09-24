@@ -1,5 +1,6 @@
 import { nvidiaChatCompletion } from './providers/nvidia.js';
 import { pilotHelpers as h } from './silas-continuation-pilot.js';
+import { repairSilasStage2 } from './silas-pilot-stage2-repair.js';
 export async function runSilasContinuationPilot(){
  const phase=Number(process.env.AAU_SILAS_PILOT_PHASE||2);
  if(![2,5].includes(phase)||!h.token||!process.env.NVIDIA_API_KEY)throw Error('pilot_invalid_config');
@@ -13,8 +14,10 @@ export async function runSilasContinuationPilot(){
    const x=JSON.parse(old.text);
    if(x.agent_id!==h.AGENT||x.model_returned!==h.MODEL||x.brief_sha!==f.sha||
       x.step!==n||x.output_sha256!==h.digest(JSON.stringify(x.output)))throw Error('bad_checkpoint:'+n);
-   prior.push(x);h.log('RESUME',{step:n,output_sha256:x.output_sha256,audit_passed:x.audit.passed});
-   if(!x.audit?.passed){h.log('BLOCKED',{step:n,reason:'prior_audit_failed',issues:x.audit?.issues});return;}
+   let effective=x;
+   if(n===2&&!x.audit?.passed)effective=await repairSilasStage2(h,brief,f,x,prior);
+   if(!effective?.audit?.passed){h.log('BLOCKED',{step:n,reason:'prior_audit_failed',issues:effective?.audit?.issues||x.audit?.issues});return;}
+   prior.push(effective);h.log('RESUME',{step:n,output_sha256:effective.output_sha256,audit_passed:effective.audit.passed,revision:effective.revision||0});
    continue;
   }
   const system='You are Silas in an isolated off-curriculum test using the same bound model. Not a normal wake, grading, or degree verification. Independently reason about the fictional data; cite given source IDs; do not invent market research or secured financing. Return complete JSON only.';
@@ -38,7 +41,13 @@ export async function runSilasContinuationPilot(){
   h.log('CHECKPOINT',{step:n,audit_passed:audit.passed,issues:audit.issues,elapsed_ms:row.elapsed_ms,
    input_chars:row.input_chars,output_chars:row.output_chars,output_sha256:row.output_sha256,
    blob:saved.blob,commit:saved.commit,bytes:saved.bytes});
-  if(!audit.passed){h.log('BLOCKED',{step:n,reason:'deterministic_audit_failed',issues:audit.issues});return;}
+  if(!audit.passed){
+   if(n===2){
+    const revised=await repairSilasStage2(h,brief,f,row,prior.slice(0,-1));
+    if(revised?.audit?.passed){prior[prior.length-1]=revised;continue;}
+   }
+   h.log('BLOCKED',{step:n,reason:'deterministic_audit_failed',issues:audit.issues});return;
+  }
  }
  h.log('RESULT',{phase,status:phase===2?'durable_pause':'complete',passed:prior.map(x=>x.audit.passed)});
 }
