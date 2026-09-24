@@ -473,11 +473,27 @@ function capstonePreflightFailures(packet) {
   const failures = packet?.complex_work_context?.preflight?.failures;
   return Array.isArray(failures) ? failures.map((v)=>String(v || '')) : [];
 }
-function capstoneReceiptResearchRequired(packet) {
-  if (!capstonePreflightHoldActive(packet)) return false;
+function capstoneFetchedResearchReceipts(packet) {
+  const receipts = packet?.complex_work_context?.latest_research?.fetched_receipts;
+  return Array.isArray(receipts)
+    ? receipts.filter((r)=>r && /^https:\/\//i.test(String(r.url || ''))
+      && /^[a-f0-9]{64}$/i.test(String(r.sha256 || '')))
+    : [];
+}
+function capstoneEvidenceSourceFailure(packet) {
   const failures = capstonePreflightFailures(packet);
   return failures.includes('fewer_than_three_receipt_backed_external_sources')
     || failures.includes('fewer_than_three_traceable_external_sources');
+}
+function capstoneReceiptResearchRequired(packet) {
+  return capstonePreflightHoldActive(packet)
+    && capstoneEvidenceSourceFailure(packet)
+    && capstoneFetchedResearchReceipts(packet).length < 3;
+}
+function capstoneReceiptIntegrationRequired(packet) {
+  return capstonePreflightHoldActive(packet)
+    && capstoneEvidenceSourceFailure(packet)
+    && capstoneFetchedResearchReceipts(packet).length >= 3;
 }
 function hasWebResearchRequest(decision) {
   const associations = Array.isArray(decision?.associations) ? decision.associations : [];
@@ -485,9 +501,33 @@ function hasWebResearchRequest(decision) {
     && String(a.origin || '')==='web_research_request_v0_1'
     && Array.isArray(a.queries) && a.queries.some((q)=>String(q || '').trim().length>3));
 }
+function claimEvidenceFileAssociation(decision) {
+  const associations = Array.isArray(decision?.associations) ? decision.associations : [];
+  return associations.find((a)=>{
+    if (!a || typeof a!=='object' || String(a.origin || '')!=='agent_file_output_v0_1') return false;
+    const file = a?.file && typeof a.file==='object' ? a.file : a;
+    return /^CLAIM_EVIDENCE_REGISTER/i.test(String(file?.filename || ''))
+      && String(file?.content || '').trim().length > 20;
+  }) || null;
+}
+function evidenceFileUsesReceiptUrls(decision, receipts) {
+  const assoc = claimEvidenceFileAssociation(decision);
+  if (!assoc) return false;
+  const file = assoc?.file && typeof assoc.file==='object' ? assoc.file : assoc;
+  const content = String(file?.content || '');
+  const urls = [...new Set((Array.isArray(receipts)?receipts:[])
+    .map((r)=>String(r?.url || '').trim()).filter((u)=>/^https:\/\//i.test(u)))];
+  let matched=0;
+  for (const url of urls) if (content.includes(url)) matched += 1;
+  return matched >= 3;
+}
 function capstoneResearchCorrection(packet) {
   const preflight = packet?.complex_work_context?.preflight || {};
   return `CAP515 PREFLIGHT RESEARCH GATE: The live preflight still lacks at least three external sources backed by actual persisted fetched-text research receipts. Do not write another reconciliation, board decision, generic benchmark, or "await operator" response yet. In THIS decision, include exactly one associations[] object with origin="web_research_request_v0_1" and 3-5 targeted queries chosen for the ReguMap AI venture's actual decision-critical claims. Target authoritative/primary sources where possible: official regulator or supervisory material relevant to compliance traceability/audit evidence, credible evidence about the buyer/problem, and defensible economic/operational benchmarks. You choose the exact questions. Do not invent URLs. The runtime will execute the request before your final commit and return receipts. After the observation, use only exact returned URLs/receipts and persist a complete non-empty CLAIM_EVIDENCE_REGISTER file. Current preflight: ${JSON.stringify(preflight).slice(0,9000)}`;
+}
+function capstoneEvidenceIntegrationCorrection(packet, receipts) {
+  const usable=(Array.isArray(receipts)?receipts:[]).slice(0,16);
+  return `CAP515 RECEIPT INTEGRATION GATE: Research has ALREADY been executed and persisted. Do NOT search again and do NOT write another board/cross-unit artifact yet. Persist a complete non-empty CLAIM_EVIDENCE_REGISTER JSON file now using origin=agent_file_output_v0_1 and the exact nested file schema. Include at least three exact HTTPS URLs from the supplied receipt ledger, but only attach each source to a claim it actually supports or qualifies. Preserve url, sha256, title, coverage, query and limitations; downgrade unsupported claims to ASSUMED / UNTESTED / INSUFFICIENT. Do not call a fetched source proof of customer demand, regulatory approval, or a pilot unless its text actually establishes that. RECEIPT LEDGER: ${JSON.stringify(usable).slice(0,16000)}`;
 }
 
 function entrepreneurshipUnitSubmissionValidation(packet, decision) {
@@ -2133,6 +2173,33 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
     }
   }
 
+  let capstoneEvidenceIntegrationRepairAttempts = 0;
+  const priorCapstoneReceipts = capstoneFetchedResearchReceipts(packet);
+  if (capstoneReceiptIntegrationRequired(packet)
+      && !evidenceFileUsesReceiptUrls(decision, priorCapstoneReceipts)) {
+    for (let i=0;i<2 && !evidenceFileUsesReceiptUrls(decision, priorCapstoneReceipts);i+=1) {
+      capstoneEvidenceIntegrationRepairAttempts += 1;
+      ai = await completeStructured(model, [
+        ...baseMessages,
+        { role:'assistant', content:String(ai.content || '').slice(0,50000) },
+        { role:'user', content:capstoneEvidenceIntegrationCorrection(packet, priorCapstoneReceipts) },
+      ], {maxTokens:3000,timeoutMs:300000});
+      decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
+    }
+    if (!evidenceFileUsesReceiptUrls(decision, priorCapstoneReceipts)) {
+      const error = new Error('capstone_preflight_receipt_integration_required');
+      error.failureDetails = {
+        schema:'aau.cap515_receipt_integration_gate.v0_1',
+        error_code:'CAP515_RECEIPT_INTEGRATION_REQUIRED',
+        receipt_count:priorCapstoneReceipts.length,
+        preflight:packet?.complex_work_context?.preflight || null,
+        repair_attempts:capstoneEvidenceIntegrationRepairAttempts,
+        captured_at:new Date().toISOString(),
+      };
+      throw error;
+    }
+  }
+
   let currentResearchLedger = [];
   let researchObserved = false;
   // One source request per cognition, including a request selected in an earlier
@@ -2198,9 +2265,37 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
         + JSON.stringify(currentResearchLedger).slice(0,21000)
         + '\\nUse only exact URL+SHA pairs from this ledger in source_manifest and expertise_knowledge_unit_v0_1. The ledger proves retrieval, NOT the correctness of a claim.'},
     ];
-    ai = await complete(model, baseMessages);
+    ai = capstonePreflightHoldActive(packet)
+      ? await completeStructured(model, baseMessages,{maxTokens:3000,timeoutMs:300000})
+      : await complete(model, baseMessages);
     decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
     decision.associations = decision.associations.filter(v=>v?.origin !== 'web_research_request_v0_1');
+
+    if (capstonePreflightHoldActive(packet) && currentResearchLedger.length>=3
+        && !evidenceFileUsesReceiptUrls(decision,currentResearchLedger)) {
+      let postResearchEvidenceRepairAttempts=0;
+      for (let i=0;i<2 && !evidenceFileUsesReceiptUrls(decision,currentResearchLedger);i+=1) {
+        postResearchEvidenceRepairAttempts += 1;
+        ai = await completeStructured(model, [
+          ...baseMessages,
+          {role:'assistant',content:String(ai.content || '').slice(0,50000)},
+          {role:'user',content:capstoneEvidenceIntegrationCorrection(packet,currentResearchLedger)},
+        ],{maxTokens:3000,timeoutMs:300000});
+        decision = applySleepIntentPolicy(packet,sanitizeDecision(parseDecision(ai.content)));
+        decision.associations = decision.associations.filter(v=>v?.origin !== 'web_research_request_v0_1');
+      }
+      if (!evidenceFileUsesReceiptUrls(decision,currentResearchLedger)) {
+        const error=new Error('capstone_post_research_evidence_integration_failed');
+        error.failureDetails={
+          schema:'aau.cap515_receipt_integration_gate.v0_1',
+          error_code:'CAP515_POST_RESEARCH_EVIDENCE_INTEGRATION_FAILED',
+          receipt_count:currentResearchLedger.length,
+          repair_attempts:postResearchEvidenceRepairAttempts,
+          captured_at:new Date().toISOString(),
+        };
+        throw error;
+      }
+    }
     // A research-based study with no source_manifest remains untrusted. Give the bound
     // model one bounded correction turn to provide genuine receipt-backed provenance.
     const studyUpdates = Array.isArray(decision?.memory?.updates) ? decision.memory.updates
@@ -2286,7 +2381,7 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
   return {
     ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts,
     fileReplyRepairAttempts, attentionResolutionRepairAttempts, externalStateRepairAttempts,
-    noProgressRepairAttempts, entrepreneurshipSubmissionRepairAttempts, capstoneResearchRepairAttempts, packetText,
+    noProgressRepairAttempts, entrepreneurshipSubmissionRepairAttempts, capstoneResearchRepairAttempts, capstoneEvidenceIntegrationRepairAttempts, packetText,
     cognitionMode:modeInfo,
     deepCognitionMeta:deepCognition?.meta || null,
   };
