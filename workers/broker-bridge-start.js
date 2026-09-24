@@ -282,3 +282,10 @@ if (isEnabled('AAU_SILAS_HOLISTIC_CONTINUATION')) {
     .then(m => m.runSilasHolisticContinuation())
     .catch(e => console.error('AAU_SILAS_HOLISTIC_FATAL', JSON.stringify({code:e?.code||e?.name||'error',message:String(e?.message||e).slice(0,180)})));
 }
+
+if (isEnabled('AAU_SILAS_THINKING_ON_PILOT')) {
+  // Separate off-curriculum condition, opt-in; never wakes or grades Silas.
+  void import('./silas-thinking-on-runner.js')
+    .then(m => m.runSilasThinkingOn())
+    .catch(e => console.error('AAU_SILAS_THINKING_ON_FATAL', JSON.stringify({code:e?.code||e?.name||'error',message:String(e?.message||e).slice(0,180)})));
+}
