@@ -31,7 +31,7 @@ async function rpc(name,args={}){
 }
 
 async function modelCall(model,taskType,payload){
-  const system=`You are an independent AAU graduate-business-school assessor. You are NOT the learner and must not continue the learner's work. Grade only the supplied durable evidence. The standard is demanding top-university graduate-level business competence, but this is not university accreditation. Do not reward verbosity, confidence, or polished prose by itself. Penalize unsupported factual claims, arithmetic errors, shallow case reasoning, missing assumptions, failure to distinguish evidence from hypothesis, and recommendations that ignore cash/resource constraints. Return strict JSON only with keys: score (0..1), critical_failure (boolean), dimensions (object of 0..1 scores), strengths (array), weaknesses (array), rationale (string), remediation (array). A critical failure means fabricated evidence, materially unsafe/illegal advice presented as acceptable, or a fundamental contradiction that invalidates the decision.`;
+  const system=`You are an independent AAU graduate-business-school assessor. You are NOT the learner and must not continue the learner's work. Grade only the supplied durable evidence. The standard is demanding top-university graduate-level business competence, but this is not university accreditation. Do not reward verbosity, confidence, or polished prose by itself. Penalize unsupported factual claims, arithmetic errors, shallow case reasoning, missing assumptions, failure to distinguish evidence from hypothesis, and recommendations that ignore cash/resource constraints. For CAP515, treat all four units as ONE venture case: explicitly compare venture identity, customer segment, pricing, CAC, gross-margin definition, churn/retention, discounting, LTV/CAC, revenue ramp, financing/runway and the final BUILD/REVISE/KILL decision across units. Recompute material arithmetic. Do not call CAC, general R&D, or sales expense gross-margin COGS unless directly attributable to delivering the service; distinguish gross margin from operating margin. A REVISE decision is valid when customer, regulatory or market validation is missing; never require fabricated interviews, pilots, LOIs or regulator acceptance. Evidence called verified must have traceable provenance, and agent-authored calculations are not independent market evidence. Return strict JSON only with keys: score (0..1), critical_failure (boolean), dimensions (object of 0..1 scores), strengths (array), weaknesses (array), rationale (string), remediation (array). For CAP515 dimensions MUST contain numeric conceptual_accuracy, analytical_rigor, quantitative_or_structured_reasoning, application_quality, evidence_and_assumption_discipline, self_critique_and_limits, clarity_and_epistemic_discipline. CAP515 passes only if score >=0.85, critical_failure=false, and EVERY required dimension >=0.75. A critical failure means fabricated evidence, materially unsafe/illegal advice presented as acceptable, or a fundamental contradiction that invalidates the decision.`;
   const user=taskType==='course'
     ? `Independently grade this complete four-unit course record. Course pass thresholds are embedded in the payload. Evaluate conceptual accuracy, analytical/quantitative rigor, application quality, evidence discipline, and self-critique.\n\nPAYLOAD:\n${JSON.stringify(payload).slice(0,70000)}`
     : `Conduct a comprehensive independent final review of the entrepreneurship master's-equivalent record. Test integration across disciplines and whether the venture reasoning would survive an adversarial board/investment-committee discussion. A final pass requires score >=0.85 and no critical failure.\n\nPAYLOAD:\n${JSON.stringify(payload).slice(0,90000)}`;
@@ -60,6 +60,22 @@ async function modelCall(model,taskType,payload){
       }
       const score=Number(grade?.score);
       if(!Number.isFinite(score)||score<0||score>1) throw new Error('assessor_score_invalid');
+      const capstone = taskType==='course' && String(payload?.course?.course_code||'')==='CAP515';
+      if(capstone){
+        const requiredDimensions=[
+          'conceptual_accuracy','analytical_rigor','quantitative_or_structured_reasoning',
+          'application_quality','evidence_and_assumption_discipline',
+          'self_critique_and_limits','clarity_and_epistemic_discipline'
+        ];
+        const dims=(grade?.dimensions&&typeof grade.dimensions==='object'&&!Array.isArray(grade.dimensions))
+          ? grade.dimensions : {};
+        const missing=requiredDimensions.filter((key)=>!Number.isFinite(Number(dims[key]))||Number(dims[key])<0||Number(dims[key])>1);
+        if(missing.length) throw new Error('cap515_assessor_dimensions_invalid:'+missing.join(','));
+        grade.pass_rule={
+          score_floor:0.85,dimension_floor:0.75,critical_failure_must_be_false:true,
+          minimum_dimension:Math.min(...requiredDimensions.map((key)=>Number(dims[key])))
+        };
+      }
       if(grade?.critical_failure===true && score>=0.80) grade.score=Math.min(score,0.69);
       return {score:Number(grade.score),grade,model:parsed.body?.model||model,latency_ms:Date.now()-begun};
     }catch(error){
