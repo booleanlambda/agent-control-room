@@ -1,0 +1,58 @@
+{
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "model_returned": "google/gemma-4-31b-it",
+  "source_brief_sha": "ace26e6a1459cac335c6301226d68e5e894add80",
+  "condition": "thinking_on",
+  "step": 2,
+  "option": "A",
+  "output_sha256": "a6a33a568740a576159091acc17c31145cf0ada42e7fe491be550f5b86dbf5ca",
+  "input_sha256": "ceada446c9475a73db7a4945ce543b142d68a927eb29226dc2d836a080496478",
+  "input_chars": 5016,
+  "output_chars": 475,
+  "reasoning_chars": 4059,
+  "usage": {
+    "prompt_tokens": 1346,
+    "completion_tokens": 2277,
+    "total_tokens": 3623,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cached_tokens": 0
+    },
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "reasoning_tokens": 2086,
+      "rejected_prediction_tokens": null
+    }
+  },
+  "finish_reason": "stop",
+  "elapsed_ms": 170069,
+  "assessment": {
+    "passed": true,
+    "issues": []
+  },
+  "output": {
+    "stage": "ledger_A",
+    "source_ids": [
+      "CASE42-V1"
+    ],
+    "option": {
+      "day0": 10520,
+      "day14_pre": 8518,
+      "day14_post": 13018,
+      "day28_pre": 11016,
+      "day28_post": 4916,
+      "day35_pre": 3915,
+      "day35_post": 6915,
+      "day42": 5914,
+      "minimum_cash": 3915,
+      "minimum_day": 35,
+      "constraint_pass": true,
+      "formula": "Cash_n = Cash_{n-1} - (daily_service + daily_fuel) + Event_n"
+    },
+    "limitations": [
+      "Assumes punctual collection of contracted payments on days 14 and 35",
+      "Assumes fixed daily fuel and service costs without volatility"
+    ]
+  }
+}
