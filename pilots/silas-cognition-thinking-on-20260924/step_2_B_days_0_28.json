@@ -1,0 +1,48 @@
+{
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "model_returned": "google/gemma-4-31b-it",
+  "brief_sha": "ace26e6a1459cac335c6301226d68e5e894add80",
+  "step": 2,
+  "part": "days_0_28",
+  "input_sha256": "ba2b91836c2eab58880c71361a8afa2b637bfb37c1629f2bb7be0fd5ee2ada86",
+  "input_chars": 4895,
+  "output_sha256": "9aa5a24c56273025c8d26e37860ef4ff4fe872f012c5b4a20acd02432ed8df30",
+  "output_chars": 468,
+  "reasoning_chars": 2108,
+  "usage": {
+    "prompt_tokens": 1342,
+    "completion_tokens": 1208,
+    "total_tokens": 2550,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cached_tokens": 0
+    },
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "reasoning_tokens": 990,
+      "rejected_prediction_tokens": null
+    }
+  },
+  "finish_reason": "stop",
+  "elapsed_ms": 70222,
+  "assessment": {
+    "passed": true,
+    "issues": []
+  },
+  "output": {
+    "stage": "purchase_B_0_28",
+    "source_ids": [
+      "CASE42-V1"
+    ],
+    "option": {
+      "day0": 2150,
+      "day14_pre": 1716,
+      "day14_post": 6216,
+      "day28_pre": 5782,
+      "day28_post": -318,
+      "formula": "Day 0: 11000 - 8850; Day 14 pre: 2150 - (14 * 31); Day 14 post: 1716 + 4500; Day 28 pre: 6216 - (14 * 31); Day 28 post: 5782 - 6100"
+    },
+    "comment": "Calculated cash flow for Option B. The balance drops below the $2,500 minimum threshold immediately on Day 0 and becomes negative after the Day 28 overhead payment."
+  }
+}
