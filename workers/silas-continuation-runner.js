@@ -13,10 +13,13 @@ export async function runSilasContinuationPilot(){
    const x=JSON.parse(old.text);
    if(x.agent_id!==h.AGENT||x.model_returned!==h.MODEL||x.brief_sha!==f.sha||
       x.step!==n||x.output_sha256!==h.digest(JSON.stringify(x.output)))throw Error('bad_checkpoint:'+n);
-   prior.push(x);h.log('RESUME',{step:n,output_sha256:x.output_sha256,audit_passed:x.audit.passed});continue;
+   prior.push(x);h.log('RESUME',{step:n,output_sha256:x.output_sha256,audit_passed:x.audit.passed});
+   if(!x.audit?.passed){h.log('BLOCKED',{step:n,reason:'prior_audit_failed',issues:x.audit?.issues});return;}
+   continue;
   }
   const system='You are Silas in an isolated off-curriculum test using the same bound model. Not a normal wake, grading, or degree verification. Independently reason about the fictional data; cite given source IDs; do not invent market research or secured financing. Return complete JSON only.';
-  const user=h.asks[n]+'\nFROZEN CASE AND PRIOR CHECKPOINTS:\n'+JSON.stringify({brief,prior:prior.map(x=>({step:x.step,output:x.output,output_sha256:x.output_sha256}))});
+  const modelBrief=n<4?(({novel_variant,...beforeQuote})=>beforeQuote)(brief):brief;
+  const user=h.asks[n]+'\nFROZEN CASE AND PRIOR CHECKPOINTS:\n'+JSON.stringify({brief:modelBrief,prior:prior.map(x=>({step:x.step,output:x.output,output_sha256:x.output_sha256}))});
   const start=Date.now();
   let r;try{
    r=await nvidiaChatCompletion({model:h.MODEL,messages:[{role:'system',content:system},{role:'user',content:user}],
@@ -35,6 +38,7 @@ export async function runSilasContinuationPilot(){
   h.log('CHECKPOINT',{step:n,audit_passed:audit.passed,issues:audit.issues,elapsed_ms:row.elapsed_ms,
    input_chars:row.input_chars,output_chars:row.output_chars,output_sha256:row.output_sha256,
    blob:saved.blob,commit:saved.commit,bytes:saved.bytes});
+  if(!audit.passed){h.log('BLOCKED',{step:n,reason:'deterministic_audit_failed',issues:audit.issues});return;}
  }
  h.log('RESULT',{phase,status:phase===2?'durable_pause':'complete',passed:prior.map(x=>x.audit.passed)});
 }
