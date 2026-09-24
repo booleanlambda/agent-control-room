@@ -469,6 +469,27 @@ function capstonePreflightHoldActive(packet) {
     && String(ctx?.assessment_hold?.course_code || '') === 'CAP515';
 }
 
+function capstonePreflightFailures(packet) {
+  const failures = packet?.complex_work_context?.preflight?.failures;
+  return Array.isArray(failures) ? failures.map((v)=>String(v || '')) : [];
+}
+function capstoneReceiptResearchRequired(packet) {
+  if (!capstonePreflightHoldActive(packet)) return false;
+  const failures = capstonePreflightFailures(packet);
+  return failures.includes('fewer_than_three_receipt_backed_external_sources')
+    || failures.includes('fewer_than_three_traceable_external_sources');
+}
+function hasWebResearchRequest(decision) {
+  const associations = Array.isArray(decision?.associations) ? decision.associations : [];
+  return associations.some((a)=>a && typeof a==='object'
+    && String(a.origin || '')==='web_research_request_v0_1'
+    && Array.isArray(a.queries) && a.queries.some((q)=>String(q || '').trim().length>3));
+}
+function capstoneResearchCorrection(packet) {
+  const preflight = packet?.complex_work_context?.preflight || {};
+  return `CAP515 PREFLIGHT RESEARCH GATE: The live preflight still lacks at least three external sources backed by actual persisted fetched-text research receipts. Do not write another reconciliation, board decision, generic benchmark, or "await operator" response yet. In THIS decision, include exactly one associations[] object with origin="web_research_request_v0_1" and 3-5 targeted queries chosen for the ReguMap AI venture's actual decision-critical claims. Target authoritative/primary sources where possible: official regulator or supervisory material relevant to compliance traceability/audit evidence, credible evidence about the buyer/problem, and defensible economic/operational benchmarks. You choose the exact questions. Do not invent URLs. The runtime will execute the request before your final commit and return receipts. After the observation, use only exact returned URLs/receipts and persist a complete non-empty CLAIM_EVIDENCE_REGISTER file. Current preflight: ${JSON.stringify(preflight).slice(0,9000)}`;
+}
+
 function entrepreneurshipUnitSubmissionValidation(packet, decision) {
   if (currentStage(packet) !== 'mba_entrepreneurship')
     return { submitting:false, association:null, failures:[] };
@@ -2086,6 +2107,32 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
     throw error;
   }
 
+  let capstoneResearchRepairAttempts = 0;
+  if (capstoneReceiptResearchRequired(packet) && !hasWebResearchRequest(decision)) {
+    for (let i=0; i<2 && !hasWebResearchRequest(decision); i+=1) {
+      capstoneResearchRepairAttempts += 1;
+      ai = await complete(model, [
+        ...baseMessages,
+        { role:'assistant', content:String(ai.content || '').slice(0,50000) },
+        { role:'user', content:capstoneResearchCorrection(packet) },
+      ]);
+      decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
+    }
+    if (!hasWebResearchRequest(decision)) {
+      const error = new Error('capstone_preflight_research_required');
+      error.failureDetails = {
+        schema:'aau.cap515_preflight_research_gate.v0_1',
+        error_code:'CAP515_RECEIPT_BACKED_RESEARCH_REQUIRED',
+        preflight:packet?.complex_work_context?.preflight || null,
+        selected_action:decision?.selected_action || null,
+        stated_reason:decision?.stated_reason || null,
+        repair_attempts:capstoneResearchRepairAttempts,
+        captured_at:new Date().toISOString(),
+      };
+      throw error;
+    }
+  }
+
   let currentResearchLedger = [];
   let researchObserved = false;
   // One source request per cognition, including a request selected in an earlier
@@ -2239,7 +2286,7 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
   return {
     ai, decision, intentRepairAttempted, identityRepairAttempts, embodimentRepairAttempts,
     fileReplyRepairAttempts, attentionResolutionRepairAttempts, externalStateRepairAttempts,
-    noProgressRepairAttempts, entrepreneurshipSubmissionRepairAttempts, packetText,
+    noProgressRepairAttempts, entrepreneurshipSubmissionRepairAttempts, capstoneResearchRepairAttempts, packetText,
     cognitionMode:modeInfo,
     deepCognitionMeta:deepCognition?.meta || null,
   };
