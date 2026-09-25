@@ -347,6 +347,7 @@ export async function runAutonomousRequirementCognition({
             {role:'system',content:prompt},
             {role:'user',content:safeJson({
               requirement:node.requirement_text,
+              agent_authored_discovery_state:agentDiscoveryState(node),
               source:{kind:node.source_kind,ref:node.source_ref},
               supplied_context:contextPayload,
               available_context_index:idx,
@@ -488,6 +489,7 @@ export async function runAutonomousRequirementCognition({
             ].join('\n')},
             {role:'user',content:safeJson({
               parent_requirement:node.requirement_text,
+              agent_authored_discovery_state:agentDiscoveryState(node),
               supplied_context:node.context_payload||{},
               previously_authored_children:previous,
             })},
@@ -817,6 +819,7 @@ export async function runAutonomousRequirementCognition({
         ].join('\n')},
         {role:'user',content:safeJson({
           parent_requirement:node.requirement_text,
+          agent_authored_discovery_state:agentDiscoveryState(node),
           prior_accumulator:accumulator,
           child:{path:child.node_path,requirement:child.requirement_text,artifact:clip(parts.artifact,7000),handoff:parts.handoff},
         })},
@@ -843,7 +846,11 @@ export async function runAutonomousRequirementCognition({
         'Return JSON only: {"artifact":"concise auditable parent result","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
         'Do not add requirements or conclusions that are not supported by the completed children.',
       ].join('\n')},
-      {role:'user',content:safeJson({parent_requirement:node.requirement_text,cumulative_synthesis:accumulator})},
+      {role:'user',content:safeJson({
+        parent_requirement:node.requirement_text,
+        agent_authored_discovery_state:agentDiscoveryState(node),
+        cumulative_synthesis:accumulator,
+      })},
     ],1800,'req_'+node.node_path.replaceAll('.','_')+'_synthesis_final');
 
     const artifact=text(final?.parsed?.artifact);
