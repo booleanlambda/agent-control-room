@@ -221,7 +221,7 @@ $function$;
 
 revoke all on function public.aau_bridge_cognition_requirement_node_v0_1(
   text,uuid,uuid,text,text,text,text,text,integer,text,text,text,text,text,jsonb,jsonb,text
-) from public;
+) from public,authenticated,service_role;
 grant execute on function public.aau_bridge_cognition_requirement_node_v0_1(
   text,uuid,uuid,text,text,text,text,text,integer,text,text,text,text,text,jsonb,jsonb,text
 ) to anon;
