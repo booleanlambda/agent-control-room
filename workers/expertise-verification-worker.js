@@ -282,11 +282,49 @@ async function answerChallenge(run, packet, existingAnswers = [], competenceReco
     let result = null;
     let lastError = null;
     for (let attempt = 1; attempt <= 3; attempt++) {
+      const boundedUser = attempt === 1 ? user : user
+        + '\n\nCOMPLETION RETRY: the prior generation was not accepted as complete. Solve the SAME task from scratch; do not continue partial text. Keep the answer bounded and complete within the existing output budget. Preserve all task constraints and required derivations.';
       try {
-        result = await nvidiaCall({ model: run.candidate_model_id, system, user, maxTokens: run?.metadata?.academic_standard_version === 'aau_owned_master_us_v0_3' ? 1800 : 700, temperature: 0.10, timeoutMs: 120000 });
-        break;
+        const candidate = await nvidiaCall({
+          model:run.candidate_model_id,system,user:boundedUser,
+          maxTokens:run?.metadata?.academic_standard_version === 'aau_owned_master_us_v0_3' ? 1800 : 700,
+          temperature:0.10,timeoutMs:120000
+        });
+        if (candidate.finish_reason === 'stop' && String(candidate.text || '').trim()) {
+          result=candidate;
+          break;
+        }
+        const content=String(candidate.text || '');
+        const rejectionReason=candidate.finish_reason === 'length'
+          ? 'TRUNCATED_RESPONSE'
+          : !content.trim() ? 'EMPTY_RESPONSE' : 'INCOMPLETE_RESPONSE';
+        try {
+          await rpc('aau_bridge_record_cognition_rejection',{
+            p_agent_id:run.agent_id,
+            p_execution_context:'expertise_verification',
+            p_execution_id:String(run.verification_run_id),
+            p_model_id:run.candidate_model_id,
+            p_phase:'candidate_answer_'+String(task.id)+'_attempt_'+attempt,
+            p_rejection_reason:rejectionReason,
+            p_finish_reason:candidate.finish_reason || null,
+            p_elapsed_ms:null,
+            p_output_chars:content.length,
+            p_output_sha256:content ? sha256(content) : null,
+            p_usage:candidate.usage || {},
+          });
+        } catch (e) {
+          console.warn('AAU_EXPERTISE_CANDIDATE_REJECTION_EVIDENCE_FAILED',String(e?.message || e).slice(0,500));
+        }
+        lastError=new Error('candidate_response_rejected:'+rejectionReason+':'+task.id);
+        lastError.code='CANDIDATE_RESPONSE_REJECTED';
+        if(attempt===3) throw lastError;
+        await sleep(1500 * attempt);
       } catch (error) {
         lastError = error;
+        if(error?.code === 'CANDIDATE_RESPONSE_REJECTED'){
+          if(attempt===3) throw error;
+          continue;
+        }
         const status = Number(error?.status || 0);
         const retryable = error?.name === 'AbortError' || status === 429 || status >= 500;
         if (!retryable || attempt === 3) throw error;
@@ -294,7 +332,6 @@ async function answerChallenge(run, packet, existingAnswers = [], competenceReco
       }
     }
     if (!result) throw lastError || new Error(`candidate_no_result:${task.id}`);
-    if (!result.text) throw new Error(`candidate_empty_answer:${task.id}`);
     answers.push({
       id: task.id,
       competency: task.competency || null,
@@ -395,6 +432,14 @@ async function gradeAnswer(run, task, answer) {
           timeoutMs: model === primaryAuthenticator ? 65000 : model.startsWith('meta/') ? 90000 : 120000,
           jsonMode: false,
         });
+        if (result.finish_reason !== 'stop') {
+          console.warn('AAU_EXPERTISE_AUTHENTICATOR_INCOMPLETE',JSON.stringify({
+            model,task_id:task.id,attempt,finish_reason:result.finish_reason || null,
+            response_chars:String(result.text || '').length,
+          }));
+          lastAuthError=new Error('authenticator_incomplete_response:'+task.id+':'+model);
+          continue;
+        }
         const grade = parseGrade(result.text);
         if (grade) return { ...grade, id: task.id, verifier_model: result.model || model, verifier_requested_model: model, authenticator_fallback_used: model !== primaryAuthenticator, raw_sha256: sha256(result.text) };
         console.warn('AAU_EXPERTISE_AUTHENTICATOR_UNUSABLE_GRADE', JSON.stringify({
@@ -441,6 +486,13 @@ async function adjudicate(run, task, answer, prior) {
           temperature: 0,
           timeoutMs: model === primaryAdjudicator ? 120000 : model.startsWith('meta/') ? 90000 : 110000,
         });
+        if (result.finish_reason !== 'stop') {
+          console.warn('AAU_EXPERTISE_ADJUDICATOR_INCOMPLETE',JSON.stringify({
+            model,task_id:task.id,attempt,finish_reason:result.finish_reason || null,
+            response_chars:String(result.text || '').length,
+          }));
+          continue;
+        }
         const grade = parseGrade(result.text);
         if (grade) {
           noteReviewerModelSuccess(model);
