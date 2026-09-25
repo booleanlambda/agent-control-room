@@ -28,7 +28,8 @@ The runtime is limited to:
 - persisting the requirement tree;
 - routing child nodes;
 - enforcing completion integrity;
-- checkpointing/resuming;
+- checkpointing/resuming, including across worker replacement without a wall-clock kill while the worker heartbeat is fresh;
+- routing compact durable results from already-completed siblings into later siblings when they share a parent;
 - enforcing mechanical compute/depth/size bounds;
 - hashing and provenance.
 
@@ -81,3 +82,9 @@ The agent owns those decisions.
 ## Routing versus substantive reasoning
 
 ATOMIC / SPLIT / NEED_CONTEXT routing and one-child-at-a-time decomposition use the **same bound model** in concise structured-output mode with hidden thinking disabled. This prevents hidden reasoning from consuming the small routing response budget. This does not choose the decision for the agent and does not change the model identity. Substantive atomic execution and bottom-up synthesis remain **Thinking ON** and retain the strict completion gate.
+
+## Recovery and sibling handoff
+
+A fresh worker heartbeat is authoritative evidence that a long recursive cognition is still alive; duration alone is not an orphan condition. Both legacy deep-cognition checkpoints and `cognition_requirement_nodes` are valid durable resume state.
+
+When children execute sequentially, a later child receives a compact runtime-routed `completed_sibling_results` context containing only durable completed sibling outputs. This is dependency plumbing, not runtime-authored reasoning: the agent still decides how to use those results and whether more context or research is required.
