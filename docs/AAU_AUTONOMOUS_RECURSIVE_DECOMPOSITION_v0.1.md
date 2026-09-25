@@ -23,7 +23,7 @@ The runtime never prescribes a number of intellectual steps or their subject-mat
 
 The runtime is limited to:
 - identifying the triggering requirement;
-- exposing an index of available stored context without injecting it;
+- exposing a shallow index of available stored context without injecting it; oversized branches are navigated recursively by agent-requested child paths;
 - executing exact context/research requests authored by the agent;
 - persisting the requirement tree;
 - routing child nodes;
@@ -77,3 +77,7 @@ The runtime may enforce external facts, permissions, resource ceilings, and AAU 
 - what conclusions the evidence should support.
 
 The agent owns those decisions.
+
+## Routing versus substantive reasoning
+
+ATOMIC / SPLIT / NEED_CONTEXT routing and one-child-at-a-time decomposition use the **same bound model** in concise structured-output mode with hidden thinking disabled. This prevents hidden reasoning from consuming the small routing response budget. This does not choose the decision for the agent and does not change the model identity. Substantive atomic execution and bottom-up synthesis remain **Thinking ON** and retain the strict completion gate.

@@ -86,8 +86,18 @@ function extractTriggerRequirement(packet){
 }
 
 function contextIndex(packet){
-  // Index only. No values are injected unless the agent explicitly requests them.
-  return indexObject(packet).map(({path,kind,bytes})=>({path,kind,bytes}));
+  // Shallow index only. The agent recursively narrows oversized branches itself.
+  if(!packet||typeof packet!=='object'||Array.isArray(packet))return [];
+  return Object.keys(packet).sort().slice(0,80).map(key=>{
+    const value=packet[key];
+    return {
+      path:key,
+      kind:Array.isArray(value)?'array':typeof value,
+      bytes:bytes(value),
+      ...(Array.isArray(value)?{items:value.length}:{}),
+      ...(value&&typeof value==='object'&&!Array.isArray(value)?{keys:Object.keys(value).length}:{})
+    };
+  });
 }
 
 function resolveContext(packet,requests){
@@ -139,7 +149,7 @@ function resultParts(raw){
 
 export async function runAutonomousRequirementCognition({
   model,packet,modeInfo,agentId,intentExecutionId,
-  rpc,sha256,completeJson,researchContext=null,
+  rpc,sha256,completeJson,completeRouteJson=null,researchContext=null,
 }){
   const rootReq=extractTriggerRequirement(packet);
   const assignmentKey='req:'+sha256({
@@ -197,6 +207,12 @@ export async function runAutonomousRequirementCognition({
     return completeJson(messages,maxTokens,phase);
   }
 
+  async function callRoute(messages,maxTokens,phase){
+    counters.model_calls++;
+    const fn=typeof completeRouteJson==='function'?completeRouteJson:completeJson;
+    return fn(messages,maxTokens,phase);
+  }
+
   async function decide(node,{forceReconsider=false}={}){
     let contextPayload=asObject(node.context_payload);
     for(let round=0;round<MAX_CONTEXT_ROUNDS;round++){
@@ -211,13 +227,13 @@ export async function runAutonomousRequirementCognition({
             'SPLIT = you decide this requirement should be decomposed into child requirements that YOU will author.',
             'NEED_CONTEXT = you need specific stored context before deciding or executing.',
             'Return JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT","reason":"brief","context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."]}.',
-            'For NEED_CONTEXT, request stored context by exact paths from the supplied index and/or request external research with queries/known URLs. You choose the questions; the runtime only executes them.',
+            'For NEED_CONTEXT, request stored context by exact paths from the supplied index or from child paths already returned for an oversized request, and/or request external research with queries/known URLs. Oversized branches return only child path metadata; narrow them yourself recursively. You choose the paths and questions; the runtime only executes them.',
             'Do not solve the requirement in this response. Do not author child requirements yet.',
             forceReconsider
               ? 'A prior ATOMIC execution was rejected as incomplete. Reconsider honestly whether this requirement should be SPLIT or needs more context; do not merely repeat the failed oversized attempt.'
               : '',
           ].filter(Boolean).join('\n');
-          const response=await callJson([
+          const response=await callRoute([
             {role:'system',content:prompt},
             {role:'user',content:safeJson({
               requirement:node.requirement_text,
@@ -225,7 +241,7 @@ export async function runAutonomousRequirementCognition({
               supplied_context:contextPayload,
               available_context_index:idx,
             })},
-          ],1600,'req_'+node.node_path.replaceAll('.','_')+'_decision_'+(round+1)+'_'+attempt);
+          ],700,'req_'+node.node_path.replaceAll('.','_')+'_decision_'+(round+1)+'_'+attempt);
           parsed=response?.parsed;
           break;
         }catch(error){
@@ -336,7 +352,7 @@ export async function runAutonomousRequirementCognition({
       let parsed=null;
       for(let attempt=1;attempt<=2;attempt++){
         try{
-          const response=await callJson([
+          const response=await callRoute([
             {role:'system',content:[
               'You are the bound autonomous agent decomposing ONE parent requirement.',
               'You own the decomposition. The runtime will persist exactly what you author.',
@@ -351,7 +367,7 @@ export async function runAutonomousRequirementCognition({
               supplied_context:node.context_payload||{},
               previously_authored_children:previous,
             })},
-          ],1600,'req_'+node.node_path.replaceAll('.','_')+'_author_child_'+ordinal+'_'+attempt);
+          ],900,'req_'+node.node_path.replaceAll('.','_')+'_author_child_'+ordinal+'_'+attempt);
           parsed=response?.parsed;
           break;
         }catch(error){

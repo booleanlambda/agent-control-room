@@ -1670,6 +1670,32 @@ async function completeDeepJson(model, messages, maxTokens, audit) {
   return {result,parsed};
 }
 
+async function completeRoutingJson(model, messages, maxTokens, audit) {
+  // Same bound model, concise control-plane pass. Hidden thinking is disabled here
+  // so ATOMIC/SPLIT/NEED_CONTEXT routing cannot consume the entire visible JSON budget.
+  // Substantive leaf execution and synthesis remain Thinking ON.
+  const result = await callWithCognitionIntegrity(() => nvidiaChatCompletion({
+    model,messages,maxTokens:Math.min(Number(maxTokens)||700,1000),
+    temperature:0.1,jsonMode:true,enableThinking:false,timeoutMs:120000,
+  }), audit);
+  let parsed=null;
+  try { parsed=JSON.parse(String(result.content || '')); }
+  catch {
+    await recordRejectedCognition(audit,{
+      rejectionReason:'MALFORMED_JSON',
+      finishReason:result.finish_reason || null,
+      outputChars:String(result.content || '').length,
+      outputSha256:String(result.content || '') ? sha256(String(result.content)) : null,
+      usage:result.usage || {},
+    });
+    const error=new Error('cognition_response_rejected:MALFORMED_JSON');
+    error.code='COGNITION_RESPONSE_REJECTED';
+    error.rejectionReason='MALFORMED_JSON';
+    throw error;
+  }
+  return {result,parsed};
+}
+
 function normalizeBoundedPlan(plan) {
   const rawSteps=Array.isArray(plan?.steps) ? plan.steps : [];
   const seen=new Set();
@@ -1753,6 +1779,9 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
   };
   const result=await runAutonomousRequirementCognition({
     model,packet,modeInfo,agentId,intentExecutionId,rpc,sha256,researchContext,
+    completeRouteJson:(messages,maxTokens,phase)=>completeRoutingJson(
+      model,messages,maxTokens,{...commonAudit,phase}
+    ),
     completeJson:(messages,maxTokens,phase)=>completeDeepJson(
       model,messages,maxTokens,{...commonAudit,phase}
     ),
