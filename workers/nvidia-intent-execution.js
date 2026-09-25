@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { nvidiaChatCompletion } from './providers/nvidia.js';
 import { researchWeb } from './web-research.js';
+import { runAutonomousRequirementCognition } from './autonomous-recursive-decomposition.js';
 
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
@@ -1700,182 +1701,34 @@ function normalizeBoundedPlan(plan) {
 }
 
 async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutionId) {
-  const deepPacket = buildDeepCognitionPacket(packet, modeInfo);
-  const deepPacketText = JSON.stringify(deepPacket);
-  const started = Date.now();
-  const assignmentKey=universalCognitionAssignmentKey(packet,modeInfo);
+  const started=Date.now();
   const commonAudit={agentId,executionId:intentExecutionId,executionContext:'wake',model};
-
-  let plan;
-  const existingPlan=await cognitionStepCheckpoint({
-    agentId,intentExecutionId,assignmentKey,stepKey:'plan',model,action:'get'
+  const result=await runAutonomousRequirementCognition({
+    model,packet,modeInfo,agentId,intentExecutionId,rpc,sha256,
+    completeJson:(messages,maxTokens,phase)=>completeDeepJson(
+      model,messages,maxTokens,{...commonAudit,phase}
+    ),
   });
-  if(existingPlan?.status==='ready'){
-    plan=normalizeBoundedPlan(JSON.parse(existingPlan.artifact));
-    console.log('AAU_BOUNDED_COGNITION_STEP_REUSED',JSON.stringify({
-      agent_id:agentId,intent_execution_id:intentExecutionId,assignment_key:assignmentKey,
-      step_key:'plan',checkpoint_id:existingPlan.step_checkpoint_id,
-    }));
-  }else{
-    const planSystem='You are the SAME bound model creating an execution plan for a persistent autonomous agent substantial task. Think privately. Return JSON only. Freeze the task charter before solving. Decompose the task into 2-8 bounded independently completable steps. Each step must be small enough to finish cleanly without relying on truncated output. Preserve mandatory constraints exactly; do not choose least-worst when all candidates fail. Return {"task_charter":{"goal":"...","authoritative_inputs":[...],"mandatory_constraints":[...],"acceptance_criteria":[...],"forbidden_relaxations":[...]},"steps":[{"id":"S1","objective":"...","required_checks":[...],"expected_output":"..."}],"final_reconciliation":[...]}.';
-    const response=await completeDeepJson(model,[
-      {role:'system',content:planSystem},
-      {role:'user',content:deepPacketText},
-    ],1600,{...commonAudit,phase:'bounded_plan'});
-    plan=normalizeBoundedPlan(response.parsed);
-    const saved=await cognitionStepCheckpoint({
-      agentId,intentExecutionId,assignmentKey,stepKey:'plan',model,action:'save',
-      artifact:JSON.stringify(plan),
-      meta:{contract:'universal_bounded_cognition_step_v0_1',kind:'plan',thinking_requested:true},
-    });
-    if(saved?.status!=='ready') throw new Error('bounded_cognition_plan_checkpoint_failed');
-    console.log('AAU_BOUNDED_COGNITION_STEP_SAVED',JSON.stringify({
-      agent_id:agentId,intent_execution_id:intentExecutionId,assignment_key:assignmentKey,
-      step_key:'plan',checkpoint_id:saved.step_checkpoint_id,
-    }));
-  }
-
-  const completed=[];
-  const handoffs=[];
-  for(const step of plan.steps){
-    const stepKey='step_'+step.id;
-    const existing=await cognitionStepCheckpoint({
-      agentId,intentExecutionId,assignmentKey,stepKey,model,action:'get'
-    });
-    if(existing?.status==='ready'){
-      const parsed=JSON.parse(existing.artifact);
-      completed.push(parsed);
-      handoffs.push(parsed.handoff || {});
-      console.log('AAU_BOUNDED_COGNITION_STEP_REUSED',JSON.stringify({
-        agent_id:agentId,intent_execution_id:intentExecutionId,assignment_key:assignmentKey,
-        step_key:stepKey,checkpoint_id:existing.step_checkpoint_id,
-      }));
-      continue;
-    }
-
-    const stepSystem='You are the SAME bound model executing exactly ONE bounded step in a larger cognition. Thinking is enabled. Do not solve later steps. Preserve the immutable task charter and all mandatory constraints. Return JSON only with keys step_id, artifact, handoff. handoff must contain conclusions, numbers_or_facts, constraints_checked, unresolved arrays. Keep artifact focused and under 7000 characters. Never claim a constraint passed unless this step establishes it. Required step_id: '+step.id+'.';
-    const stepUser='IMMUTABLE TASK CHARTER:\n'+JSON.stringify(plan.task_charter)
-      +'\n\nFULL AUTHORITATIVE TASK PACKET:\n'+deepPacketText
-      +'\n\nCURRENT BOUNDED STEP:\n'+JSON.stringify(step)
-      +'\n\nPRIOR COMPLETED HANDOFFS (not hidden reasoning):\n'+JSON.stringify(handoffs);
-    let parsed=null;
-    for(let attempt=1;attempt<=2;attempt++){
-      try{
-        const response=await completeDeepJson(model,[
-          {role:'system',content:stepSystem+(attempt===2?' This is a retry after an incomplete attempt: be even more bounded and do not expand scope.':'')},
-          {role:'user',content:stepUser},
-        ],1800,{...commonAudit,phase:'bounded_'+step.id+'_attempt_'+attempt});
-        parsed=response.parsed;
-        break;
-      }catch(error){
-        if(attempt===2) throw error;
-        if(error?.code!=='COGNITION_RESPONSE_REJECTED' && error?.code!=='NVIDIA_TIMEOUT') throw error;
-      }
-    }
-    if(!parsed || String(parsed.step_id)!==step.id || !String(parsed.artifact || '').trim())
-      throw new Error('bounded_cognition_step_contract_incomplete:'+step.id);
-    if(Buffer.byteLength(String(parsed.artifact))>12000)
-      throw new Error('bounded_cognition_step_artifact_too_large:'+step.id);
-    const normalized={
-      step_id:step.id,
-      artifact:String(parsed.artifact),
-      handoff:{
-        conclusions:Array.isArray(parsed?.handoff?.conclusions)?parsed.handoff.conclusions.slice(0,20):[],
-        numbers_or_facts:Array.isArray(parsed?.handoff?.numbers_or_facts)?parsed.handoff.numbers_or_facts.slice(0,30):[],
-        constraints_checked:Array.isArray(parsed?.handoff?.constraints_checked)?parsed.handoff.constraints_checked.slice(0,30):[],
-        unresolved:Array.isArray(parsed?.handoff?.unresolved)?parsed.handoff.unresolved.slice(0,20):[],
-      },
-    };
-    const saved=await cognitionStepCheckpoint({
-      agentId,intentExecutionId,assignmentKey,stepKey,model,action:'save',
-      artifact:JSON.stringify(normalized),
-      meta:{contract:'universal_bounded_cognition_step_v0_1',kind:'bounded_step',step_id:step.id,thinking_requested:true},
-    });
-    if(saved?.status!=='ready' || saved.artifact_hash!==sha256(JSON.stringify(normalized)))
-      throw new Error('bounded_cognition_step_checkpoint_failed:'+step.id);
-    completed.push(normalized);
-    handoffs.push(normalized.handoff);
-    console.log('AAU_BOUNDED_COGNITION_STEP_SAVED',JSON.stringify({
-      agent_id:agentId,intent_execution_id:intentExecutionId,assignment_key:assignmentKey,
-      step_key:stepKey,checkpoint_id:saved.step_checkpoint_id,artifact_bytes:Buffer.byteLength(normalized.artifact),
-    }));
-  }
-
-  const synthesisSystem='You are the SAME bound model performing final reconciliation of a decomposed cognition. Thinking is enabled. Use only the complete persisted step artifacts below. Recheck the final conclusion against the ORIGINAL task charter, mandatory constraints, acceptance criteria, units, arithmetic identities and unresolved items. If no option satisfies all mandatory constraints, state that explicitly. Return a concise auditable WORK ARTIFACT, not JSON and not chain-of-thought.';
-  const synthesisUser='TASK CHARTER:\n'+JSON.stringify(plan.task_charter)
-    +'\nFINAL RECONCILIATION REQUIREMENTS:\n'+JSON.stringify(plan.final_reconciliation)
-    +'\nCOMPLETE STEP ARTIFACTS:\n'+JSON.stringify(completed);
-  let synthesis;
-  const existingSynthesis=await cognitionStepCheckpoint({
-    agentId,intentExecutionId,assignmentKey,stepKey:'synthesis',model,action:'get'
-  });
-  if(existingSynthesis?.status==='ready'){
-    synthesis=existingSynthesis.artifact;
-    console.log('AAU_BOUNDED_COGNITION_STEP_REUSED',JSON.stringify({
-      agent_id:agentId,intent_execution_id:intentExecutionId,assignment_key:assignmentKey,
-      step_key:'synthesis',checkpoint_id:existingSynthesis.step_checkpoint_id,
-    }));
-  }else{
-    const result=await completeDeepPass(model,[
-      {role:'system',content:synthesisSystem},
-      {role:'user',content:synthesisUser},
-    ],2800,{...commonAudit,phase:'bounded_synthesis'});
-    synthesis=String(result.content || '').trim();
-    if(!synthesis) throw new Error('bounded_cognition_empty_synthesis');
-    const saved=await cognitionStepCheckpoint({
-      agentId,intentExecutionId,assignmentKey,stepKey:'synthesis',model,action:'save',
-      artifact:synthesis,
-      meta:{contract:'universal_bounded_cognition_step_v0_1',kind:'synthesis',thinking_requested:true,step_count:completed.length},
-    });
-    if(saved?.status!=='ready') throw new Error('bounded_cognition_synthesis_checkpoint_failed');
-  }
-
-  const criticContext={
-    task_charter:plan.task_charter,
-    final_reconciliation:plan.final_reconciliation,
-    synthesis,
-    handoffs,
-  };
-  let criticArtifact='';
-  try{
-    const critic=await completeDeepPass(model,[
-      {role:'system',content:DEEP_CRITIC_SYSTEM_PROMPT},
-      {role:'user',content:JSON.stringify(criticContext)},
-    ],2600,{...commonAudit,phase:'bounded_critic'});
-    criticArtifact=String(critic.content || '').trim();
-  }catch(error){
-    console.warn('AAU_BOUNDED_COGNITION_CRITIC_REJECTED',JSON.stringify({
-      agent_id:agentId,intent_execution_id:intentExecutionId,
-      error:String(error?.message || error).slice(0,500),
-      synthesis_preserved:true,
-    }));
-  }
-
-  const finalArtifact=criticArtifact || synthesis;
-  const artifactHash=sha256(finalArtifact);
-  console.log('AAU_DEEP_COGNITION_RESULT',JSON.stringify({
-    agent_id:agentId,intent_execution_id:intentExecutionId,mode:'deep',
-    reason:modeInfo?.reason || null,assignment_key:assignmentKey,
-    task_packet_bytes:Buffer.byteLength(deepPacketText),
-    artifact_bytes:Buffer.byteLength(finalArtifact),artifact_hash:artifactHash,
-    bounded_steps:completed.length,thinking_requested:true,thinking_fallback:false,
-    critic_used:Boolean(criticArtifact),latency_ms:Date.now()-started,
-    contract:'universal_cognition_cycle_v0_1',
+  console.log('AAU_AUTONOMOUS_DECOMPOSITION_RESULT',JSON.stringify({
+    agent_id:agentId,
+    intent_execution_id:intentExecutionId,
+    assignment_key:result?.meta?.assignment_key||null,
+    root_node_id:result?.meta?.root_node_id||null,
+    nodes_touched:result?.meta?.nodes_touched||null,
+    model_calls:result?.meta?.model_calls||null,
+    context_requests:result?.meta?.context_requests||null,
+    artifact_bytes:Buffer.byteLength(result?.artifact||''),
+    latency_ms:Date.now()-started,
+    contract:'autonomous_recursive_decomposition_v0_1',
   }));
-
   return {
-    artifact:finalArtifact,
+    artifact:result.artifact,
     meta:{
-      contract:'deep_reasoning_structured_commit_v0_1+universal_cognition_cycle_v0_1',
-      assignment_key:assignmentKey,
-      task_packet_bytes:Buffer.byteLength(deepPacketText),
-      artifact_bytes:Buffer.byteLength(finalArtifact),
-      artifact_hash:artifactHash,
-      bounded_steps:completed.length,
-      thinking_requested:true,
-      thinking_fallback:false,
-      critic_used:Boolean(criticArtifact),
+      ...(result.meta||{}),
       latency_ms:Date.now()-started,
+      thinking_requested:true,
+      decomposition_authored_by_bound_agent:true,
+      contract:'autonomous_recursive_decomposition_v0_1',
     },
   };
 }
