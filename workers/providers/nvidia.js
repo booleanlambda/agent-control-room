@@ -24,10 +24,10 @@ function envBool(name) {
 function resolveTimeoutMs(overrideMs = null) {
   const override = Number(overrideMs);
   if (Number.isFinite(override) && override > 0)
-    return Math.max(5000, Math.min(Math.floor(override), 360000));
+    return Math.max(5000, Math.min(Math.floor(override), 900000));
   const raw = Number(process.env.AAU_NVIDIA_TIMEOUT_MS);
   if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_NVIDIA_TIMEOUT_MS;
-  return Math.max(5000, Math.min(Math.floor(raw), 360000));
+  return Math.max(5000, Math.min(Math.floor(raw), 900000));
 }
 
 function resolveConfig() {
