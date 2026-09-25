@@ -1,0 +1,63 @@
+{
+  "artifact": "silas_masters_physical_chemistry_parallel_kinetics_v1",
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "agent_name": "Silas",
+  "bound_model": "google/gemma-4-31b-it",
+  "scope": "standalone_off_curriculum_masters_chemistry_exercise_no_grading_or_lifecycle_credit",
+  "thinking": true,
+  "source_id": "CHEM-KIN-V1",
+  "objective": "Evaluate a parallel first-order reaction network A→B (desired) and A→C (undesired) under three isothermal batch temperatures, choose a condition satisfying all frozen chemistry/process constraints, then re-evaluate after catalyst aging changes the undesired pathway.",
+  "system": {
+    "initial_A_M": 0.25,
+    "batch_time_min": 10,
+    "gas_constant_J_mol_K": 8.314,
+    "desired": {
+      "reaction": "A→B",
+      "pre_exponential_s_1": 10000000,
+      "activation_energy_J_mol": 60000
+    },
+    "undesired": {
+      "reaction": "A→C",
+      "pre_exponential_s_1": 100000000,
+      "activation_energy_J_mol": 72000
+    },
+    "candidate_temperatures_K": [
+      330,
+      345,
+      360
+    ]
+  },
+  "equations": {
+    "arrhenius": "k_i = A_i * exp(-Ea_i/(R*T))",
+    "total_rate_constant": "k_total = k_B + k_C",
+    "conversion": "X_A = 1 - exp(-k_total*t)",
+    "selectivity_to_B": "S_B = k_B/k_total",
+    "yield_to_B": "Y_B = X_A*S_B",
+    "final_A": "[A]_t = [A]_0*(1-X_A)",
+    "final_B": "[B]_t = [A]_0*Y_B",
+    "final_C": "[C]_t = [A]_0*X_A*(1-S_B)",
+    "mass_balance": "[A]_t+[B]_t+[C]_t=[A]_0"
+  },
+  "constraints": [
+    "A conversion after 10 minutes must be >= 0.95.",
+    "Selectivity to desired product B must be >= 0.86.",
+    "Yield of B relative to initial A must be >= 0.85.",
+    "Operating temperature must be <= 350 K.",
+    "Final concentrations must be non-negative and close the A/B/C mass balance to within 0.0005 M.",
+    "A condition is feasible only if ALL constraints pass; do not redefine feasibility as least-worst."
+  ],
+  "changed_condition": {
+    "source_id": "CAT-AGE-V2",
+    "description": "Catalyst aging increases only the undesired-pathway pre-exponential factor A_C from 1.0e8 s^-1 to 1.5e8 s^-1.",
+    "undesired_pre_exponential_s_1": 150000000,
+    "all_other_inputs_unchanged": true,
+    "instruction": "Recompute all candidate temperatures. If none satisfies every frozen constraint, explicitly report no feasible condition under current constraints."
+  },
+  "stages": [
+    "Interpret the parallel-reaction model, equations, assumptions, units, constraints, and plan the calculations.",
+    "Compute the 330 K, 345 K, and 360 K baseline candidates independently with Arrhenius constants, conversion, selectivity, yield, concentrations, and mass balance.",
+    "Compare the validated baseline candidate records and choose a feasible temperature or NONE without relaxing any constraint.",
+    "Receive CAT-AGE-V2 and recompute the three candidates independently with only A_C changed.",
+    "Make the changed-condition feasibility decision and produce a chemistry memo referencing prior checkpoints and any earlier audit errors."
+  ]
+}
