@@ -45,6 +45,19 @@ if (true || isEnabled('AAU_CONTROL_ROOM_INTENT_VISIBILITY_PATCH')) {
   }
 }
 
+// Read-only LangGraph/LangSmith credential probe. Never logs the token.
+if (String(process.env.LANGGRAPH_TOKEN || '').trim()) {
+  try {
+    const { probeLangGraphToken } = await import('./langgraph-token-probe.js');
+    await probeLangGraphToken();
+  } catch (error) {
+    console.log('AAU_LANGGRAPH_TOKEN_PROBE', JSON.stringify({
+      present:true,ok:false,reason:'probe_exception',
+      error:String(error?.message || error).slice(0,500)
+    }));
+  }
+}
+
 // Operator-only bounded source discovery probe. Does not wake an agent.
 if (isEnabled('AAU_WEB_RESEARCH_SMOKE_TEST')) {
   try {
