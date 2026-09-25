@@ -1,0 +1,76 @@
+{
+  "contract": "silas_masters_physical_chemistry_parallel_kinetics_v1",
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "model_returned": "google/gemma-4-31b-it",
+  "thinking_requested": true,
+  "stage": 1,
+  "brief_sha": "3cfc3d3309a3ee2739ff9dbfe18b45b938d09277",
+  "input_sha256": "1b36e27b15cd80412a19363b10a9ba382f916a5ca2a3ca705537d4a19805e59b",
+  "output_sha256": "d938edeba04cbdaade9283861aec114ca0aeaea7a160d8bee9b207ded15dce09",
+  "output_chars": 2963,
+  "reasoning_chars": 3200,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 1013,
+    "completion_tokens": 2035,
+    "total_tokens": 3048,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cached_tokens": 0
+    },
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "reasoning_tokens": 1216,
+      "rejected_prediction_tokens": null
+    }
+  },
+  "elapsed_ms": 36127,
+  "assessment": {
+    "passed": true,
+    "issues": []
+  },
+  "output": {
+    "stage": "chemistry_plan",
+    "source_ids": [
+      "CHEM-KIN-V1"
+    ],
+    "reaction_model": "Parallel first-order network A → B (desired) and A → C (undesired) where rate constants k_B and k_C follow the Arrhenius equation. The system is an isothermal batch reactor.",
+    "calculation_sequence": [
+      "Convert batch time from minutes to seconds (10 min * 60 s/min = 600 s).",
+      "Calculate rate constants k_B and k_C for each candidate temperature (330 K, 345 K, 360 K) using the Arrhenius equation: k_i = A_i * exp(-Ea_i/(R*T)).",
+      "Determine the total rate constant k_total = k_B + k_C for each temperature.",
+      "Compute the conversion of A (X_A = 1 - exp(-k_total * t)) for each temperature.",
+      "Compute the selectivity to B (S_B = k_B / k_total) for each temperature.",
+      "Compute the yield of B (Y_B = X_A * S_B) for each temperature.",
+      "Calculate final concentrations [A]_t, [B]_t, and [C]_t and verify the mass balance closure ([A]_t + [B]_t + [C]_t = [A]_0).",
+      "Evaluate all six frozen constraints for each baseline temperature to identify the feasible condition.",
+      "Update the pre-exponential factor A_C to 1.5e8 s^-1 as per CAT-AGE-V2.",
+      "Repeat the calculation sequence (Steps 2-7) for all candidate temperatures under the aged catalyst condition.",
+      "Perform a final feasibility check against the frozen constraints for the aged catalyst results."
+    ],
+    "unit_checks": [
+      "Ensure time is converted from minutes to seconds to match the units of the pre-exponential factors (s^-1).",
+      "Verify that activation energy (J/mol) and gas constant (J/mol·K) are consistent to yield a dimensionless exponent.",
+      "Confirm that final concentrations are in Molar (M) and the mass balance sum is compared against the initial [A]_0 = 0.25 M."
+    ],
+    "constraints": [
+      "A conversion after 10 minutes must be >= 0.95.",
+      "Selectivity to desired product B must be >= 0.86.",
+      "Yield of B relative to initial A must be >= 0.85.",
+      "Operating temperature must be <= 350 K.",
+      "Final concentrations must be non-negative and close the A/B/C mass balance to within 0.0005 M.",
+      "A condition is feasible only if ALL constraints pass; do not redefine feasibility as least-worst."
+    ],
+    "assumptions": [
+      "The reactor maintains a perfectly isothermal environment at the specified candidate temperatures.",
+      "The reaction kinetics remain strictly first-order with respect to A throughout the process.",
+      "Catalyst aging affects only the pre-exponential factor of the undesired pathway (A_C) and does not alter activation energies or the desired pathway."
+    ],
+    "failure_modes": [
+      "Numerical instability or precision errors when calculating the exponential terms for Arrhenius constants.",
+      "Incorrect unit conversion of time (using 10 instead of 600), leading to underestimated conversion.",
+      "Incorrectly identifying a 'best' candidate when no candidate satisfies all six frozen constraints."
+    ]
+  }
+}
