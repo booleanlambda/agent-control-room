@@ -2,7 +2,8 @@
 // The bound agent authors decomposition. Runtime only persists/routes/checkpoints.
 
 const MAX_BRANCH_DEPTH=12;
-const MAX_SINGLE_CHILD_REFINEMENTS=12;
+const MAX_SINGLE_CHILD_REFINEMENTS=4;
+const MAX_ATOMIC_EXECUTION_FAILURES=1;
 const MAX_CHILDREN_PER_NODE=16;
 const MAX_CONTEXT_ROUNDS=4;
 const MAX_CONTEXT_REQUESTS_PER_ROUND=8;
@@ -16,6 +17,34 @@ function text(v){return String(v??'').trim();}
 function bytes(v){try{return Buffer.byteLength(typeof v==='string'?v:JSON.stringify(v));}catch{return 0;}}
 function clip(s,n){const v=String(s??'');return v.length<=n?v:v.slice(0,n);}
 function safeJson(v){try{return JSON.stringify(v);}catch{return '{}';}}
+function normalizedRequirement(v){
+  return text(v).toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
+}
+function requirementSimilarity(a,b){
+  const aa=normalizedRequirement(a);
+  const bb=normalizedRequirement(b);
+  if(!aa||!bb)return 0;
+  if(aa===bb)return 1;
+  const aset=new Set(aa.split(' ').filter(Boolean));
+  const bset=new Set(bb.split(' ').filter(Boolean));
+  let overlap=0;
+  for(const token of aset)if(bset.has(token))overlap++;
+  return overlap/Math.max(1,new Set([...aset,...bset]).size);
+}
+function childConvergenceValidation(parentRequirement,childRequirement,scopeRemoved,completionCriterion){
+  const failures=[];
+  const scope=text(scopeRemoved);
+  const criterion=text(completionCriterion);
+  if(scope.length<12)failures.push('scope_removed_required');
+  if(criterion.length<12)failures.push('completion_criterion_required');
+  const parentNorm=normalizedRequirement(parentRequirement);
+  const childNorm=normalizedRequirement(childRequirement);
+  const similarity=requirementSimilarity(parentRequirement,childRequirement);
+  if(parentNorm===childNorm)failures.push('child_exactly_restates_parent');
+  if(similarity>=0.88 && childNorm.length>=Math.max(1,Math.floor(parentNorm.length*0.80)))
+    failures.push('child_does_not_materially_reduce_scope');
+  return {valid:failures.length===0,failures,similarity};
+}
 function boundContextPayload(payload){
   const src=asObject(payload);
   if(bytes(src)<=MAX_PERSISTED_CONTEXT_BYTES)return src;
@@ -280,6 +309,8 @@ export async function runAutonomousRequirementCognition({
 
   async function decide(node,{forceReconsider=false}={}){
     let contextPayload=asObject(node.context_payload);
+    const atomicExecutionFailures=Math.max(0,Number(node?.decision_payload?.atomic_execution_failures||0));
+    const atomicUnavailable=atomicExecutionFailures>=MAX_ATOMIC_EXECUTION_FAILURES;
     for(let round=0;round<MAX_CONTEXT_ROUNDS;round++){
       let parsed=null;
       for(let attempt=1;attempt<=2;attempt++){
@@ -288,7 +319,9 @@ export async function runAutonomousRequirementCognition({
             'You are the bound autonomous agent deciding how to handle ONE requirement.',
             'The runtime does not choose your decomposition.',
             'Choose exactly one decision:',
-            'ATOMIC = you judge this requirement small and clear enough to complete as one bounded cognition.',
+            atomicUnavailable
+              ? 'ATOMIC is unavailable for this exact node because its bounded atomic execution already exhausted the allowed retries without a complete response. Choose SPLIT or NEED_CONTEXT yourself.'
+              : 'ATOMIC = you judge this requirement small and clear enough to complete as one bounded cognition.',
             'SPLIT = you decide this requirement should be decomposed into child requirements that YOU will author.',
             'NEED_CONTEXT = you need specific stored context before deciding or executing.',
             'Return JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT","reason":"brief","context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."]}.',
@@ -307,11 +340,18 @@ export async function runAutonomousRequirementCognition({
               available_context_index:idx,
             })},
           ],700,'req_'+node.node_path.replaceAll('.','_')+'_decision_'+(round+1)+'_'+attempt);
-          parsed=response?.parsed;
+          const candidate=response?.parsed;
+          const candidateDecision=text(candidate?.decision).toUpperCase();
+          if(atomicUnavailable&&candidateDecision==='ATOMIC'){
+            if(attempt===2)throw new Error('autonomous_decomposition_atomic_mode_exhausted:'+node.node_path);
+            continue;
+          }
+          parsed=candidate;
           break;
         }catch(error){
           if(attempt===2)throw error;
-          if(error?.code!=='COGNITION_RESPONSE_REJECTED'&&error?.code!=='NVIDIA_TIMEOUT')throw error;
+          if(error?.code!=='COGNITION_RESPONSE_REJECTED'&&error?.code!=='NVIDIA_TIMEOUT'
+             &&!String(error?.message||'').startsWith('autonomous_decomposition_atomic_mode_exhausted:'))throw error;
         }
       }
 
@@ -320,9 +360,12 @@ export async function runAutonomousRequirementCognition({
         throw new Error('autonomous_decomposition_invalid_decision:'+node.node_path);
 
       const decisionPayload={
+        ...(node.decision_payload||{}),
         reason:clip(parsed?.reason,1200),
         context_round:round,
         force_reconsider:Boolean(forceReconsider),
+        atomic_execution_failures:atomicExecutionFailures,
+        atomic_unavailable:atomicUnavailable,
       };
 
       if(decision==='NEED_CONTEXT'){
@@ -423,9 +466,10 @@ export async function runAutonomousRequirementCognition({
               'You own the decomposition. The runtime will persist exactly what you author.',
               'Author exactly ONE next child requirement, or declare DONE when the children already authored adequately cover the parent.',
               'A child must be a real independently completable requirement, not a vague label.',
+              'Every child must materially reduce the parent scope. State what scope is removed and give a concrete completion criterion.',
               'Do not solve the child here.',
-              'Return JSON only: {"status":"CHILD","requirement":"...","reason":"brief"} OR {"status":"DONE","coverage_note":"brief"}.',
-              'There is no required number of children. One child is valid when it is a genuinely narrower refinement; do not merely restate the parent. Use as many or as few as your reasoning requires.',
+              'Return JSON only: {"status":"CHILD","requirement":"...","scope_removed":"...","completion_criterion":"...","reason":"brief"} OR {"status":"DONE","coverage_note":"brief"}.',
+              'There is no required number of children. One child is valid only when it is a genuinely narrower refinement; do not merely restate the parent. Use as many or as few as your reasoning requires.',
             ].join('\n')},
             {role:'user',content:safeJson({
               parent_requirement:node.requirement_text,
@@ -433,11 +477,28 @@ export async function runAutonomousRequirementCognition({
               previously_authored_children:previous,
             })},
           ],900,'req_'+node.node_path.replaceAll('.','_')+'_author_child_'+ordinal+'_'+attempt);
-          parsed=response?.parsed;
+          const candidate=response?.parsed;
+          const candidateStatus=text(candidate?.status).toUpperCase();
+          if(candidateStatus==='CHILD'){
+            const validation=childConvergenceValidation(
+              node.requirement_text,
+              candidate?.requirement,
+              candidate?.scope_removed,
+              candidate?.completion_criterion
+            );
+            if(!validation.valid){
+              if(attempt===2)
+                throw new Error('autonomous_decomposition_nonconvergent_child:'+node.node_path+':'+validation.failures.join(','));
+              continue;
+            }
+            candidate._convergence_validation=validation;
+          }
+          parsed=candidate;
           break;
         }catch(error){
           if(attempt===2)throw error;
-          if(error?.code!=='COGNITION_RESPONSE_REJECTED'&&error?.code!=='NVIDIA_TIMEOUT')throw error;
+          if(error?.code!=='COGNITION_RESPONSE_REJECTED'&&error?.code!=='NVIDIA_TIMEOUT'
+             &&!String(error?.message||'').startsWith('autonomous_decomposition_nonconvergent_child:'))throw error;
         }
       }
 
@@ -465,7 +526,13 @@ export async function runAutonomousRequirementCognition({
         nodePath,parentPath:node.node_path,ordinal,
         requirement,sourceKind:'agent_decomposition',sourceRef:node.node_path,
         status:'pending',decisionType:null,
-        decisionPayload:{authored_reason:clip(parsed?.reason,1200),authored_by_bound_agent:true},
+        decisionPayload:{
+          authored_reason:clip(parsed?.reason,1200),
+          authored_by_bound_agent:true,
+          scope_removed:clip(parsed?.scope_removed,1600),
+          completion_criterion:clip(parsed?.completion_criterion,1600),
+          convergence_similarity:Number(parsed?._convergence_validation?.similarity||0),
+        },
         contextPayload:inheritedChildContext(node.context_payload),resultArtifact:null,
       });
       child.parent_path=node.node_path;
@@ -504,11 +571,18 @@ export async function runAutonomousRequirementCognition({
       }
     }catch(error){
       if(error?.code==='COGNITION_RESPONSE_REJECTED'||error?.code==='NVIDIA_TIMEOUT'){
+        const atomicExecutionFailures=Math.max(0,Number(node?.decision_payload?.atomic_execution_failures||0))+1;
         const reset=await saveNode({
           nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
           requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
           status:'pending',decisionType:null,
-          decisionPayload:{prior_atomic_rejection:String(error?.rejectionReason||error?.code||'incomplete'),reconsider_decomposition:true},
+          decisionPayload:{
+            ...(node.decision_payload||{}),
+            prior_atomic_rejection:String(error?.rejectionReason||error?.code||'incomplete'),
+            reconsider_decomposition:true,
+            atomic_execution_failures:atomicExecutionFailures,
+            atomic_unavailable:atomicExecutionFailures>=MAX_ATOMIC_EXECUTION_FAILURES,
+          },
           contextPayload:node.context_payload||{},resultArtifact:null,
         });
         reset.parent_path=node.parent_path??parentPathOf(node.node_path);
@@ -640,8 +714,6 @@ export async function runAutonomousRequirementCognition({
 
   async function process(nodePath,parentPath=null,branchDepth=0,singleChildRefinements=0){
     if(branchDepth>MAX_BRANCH_DEPTH)throw new Error('autonomous_decomposition_branch_depth_resource_limit:'+nodePath);
-    if(singleChildRefinements>MAX_SINGLE_CHILD_REFINEMENTS)
-      throw new Error('autonomous_decomposition_single_child_convergence_limit:'+nodePath);
     let node=await getNode(nodePath);
     if(node?.status!=='ready')throw new Error('autonomous_decomposition_node_missing:'+nodePath);
     node.parent_path=parentPath;
@@ -651,8 +723,37 @@ export async function runAutonomousRequirementCognition({
 
     for(let transitions=0;transitions<8;transitions++){
       if(node.node_status==='split'||node.decision_type==='SPLIT'){
-        let kids=await children(node.node_path);
+        let kids=(await children(node.node_path)).filter((child)=>String(child?.status||'')!=='cancelled');
         if(!kids.length)kids=await authorChildren(node);
+        if(kids.length===1&&singleChildRefinements>=MAX_SINGLE_CHILD_REFINEMENTS){
+          const child=kids[0];
+          await saveNode({
+            nodePath:child.node_path,parentPath:node.node_path,ordinal:child.ordinal||0,
+            requirement:child.requirement_text,sourceKind:child.source_kind||'agent_decomposition',
+            sourceRef:child.source_ref??node.node_path,status:'cancelled',
+            decisionType:child.decision_type??null,
+            decisionPayload:{
+              ...(child.decision_payload||{}),
+              cancelled_for_nonconvergence:true,
+              cancellation_reason:'single_child_refinement_budget_exhausted',
+            },
+            contextPayload:child.context_payload||{},resultArtifact:child.result_artifact||null,
+          });
+          node=await saveNode({
+            nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
+            requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
+            status:'pending',decisionType:null,
+            decisionPayload:{
+              ...(node.decision_payload||{}),
+              reconsider_decomposition:true,
+              convergence_recovery:'single_child_refinement_budget_exhausted',
+              cancelled_child_path:child.node_path,
+            },
+            contextPayload:node.context_payload||{},resultArtifact:null,
+          });
+          node.parent_path=parentPath;
+          continue;
+        }
         const completed=[];
         for(const child of kids){
           child.parent_path=node.node_path;
@@ -683,7 +784,7 @@ export async function runAutonomousRequirementCognition({
           const done=await process(
             child.node_path,
             node.node_path,
-            singleChild?branchDepth:branchDepth+1,
+            branchDepth+1,
             singleChild?singleChildRefinements+1:0
           );
           if(done.node_status!=='completed')throw new Error('autonomous_decomposition_child_not_complete:'+child.node_path);
@@ -738,7 +839,7 @@ export async function runAutonomousRequirementCognition({
       nodes_touched:counters.nodes,
       model_calls:counters.model_calls,
       context_requests:counters.context_requests,
-      convergence_policy:'branch_depth_v0_2_single_child_refinement_budget',
+      convergence_policy:'branch_depth_v0_3_atomic_lock_single_child_contraction',
       decomposition_authored_by_bound_agent:true,
       runtime_role:'persist_route_resume_completion_integrity_only',
       cognition_mode:modeInfo?.mode||'deep',
