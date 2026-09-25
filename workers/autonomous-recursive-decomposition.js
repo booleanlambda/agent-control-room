@@ -241,6 +241,18 @@ function compactCompletedSiblingResults(rows){
   });
 }
 
+function agentDiscoveryState(node){
+  const payload=asObject(node?.decision_payload);
+  return {
+    authored_reason:text(payload.authored_reason)||null,
+    scope_removed:text(payload.scope_removed)||null,
+    completion_criterion:text(payload.completion_criterion)||null,
+    prior_decision_reason:text(payload.reason)||null,
+    source_kind:node?.source_kind||null,
+    source_ref:node?.source_ref??null,
+  };
+}
+
 export async function runAutonomousRequirementCognition({
   model,packet,modeInfo,agentId,intentExecutionId,
   rpc,sha256,completeJson,completeRouteJson=null,researchContext=null,
@@ -561,6 +573,7 @@ export async function runAutonomousRequirementCognition({
             ].join('\n')},
             {role:'user',content:safeJson({
               requirement:node.requirement_text,
+              agent_authored_discovery_state:agentDiscoveryState(node),
               supplied_context:node.context_payload||{},
               available_context_index:idx,
             })},
@@ -642,15 +655,147 @@ export async function runAutonomousRequirementCognition({
     }
     if(status!=='COMPLETE')throw new Error('autonomous_decomposition_atomic_status_invalid:'+node.node_path);
 
-    const artifact=text(parsed?.artifact);
-    if(!artifact)throw new Error('autonomous_decomposition_atomic_artifact_empty:'+node.node_path);
-    const handoff=asObject(parsed?.handoff);
+    const proposedArtifact=text(parsed?.artifact);
+    if(!proposedArtifact)throw new Error('autonomous_decomposition_atomic_artifact_empty:'+node.node_path);
+    const proposedHandoff=asObject(parsed?.handoff);
+
+    // Cognitive continuity: before runtime may persist completion, the same bound
+    // agent reconciles its proposed result against its own discovery state.
+    let reconciliation=null;
+    try{
+      for(let attempt=1;attempt<=2;attempt++){
+        try{
+          const response=await callJson([
+            {role:'system',content:[
+              'You are the bound autonomous agent reconciling YOUR proposed completion against YOUR OWN prior discovery state.',
+              'This is not an external verifier. The runtime has made no substantive judgment and must not reinterpret your task for you.',
+              'Re-read your requirement, your authored discovery state, your proposed artifact, and the supplied evidence.',
+              'Decide whether YOU consider your own completion criterion actually satisfied.',
+              'Return one status only:',
+              'COMPLETE = you judge the requirement and your own completion criterion genuinely satisfied by the evidence. You may correct wording/calculation in artifact and handoff before finalizing.',
+              'NEED_CONTEXT = evidence or stored context is still missing. Supply exact context_requests and/or research_queries/research_urls you choose.',
+              'SPLIT = you now judge the requirement is not actually bounded and should be decomposed by you.',
+              'Do not treat a nearby metric, label, time horizon, population, market definition, or proxy as equivalent unless you can justify that equivalence from the supplied evidence.',
+              'Preserve uncertainty. A retrieved source is evidence only for what it actually supports.',
+              'Return JSON only: {"status":"COMPLETE|NEED_CONTEXT|SPLIT","reason":"brief auditable reason","criterion_assessment":"brief comparison to your own criterion","gaps":["..."],"artifact":"required when COMPLETE","handoff":{"conclusions":[],"facts":[],"unresolved":[]},"context_requests":[],"research_queries":[],"research_urls":[]}.',
+            ].join('\n')},
+            {role:'user',content:safeJson({
+              requirement:node.requirement_text,
+              agent_authored_discovery_state:agentDiscoveryState(node),
+              proposed_completion:{artifact:proposedArtifact,handoff:proposedHandoff},
+              supplied_context:node.context_payload||{},
+              available_context_index:idx,
+            })},
+          ],1800,'req_'+node.node_path.replaceAll('.','_')+'_reconcile_'+attempt);
+          reconciliation=response?.parsed;
+          break;
+        }catch(error){
+          if(attempt===2)throw error;
+          if(error?.code!=='COGNITION_RESPONSE_REJECTED'&&error?.code!=='NVIDIA_TIMEOUT')throw error;
+        }
+      }
+    }catch(error){
+      if(error?.code==='COGNITION_RESPONSE_REJECTED'||error?.code==='NVIDIA_TIMEOUT'){
+        const atomicExecutionFailures=Math.max(0,Number(node?.decision_payload?.atomic_execution_failures||0))+1;
+        const reset=await saveNode({
+          nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
+          requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
+          status:'pending',decisionType:null,
+          decisionPayload:{
+            ...(node.decision_payload||{}),
+            prior_atomic_rejection:String(error?.rejectionReason||error?.code||'reconciliation_incomplete'),
+            reconsider_decomposition:true,
+            atomic_execution_failures:atomicExecutionFailures,
+            atomic_unavailable:atomicExecutionFailures>=MAX_ATOMIC_EXECUTION_FAILURES,
+            reconciliation_incomplete:true,
+          },
+          contextPayload:node.context_payload||{},resultArtifact:null,
+        });
+        reset.parent_path=node.parent_path??parentPathOf(node.node_path);
+        return {reconsider:true,node:reset};
+      }
+      throw error;
+    }
+
+    const reconciliationStatus=text(reconciliation?.status).toUpperCase();
+    const reconciliationMeta={
+      reconciliation_performed:true,
+      reconciliation_reason:clip(reconciliation?.reason,1600),
+      reconciliation_criterion_assessment:clip(reconciliation?.criterion_assessment,2200),
+      reconciliation_gaps:asArray(reconciliation?.gaps).map(v=>clip(text(v),700)).filter(Boolean).slice(0,12),
+      cognitive_continuity_policy:'agent_discovery_restore_and_reconcile_v0_1',
+    };
+
+    if(reconciliationStatus==='SPLIT'){
+      const split=await saveNode({
+        nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
+        requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
+        status:'split',decisionType:'SPLIT',
+        decisionPayload:{
+          ...(node.decision_payload||{}),
+          ...reconciliationMeta,
+          reason:clip(reconciliation?.reason,1200),
+          reclassified_during_reconciliation:true,
+        },
+        contextPayload:node.context_payload||{},resultArtifact:null,
+      });
+      split.parent_path=node.parent_path??parentPathOf(node.node_path);
+      return {split:true,node:split};
+    }
+
+    if(reconciliationStatus==='NEED_CONTEXT'){
+      const requests=asArray(reconciliation?.context_requests).map(text).filter(Boolean).slice(0,MAX_CONTEXT_REQUESTS_PER_ROUND);
+      const researchQueries=asArray(reconciliation?.research_queries).map(text).filter(Boolean).slice(0,8);
+      const researchUrls=asArray(reconciliation?.research_urls).map(text).filter(v=>/^https:\/\//i.test(v)).slice(0,8);
+      if(!requests.length&&!researchQueries.length&&!researchUrls.length)
+        throw new Error('autonomous_decomposition_reconciliation_context_empty:'+node.node_path);
+      let researchObserved=null;
+      if((researchQueries.length||researchUrls.length)&&typeof researchContext==='function'){
+        researchObserved=await researchContext({nodePath:node.node_path,queries:researchQueries,urls:researchUrls});
+      }else if(researchQueries.length||researchUrls.length){
+        researchObserved={status:'unavailable',reason:'research_runtime_not_configured'};
+      }
+      const contextPayload={
+        ...(node.context_payload||{}),
+        ...resolveContext(packet,requests),
+        ...(researchObserved?{external_research_reconciliation:researchObserved}:{}),
+      };
+      counters.context_requests+=requests.length+researchQueries.length+researchUrls.length;
+      const reset=await saveNode({
+        nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
+        requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
+        status:'pending',decisionType:'NEED_CONTEXT',
+        decisionPayload:{
+          ...(node.decision_payload||{}),
+          ...reconciliationMeta,
+          reason:clip(reconciliation?.reason,1200),
+          context_requests:requests,
+          research_queries:researchQueries,
+          research_urls:researchUrls,
+          reclassified_during_reconciliation:true,
+        },
+        contextPayload,resultArtifact:null,
+      });
+      reset.parent_path=node.parent_path??parentPathOf(node.node_path);
+      return {reconsider:true,node:reset};
+    }
+
+    if(reconciliationStatus!=='COMPLETE')
+      throw new Error('autonomous_decomposition_reconciliation_status_invalid:'+node.node_path);
+
+    const artifact=text(reconciliation?.artifact)||proposedArtifact;
+    if(!artifact)throw new Error('autonomous_decomposition_reconciliation_artifact_empty:'+node.node_path);
+    const handoff=Object.keys(asObject(reconciliation?.handoff)).length?asObject(reconciliation?.handoff):proposedHandoff;
     const resultArtifact=JSON.stringify({artifact,handoff});
     const done=await saveNode({
       nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
       requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
       status:'completed',decisionType:'ATOMIC',
-      decisionPayload:{...(node.decision_payload||{}),completed_as_atomic:true},
+      decisionPayload:{
+        ...(node.decision_payload||{}),
+        ...reconciliationMeta,
+        completed_as_atomic:true,
+      },
       contextPayload:node.context_payload||{},resultArtifact,
     });
     done.parent_path=node.parent_path??parentPathOf(node.node_path);
@@ -843,6 +988,7 @@ export async function runAutonomousRequirementCognition({
       model_calls:counters.model_calls,
       context_requests:counters.context_requests,
       convergence_policy:'branch_depth_v0_3_atomic_lock_single_child_contraction',
+      cognitive_continuity_policy:'agent_discovery_restore_and_reconcile_v0_1',
       decomposition_authored_by_bound_agent:true,
       runtime_role:'persist_route_resume_completion_integrity_only',
       cognition_mode:modeInfo?.mode||'deep',
