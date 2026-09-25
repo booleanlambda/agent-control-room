@@ -1,0 +1,154 @@
+{
+  "contract": "silas_engineering_hydraulic_design_v1",
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "model_returned": "google/gemma-4-31b-it",
+  "thinking_requested": true,
+  "stage": 3,
+  "brief_sha": "875e543b12a5f8c27b5b7e2ec9abe5bbdb5b5427",
+  "prior_output_sha256": "0029bd2b35383793427e23e715bc28c0f6ee6fdf0289fdac68db3a5c9df619e7",
+  "input_sha256": "aeb42e63a266bb8aa62ec1a78753dda0202f193530a0498520dd12164acd85ed",
+  "output_sha256": "2009d8fad354a267b8344af05c34010d9249fe4f18adc1344f319f12afa9e302",
+  "output_chars": 3200,
+  "reasoning_chars": 6012,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 2255,
+    "completion_tokens": 4074,
+    "total_tokens": 6329,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cached_tokens": 0
+    },
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "reasoning_tokens": 2790,
+      "rejected_prediction_tokens": null
+    }
+  },
+  "elapsed_ms": 202409,
+  "assessment": {
+    "passed": false,
+    "issues": [
+      "matrix_D50_P3"
+    ]
+  },
+  "output": {
+    "stage": "design_selection",
+    "source_ids": [
+      "ENG-V1"
+    ],
+    "prior_pipe_sha256": [
+      "24381a6c84a202b08a00ab9a46bce71b3dc7f4d6c03d0c577ab3bfbe8c121c65",
+      "e5dbfaa7e418e92463a9bb04dc90b70dc29bc6a6e0a0a5151ba37445be15cd6a",
+      "0029bd2b35383793427e23e715bc28c0f6ee6fdf0289fdac68db3a5c9df619e7"
+    ],
+    "constraint_matrix": [
+      {
+        "pipe": "D40",
+        "pump": "P1",
+        "total_cost_usd": 5210,
+        "velocity_pass": false,
+        "calculated_power_pass": true,
+        "rated_head_pass": false,
+        "pump_rating_pass": true,
+        "budget_pass": true,
+        "feasible": false
+      },
+      {
+        "pipe": "D40",
+        "pump": "P2",
+        "total_cost_usd": 5560,
+        "velocity_pass": false,
+        "calculated_power_pass": true,
+        "rated_head_pass": false,
+        "pump_rating_pass": true,
+        "budget_pass": true,
+        "feasible": false
+      },
+      {
+        "pipe": "D40",
+        "pump": "P3",
+        "total_cost_usd": 5810,
+        "velocity_pass": false,
+        "calculated_power_pass": true,
+        "rated_head_pass": true,
+        "pump_rating_pass": true,
+        "budget_pass": true,
+        "feasible": false
+      },
+      {
+        "pipe": "D50",
+        "pump": "P1",
+        "total_cost_usd": 6650,
+        "velocity_pass": true,
+        "calculated_power_pass": true,
+        "rated_head_pass": false,
+        "pump_rating_pass": true,
+        "budget_pass": true,
+        "feasible": false
+      },
+      {
+        "pipe": "D50",
+        "pump": "P2",
+        "total_cost_usd": 7000,
+        "velocity_pass": true,
+        "calculated_power_pass": true,
+        "rated_head_pass": true,
+        "pump_rating_pass": true,
+        "budget_pass": true,
+        "feasible": true
+      },
+      {
+        "pipe": "D50",
+        "pump": "P3",
+        "total_cost_usd": 7250,
+        "velocity_pass": true,
+        "calculated_power_pass": true,
+        "rated_head_pass": true,
+        "pump_rating_pass": true,
+        "budget_pass": true,
+        "feasible": true
+      },
+      {
+        "pipe": "D63",
+        "pump": "P1",
+        "total_cost_usd": 9350,
+        "velocity_pass": true,
+        "calculated_power_pass": true,
+        "rated_head_pass": true,
+        "pump_rating_pass": true,
+        "budget_pass": false,
+        "feasible": false
+      },
+      {
+        "pipe": "D63",
+        "pump": "P2",
+        "total_cost_usd": 9700,
+        "velocity_pass": true,
+        "calculated_power_pass": true,
+        "rated_head_pass": true,
+        "pump_rating_pass": true,
+        "budget_pass": false,
+        "feasible": false
+      },
+      {
+        "pipe": "D63",
+        "pump": "P3",
+        "total_cost_usd": 9950,
+        "velocity_pass": true,
+        "calculated_power_pass": true,
+        "rated_head_pass": true,
+        "pump_rating_pass": true,
+        "budget_pass": false,
+        "feasible": false
+      }
+    ],
+    "selected_design": {
+      "pipe": "D50",
+      "pump": "P2"
+    },
+    "reasoning": "D40 is excluded due to exceeding the maximum velocity constraint (1.24 m/s > 1.0 m/s). D63 is excluded because the pipe cost alone (8100 USD) exceeds the total installed budget (7500 USD). For D50, P1 fails the rated head requirement (28m < 29.11m). Both P2 and P3 are feasible with D50; P2 is selected as the most cost-effective solution (7000 USD vs 7250 USD).",
+    "unresolved_evidence": []
+  }
+}
