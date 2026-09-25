@@ -290,7 +290,10 @@ export async function nvidiaChatCompletion({
   const requestBody = {
     model: resolvedModel,
     messages: resolvedMessages,
-    max_tokens: Math.max(1, Math.min(Number(maxTokens) || 256, 4096)),
+    // Allow substantive Thinking-ON calls to request enough completion budget for
+    // provider reasoning + final structured output. Individual callers still set
+    // their own bounded maxTokens; this is only the adapter ceiling.
+    max_tokens: Math.max(1, Math.min(Number(maxTokens) || 256, 16384)),
     temperature: Number.isFinite(Number(temperature)) ? Number(temperature) : 0.2,
     stream: false,
   };
