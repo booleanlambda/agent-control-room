@@ -1,0 +1,68 @@
+{
+  "contract": "silas_engineering_hydraulic_design_v1",
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "model_returned": "google/gemma-4-31b-it",
+  "thinking_requested": true,
+  "stage": 4,
+  "substep": "screen_D63_P2",
+  "brief_sha": "875e543b12a5f8c27b5b7e2ec9abe5bbdb5b5427",
+  "source_ids": [
+    "ENG-V1",
+    "ROUTE-V2"
+  ],
+  "prior_output_sha256": "97ed9d4bd1ad2e305f0e0fd6db159e75d092684850fc655a4b539849490d055a",
+  "input_sha256": "10fefbbffcbd879982010bf951f09b644e5b356cfc0543def0d66aae23ae7e44",
+  "output_sha256": "e8df624ad85063f30833321ef5323ade949a73885baa39b31f70f58533c9bf9b",
+  "output_chars": 481,
+  "reasoning_chars": 1333,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 972,
+    "completion_tokens": 779,
+    "total_tokens": 1751,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cached_tokens": 96
+    },
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "reasoning_tokens": 566,
+      "rejected_prediction_tokens": null
+    }
+  },
+  "elapsed_ms": 27925,
+  "assessment": {
+    "passed": true,
+    "issues": [],
+    "expected": {
+      "pipe": "D63",
+      "pump": "P2",
+      "total_cost_usd": 13300,
+      "velocity_pass": true,
+      "calculated_power_pass": true,
+      "rated_head_pass": true,
+      "pump_rating_pass": true,
+      "budget_pass": false,
+      "feasible": false
+    }
+  },
+  "output": {
+    "stage": "route_v2_single_candidate",
+    "source_ids": [
+      "ENG-V1",
+      "ROUTE-V2"
+    ],
+    "pipe": "D63",
+    "pump": "P2",
+    "prior_route_output_sha256": "97ed9d4bd1ad2e305f0e0fd6db159e75d092684850fc655a4b539849490d055a",
+    "total_cost_usd": 13300,
+    "velocity_pass": true,
+    "calculated_power_pass": true,
+    "rated_head_pass": true,
+    "pump_rating_pass": true,
+    "budget_pass": false,
+    "feasible": false,
+    "reasoning": "The total cost of 13,300 USD (11,700 USD for pipe and 1,600 USD for pump) exceeds the budget constraint of 7,500 USD."
+  }
+}
