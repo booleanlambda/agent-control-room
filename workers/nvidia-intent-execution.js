@@ -1703,8 +1703,56 @@ function normalizeBoundedPlan(plan) {
 async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutionId) {
   const started=Date.now();
   const commonAudit={agentId,executionId:intentExecutionId,executionContext:'wake',model};
+  const researchContext=async({nodePath,queries,urls})=>{
+    let observed;
+    try{
+      observed=await researchWeb({queries,urls});
+      observed.usage_policy='agent_authored_queries_no_aau_search_quota';
+    }catch(error){
+      observed={
+        version:'aau_web_research_v0_3',status:'blocked',
+        requested_queries:Array.isArray(queries)?queries:[],
+        searches:[],sources:[],
+        execution_error:String(error?.message||error).slice(0,400),
+      };
+    }
+    observed=normalizeResearchAuditPayload(observed);
+    try{
+      observed.audit_batch_id=await rpc('aau_bridge_record_web_research',{
+        p_agent_id:agentId,p_wake_request_id:intentExecutionId,p_research:observed,
+      });
+    }catch(error){
+      observed.audit_error=String(error?.message||error).slice(0,300);
+      observed.status='blocked_audit_persistence';
+    }
+    const sources=(observed.audit_error?[]:(observed.sources||[])).slice(0,8).map(source=>({
+      title:source?.title||source?.search_title||null,
+      publisher:source?.publisher||null,
+      url:source?.url||null,
+      published_at:source?.published_at||null,
+      coverage:source?.coverage||null,
+      fetch_status:source?.fetch_status||null,
+      sha256:source?.sha256||null,
+      excerpt:typeof source?.excerpt==='string'?source.excerpt.slice(0,1800):null,
+    }));
+    console.log('AAU_AUTONOMOUS_DECOMPOSITION_RESEARCH',JSON.stringify({
+      agent_id:agentId,intent_execution_id:intentExecutionId,node_path:nodePath,
+      query_count:Array.isArray(queries)?queries.length:0,
+      url_count:Array.isArray(urls)?urls.length:0,
+      source_count:sources.length,status:observed.status||null,
+      audit_batch_id:observed.audit_batch_id||null,
+    }));
+    return {
+      status:observed.status||'unknown',
+      audit_batch_id:observed.audit_batch_id||null,
+      requested_queries:Array.isArray(queries)?queries:[],
+      requested_urls:Array.isArray(urls)?urls:[],
+      sources,
+      evidence_rule:'Fetched receipts are observations, not automatic claim verification.',
+    };
+  };
   const result=await runAutonomousRequirementCognition({
-    model,packet,modeInfo,agentId,intentExecutionId,rpc,sha256,
+    model,packet,modeInfo,agentId,intentExecutionId,rpc,sha256,researchContext,
     completeJson:(messages,maxTokens,phase)=>completeDeepJson(
       model,messages,maxTokens,{...commonAudit,phase}
     ),
