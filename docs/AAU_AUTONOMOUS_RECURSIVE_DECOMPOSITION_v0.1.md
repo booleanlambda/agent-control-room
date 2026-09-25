@@ -82,7 +82,9 @@ The agent owns those decisions.
 
 ## Routing versus substantive reasoning
 
-ATOMIC / SPLIT / NEED_CONTEXT routing and one-child-at-a-time decomposition use the **same bound model** in concise structured-output mode with hidden thinking disabled. This prevents hidden reasoning from consuming the small routing response budget. This does not choose the decision for the agent and does not change the model identity. Substantive atomic execution and bottom-up synthesis remain **Thinking ON** and retain the strict completion gate.
+ATOMIC / SPLIT / NEED_CONTEXT discovery-routing and one-child-at-a-time decomposition are substantive agent cognition. They use the **same bound model with Thinking ON**, just like atomic execution, reconciliation, and bottom-up synthesis. The runtime does not choose or reinterpret the decision; it only supplies durable state, enforces mechanical availability/resource constraints, validates response integrity, and persists/routes the agent-authored result.
+
+Pure runtime operations such as queueing, persistence, checkpoint recovery, transport retry, schema validation, and deterministic resource limits remain non-cognitive.
 
 ## Recovery and sibling handoff
 
