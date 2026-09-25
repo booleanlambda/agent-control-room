@@ -1,0 +1,78 @@
+{
+  "contract": "silas_engineering_hydraulic_design_v1",
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "model_returned": "google/gemma-4-31b-it",
+  "thinking_requested": true,
+  "stage": 2,
+  "substep": "D50",
+  "brief_sha": "875e543b12a5f8c27b5b7e2ec9abe5bbdb5b5427",
+  "prior_output_sha256": "b29d723cf25da14825f9f87e29eb615a5241f0a52f762e367c7dedfad75ba8ce",
+  "input_sha256": "e617df78ac6460a7e188f30248ed3a1f50bd0c75def2dfe772dbb2c843926605",
+  "output_sha256": "e5dbfaa7e418e92463a9bb04dc90b70dc29bc6a6e0a0a5151ba37445be15cd6a",
+  "output_chars": 746,
+  "reasoning_chars": 4920,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 589,
+    "completion_tokens": 2934,
+    "total_tokens": 3523,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cached_tokens": 0
+    },
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "reasoning_tokens": 2587,
+      "rejected_prediction_tokens": null
+    }
+  },
+  "elapsed_ms": 244259,
+  "assessment": {
+    "passed": true,
+    "issues": [],
+    "expected": {
+      "Q_m3_s": 0.0015555555555555555,
+      "Q_L_s": 1.5555555555555554,
+      "velocity_m_s": 0.7922379389463233,
+      "hf_m": 2.9942504127621783,
+      "hm_m": 0.31989854837202764,
+      "TDH_m": 25.314148961134205,
+      "electrical_input_kw": 0.6644202152509597,
+      "required_rated_head_m": 29.11127130530433
+    },
+    "expected_pipe_cost_usd": 5400
+  },
+  "output": {
+    "stage": "pipe_calculation",
+    "source_ids": [
+      "ENG-V1"
+    ],
+    "pipe_id": "D50",
+    "metrics": {
+      "Q_m3_s": 0.0015555555555555557,
+      "Q_L_s": 1.5555555555555556,
+      "velocity_m_s": 0.7922,
+      "hf_m": 2.993,
+      "hm_m": 0.3198,
+      "TDH_m": 25.3128,
+      "electrical_input_kw": 0.66421,
+      "required_rated_head_m": 29.1097
+    },
+    "pipe_cost_usd": 5400,
+    "velocity_pass": true,
+    "calculated_power_pass": true,
+    "equations": [
+      "Q = daily_volume / run_hours / 3600",
+      "A = pi D^2 / 4",
+      "v = Q / A",
+      "hf = f (L/D) (v^2/(2g))",
+      "hm = K (v^2/(2g))",
+      "TDH = static_head + hf + hm",
+      "Ph = rho g Q TDH",
+      "Pin = Ph/(eta_pump eta_motor eta_inverter)",
+      "H_required = 1.15 * TDH"
+    ],
+    "engineering_comment": "Pipe D50 satisfies both the maximum velocity constraint (0.792 m/s < 1 m/s) and the maximum electrical input constraint (0.664 kW < 1 kW)."
+  }
+}
