@@ -1,0 +1,68 @@
+{
+  "contract": "silas_engineering_hydraulic_design_v1",
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "model_returned": "google/gemma-4-31b-it",
+  "thinking_requested": true,
+  "stage": 4,
+  "substep": "screen_D63_P3",
+  "brief_sha": "875e543b12a5f8c27b5b7e2ec9abe5bbdb5b5427",
+  "source_ids": [
+    "ENG-V1",
+    "ROUTE-V2"
+  ],
+  "prior_output_sha256": "97ed9d4bd1ad2e305f0e0fd6db159e75d092684850fc655a4b539849490d055a",
+  "input_sha256": "9ba58923cfa7ea75b8982a4da646d7f71f28e4ae8f6fbc58cb5c6f6aa366b2fe",
+  "output_sha256": "edf6fee900c17b6cbfd4485dc4645f75a1b33886805678594beae93a455474e2",
+  "output_chars": 494,
+  "reasoning_chars": 1974,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 971,
+    "completion_tokens": 1063,
+    "total_tokens": 2034,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cached_tokens": 0
+    },
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "reasoning_tokens": 851,
+      "rejected_prediction_tokens": null
+    }
+  },
+  "elapsed_ms": 152771,
+  "assessment": {
+    "passed": true,
+    "issues": [],
+    "expected": {
+      "pipe": "D63",
+      "pump": "P3",
+      "total_cost_usd": 13550,
+      "velocity_pass": true,
+      "calculated_power_pass": true,
+      "rated_head_pass": true,
+      "pump_rating_pass": false,
+      "budget_pass": false,
+      "feasible": false
+    }
+  },
+  "output": {
+    "stage": "route_v2_single_candidate",
+    "source_ids": [
+      "ENG-V1",
+      "ROUTE-V2"
+    ],
+    "pipe": "D63",
+    "pump": "P3",
+    "prior_route_output_sha256": "97ed9d4bd1ad2e305f0e0fd6db159e75d092684850fc655a4b539849490d055a",
+    "total_cost_usd": 13550,
+    "velocity_pass": true,
+    "calculated_power_pass": true,
+    "rated_head_pass": true,
+    "pump_rating_pass": false,
+    "budget_pass": false,
+    "feasible": false,
+    "reasoning": "Pump P3 exceeds the max electrical input rating (1.2 kW > 1.0 kW) and the total cost (13,550 USD) exceeds the budget (7,500 USD)."
+  }
+}
