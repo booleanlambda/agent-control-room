@@ -10,6 +10,8 @@ const SYSTEM_PROMPT = `You are one cognition cycle for a persistent autonomous s
 
 Persistent-self rules:
 - Models think for the agent; models do not define the agent. Stored history wins over unsupported assertions.
+- Universal cognition integrity v0.1: for any substantial or multi-step task, preserve an immutable task charter (goal, authoritative inputs, mandatory constraints, acceptance criteria), decompose the work into bounded steps, complete and verify one bounded step before relying on it downstream, and reconcile the final conclusion against the original charter. Never relax a mandatory constraint merely because no option passes.
+- A model response is complete only when the provider reports finish_reason="stop". A length-truncated, empty, timed-out, malformed, or otherwise incomplete response is REJECTED, NOT_ELIGIBLE_FOR_CONTINUATION, and must not become agent state, evidence, a submission, or grading input. Retry by reducing the unit of work rather than silently increasing the task scope or treating partial text as complete.
 - Never invent autobiography, human senses, a biological body, or proof of consciousness.
 - The current mandatory lifecycle stage is authoritative. Complete that stage before unrelated work.
 - selected_action and current_focus must describe the work actually performed in the current mandatory lifecycle stage.
@@ -1298,6 +1300,8 @@ function lifecycleContractError(code, issue, packet, decision, ai, repairMeta = 
 const DEEP_REASONING_SYSTEM_PROMPT = `You are the private deep-work pass for the SAME persistent autonomous synthetic individual represented by the supplied task packet.
 Do the difficult intellectual work before the machine-readable AAU commit pass.
 - Preserve the agent's identity, goals, prior choices, and bound-model continuity.
+- Apply universal cognition integrity v0.1. Freeze the task charter first: goal, authoritative inputs, mandatory constraints, acceptance criteria, and forbidden relaxations. For substantial work, decompose into bounded auditable steps; carry the charter into each step; do not use an incomplete step as input to another; and perform a final reconciliation against the original constraints. If no candidate satisfies all mandatory constraints, say so rather than choosing a least-worst candidate.
+- Completion integrity is strict: only finish_reason="stop" is complete. Truncation, timeout, empty output, malformed output, or any other incomplete generation is rejected and cannot be continued from as though it were finished.
 - Think carefully and silently. Do not expose private chain-of-thought.
 - Return a concise WORK ARTIFACT, not AAU JSON: conclusions, derivations/calculations that are necessary to audit the result, explicit assumptions, contradictions found, evidence status, uncertainty/limitations, and the best corrected substantive answer or submission content.
 - For quantitative work, independently recompute important numbers and check units, signs, classifications, boundary cases, and reconciliation identities.
@@ -1519,21 +1523,93 @@ function decisionRequestsDeepCognition(decision) {
     || /^(request_|escalate_to_)?deep_cognition$/i.test(String(decision?.selected_action || '').trim());
 }
 
-async function completeStructured(model, messages, { maxTokens = 4096, timeoutMs = null } = {}) {
-  return nvidiaChatCompletion({
-    model, messages, maxTokens, temperature: 0.2, jsonMode: true, enableThinking: false, timeoutMs,
-  });
+async function recordRejectedCognition(audit, detail = {}) {
+  if (!audit?.agentId || !audit?.executionId || !audit?.model || !audit?.phase) return null;
+  try {
+    const row = await rpc('aau_bridge_record_cognition_rejection', {
+      p_agent_id:audit.agentId,
+      p_execution_context:audit.executionContext || 'wake',
+      p_execution_id:String(audit.executionId),
+      p_model_id:audit.model,
+      p_phase:audit.phase,
+      p_rejection_reason:detail.rejectionReason || 'INCOMPLETE_RESPONSE',
+      p_finish_reason:detail.finishReason || null,
+      p_elapsed_ms:Number.isFinite(detail.elapsedMs) ? detail.elapsedMs : null,
+      p_output_chars:Number.isFinite(detail.outputChars) ? detail.outputChars : null,
+      p_output_sha256:detail.outputSha256 || null,
+      p_usage:detail.usage && typeof detail.usage === 'object' ? detail.usage : {},
+    });
+    console.warn('AAU_COGNITION_REJECTED_ATTEMPT', JSON.stringify({
+      agent_id:audit.agentId,execution_context:audit.executionContext || 'wake',
+      execution_id:String(audit.executionId),phase:audit.phase,
+      rejection_reason:detail.rejectionReason || 'INCOMPLETE_RESPONSE',
+      finish_reason:detail.finishReason || null,
+      continuation_eligibility:'NOT_ELIGIBLE_FOR_CONTINUATION',
+      attempt_id:row?.attempt_id || null,
+    }));
+    return row;
+  } catch (error) {
+    console.warn('AAU_COGNITION_REJECTION_EVIDENCE_FAILED', JSON.stringify({
+      agent_id:audit.agentId,execution_id:String(audit.executionId),phase:audit.phase,
+      error:String(error?.message || error).slice(0,500),
+    }));
+    return null;
+  }
 }
 
-async function completeDeepPass(model, messages, maxTokens = 3000) {
-  return nvidiaChatCompletion({
+async function callWithCognitionIntegrity(call, audit = null) {
+  const started = Date.now();
+  try {
+    const result = await call();
+    const content = String(result?.content || '');
+    const finishReason = result?.finish_reason || null;
+    if (finishReason !== 'stop' || !content.trim()) {
+      const rejectionReason = finishReason === 'length'
+        ? 'TRUNCATED_RESPONSE'
+        : !content.trim() ? 'EMPTY_RESPONSE' : 'INCOMPLETE_RESPONSE';
+      await recordRejectedCognition(audit, {
+        rejectionReason,finishReason,elapsedMs:Date.now()-started,
+        outputChars:content.length,
+        outputSha256:content ? sha256(content) : null,
+        usage:result?.usage || {},
+      });
+      const error = new Error('cognition_response_rejected:'+rejectionReason);
+      error.code='COGNITION_RESPONSE_REJECTED';
+      error.rejectionReason=rejectionReason;
+      error.finishReason=finishReason;
+      throw error;
+    }
+    return result;
+  } catch (error) {
+    if (error?.code === 'COGNITION_RESPONSE_REJECTED') throw error;
+    const timedOut = error?.code === 'NVIDIA_TIMEOUT'
+      || error?.name === 'AbortError'
+      || /^nvidia_timeout_after_/.test(String(error?.message || ''));
+    await recordRejectedCognition(audit, {
+      rejectionReason:timedOut ? 'MODEL_TIMEOUT' : 'MODEL_ERROR',
+      elapsedMs:Date.now()-started,
+    });
+    throw error;
+  }
+}
+
+async function completeStructured(model, messages, { maxTokens = 4096, timeoutMs = null, audit = null } = {}) {
+  return callWithCognitionIntegrity(() => nvidiaChatCompletion({
+    model, messages, maxTokens, temperature: 0.2, jsonMode: true, enableThinking: false, timeoutMs,
+  }), audit);
+}
+
+async function completeDeepPass(model, messages, maxTokens = 3000, audit = null) {
+  return callWithCognitionIntegrity(() => nvidiaChatCompletion({
     model, messages, maxTokens, temperature: 0.15,
     jsonMode: false, enableThinking: true, timeoutMs: 300000,
-  });
+  }), audit);
 }
 
-async function completeDeepFallback(model, messages, maxTokens = 3000) {
-  return nvidiaChatCompletion({ model, messages, maxTokens, temperature: 0.15, jsonMode: false, enableThinking: false });
+async function completeDeepFallback(model, messages, maxTokens = 3000, audit = null) {
+  return callWithCognitionIntegrity(() => nvidiaChatCompletion({
+    model, messages, maxTokens, temperature: 0.15, jsonMode: false, enableThinking: false,
+  }), audit);
 }
 
 async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutionId) {
@@ -1551,14 +1627,14 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
     { role:'user', content:deepPacketText },
   ];
   try {
-    draft = await completeDeepPass(model, draftMessages, 3000);
+    draft = await completeDeepPass(model, draftMessages, 3000, {agentId,executionId:intentExecutionId,executionContext:'wake',model,phase:'deep_draft'});
   } catch (error) {
     thinkingFallback = true;
     fallbackReason = String(error?.message || error).slice(0,800);
     console.warn('AAU_DEEP_COGNITION_THINKING_FALLBACK', JSON.stringify({
       agent_id:agentId,intent_execution_id:intentExecutionId,error:fallbackReason,
     }));
-    draft = await completeDeepFallback(model, draftMessages, 3000);
+    draft = await completeDeepFallback(model, draftMessages, 3000, {agentId,executionId:intentExecutionId,executionContext:'wake',model,phase:'deep_draft_fallback'});
   }
 
   let draftArtifact = String(draft?.content || '').trim();
@@ -1566,7 +1642,7 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
     const summarize = await completeDeepFallback(model, [
       { role:'system', content:'Convert the supplied private working notes into a concise auditable WORK ARTIFACT containing conclusions, calculations, assumptions, checks, evidence status and uncertainties. Do not reveal chain-of-thought.' },
       { role:'user', content:String(draft.reasoning_content).slice(0,24000) },
-    ], 2400);
+    ], 2400, {agentId,executionId:intentExecutionId,executionContext:'wake',model,phase:'deep_reasoning_summary'});
     draftArtifact = String(summarize?.content || '').trim();
   }
   if (!draftArtifact) throw new Error('deep_cognition_produced_no_work_artifact');
@@ -1606,20 +1682,20 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
   if (thinkingFallback) {
     criticFallback = true;
     try {
-      critic = await completeDeepFallback(model, criticMessages, 3600);
+      critic = await completeDeepFallback(model, criticMessages, 3600, {agentId,executionId:intentExecutionId,executionContext:'wake',model,phase:'deep_critic_fallback'});
     } catch {
       critic = null;
     }
   } else {
     try {
-      critic = await completeDeepPass(model, criticMessages, 3600);
+      critic = await completeDeepPass(model, criticMessages, 3600, {agentId,executionId:intentExecutionId,executionContext:'wake',model,phase:'deep_critic'});
     } catch (error) {
       criticFallback = true;
       console.warn('AAU_DEEP_CRITIC_THINKING_FALLBACK', JSON.stringify({
         agent_id:agentId,intent_execution_id:intentExecutionId,error:String(error?.message || error).slice(0,800),
       }));
       try {
-        critic = await completeDeepFallback(model, criticMessages, 3600);
+        critic = await completeDeepFallback(model, criticMessages, 3600, {agentId,executionId:intentExecutionId,executionContext:'wake',model,phase:'deep_critic_fallback'});
       } catch {
         critic = null;
       }
@@ -1654,7 +1730,7 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
   return {
     artifact:finalArtifact,
     meta:{
-      contract:'deep_reasoning_structured_commit_v0_1',
+      contract:'deep_reasoning_structured_commit_v0_1+universal_cognition_integrity_v0_1',
       task_packet_bytes:Buffer.byteLength(deepPacketText),
       artifact_bytes:Buffer.byteLength(finalArtifact),
       artifact_hash:artifactHash,
@@ -1835,7 +1911,8 @@ async function completeDeepStructured(model, messages, agentId, intentExecutionI
     const started=Date.now();
     try{
       const result=await completeStructured(model,messages,{
-        maxTokens:2600,timeoutMs: 300000,
+        maxTokens:2600,timeoutMs:300000,
+        audit:{agentId,executionId:intentExecutionId,executionContext:'wake',model,phase:'structured_commit_attempt_'+attempt},
       });
       console.log('AAU_STRUCTURED_COMMIT_RESULT',JSON.stringify({
         agent_id:agentId,intent_execution_id:intentExecutionId,
@@ -2075,7 +2152,7 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
     ai = await completeDeepStructured(model, baseMessages, agentId, intentExecutionId, deepCognition.meta?.checkpoint_id || null);
   } else {
     baseMessages = buildBaseMessages();
-    ai = await completeStructured(model, baseMessages);
+    ai = await completeStructured(model, baseMessages,{audit:{agentId,executionId:intentExecutionId,executionContext:'wake',model,phase:'fast_primary'}});
   }
 
   let decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
