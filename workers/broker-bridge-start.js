@@ -303,3 +303,10 @@ if (isEnabled('AAU_SILAS_THINKING_ON_SPLIT_PURCHASE')) {
     .then(m => m.runSilasPurchaseBContinuation())
     .catch(e => console.error('AAU_SILAS_B_CONTINUATION_FATAL', JSON.stringify({code:e?.code||e?.name||'error',message:String(e?.message||e).slice(0,180)})));
 }
+
+if (isEnabled('AAU_SILAS_ENGINEERING_HYDRAULIC')) {
+  // Silas-only off-curriculum engineering exercise; thinking ON, durable bounded steps.
+  void import('./silas-engineering-hydraulic.js')
+    .then(m => m.runSilasEngineeringExercise())
+    .catch(e => console.error('AAU_SILAS_ENGINEERING_FATAL',JSON.stringify({code:e?.code||e?.name||'error',message:String(e?.message||e).slice(0,180)})));
+}
