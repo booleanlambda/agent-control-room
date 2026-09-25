@@ -2054,6 +2054,15 @@ async function processAutonomousRequirementNode(ctx,nodePath,requirement,depth=0
       if(contextExisting) acquiredContext.push(contextExisting.value);
     }
 
+    const handledFailure=await loadCheckpointJson({
+      agentId:ctx.agentId,intentExecutionId:ctx.intentExecutionId,
+      assignmentKey:ctx.assignmentKey,stepKey:prefix+'_fail'+cycle,model:ctx.model
+    });
+    if(handledFailure){
+      failureSignal=handledFailure.value;
+      continue;
+    }
+
     const decision=await decideRequirementNode({
       model:ctx.model,packet:ctx.packet,agentId:ctx.agentId,
       intentExecutionId:ctx.intentExecutionId,assignmentKey:ctx.assignmentKey,
@@ -2096,6 +2105,14 @@ async function processAutonomousRequirementNode(ctx,nodePath,requirement,depth=0
           reason:error?.rejectionReason || error?.code || 'incomplete',
           instruction:'Your child work completed, but synthesis did not fit. Decide autonomously whether this parent needs a different subdivision or additional context.',
         };
+        await saveCheckpointJson(
+          {
+            agentId:ctx.agentId,intentExecutionId:ctx.intentExecutionId,
+            assignmentKey:ctx.assignmentKey,stepKey:prefix+'_fail'+cycle,model:ctx.model
+          },
+          failureSignal,
+          {kind:'node_execution_failure',node_path:nodePath,decision_cycle:cycle}
+        );
         continue;
       }
     }
@@ -2113,6 +2130,14 @@ async function processAutonomousRequirementNode(ctx,nodePath,requirement,depth=0
         finish_reason:error?.finishReason || null,
         instruction:'Your own ATOMIC execution did not complete. Reassess this same requirement and choose your own SPLIT or NEED_CONTEXT if appropriate. Do not continue rejected partial text.',
       };
+      await saveCheckpointJson(
+        {
+          agentId:ctx.agentId,intentExecutionId:ctx.intentExecutionId,
+          assignmentKey:ctx.assignmentKey,stepKey:prefix+'_fail'+cycle,model:ctx.model
+        },
+        failureSignal,
+        {kind:'node_execution_failure',node_path:nodePath,decision_cycle:cycle}
+      );
       console.warn('AAU_AUTONOMOUS_ATOMIC_RECONSIDER',JSON.stringify({
         agent_id:ctx.agentId,intent_execution_id:ctx.intentExecutionId,
         node_path:nodePath,cycle,reason:failureSignal.reason,
