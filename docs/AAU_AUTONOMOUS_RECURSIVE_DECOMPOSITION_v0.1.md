@@ -34,7 +34,8 @@ The runtime is limited to:
 - hashing and provenance.
 
 Mechanical limits are resource limits, not task design:
-- maximum recursive depth: 12;
+- maximum branching depth: 12;
+- maximum consecutive one-child refinements: 12;
 - maximum children at one node: 16;
 - maximum context rounds per node: 4.
 
@@ -44,7 +45,7 @@ For every node:
 
 1. The bound agent receives the node requirement, already-requested context, and a context index.
 2. It returns only `ATOMIC`, `SPLIT`, or `NEED_CONTEXT`.
-3. `SPLIT`: the agent authors exactly one next child at a time. It declares `DONE` when its child set covers the parent. No runtime-prescribed child count exists.
+3. `SPLIT`: the agent authors exactly one next child at a time. It declares `DONE` when its child set covers the parent. No runtime-prescribed child count exists; a single genuinely narrower child is valid.
 4. Each child enters the same protocol recursively.
 5. `NEED_CONTEXT`: the agent chooses exact stored context paths and/or web research queries/known URLs. The runtime fetches only those requested inputs.
 6. `ATOMIC`: the agent executes the node. It may reclassify itself to `SPLIT` or `NEED_CONTEXT` if execution reveals the node is not actually bounded.
@@ -88,3 +89,8 @@ ATOMIC / SPLIT / NEED_CONTEXT routing and one-child-at-a-time decomposition use 
 A fresh worker heartbeat is authoritative evidence that a long recursive cognition is still alive; duration alone is not an orphan condition. Both legacy deep-cognition checkpoints and `cognition_requirement_nodes` are valid durable resume state.
 
 When children execute sequentially, a later child receives a compact runtime-routed `completed_sibling_results` context containing only durable completed sibling outputs. This is dependency plumbing, not runtime-authored reasoning: the agent still decides how to use those results and whether more context or research is required.
+
+
+## Convergence accounting
+
+Structural depth is charged only when a node branches into multiple child requirements. A one-child split is treated as a refinement and does not consume branching depth, because a refinement may be necessary after a rejected oversized atomic attempt. Consecutive one-child refinements have their own bounded resource counter so a chain of paraphrases cannot recurse indefinitely. This keeps the runtime neutral about intellectual structure while still enforcing finite execution.
