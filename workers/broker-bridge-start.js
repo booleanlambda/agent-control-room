@@ -310,3 +310,9 @@ if (isEnabled('AAU_SILAS_ENGINEERING_HYDRAULIC')) {
     .then(m => m.runSilasEngineeringExercise())
     .catch(e => console.error('AAU_SILAS_ENGINEERING_FATAL',JSON.stringify({code:e?.code||e?.name||'error',message:String(e?.message||e).slice(0,180)})));
 }
+
+if (isEnabled('AAU_SILAS_ENGINEERING_D63_RECOVERY')) {
+  void import('./silas-engineering-d63-recovery.js')
+    .then(m => m.runSilasEngineeringD63Recovery())
+    .catch(e => console.error('AAU_SILAS_ENGINEERING_D63_FATAL',JSON.stringify({code:e?.code||e?.name||'error',message:String(e?.message||e).slice(0,180)})));
+}
