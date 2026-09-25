@@ -2046,11 +2046,13 @@ async function processAutonomousRequirementNode(ctx,nodePath,requirement,depth=0
   let failureSignal=null;
 
   for(let cycle=0;cycle<6;cycle++){
-    const contextExisting=await loadCheckpointJson({
-      agentId:ctx.agentId,intentExecutionId:ctx.intentExecutionId,
-      assignmentKey:ctx.assignmentKey,stepKey:prefix+'_ctx'+cycle,model:ctx.model
-    });
-    if(contextExisting) acquiredContext.push(contextExisting.value);
+    if(cycle>0){
+      const contextExisting=await loadCheckpointJson({
+        agentId:ctx.agentId,intentExecutionId:ctx.intentExecutionId,
+        assignmentKey:ctx.assignmentKey,stepKey:prefix+'_ctx'+(cycle-1),model:ctx.model
+      });
+      if(contextExisting) acquiredContext.push(contextExisting.value);
+    }
 
     const decision=await decideRequirementNode({
       model:ctx.model,packet:ctx.packet,agentId:ctx.agentId,
@@ -2059,12 +2061,11 @@ async function processAutonomousRequirementNode(ctx,nodePath,requirement,depth=0
     });
 
     if(decision.mode==='NEED_CONTEXT'){
-      const bundle=await acquireRequirementContext({
+      await acquireRequirementContext({
         model:ctx.model,packet:ctx.packet,agentId:ctx.agentId,
         intentExecutionId:ctx.intentExecutionId,assignmentKey:ctx.assignmentKey,
         nodePath,requests:decision.context_requests,cycle
       });
-      acquiredContext.push(bundle);
       failureSignal=null;
       continue;
     }
