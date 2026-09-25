@@ -1,0 +1,122 @@
+{
+  "contract": "silas_engineering_hydraulic_design_v1",
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "model_returned": "google/gemma-4-31b-it",
+  "thinking_requested": true,
+  "stage": 4,
+  "substep": "screen_D63",
+  "brief_sha": "875e543b12a5f8c27b5b7e2ec9abe5bbdb5b5427",
+  "source_ids": [
+    "ENG-V1",
+    "ROUTE-V2"
+  ],
+  "prior_output_sha256": "97ed9d4bd1ad2e305f0e0fd6db159e75d092684850fc655a4b539849490d055a",
+  "output_sha256": "ff2f99df2c5b622ea6a8546799ae7a935212ca223132557d364fb8c6a97eaf6c",
+  "output_chars": 1086,
+  "reasoning_chars": 4639,
+  "finish_reason": "assembled_complete_substeps",
+  "usage": {
+    "parts": [
+      {
+        "prompt_tokens": 972,
+        "completion_tokens": 773,
+        "total_tokens": 1745,
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 558,
+          "rejected_prediction_tokens": null
+        }
+      },
+      {
+        "prompt_tokens": 972,
+        "completion_tokens": 779,
+        "total_tokens": 1751,
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 96
+        },
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 566,
+          "rejected_prediction_tokens": null
+        }
+      },
+      {
+        "prompt_tokens": 971,
+        "completion_tokens": 1063,
+        "total_tokens": 2034,
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 851,
+          "rejected_prediction_tokens": null
+        }
+      }
+    ]
+  },
+  "elapsed_ms": 230013,
+  "assessment": {
+    "passed": true,
+    "issues": []
+  },
+  "output": {
+    "stage": "route_v2_pipe_pump_screen",
+    "source_ids": [
+      "ENG-V1",
+      "ROUTE-V2"
+    ],
+    "pipe_id": "D63",
+    "prior_route_output_sha256": "97ed9d4bd1ad2e305f0e0fd6db159e75d092684850fc655a4b539849490d055a",
+    "rows": [
+      {
+        "pipe": "D63",
+        "pump": "P1",
+        "total_cost_usd": 12950,
+        "velocity_pass": true,
+        "calculated_power_pass": true,
+        "rated_head_pass": true,
+        "pump_rating_pass": true,
+        "budget_pass": false,
+        "feasible": false
+      },
+      {
+        "pipe": "D63",
+        "pump": "P2",
+        "total_cost_usd": 13300,
+        "velocity_pass": true,
+        "calculated_power_pass": true,
+        "rated_head_pass": true,
+        "pump_rating_pass": true,
+        "budget_pass": false,
+        "feasible": false
+      },
+      {
+        "pipe": "D63",
+        "pump": "P3",
+        "total_cost_usd": 13550,
+        "velocity_pass": true,
+        "calculated_power_pass": true,
+        "rated_head_pass": true,
+        "pump_rating_pass": false,
+        "budget_pass": false,
+        "feasible": false
+      }
+    ],
+    "engineering_comment": "Assembled from three independently generated thinking-ON single-candidate checkpoints.",
+    "bounded_candidate_sha256": [
+      "ff56d681eaa97d84257f17381cbedeaff69e74e5f9bcf9b0e0fcfff69552350f",
+      "e8df624ad85063f30833321ef5323ade949a73885baa39b31f70f58533c9bf9b",
+      "edf6fee900c17b6cbfd4485dc4645f75a1b33886805678594beae93a455474e2"
+    ]
+  }
+}
