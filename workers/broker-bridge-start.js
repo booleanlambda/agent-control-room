@@ -323,3 +323,10 @@ if (isEnabled('AAU_SILAS_ENGINEERING_FEASIBILITY_CONTINUATION')) {
     .then(m => m.runSilasEngineeringFeasibilityContinuation())
     .catch(e => console.error('AAU_SILAS_ENGINEERING_CONT_FATAL',JSON.stringify({code:e?.code||e?.name||'error',message:String(e?.message||e).slice(0,180)})));
 }
+
+if (isEnabled('AAU_SILAS_ENGINEERING_SINGLE_PUMP_RECOVERY')) {
+  // Silas-only one-candidate continuation after multi-pump screening timeout.
+  void import('./silas-engineering-single-pump-recovery.js')
+    .then(m => m.runSilasEngineeringSinglePumpRecovery())
+    .catch(e => console.error('AAU_SILAS_ENGINEERING_SINGLE_FATAL',JSON.stringify({code:e?.code||e?.name||'error',message:String(e?.message||e).slice(0,180)})));
+}
