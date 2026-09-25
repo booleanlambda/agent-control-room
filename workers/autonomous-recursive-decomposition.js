@@ -6,6 +6,7 @@ const MAX_CHILDREN_PER_NODE=16;
 const MAX_CONTEXT_ROUNDS=4;
 const MAX_CONTEXT_REQUESTS_PER_ROUND=8;
 const MAX_CONTEXT_VALUE_BYTES=12000;
+const MAX_PERSISTED_CONTEXT_BYTES=52000;
 
 const asObject=(v)=>v&&typeof v==='object'&&!Array.isArray(v)?v:{};
 const asArray=(v)=>Array.isArray(v)?v:[];
@@ -14,6 +15,56 @@ function text(v){return String(v??'').trim();}
 function bytes(v){try{return Buffer.byteLength(typeof v==='string'?v:JSON.stringify(v));}catch{return 0;}}
 function clip(s,n){const v=String(s??'');return v.length<=n?v:v.slice(0,n);}
 function safeJson(v){try{return JSON.stringify(v);}catch{return '{}';}}
+function boundContextPayload(payload){
+  const src=asObject(payload);
+  if(bytes(src)<=MAX_PERSISTED_CONTEXT_BYTES)return src;
+  const entries=Object.entries(src);
+  const out={};
+  const evicted=[];
+  const reserve=3500;
+  const priority=(key)=>key==='completed_sibling_results'
+    ||key==='inherited_completed_sibling_results'
+    ||key.startsWith('external_research');
+  const tryAdd=(key,value)=>{
+    const candidate={...out,[key]:value};
+    if(bytes(candidate)<=MAX_PERSISTED_CONTEXT_BYTES-reserve){
+      out[key]=value;
+      return true;
+    }
+    evicted.push({path:key,bytes:bytes(value)});
+    return false;
+  };
+  for(const [key,value] of entries){
+    if(priority(key))tryAdd(key,value);
+  }
+  for(let i=entries.length-1;i>=0;i--){
+    const [key,value]=entries[i];
+    if(priority(key)||Object.prototype.hasOwnProperty.call(out,key))continue;
+    tryAdd(key,value);
+  }
+  out._context_evicted=evicted.slice(0,40);
+  out._context_budget={
+    max_bytes:MAX_PERSISTED_CONTEXT_BYTES,
+    policy:'preserve_upstream_handoffs_and_recent_requested_context_v0_1',
+    evicted_count:evicted.length,
+  };
+  while(bytes(out)>MAX_PERSISTED_CONTEXT_BYTES && out._context_evicted.length){
+    out._context_evicted.pop();
+  }
+  return out;
+}
+
+function inheritedChildContext(parentPayload){
+  const src=asObject(parentPayload);
+  const inherited={};
+  if(Array.isArray(src.completed_sibling_results)&&src.completed_sibling_results.length){
+    inherited.completed_sibling_results=src.completed_sibling_results;
+  }
+  if(Array.isArray(src.inherited_completed_sibling_results)&&src.inherited_completed_sibling_results.length){
+    inherited.inherited_completed_sibling_results=src.inherited_completed_sibling_results;
+  }
+  return boundContextPayload(inherited);
+}
 
 function getPath(root,path){
   const parts=String(path||'').split('.').filter(Boolean);
@@ -190,7 +241,7 @@ export async function runAutonomousRequirementCognition({
       p_status:args.status??null,
       p_decision_type:args.decisionType??null,
       p_decision_payload:args.decisionPayload??{},
-      p_context_payload:args.contextPayload??{},
+      p_context_payload:boundContextPayload(args.contextPayload??{}),
       p_result_artifact:args.resultArtifact??null,
     });
   }
@@ -414,7 +465,7 @@ export async function runAutonomousRequirementCognition({
         requirement,sourceKind:'agent_decomposition',sourceRef:node.node_path,
         status:'pending',decisionType:null,
         decisionPayload:{authored_reason:clip(parsed?.reason,1200),authored_by_bound_agent:true},
-        contextPayload:{},resultArtifact:null,
+        contextPayload:inheritedChildContext(node.context_payload),resultArtifact:null,
       });
       child.parent_path=node.node_path;
       authored.push(child);
@@ -602,7 +653,8 @@ export async function runAutonomousRequirementCognition({
         const completed=[];
         for(const child of kids){
           child.parent_path=node.node_path;
-          if(completed.length){
+          const inherited=inheritedChildContext(node.context_payload);
+          if(completed.length||Object.keys(inherited).length){
             const current=await getNode(child.node_path);
             if(current?.status!=='ready')throw new Error('autonomous_decomposition_child_lookup_failed:'+child.node_path);
             const routed=await saveNode({
@@ -615,10 +667,11 @@ export async function runAutonomousRequirementCognition({
               status:current.node_status,
               decisionType:current.decision_type??null,
               decisionPayload:current.decision_payload||{},
-              contextPayload:{
+              contextPayload:boundContextPayload({
                 ...(current.context_payload||{}),
-                completed_sibling_results:compactCompletedSiblingResults(completed),
-              },
+                ...inherited,
+                ...(completed.length?{completed_sibling_results:compactCompletedSiblingResults(completed)}:{}),
+              }),
               resultArtifact:current.result_artifact||null,
             });
             routed.parent_path=node.node_path;
