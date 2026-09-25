@@ -3,6 +3,7 @@
 // No normal wake, grades, credentials, lifecycle, or AAU-wide policy mutation.
 import { createHash } from 'node:crypto';
 import { nvidiaChatCompletion } from './providers/nvidia.js';
+import { persistRejectedPilotAttempt } from './pilot-rejected-attempt-evidence.js';
 
 const REPO='booleanlambda/agent-control-room';
 const EVIDENCE_BRANCH='pilot/silas-chemistry-kinetics-20260925';
@@ -63,17 +64,47 @@ function auditCandidate(brief,T,o,aged){
  if(o.feasible!==g.feasible)issues.push('feasible');
  return {passed:issues.length===0,issues,expected:g};
 }
+async function recordRejectedAttempt({label,rejectionReason,modelReturned=null,finishReason=null,elapsedMs=null,usage=null,partialOutput=null,reasoningChars=null,reasoningTokens=null,inputSha256=null}){
+ try{
+  const ev=await persistRejectedPilotAttempt({
+   branch:EVIDENCE_BRANCH,root:ROOT,label,agentId:AGENT,
+   testContract:'silas_masters_physical_chemistry_parallel_kinetics_v1',
+   modelRequested:MODEL,modelReturned,rejectionReason,finishReason,elapsedMs,usage,
+   partialOutput,reasoningChars,reasoningTokens,inputSha256,sourceIds:[],
+   provenance:'runtime_native'
+  });
+  log('REJECTED_ATTEMPT_PERSISTED',{label,path:ev.path,rejection_reason:rejectionReason,finish_reason:finishReason,
+   continuation_eligibility:'NOT_ELIGIBLE_FOR_CONTINUATION',blob:ev.blob,commit:ev.commit});
+ }catch(e){
+  log('REJECTION_EVIDENCE_FAILED',{label,rejection_reason:rejectionReason,code:e?.code||e?.name||'error',message:String(e?.message||e).slice(0,160)});
+ }
+}
 async function invoke(label,system,user,{maxTokens=2048,timeoutMs=180000}={}){
- const start=Date.now();let r;
+ const start=Date.now(),inputSha256=digest(system+'\n'+user);let r;
  try{r=await nvidiaChatCompletion({model:MODEL,messages:[{role:'system',content:system},{role:'user',content:user}],
   temperature:0,jsonMode:true,enableThinking:true,maxTokens,timeoutMs});}
- catch(e){log('BLOCKED',{label,reason:'model_or_timeout',code:e?.code||e?.name||'error',elapsed_ms:Date.now()-start});return null;}
+ catch(e){
+  const elapsedMs=Date.now()-start;
+  const rejectionReason=e?.code==='NVIDIA_TIMEOUT'?'MODEL_TIMEOUT':'MODEL_ERROR';
+  await recordRejectedAttempt({label,rejectionReason,elapsedMs,inputSha256});
+  log('BLOCKED',{label,reason:'model_or_timeout',code:e?.code||e?.name||'error',elapsed_ms:elapsedMs,
+   continuation_eligibility:'NOT_ELIGIBLE_FOR_CONTINUATION'});
+  return null;
+ }
+ const elapsedMs=Date.now()-start;
+ const reasoningChars=String(r.reasoning_content||'').length;
+ const reasoningTokens=r.usage?.completion_tokens_details?.reasoning_tokens??null;
  let o;try{o=JSON.parse(String(r.content||''));}catch{o=null;}
  if(r.model_returned!==MODEL||r.finish_reason!=='stop'||!o){
-  log('BLOCKED',{label,reason:'invalid_or_incomplete',model_returned:r.model_returned,finish_reason:r.finish_reason,
-    elapsed_ms:Date.now()-start,reasoning_chars:String(r.reasoning_content||'').length});return null;
+  const rejectionReason=r.finish_reason==='length'?'TRUNCATED_RESPONSE':(!o?'INVALID_OR_INCOMPLETE_RESPONSE':'MODEL_OR_COMPLETION_MISMATCH');
+  await recordRejectedAttempt({label,rejectionReason,modelReturned:r.model_returned,finishReason:r.finish_reason,
+   elapsedMs,usage:r.usage||null,partialOutput:r.content||null,reasoningChars,reasoningTokens,inputSha256});
+  log('BLOCKED',{label,reason:'invalid_or_incomplete',rejection_reason:rejectionReason,model_returned:r.model_returned,
+   finish_reason:r.finish_reason,elapsed_ms:elapsedMs,reasoning_chars:reasoningChars,reasoning_tokens:reasoningTokens,
+   continuation_eligibility:'NOT_ELIGIBLE_FOR_CONTINUATION'});
+  return null;
  }
- return {o,r,elapsed_ms:Date.now()-start,reasoning_chars:String(r.reasoning_content||'').length};
+ return {o,r,elapsed_ms:elapsedMs,reasoning_chars:reasoningChars};
 }
 async function persist(path,meta,c,assessment){
  const row={contract:'silas_masters_physical_chemistry_parallel_kinetics_v1',agent_id:AGENT,model_returned:c.r.model_returned,
@@ -102,7 +133,7 @@ export async function runSilasChemistryKinetics(){
  if(planFile){plan=JSON.parse(planFile.text);log('RESUME',{stage:1,sha:plan.output_sha256});}
  else{
   const user='Before calculating any candidate, return JSON {"stage":"chemistry_plan","source_ids":["CHEM-KIN-V1"],"reaction_model":"...","calculation_sequence":[at least 7 steps],"unit_checks":[at least 3],"constraints":[all six constraints without weakening them],"assumptions":[at least 3],"failure_modes":[at least 3]}. CASE:'+JSON.stringify(brief);
-  const c=await invoke('plan',system,user,{maxTokens:4096,timeoutMs:180000});if(!c)return;
+  const c=await invoke('plan',system,user,{maxTokens:2048,timeoutMs:180000});if(!c)return;
   const issues=[];if(c.o.stage!=='chemistry_plan')issues.push('stage');if(c.o.calculation_sequence?.length<7)issues.push('sequence');if(c.o.constraints?.length<6)issues.push('constraints');if(c.o.unit_checks?.length<3)issues.push('unit_checks');
   plan=await persist(ROOT+'/step_1_plan.json',{stage:1,brief_sha:bf.sha,input_sha256:digest(system+'\n'+user)},c,{passed:issues.length===0,issues});
  }
@@ -112,7 +143,7 @@ export async function runSilasChemistryKinetics(){
   const path=ROOT+'/step_2_baseline_'+T+'K.json',old=await read(path);
   if(old){const row=JSON.parse(old.text);baseline.push(row);log('RESUME',{stage:2,substep:T+'K',sha:row.output_sha256,passed:row.assessment?.passed});continue;}
   const user=candidatePrompt(brief,T,false);
-  const c=await invoke('baseline_'+T,system,user,{maxTokens:4096,timeoutMs:180000});if(!c)return;
+  const c=await invoke('baseline_'+T,system,user,{maxTokens:2048,timeoutMs:180000});if(!c)return;
   const assessment=auditCandidate(brief,T,c.o,false);
   const row=await persist(path,{stage:2,substep:T+'K',brief_sha:bf.sha,source_ids:['CHEM-KIN-V1'],prior_output_sha256:plan.output_sha256,input_sha256:digest(system+'\n'+user)},c,assessment);
   baseline.push(row);
@@ -135,7 +166,7 @@ export async function runSilasChemistryKinetics(){
   const path=ROOT+'/step_4_aged_'+T+'K.json',old=await read(path);
   if(old){const row=JSON.parse(old.text);aged.push(row);log('RESUME',{stage:4,substep:T+'K',sha:row.output_sha256,passed:row.assessment?.passed});continue;}
   const user='NEW SOURCE CAT-AGE-V2: only A_C changes from 1.0e8 s^-1 to 1.5e8 s^-1; all equations, activation energies, batch time, temperatures and ALL SIX constraints remain unchanged. '+candidatePrompt(brief,T,true);
-  const c=await invoke('aged_'+T,system,user,{maxTokens:4096,timeoutMs:180000});if(!c)return;
+  const c=await invoke('aged_'+T,system,user,{maxTokens:2048,timeoutMs:180000});if(!c)return;
   const assessment=auditCandidate(brief,T,c.o,true);
   const row=await persist(path,{stage:4,substep:T+'K',brief_sha:bf.sha,source_ids:['CHEM-KIN-V1','CAT-AGE-V2'],prior_output_sha256:decision.output_sha256,input_sha256:digest(system+'\n'+user)},c,assessment);
   aged.push(row);
