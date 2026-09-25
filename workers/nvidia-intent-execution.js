@@ -1671,12 +1671,13 @@ async function completeDeepJson(model, messages, maxTokens, audit) {
 }
 
 async function completeRoutingJson(model, messages, maxTokens, audit) {
-  // Same bound model, concise control-plane pass. Hidden thinking is disabled here
-  // so ATOMIC/SPLIT/NEED_CONTEXT routing cannot consume the entire visible JSON budget.
-  // Substantive leaf execution and synthesis remain Thinking ON.
+  // Recursive discovery/routing is substantive agent cognition, not a mechanical
+  // control-plane operation. Keep the same bound model with thinking enabled.
+  // The runtime still only validates/persists/routes the agent-authored decision.
+  const requested=Math.max(1800,Number(maxTokens)||1800);
   const result = await callWithCognitionIntegrity(() => nvidiaChatCompletion({
-    model,messages,maxTokens:Math.min(Number(maxTokens)||700,1000),
-    temperature:0.1,jsonMode:true,enableThinking:false,timeoutMs:120000,
+    model,messages,maxTokens:Math.min(requested,3200),
+    temperature:0.1,jsonMode:true,enableThinking:true,timeoutMs:300000,
   }), audit);
   let parsed=null;
   try { parsed=JSON.parse(String(result.content || '')); }
@@ -1804,6 +1805,7 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
       ...(result.meta||{}),
       latency_ms:Date.now()-started,
       thinking_requested:true,
+      recursive_routing_thinking:true,
       decomposition_authored_by_bound_agent:true,
       contract:'autonomous_recursive_decomposition_v0_1',
     },
