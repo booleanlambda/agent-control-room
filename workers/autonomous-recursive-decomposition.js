@@ -147,6 +147,19 @@ function resultParts(raw){
   }
 }
 
+function compactCompletedSiblingResults(rows){
+  return asArray(rows).slice(-6).map(row=>{
+    const parts=resultParts(row?.result_artifact);
+    return {
+      path:row?.node_path||null,
+      requirement:clip(row?.requirement_text,700),
+      artifact:clip(parts.artifact,3500),
+      handoff_json:clip(safeJson(parts.handoff),1800),
+      result_hash:row?.result_hash||null,
+    };
+  });
+}
+
 export async function runAutonomousRequirementCognition({
   model,packet,modeInfo,agentId,intentExecutionId,
   rpc,sha256,completeJson,completeRouteJson=null,researchContext=null,
@@ -589,6 +602,27 @@ export async function runAutonomousRequirementCognition({
         const completed=[];
         for(const child of kids){
           child.parent_path=node.node_path;
+          if(completed.length){
+            const current=await getNode(child.node_path);
+            if(current?.status!=='ready')throw new Error('autonomous_decomposition_child_lookup_failed:'+child.node_path);
+            const routed=await saveNode({
+              nodePath:current.node_path,
+              parentPath:node.node_path,
+              ordinal:current.ordinal||child.ordinal||0,
+              requirement:current.requirement_text,
+              sourceKind:current.source_kind||child.source_kind||'agent_decomposition',
+              sourceRef:current.source_ref??child.source_ref??node.node_path,
+              status:current.node_status,
+              decisionType:current.decision_type??null,
+              decisionPayload:current.decision_payload||{},
+              contextPayload:{
+                ...(current.context_payload||{}),
+                completed_sibling_results:compactCompletedSiblingResults(completed),
+              },
+              resultArtifact:current.result_artifact||null,
+            });
+            routed.parent_path=node.node_path;
+          }
           const done=await process(child.node_path,node.node_path,depth+1);
           if(done.node_status!=='completed')throw new Error('autonomous_decomposition_child_not_complete:'+child.node_path);
           completed.push(done);
