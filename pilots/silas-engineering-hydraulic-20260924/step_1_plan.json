@@ -1,0 +1,69 @@
+{
+  "contract": "silas_engineering_hydraulic_design_v1",
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "model_returned": "google/gemma-4-31b-it",
+  "thinking_requested": true,
+  "stage": 1,
+  "brief_sha": "875e543b12a5f8c27b5b7e2ec9abe5bbdb5b5427",
+  "input_sha256": "76c40ceb5ba8206f55f7cfef453b5fe36750ba00db2c3dad82809223e3848119",
+  "output_sha256": "b29d723cf25da14825f9f87e29eb615a5241f0a52f762e367c7dedfad75ba8ce",
+  "output_chars": 2647,
+  "reasoning_chars": 3198,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 1126,
+    "completion_tokens": 1705,
+    "total_tokens": 2831,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cached_tokens": 0
+    },
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "reasoning_tokens": 1004,
+      "rejected_prediction_tokens": null
+    }
+  },
+  "elapsed_ms": 90597,
+  "assessment": {
+    "passed": true,
+    "issues": []
+  },
+  "output": {
+    "stage": "engineering_plan",
+    "source_ids": [
+      "ENG-V1"
+    ],
+    "constraints": [
+      "Flow velocity within the pipe must not exceed 1.0 m/s.",
+      "The calculated electrical input power must be 1.0 kW or less.",
+      "The selected pump's rated head at design flow must be at least 115% of the calculated Total Dynamic Head (TDH).",
+      "The selected pump's maximum electrical input rating must not exceed 1.0 kW.",
+      "The combined cost of pipe installation and pump purchase must be within a $7,500 budget.",
+      "A design is only feasible if every single constraint is satisfied; no partial compliance is allowed."
+    ],
+    "calculation_sequence": [
+      "Calculate the design flow rate (Q) using daily volume and pump run hours.",
+      "For each pipe diameter (D40, D50, D63), calculate the flow velocity (v) and verify it is <= 1.0 m/s.",
+      "For each pipe diameter, calculate the friction head loss (hf) and minor head loss (hm) based on the route length.",
+      "Determine the Total Dynamic Head (TDH) by summing static head, friction head, and minor head, then calculate the required rated head (1.15 * TDH).",
+      "Calculate the electrical input power (Pin) for each pipe/TDH combination and verify it is <= 1.0 kW.",
+      "Cross-reference the required rated head and Pin against the specifications of pump options P1, P2, and P3, ensuring the pump's own max electrical rating is also <= 1.0 kW.",
+      "Compute the total installed cost (pipe length * cost per meter + pump cost) and verify it is <= $7,500.",
+      "Re-execute the hydraulic and budget calculations using the updated route length from ROUTE-V2 to determine if a feasible design still exists."
+    ],
+    "failure_modes": [
+      "Velocity Constraint Violation: Selecting a pipe diameter too small leads to flow velocity exceeding 1.0 m/s.",
+      "Pump Head Insufficiency: The TDH (including the 15% margin) exceeds the rated head of all pumps that meet the electrical input constraint.",
+      "Electrical Overload: The power required to overcome the TDH exceeds the 1.0 kW limit for either the calculated input or the pump's rated maximum.",
+      "Budget Overrun: The cost of the larger diameter pipes required for velocity/head constraints combined with the necessary pump exceeds $7,500."
+    ],
+    "assumptions": [
+      "The Darcy friction factor (f = 0.026) and minor loss coefficient (K = 10) remain constant across all pipe diameter options.",
+      "Pump, motor, and inverter efficiencies are uniform across all pump options provided.",
+      "Water density is constant at 1000 kg/m³.",
+      "The system operates at a steady state during the designated 5-hour daily run window."
+    ]
+  }
+}
