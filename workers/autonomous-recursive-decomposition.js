@@ -19,20 +19,37 @@ function getPath(root,path){
   const parts=String(path||'').split('.').filter(Boolean);
   let cur=root;
   for(const part of parts){
-    if(!cur||typeof cur!=='object'||Array.isArray(cur)||!(part in cur))return {found:false,value:null};
+    if(cur===null||cur===undefined||typeof cur!=='object')return {found:false,value:null};
+    if(Array.isArray(cur)){
+      if(!/^[0-9]+$/.test(part))return {found:false,value:null};
+      const index=Number(part);
+      if(index<0||index>=cur.length)return {found:false,value:null};
+      cur=cur[index];
+      continue;
+    }
+    if(!(part in cur))return {found:false,value:null};
     cur=cur[part];
   }
   return {found:true,value:cur};
 }
 
 function indexObject(root,prefix='',depth=0,out=[]){
-  if(!root||typeof root!=='object'||Array.isArray(root)||depth>2)return out;
+  if(!root||typeof root!=='object'||depth>2)return out;
+  if(Array.isArray(root)){
+    for(let i=0;i<Math.min(root.length,24)&&out.length<180;i++){
+      const path=prefix?prefix+'.'+i:String(i);
+      const value=root[i];
+      out.push({path,kind:Array.isArray(value)?'array':typeof value,bytes:bytes(value)});
+      if(value&&typeof value==='object'&&depth<2)indexObject(value,path,depth+1,out);
+    }
+    return out;
+  }
   for(const key of Object.keys(root).sort()){
     if(out.length>=180)break;
     const path=prefix?prefix+'.'+key:key;
     const value=root[key];
     out.push({path,kind:Array.isArray(value)?'array':typeof value,bytes:bytes(value)});
-    if(value&&typeof value==='object'&&!Array.isArray(value)&&depth<2)indexObject(value,path,depth+1,out);
+    if(value&&typeof value==='object'&&depth<2)indexObject(value,path,depth+1,out);
   }
   return out;
 }
@@ -84,9 +101,16 @@ function resolveContext(packet,requests){
       continue;
     }
     if(bytes(hit.value)>MAX_CONTEXT_VALUE_BYTES){
-      const childIndex=(hit.value&&typeof hit.value==='object'&&!Array.isArray(hit.value))
-        ? Object.keys(hit.value).slice(0,80).map(k=>({path:path+'.'+k,bytes:bytes(hit.value[k]),kind:Array.isArray(hit.value[k])?'array':typeof hit.value[k]}))
-        : [];
+      let childIndex=[];
+      if(Array.isArray(hit.value)){
+        childIndex=hit.value.slice(0,48).map((v,i)=>({
+          path:path+'.'+i,bytes:bytes(v),kind:Array.isArray(v)?'array':typeof v
+        }));
+      }else if(hit.value&&typeof hit.value==='object'){
+        childIndex=Object.keys(hit.value).slice(0,80).map(k=>({
+          path:path+'.'+k,bytes:bytes(hit.value[k]),kind:Array.isArray(hit.value[k])?'array':typeof hit.value[k]
+        }));
+      }
       out[path]={available:true,too_large:true,bytes:bytes(hit.value),children:childIndex};
       continue;
     }
