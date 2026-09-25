@@ -1697,6 +1697,31 @@ async function completeRoutingJson(model, messages, maxTokens, audit) {
   return {result,parsed};
 }
 
+async function completeProtocolSerializeJson(model, messages, maxTokens, audit) {
+  // Mechanical protocol packaging only. The substantive decision has already
+  // been made and durably checkpointed by the same bound model with Thinking ON.
+  const result = await callWithCognitionIntegrity(() => nvidiaChatCompletion({
+    model,messages,maxTokens:Math.min(Math.max(300,Number(maxTokens)||700),900),
+    temperature:0,jsonMode:true,enableThinking:false,timeoutMs:120000,
+  }), audit);
+  let parsed=null;
+  try { parsed=JSON.parse(String(result.content || '')); }
+  catch {
+    await recordRejectedCognition(audit,{
+      rejectionReason:'MALFORMED_JSON',
+      finishReason:result.finish_reason || null,
+      outputChars:String(result.content || '').length,
+      outputSha256:String(result.content || '') ? sha256(String(result.content)) : null,
+      usage:result.usage || {},
+    });
+    const error=new Error('cognition_response_rejected:MALFORMED_JSON');
+    error.code='COGNITION_RESPONSE_REJECTED';
+    error.rejectionReason='MALFORMED_JSON';
+    throw error;
+  }
+  return {result,parsed};
+}
+
 function normalizeBoundedPlan(plan) {
   const rawSteps=Array.isArray(plan?.steps) ? plan.steps : [];
   const seen=new Set();
@@ -1783,6 +1808,9 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
     completeRouteJson:(messages,maxTokens,phase)=>completeRoutingJson(
       model,messages,maxTokens,{...commonAudit,phase}
     ),
+    completeSerializeJson:(messages,maxTokens,phase)=>completeProtocolSerializeJson(
+      model,messages,maxTokens,{...commonAudit,phase}
+    ),
     completeJson:(messages,maxTokens,phase)=>completeDeepJson(
       model,messages,maxTokens,{...commonAudit,phase}
     ),
@@ -1806,6 +1834,8 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
       latency_ms:Date.now()-started,
       thinking_requested:true,
       recursive_routing_thinking:true,
+      routing_commit_thinking:false,
+      routing_protocol:'deep_discovery_then_commit_v0_1',
       decomposition_authored_by_bound_agent:true,
       contract:'autonomous_recursive_decomposition_v0_1',
     },
