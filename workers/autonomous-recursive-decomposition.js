@@ -115,7 +115,7 @@ function resultParts(raw){
 
 export async function runAutonomousRequirementCognition({
   model,packet,modeInfo,agentId,intentExecutionId,
-  rpc,sha256,completeJson,
+  rpc,sha256,completeJson,researchContext=null,
 }){
   const rootReq=extractTriggerRequirement(packet);
   const assignmentKey='req:'+sha256({
@@ -186,8 +186,8 @@ export async function runAutonomousRequirementCognition({
             'ATOMIC = you judge this requirement small and clear enough to complete as one bounded cognition.',
             'SPLIT = you decide this requirement should be decomposed into child requirements that YOU will author.',
             'NEED_CONTEXT = you need specific stored context before deciding or executing.',
-            'Return JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT","reason":"brief","context_requests":["exact.path"]}.',
-            'For NEED_CONTEXT request only exact paths from the supplied context index.',
+            'Return JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT","reason":"brief","context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."]}.',
+            'For NEED_CONTEXT, request stored context by exact paths from the supplied index and/or request external research with queries/known URLs. You choose the questions; the runtime only executes them.',
             'Do not solve the requirement in this response. Do not author child requirements yet.',
             forceReconsider
               ? 'A prior ATOMIC execution was rejected as incomplete. Reconsider honestly whether this requirement should be SPLIT or needs more context; do not merely repeat the failed oversized attempt.'
@@ -222,10 +222,28 @@ export async function runAutonomousRequirementCognition({
 
       if(decision==='NEED_CONTEXT'){
         const requests=asArray(parsed?.context_requests).map(text).filter(Boolean).slice(0,MAX_CONTEXT_REQUESTS_PER_ROUND);
-        if(!requests.length)throw new Error('autonomous_decomposition_context_request_empty:'+node.node_path);
-        counters.context_requests+=requests.length;
+        const researchQueries=asArray(parsed?.research_queries).map(text).filter(Boolean).slice(0,8);
+        const researchUrls=asArray(parsed?.research_urls).map(text).filter(v=>/^https:\/\//i.test(v)).slice(0,8);
+        if(!requests.length&&!researchQueries.length&&!researchUrls.length)
+          throw new Error('autonomous_decomposition_context_request_empty:'+node.node_path);
+
+        counters.context_requests+=requests.length+researchQueries.length+researchUrls.length;
         const resolved=resolveContext(packet,requests);
-        contextPayload={...contextPayload,...resolved};
+        let researchObserved=null;
+        if((researchQueries.length||researchUrls.length)&&typeof researchContext==='function'){
+          researchObserved=await researchContext({
+            nodePath:node.node_path,
+            queries:researchQueries,
+            urls:researchUrls,
+          });
+        }else if(researchQueries.length||researchUrls.length){
+          researchObserved={status:'unavailable',reason:'research_runtime_not_configured'};
+        }
+        contextPayload={
+          ...contextPayload,
+          ...resolved,
+          ...(researchObserved?{['external_research_round_'+(round+1)]:researchObserved}:{}),
+        };
         node=await saveNode({
           nodePath:node.node_path,
           parentPath:node.parent_path??parentPathOf(node.node_path),
@@ -235,7 +253,12 @@ export async function runAutonomousRequirementCognition({
           sourceRef:node.source_ref,
           status:'waiting_context',
           decisionType:'NEED_CONTEXT',
-          decisionPayload:{...decisionPayload,context_requests:requests},
+          decisionPayload:{
+            ...decisionPayload,
+            context_requests:requests,
+            research_queries:researchQueries,
+            research_urls:researchUrls,
+          },
           contextPayload,
           resultArtifact:node.result_artifact||null,
         });
@@ -248,7 +271,13 @@ export async function runAutonomousRequirementCognition({
           sourceRef:node.source_ref,
           status:'pending',
           decisionType:'NEED_CONTEXT',
-          decisionPayload:{...decisionPayload,context_requests:requests,context_supplied:true},
+          decisionPayload:{
+            ...decisionPayload,
+            context_requests:requests,
+            research_queries:researchQueries,
+            research_urls:researchUrls,
+            context_supplied:true,
+          },
           contextPayload,
           resultArtifact:node.result_artifact||null,
         });
@@ -351,7 +380,7 @@ export async function runAutonomousRequirementCognition({
               'You are the bound autonomous agent executing exactly ONE requirement you previously judged ATOMIC.',
               'Complete only this requirement. Do not silently expand into unrelated work.',
               'If you discover it is not actually bounded, return {"status":"SPLIT","reason":"..."} instead of forcing an oversized answer.',
-              'If specific stored context is missing, return {"status":"NEED_CONTEXT","context_requests":["exact.path"],"reason":"..."}.',
+              'If context is missing, return {"status":"NEED_CONTEXT","context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."],"reason":"..."}. You choose any research questions; do not fabricate findings.',
               'Otherwise return JSON only: {"status":"COMPLETE","artifact":"concise auditable work product","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
               'Keep the artifact bounded. Preserve uncertainty and do not claim external facts without supplied evidence.',
             ].join('\n')},
@@ -397,14 +426,33 @@ export async function runAutonomousRequirementCognition({
     }
     if(status==='NEED_CONTEXT'){
       const requests=asArray(parsed?.context_requests).map(text).filter(Boolean).slice(0,MAX_CONTEXT_REQUESTS_PER_ROUND);
-      if(!requests.length)throw new Error('autonomous_decomposition_atomic_context_empty:'+node.node_path);
-      const contextPayload={...(node.context_payload||{}),...resolveContext(packet,requests)};
-      counters.context_requests+=requests.length;
+      const researchQueries=asArray(parsed?.research_queries).map(text).filter(Boolean).slice(0,8);
+      const researchUrls=asArray(parsed?.research_urls).map(text).filter(v=>/^https:\/\//i.test(v)).slice(0,8);
+      if(!requests.length&&!researchQueries.length&&!researchUrls.length)
+        throw new Error('autonomous_decomposition_atomic_context_empty:'+node.node_path);
+      let researchObserved=null;
+      if((researchQueries.length||researchUrls.length)&&typeof researchContext==='function'){
+        researchObserved=await researchContext({nodePath:node.node_path,queries:researchQueries,urls:researchUrls});
+      }else if(researchQueries.length||researchUrls.length){
+        researchObserved={status:'unavailable',reason:'research_runtime_not_configured'};
+      }
+      const contextPayload={
+        ...(node.context_payload||{}),
+        ...resolveContext(packet,requests),
+        ...(researchObserved?{external_research_atomic:researchObserved}:{}),
+      };
+      counters.context_requests+=requests.length+researchQueries.length+researchUrls.length;
       const reset=await saveNode({
         nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
         requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
         status:'pending',decisionType:'NEED_CONTEXT',
-        decisionPayload:{reason:clip(parsed?.reason,1200),context_requests:requests,reclassified_during_execution:true},
+        decisionPayload:{
+          reason:clip(parsed?.reason,1200),
+          context_requests:requests,
+          research_queries:researchQueries,
+          research_urls:researchUrls,
+          reclassified_during_execution:true
+        },
         contextPayload,resultArtifact:null,
       });
       reset.parent_path=node.parent_path??parentPathOf(node.node_path);
