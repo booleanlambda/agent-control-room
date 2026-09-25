@@ -119,7 +119,7 @@ export async function runSilasEngineeringExercise(){
   if(old){const row=JSON.parse(old.text);pipeRows.push(row);log('RESUME',{stage:2,substep:pipe.id,sha:row.output_sha256,passed:row.assessment?.passed});continue;}
   const visible={source_id:'ENG-V1',constants:brief.constants,pipe,formulas:brief.equations};
   const user='Compute ONLY pipe '+pipe.id+' for the original 180 m route. Return JSON {"stage":"pipe_calculation","source_ids":["ENG-V1"],"pipe_id":"'+pipe.id+'","metrics":{"Q_m3_s":number,"Q_L_s":number,"velocity_m_s":number,"hf_m":number,"hm_m":number,"TDH_m":number,"electrical_input_kw":number,"required_rated_head_m":number},"pipe_cost_usd":number,"velocity_pass":boolean,"calculated_power_pass":boolean,"equations":["running equations"],"engineering_comment":"..."}. INPUT:'+JSON.stringify(visible);
-  const call=await modelCall({label:'pipe_'+pipe.id,system,user,maxTokens:3072});if(!call)return;
+  const call=await modelCall({label:'pipe_'+pipe.id,system,user,maxTokens:4096});if(!call)return;
   const assessment=pipeAudit(brief,pipe,call.out,brief.constants.route_length_m);
   const row=await persistModel(path,{stage:2,substep:pipe.id,brief_sha:briefFile.sha,prior_output_sha256:plan.output_sha256,input_sha256:hash(system+'\n'+user)},call,assessment);
   pipeRows.push(row);
@@ -145,7 +145,7 @@ export async function runSilasEngineeringExercise(){
   const path=ROOT+'/step_4_'+pipe.id+'_route_v2.json';const old=await read(path);
   if(old){const row=JSON.parse(old.text);routeRows.push(row);log('RESUME',{stage:4,substep:pipe.id,sha:row.output_sha256,passed:row.assessment?.passed});continue;}
   const user='NEW SOURCE ROUTE-V2: route length changes from 180 m to 260 m; every other frozen input and EVERY ORIGINAL CONSTRAINT is unchanged. Recompute ONLY pipe '+pipe.id+'. Return JSON {"stage":"route_v2_pipe","source_ids":["ENG-V1","ROUTE-V2"],"pipe_id":"'+pipe.id+'","metrics":{"Q_m3_s":number,"Q_L_s":number,"velocity_m_s":number,"hf_m":number,"hm_m":number,"TDH_m":number,"electrical_input_kw":number,"required_rated_head_m":number},"pipe_cost_usd":number,"velocity_pass":boolean,"calculated_power_pass":boolean,"equations":["..."],"engineering_comment":"..."}. INPUT:'+JSON.stringify({constants:{...brief.constants,route_length_m:260},pipe,formulas:brief.equations});
-  const call=await modelCall({label:'route_v2_'+pipe.id,system,user,maxTokens:3072});if(!call)return;
+  const call=await modelCall({label:'route_v2_'+pipe.id,system,user,maxTokens:4096});if(!call)return;
   const assessment=pipeAudit(brief,pipe,call.out,260);
   const row=await persistModel(path,{stage:4,substep:pipe.id,brief_sha:briefFile.sha,source_ids:['ENG-V1','ROUTE-V2'],prior_output_sha256:selection.output_sha256,input_sha256:hash(system+'\n'+user)},call,assessment);
   routeRows.push(row);
