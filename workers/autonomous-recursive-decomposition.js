@@ -95,6 +95,11 @@ function resolveContext(packet,requests){
   return out;
 }
 
+function parentPathOf(nodePath){
+  const i=String(nodePath||'').lastIndexOf('.');
+  return i<0?null:String(nodePath).slice(0,i);
+}
+
 function resultParts(raw){
   if(!raw)return {artifact:'',handoff:{}};
   try{
@@ -146,7 +151,12 @@ export async function runAutonomousRequirementCognition({
   async function saveNode(args){
     const row=await nodeRpc('save',args);
     if(row?.status!=='ready')throw new Error('autonomous_decomposition_checkpoint_save_failed:'+args.nodePath);
-    return row;
+    return {
+      ...row,
+      parent_path:args.parentPath??null,
+      source_kind:row.source_kind||args.sourceKind||'requirement',
+      source_ref:row.source_ref??args.sourceRef??null,
+    };
   }
 
   async function getNode(nodePath){
@@ -218,7 +228,7 @@ export async function runAutonomousRequirementCognition({
         contextPayload={...contextPayload,...resolved};
         node=await saveNode({
           nodePath:node.node_path,
-          parentPath:node.parent_path||null,
+          parentPath:node.parent_path??parentPathOf(node.node_path),
           ordinal:node.ordinal||0,
           requirement:node.requirement_text,
           sourceKind:node.source_kind,
@@ -231,7 +241,7 @@ export async function runAutonomousRequirementCognition({
         });
         node=await saveNode({
           nodePath:node.node_path,
-          parentPath:node.parent_path||null,
+          parentPath:node.parent_path??parentPathOf(node.node_path),
           ordinal:node.ordinal||0,
           requirement:node.requirement_text,
           sourceKind:node.source_kind,
@@ -247,7 +257,7 @@ export async function runAutonomousRequirementCognition({
 
       node=await saveNode({
         nodePath:node.node_path,
-        parentPath:node.parent_path||null,
+        parentPath:node.parent_path??parentPathOf(node.node_path),
         ordinal:node.ordinal||0,
         requirement:node.requirement_text,
         sourceKind:node.source_kind,
@@ -302,7 +312,7 @@ export async function runAutonomousRequirementCognition({
         if(authored.length<2)
           throw new Error('autonomous_decomposition_split_requires_multiple_children:'+node.node_path);
         await saveNode({
-          nodePath:node.node_path,parentPath:node.parent_path||null,ordinal:node.ordinal||0,
+          nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
           requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
           status:'split',decisionType:'SPLIT',
           decisionPayload:{...(node.decision_payload||{}),child_count:authored.length,coverage_note:clip(parsed?.coverage_note,1500),children_authored:true},
@@ -361,13 +371,13 @@ export async function runAutonomousRequirementCognition({
     }catch(error){
       if(error?.code==='COGNITION_RESPONSE_REJECTED'||error?.code==='NVIDIA_TIMEOUT'){
         const reset=await saveNode({
-          nodePath:node.node_path,parentPath:node.parent_path||null,ordinal:node.ordinal||0,
+          nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
           requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
           status:'pending',decisionType:null,
           decisionPayload:{prior_atomic_rejection:String(error?.rejectionReason||error?.code||'incomplete'),reconsider_decomposition:true},
           contextPayload:node.context_payload||{},resultArtifact:null,
         });
-        reset.parent_path=node.parent_path||null;
+        reset.parent_path=node.parent_path??parentPathOf(node.node_path);
         return {reconsider:true,node:reset};
       }
       throw error;
@@ -376,13 +386,13 @@ export async function runAutonomousRequirementCognition({
     const status=text(parsed?.status).toUpperCase();
     if(status==='SPLIT'){
       const split=await saveNode({
-        nodePath:node.node_path,parentPath:node.parent_path||null,ordinal:node.ordinal||0,
+        nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
         requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
         status:'split',decisionType:'SPLIT',
         decisionPayload:{reason:clip(parsed?.reason,1200),reclassified_during_execution:true},
         contextPayload:node.context_payload||{},resultArtifact:null,
       });
-      split.parent_path=node.parent_path||null;
+      split.parent_path=node.parent_path??parentPathOf(node.node_path);
       return {split:true,node:split};
     }
     if(status==='NEED_CONTEXT'){
@@ -391,13 +401,13 @@ export async function runAutonomousRequirementCognition({
       const contextPayload={...(node.context_payload||{}),...resolveContext(packet,requests)};
       counters.context_requests+=requests.length;
       const reset=await saveNode({
-        nodePath:node.node_path,parentPath:node.parent_path||null,ordinal:node.ordinal||0,
+        nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
         requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
         status:'pending',decisionType:'NEED_CONTEXT',
         decisionPayload:{reason:clip(parsed?.reason,1200),context_requests:requests,reclassified_during_execution:true},
         contextPayload,resultArtifact:null,
       });
-      reset.parent_path=node.parent_path||null;
+      reset.parent_path=node.parent_path??parentPathOf(node.node_path);
       return {reconsider:true,node:reset};
     }
     if(status!=='COMPLETE')throw new Error('autonomous_decomposition_atomic_status_invalid:'+node.node_path);
@@ -407,13 +417,13 @@ export async function runAutonomousRequirementCognition({
     const handoff=asObject(parsed?.handoff);
     const resultArtifact=JSON.stringify({artifact,handoff});
     const done=await saveNode({
-      nodePath:node.node_path,parentPath:node.parent_path||null,ordinal:node.ordinal||0,
+      nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
       requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
       status:'completed',decisionType:'ATOMIC',
       decisionPayload:{...(node.decision_payload||{}),completed_as_atomic:true},
       contextPayload:node.context_payload||{},resultArtifact,
     });
-    done.parent_path=node.parent_path||null;
+    done.parent_path=node.parent_path??parentPathOf(node.node_path);
     return {completed:true,node:done};
   }
 
@@ -442,13 +452,13 @@ export async function runAutonomousRequirementCognition({
       };
       cursor=i+1;
       node=await saveNode({
-        nodePath:node.node_path,parentPath:node.parent_path||null,ordinal:node.ordinal||0,
+        nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
         requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
         status:'split',decisionType:'SPLIT',
         decisionPayload:{...(node.decision_payload||{}),synthesis_cursor:cursor,synthesis_accumulator:accumulator},
         contextPayload:node.context_payload||{},resultArtifact:null,
       });
-      node.parent_path=node.parent_path||null;
+      node.parent_path=node.parent_path??parentPathOf(node.node_path);
     }
 
     const final=await callJson([
@@ -465,13 +475,13 @@ export async function runAutonomousRequirementCognition({
     if(!artifact)throw new Error('autonomous_decomposition_synthesis_empty:'+node.node_path);
     const resultArtifact=JSON.stringify({artifact,handoff:asObject(final?.parsed?.handoff)});
     const done=await saveNode({
-      nodePath:node.node_path,parentPath:node.parent_path||null,ordinal:node.ordinal||0,
+      nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
       requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
       status:'completed',decisionType:'SPLIT',
       decisionPayload:{...(node.decision_payload||{}),synthesis_cursor:childRows.length,synthesis_complete:true},
       contextPayload:node.context_payload||{},resultArtifact,
     });
-    done.parent_path=node.parent_path||null;
+    done.parent_path=node.parent_path??parentPathOf(node.node_path);
     return done;
   }
 
