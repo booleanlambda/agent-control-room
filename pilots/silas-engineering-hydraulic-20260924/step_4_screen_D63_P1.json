@@ -1,0 +1,68 @@
+{
+  "contract": "silas_engineering_hydraulic_design_v1",
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "model_returned": "google/gemma-4-31b-it",
+  "thinking_requested": true,
+  "stage": 4,
+  "substep": "screen_D63_P1",
+  "brief_sha": "875e543b12a5f8c27b5b7e2ec9abe5bbdb5b5427",
+  "source_ids": [
+    "ENG-V1",
+    "ROUTE-V2"
+  ],
+  "prior_output_sha256": "97ed9d4bd1ad2e305f0e0fd6db159e75d092684850fc655a4b539849490d055a",
+  "input_sha256": "54bf503b3de296eaf041856fe84056ab657a65731437abcc7a6d21c0ec6fc0f9",
+  "output_sha256": "ff56d681eaa97d84257f17381cbedeaff69e74e5f9bcf9b0e0fcfff69552350f",
+  "output_chars": 486,
+  "reasoning_chars": 1332,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 972,
+    "completion_tokens": 773,
+    "total_tokens": 1745,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cached_tokens": 0
+    },
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "reasoning_tokens": 558,
+      "rejected_prediction_tokens": null
+    }
+  },
+  "elapsed_ms": 49317,
+  "assessment": {
+    "passed": true,
+    "issues": [],
+    "expected": {
+      "pipe": "D63",
+      "pump": "P1",
+      "total_cost_usd": 12950,
+      "velocity_pass": true,
+      "calculated_power_pass": true,
+      "rated_head_pass": true,
+      "pump_rating_pass": true,
+      "budget_pass": false,
+      "feasible": false
+    }
+  },
+  "output": {
+    "stage": "route_v2_single_candidate",
+    "source_ids": [
+      "ENG-V1",
+      "ROUTE-V2"
+    ],
+    "pipe": "D63",
+    "pump": "P1",
+    "prior_route_output_sha256": "97ed9d4bd1ad2e305f0e0fd6db159e75d092684850fc655a4b539849490d055a",
+    "total_cost_usd": 12950,
+    "velocity_pass": true,
+    "calculated_power_pass": true,
+    "rated_head_pass": true,
+    "pump_rating_pass": true,
+    "budget_pass": false,
+    "feasible": false,
+    "reasoning": "The design fails the budget constraint; the total cost of $12,950 (Pipe: $11,700 + Pump: $1,250) exceeds the $7,500 limit."
+  }
+}
