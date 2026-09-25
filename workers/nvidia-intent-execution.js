@@ -1650,7 +1650,7 @@ async function cognitionStepCheckpoint({agentId,intentExecutionId,assignmentKey,
 
 async function completeDeepJson(model, messages, maxTokens, audit) {
   const result = await callWithCognitionIntegrity(() => nvidiaChatCompletion({
-    model,messages,maxTokens,temperature:0.1,jsonMode:true,enableThinking:true,timeoutMs:300000,
+    model,messages,maxTokens,temperature:0.1,jsonMode:true,enableThinking:true,timeoutMs:900000,
   }), audit);
   let parsed = null;
   try { parsed = JSON.parse(String(result.content || '')); }
@@ -1677,7 +1677,7 @@ async function completeRoutingJson(model, messages, maxTokens, audit) {
   const requested=Math.max(1800,Number(maxTokens)||1800);
   const result = await callWithCognitionIntegrity(() => nvidiaChatCompletion({
     model,messages,maxTokens:Math.min(requested,3200),
-    temperature:0.1,jsonMode:true,enableThinking:true,timeoutMs:300000,
+    temperature:0.1,jsonMode:true,enableThinking:true,timeoutMs:900000,
   }), audit);
   let parsed=null;
   try { parsed=JSON.parse(String(result.content || '')); }
