@@ -1,0 +1,119 @@
+{
+  "contract": "silas_engineering_hydraulic_design_v1",
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "model_returned": "google/gemma-4-31b-it",
+  "thinking_requested": true,
+  "stage": 4,
+  "substep": "screen_D40",
+  "brief_sha": "875e543b12a5f8c27b5b7e2ec9abe5bbdb5b5427",
+  "source_ids": [
+    "ENG-V1",
+    "ROUTE-V2"
+  ],
+  "prior_output_sha256": "e2ee68d5a2a5ca8ea646512a7a6859d71df1cfc1d1e842e1e432aea7fc8b776d",
+  "input_sha256": "5c0af64076085280afd0e8bc7d5fd43e17cbf57a0c838023e8aa554744ed79da",
+  "output_sha256": "4bafcc462676810db1a287249d31ad11ef14e0f61b5293763242e56235dcaca8",
+  "output_chars": 1348,
+  "reasoning_chars": 3663,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 1116,
+    "completion_tokens": 1978,
+    "total_tokens": 3094,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cached_tokens": 0
+    },
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "reasoning_tokens": 1463,
+      "rejected_prediction_tokens": null
+    }
+  },
+  "elapsed_ms": 136970,
+  "assessment": {
+    "passed": true,
+    "issues": [],
+    "expected": [
+      {
+        "pipe": "D40",
+        "pump": "P1",
+        "total_cost_usd": 6970,
+        "velocity_pass": false,
+        "calculated_power_pass": true,
+        "rated_head_pass": false,
+        "pump_rating_pass": true,
+        "budget_pass": true,
+        "feasible": false
+      },
+      {
+        "pipe": "D40",
+        "pump": "P2",
+        "total_cost_usd": 7320,
+        "velocity_pass": false,
+        "calculated_power_pass": true,
+        "rated_head_pass": false,
+        "pump_rating_pass": true,
+        "budget_pass": true,
+        "feasible": false
+      },
+      {
+        "pipe": "D40",
+        "pump": "P3",
+        "total_cost_usd": 7570,
+        "velocity_pass": false,
+        "calculated_power_pass": true,
+        "rated_head_pass": false,
+        "pump_rating_pass": false,
+        "budget_pass": false,
+        "feasible": false
+      }
+    ]
+  },
+  "output": {
+    "stage": "route_v2_pipe_pump_screen",
+    "source_ids": [
+      "ENG-V1",
+      "ROUTE-V2"
+    ],
+    "pipe_id": "D40",
+    "prior_route_output_sha256": "e2ee68d5a2a5ca8ea646512a7a6859d71df1cfc1d1e842e1e432aea7fc8b776d",
+    "rows": [
+      {
+        "pipe": "D40",
+        "pump": "P1",
+        "total_cost_usd": 6970,
+        "velocity_pass": false,
+        "calculated_power_pass": true,
+        "rated_head_pass": false,
+        "pump_rating_pass": true,
+        "budget_pass": true,
+        "feasible": false
+      },
+      {
+        "pipe": "D40",
+        "pump": "P2",
+        "total_cost_usd": 7320,
+        "velocity_pass": false,
+        "calculated_power_pass": true,
+        "rated_head_pass": false,
+        "pump_rating_pass": true,
+        "budget_pass": true,
+        "feasible": false
+      },
+      {
+        "pipe": "D40",
+        "pump": "P3",
+        "total_cost_usd": 7570,
+        "velocity_pass": false,
+        "calculated_power_pass": true,
+        "rated_head_pass": false,
+        "pump_rating_pass": false,
+        "budget_pass": false,
+        "feasible": false
+      }
+    ],
+    "engineering_comment": "All pump candidates are infeasible for pipe D40. The pipe velocity (1.238 m/s) exceeds the 1.0 m/s limit regardless of pump selection. Furthermore, none of the candidates meet the minimum rated head requirement of 41.37 m. P3 additionally fails the electrical rating and budget constraints."
+  }
+}
