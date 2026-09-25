@@ -1,0 +1,68 @@
+{
+  "contract": "silas_engineering_hydraulic_design_v1",
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "model_returned": "google/gemma-4-31b-it",
+  "thinking_requested": true,
+  "stage": 4,
+  "substep": "screen_D50_P1",
+  "brief_sha": "875e543b12a5f8c27b5b7e2ec9abe5bbdb5b5427",
+  "source_ids": [
+    "ENG-V1",
+    "ROUTE-V2"
+  ],
+  "prior_output_sha256": "131342858b182f6ee429648dcd78f263920177cca9d466ba39c1a8d86b38fc67",
+  "input_sha256": "c8e0b4efa2a4307b8d46005e113fbe06c48f43af12789f8ab28dd1b99752f498",
+  "output_sha256": "0d5c62ed807a4a740d371134468ac074662abd86b5ee55da15d7ca8fe7dce2c5",
+  "output_chars": 534,
+  "reasoning_chars": 1304,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 977,
+    "completion_tokens": 788,
+    "total_tokens": 1765,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cached_tokens": 0
+    },
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "reasoning_tokens": 564,
+      "rejected_prediction_tokens": null
+    }
+  },
+  "elapsed_ms": 86353,
+  "assessment": {
+    "passed": true,
+    "issues": [],
+    "expected": {
+      "pipe": "D50",
+      "pump": "P1",
+      "total_cost_usd": 9050,
+      "velocity_pass": true,
+      "calculated_power_pass": true,
+      "rated_head_pass": false,
+      "pump_rating_pass": true,
+      "budget_pass": false,
+      "feasible": false
+    }
+  },
+  "output": {
+    "stage": "route_v2_single_candidate",
+    "source_ids": [
+      "ENG-V1",
+      "ROUTE-V2"
+    ],
+    "pipe": "D50",
+    "pump": "P1",
+    "prior_route_output_sha256": "131342858b182f6ee429648dcd78f263920177cca9d466ba39c1a8d86b38fc67",
+    "total_cost_usd": 9050,
+    "velocity_pass": true,
+    "calculated_power_pass": true,
+    "rated_head_pass": false,
+    "pump_rating_pass": true,
+    "budget_pass": false,
+    "feasible": false,
+    "reasoning": "The design fails on two constraints: the pump rated head (28m) is less than the required 1.15 * TDH (30.64m), and the total cost (9050 USD) exceeds the budget (7500 USD)."
+  }
+}
