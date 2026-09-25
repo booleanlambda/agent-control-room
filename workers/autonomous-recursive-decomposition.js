@@ -615,7 +615,7 @@ export async function runAutonomousRequirementCognition({
         nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
         requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
         status:'split',decisionType:'SPLIT',
-        decisionPayload:{reason:clip(parsed?.reason,1200),reclassified_during_execution:true},
+        decisionPayload:{...(node.decision_payload||{}),reason:clip(parsed?.reason,1200),reclassified_during_execution:true},
         contextPayload:node.context_payload||{},resultArtifact:null,
       });
       split.parent_path=node.parent_path??parentPathOf(node.node_path);
@@ -644,6 +644,7 @@ export async function runAutonomousRequirementCognition({
         requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
         status:'pending',decisionType:'NEED_CONTEXT',
         decisionPayload:{
+          ...(node.decision_payload||{}),
           reason:clip(parsed?.reason,1200),
           context_requests:requests,
           research_queries:researchQueries,
