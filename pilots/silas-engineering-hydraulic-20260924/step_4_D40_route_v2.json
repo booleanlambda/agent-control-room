@@ -1,0 +1,84 @@
+{
+  "contract": "silas_engineering_hydraulic_design_v1",
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "model_returned": "google/gemma-4-31b-it",
+  "thinking_requested": true,
+  "stage": 4,
+  "substep": "D40",
+  "brief_sha": "875e543b12a5f8c27b5b7e2ec9abe5bbdb5b5427",
+  "source_ids": [
+    "ENG-V1",
+    "ROUTE-V2"
+  ],
+  "prior_output_sha256": "2009d8fad354a267b8344af05c34010d9249fe4f18adc1344f319f12afa9e302",
+  "input_sha256": "4aecc02c5f709641d7dd7d6b93f0a294802ec6faba96c9f4d681e9f4fd1509ae",
+  "output_sha256": "e2ee68d5a2a5ca8ea646512a7a6859d71df1cfc1d1e842e1e432aea7fc8b776d",
+  "output_chars": 1104,
+  "reasoning_chars": 4577,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 614,
+    "completion_tokens": 3265,
+    "total_tokens": 3879,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cached_tokens": 0
+    },
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "reasoning_tokens": 2643,
+      "rejected_prediction_tokens": null
+    }
+  },
+  "elapsed_ms": 291397,
+  "assessment": {
+    "passed": true,
+    "issues": [],
+    "expected": {
+      "Q_m3_s": 0.0015555555555555555,
+      "Q_L_s": 1.5555555555555554,
+      "velocity_m_s": 1.2378717796036303,
+      "hf_m": 13.19893912960759,
+      "hm_m": 0.7810023153613959,
+      "TDH_m": 35.979941444968986,
+      "electrical_input_kw": 0.9443651641730765,
+      "required_rated_head_m": 41.37693266171433
+    },
+    "expected_pipe_cost_usd": 5720
+  },
+  "output": {
+    "stage": "route_v2_pipe",
+    "source_ids": [
+      "ENG-V1",
+      "ROUTE-V2"
+    ],
+    "pipe_id": "D40",
+    "metrics": {
+      "Q_m3_s": 0.0015555555555555557,
+      "Q_L_s": 1.5555555555555556,
+      "velocity_m_s": 1.237811,
+      "hf_m": 13.1967,
+      "hm_m": 0.78087,
+      "TDH_m": 35.97757,
+      "electrical_input_kw": 0.94418,
+      "required_rated_head_m": 41.3742
+    },
+    "pipe_cost_usd": 5720,
+    "velocity_pass": false,
+    "calculated_power_pass": true,
+    "equations": [
+      "Q = 28 / (5 * 3600) = 0.001556 m3/s",
+      "A = pi * 0.04^2 / 4 = 0.001257 m2",
+      "v = 0.001556 / 0.001257 = 1.2378 m/s",
+      "hf = 0.026 * (260 / 0.04) * (1.2378^2 / (2 * 9.81)) = 13.1967 m",
+      "hm = 10 * (1.2378^2 / (2 * 9.81)) = 0.7809 m",
+      "TDH = 22 + 13.1967 + 0.7809 = 35.9776 m",
+      "Ph = 1000 * 9.81 * 0.001556 * 35.9776 = 548.95 W",
+      "Pin = 548.95 / (0.68 * 0.9 * 0.95) = 944.18 W = 0.9442 kW",
+      "H_required = 1.15 * 35.9776 = 41.3742 m",
+      "Cost = 260 * 22 = 5720 USD"
+    ],
+    "engineering_comment": "Increasing the route length to 260m increases the friction head loss (hf) significantly. While the electrical input remains under the 1kW limit (0.944 kW), the flow velocity (1.238 m/s) exceeds the maximum allowable limit of 1 m/s, resulting in a velocity failure."
+  }
+}
