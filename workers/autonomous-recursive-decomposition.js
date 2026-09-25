@@ -382,7 +382,7 @@ export async function runAutonomousRequirementCognition({
                 available_context_index:idx,
                 available_decisions:availableDecisions,
               })},
-            ],5200,'req_'+node.node_path.replaceAll('.','_')+'_discovery_'+(round+1)+'_'+attempt);
+            ],10000,'req_'+node.node_path.replaceAll('.','_')+'_discovery_'+(round+1)+'_'+attempt);
 
             const candidate=asObject(response?.parsed);
             const candidateDecision=text(candidate.decision).toUpperCase();
