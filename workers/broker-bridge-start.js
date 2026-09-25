@@ -45,8 +45,8 @@ if (true || isEnabled('AAU_CONTROL_ROOM_INTENT_VISIBILITY_PATCH')) {
   }
 }
 
-// Read-only LangGraph/LangSmith credential probe. Never logs the token.
-if (String(process.env.LANGGRAPH_TOKEN || '').trim()) {
+// Optional read-only LangGraph/LangSmith credential probe. Disabled unless explicitly requested.
+if (isEnabled('AAU_LANGGRAPH_TOKEN_PROBE') && String(process.env.LANGGRAPH_TOKEN || '').trim()) {
   try {
     const { probeLangGraphToken } = await import('./langgraph-token-probe.js');
     await probeLangGraphToken();
