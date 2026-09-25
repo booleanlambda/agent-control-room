@@ -1,0 +1,56 @@
+{
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "model_returned": "google/gemma-4-31b-it",
+  "brief_sha": "875e543b12a5f8c27b5b7e2ec9abe5bbdb5b5427",
+  "step": 2,
+  "part": "D63_hydraulics",
+  "thinking_requested": true,
+  "input_sha256": "159a68e24a7ba93d1427d2d57f411e8a06fb4050faa6d2fa35ca9d3da300f12f",
+  "output_sha256": "b30b24be94607e1f7b43d4dfd8c99d22b6a58e91bb620f7ff964aec9d4ec4f48",
+  "output_chars": 368,
+  "reasoning_chars": 2582,
+  "usage": {
+    "prompt_tokens": 537,
+    "completion_tokens": 1720,
+    "total_tokens": 2257,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cached_tokens": 0
+    },
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "reasoning_tokens": 1497,
+      "rejected_prediction_tokens": null
+    }
+  },
+  "finish_reason": "stop",
+  "elapsed_ms": 58367,
+  "assessment": {
+    "passed": true,
+    "issues": []
+  },
+  "output": {
+    "stage": "D63_hydraulics",
+    "source_ids": [
+      "ENG-V1"
+    ],
+    "metrics": {
+      "Q_m3_s": 0.0015555555555555557,
+      "Q_L_s": 1.5555555555555556,
+      "area_m2": 0.0031172453,
+      "velocity_m_s": 0.498986,
+      "hf_m": 0.9427,
+      "hm_m": 0.1269,
+      "TDH_m": 23.0696
+    },
+    "equations": [
+      "Q = daily_volume / run_hours / 3600",
+      "A = pi D^2 / 4",
+      "v = Q / A",
+      "hf = f (L/D) (v^2/(2g))",
+      "hm = K (v^2/(2g))",
+      "TDH = static_head + hf + hm"
+    ]
+  }
+}
