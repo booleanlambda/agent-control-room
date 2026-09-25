@@ -1,0 +1,28 @@
+{
+  "contract": "aau_rejected_attempt_evidence_v0_1",
+  "test_contract": "silas_masters_physical_chemistry_parallel_kinetics_v1",
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "label": "baseline_330",
+  "status": "REJECTED",
+  "continuation_eligibility": "NOT_ELIGIBLE_FOR_CONTINUATION",
+  "rejection_reason": "TRUNCATED_RESPONSE",
+  "model_requested": "google/gemma-4-31b-it",
+  "model_returned": "google/gemma-4-31b-it",
+  "finish_reason": "length",
+  "elapsed_ms": 67243,
+  "usage": null,
+  "reasoning_chars": 3539,
+  "reasoning_tokens": null,
+  "input_sha256": null,
+  "prior_checkpoint_sha256": "d938edeba04cbdaade9283861aec114ca0aeaea7a160d8bee9b207ded15dce09",
+  "source_ids": [
+    "CHEM-KIN-V1"
+  ],
+  "partial_output_chars": null,
+  "partial_output_sha256": null,
+  "reasoning_content_persisted": false,
+  "continuation_rule": "This record is evidence only. It MUST NOT be used as a completed checkpoint or as input to later reasoning stages.",
+  "provenance": "reconstructed_from_render_runtime_log; partial output and token usage were not durably captured by the pre-fix runner",
+  "observed_at": "2026-09-25T07:58:32.145436917Z",
+  "recorded_at": "2026-09-25T10:49:58.619Z"
+}
