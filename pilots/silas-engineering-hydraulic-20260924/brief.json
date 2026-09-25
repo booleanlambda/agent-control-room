@@ -1,0 +1,95 @@
+{
+  "artifact": "silas_engineering_hydraulic_design_v1",
+  "agent_id": "f7e7a357-3c6b-4c18-8b12-0e5008b3ef82",
+  "agent_name": "Silas",
+  "bound_model": "google/gemma-4-31b-it",
+  "scope": "standalone_off_curriculum_engineering_exercise_no_grading_or_lifecycle_credit",
+  "thinking": true,
+  "objective": "Design a 42-day-independent remote-clinic water transfer line and pump choice under hydraulic, electrical, velocity, and budget constraints; then adapt when the route changes.",
+  "equations": {
+    "demand_flow": "Q = daily_volume / run_hours / 3600",
+    "pipe_area": "A = pi D^2 / 4",
+    "velocity": "v = Q / A",
+    "darcy_friction_head": "hf = f (L/D) (v^2/(2g))",
+    "minor_head": "hm = K (v^2/(2g))",
+    "total_dynamic_head": "TDH = static_head + hf + hm",
+    "hydraulic_power": "Ph = rho g Q TDH",
+    "electrical_input": "Pin = Ph/(eta_pump eta_motor eta_inverter)",
+    "required_rated_head": "H_required = 1.15 * TDH"
+  },
+  "constants": {
+    "daily_water_m3": 28,
+    "pump_run_hours_per_day": 5,
+    "static_head_m": 22,
+    "route_length_m": 180,
+    "darcy_f": 0.026,
+    "minor_loss_K": 10,
+    "rho_kg_m3": 1000,
+    "g_m_s2": 9.81,
+    "pump_efficiency": 0.68,
+    "motor_efficiency": 0.9,
+    "inverter_efficiency": 0.95,
+    "max_pipe_velocity_m_s": 1,
+    "max_continuous_electrical_kw": 1,
+    "head_margin_fraction": 0.15,
+    "total_installed_budget_usd": 7500
+  },
+  "pipe_options": [
+    {
+      "id": "D40",
+      "internal_diameter_m": 0.04,
+      "installed_cost_usd_per_m": 22
+    },
+    {
+      "id": "D50",
+      "internal_diameter_m": 0.05,
+      "installed_cost_usd_per_m": 30
+    },
+    {
+      "id": "D63",
+      "internal_diameter_m": 0.063,
+      "installed_cost_usd_per_m": 45
+    }
+  ],
+  "pump_options": [
+    {
+      "id": "P1",
+      "rated_head_m_at_design_flow": 28,
+      "max_electrical_input_kw": 0.85,
+      "cost_usd": 1250
+    },
+    {
+      "id": "P2",
+      "rated_head_m_at_design_flow": 32,
+      "max_electrical_input_kw": 0.95,
+      "cost_usd": 1600
+    },
+    {
+      "id": "P3",
+      "rated_head_m_at_design_flow": 40,
+      "max_electrical_input_kw": 1.2,
+      "cost_usd": 1850
+    }
+  ],
+  "constraints": [
+    "Pipe velocity must be <= 1.0 m/s.",
+    "Calculated electrical input must be <= 1.0 kW.",
+    "Selected pump rated head at design flow must be >= 1.15 * calculated TDH.",
+    "Selected pump max electrical input rating must be <= 1.0 kW.",
+    "Pipe installed cost plus pump purchase cost must be <= $7,500.",
+    "A design is feasible only if ALL constraints pass; do not redefine feasibility as least-worst."
+  ],
+  "changed_condition": {
+    "source_id": "ROUTE-V2",
+    "new_route_length_m": 260,
+    "all_other_inputs_unchanged": true,
+    "instruction": "Re-evaluate all relevant hydraulic and budget constraints. If no combination passes every constraint, explicitly report no feasible design under current constraints."
+  },
+  "stages": [
+    "Interpret equations, constraints, and create engineering calculation plan.",
+    "Calculate each pipe option independently; compute Q, v, hf, hm, TDH, Pin, 15% head requirement, and pipe cost.",
+    "Combine pipe results with pump candidates; select a feasible design or none, with constraint matrix.",
+    "Receive ROUTE-V2 and recompute affected quantities and feasibility without relaxing any original constraint.",
+    "Produce engineering design memo referencing all prior checkpoints and clearly separating calculations, assumptions, constraints, and recommendation."
+  ]
+}
