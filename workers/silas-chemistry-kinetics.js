@@ -102,7 +102,7 @@ export async function runSilasChemistryKinetics(){
  if(planFile){plan=JSON.parse(planFile.text);log('RESUME',{stage:1,sha:plan.output_sha256});}
  else{
   const user='Before calculating any candidate, return JSON {"stage":"chemistry_plan","source_ids":["CHEM-KIN-V1"],"reaction_model":"...","calculation_sequence":[at least 7 steps],"unit_checks":[at least 3],"constraints":[all six constraints without weakening them],"assumptions":[at least 3],"failure_modes":[at least 3]}. CASE:'+JSON.stringify(brief);
-  const c=await invoke('plan',system,user,{maxTokens:2048,timeoutMs:180000});if(!c)return;
+  const c=await invoke('plan',system,user,{maxTokens:4096,timeoutMs:180000});if(!c)return;
   const issues=[];if(c.o.stage!=='chemistry_plan')issues.push('stage');if(c.o.calculation_sequence?.length<7)issues.push('sequence');if(c.o.constraints?.length<6)issues.push('constraints');if(c.o.unit_checks?.length<3)issues.push('unit_checks');
   plan=await persist(ROOT+'/step_1_plan.json',{stage:1,brief_sha:bf.sha,input_sha256:digest(system+'\n'+user)},c,{passed:issues.length===0,issues});
  }
@@ -112,7 +112,7 @@ export async function runSilasChemistryKinetics(){
   const path=ROOT+'/step_2_baseline_'+T+'K.json',old=await read(path);
   if(old){const row=JSON.parse(old.text);baseline.push(row);log('RESUME',{stage:2,substep:T+'K',sha:row.output_sha256,passed:row.assessment?.passed});continue;}
   const user=candidatePrompt(brief,T,false);
-  const c=await invoke('baseline_'+T,system,user,{maxTokens:2048,timeoutMs:180000});if(!c)return;
+  const c=await invoke('baseline_'+T,system,user,{maxTokens:4096,timeoutMs:180000});if(!c)return;
   const assessment=auditCandidate(brief,T,c.o,false);
   const row=await persist(path,{stage:2,substep:T+'K',brief_sha:bf.sha,source_ids:['CHEM-KIN-V1'],prior_output_sha256:plan.output_sha256,input_sha256:digest(system+'\n'+user)},c,assessment);
   baseline.push(row);
@@ -135,7 +135,7 @@ export async function runSilasChemistryKinetics(){
   const path=ROOT+'/step_4_aged_'+T+'K.json',old=await read(path);
   if(old){const row=JSON.parse(old.text);aged.push(row);log('RESUME',{stage:4,substep:T+'K',sha:row.output_sha256,passed:row.assessment?.passed});continue;}
   const user='NEW SOURCE CAT-AGE-V2: only A_C changes from 1.0e8 s^-1 to 1.5e8 s^-1; all equations, activation energies, batch time, temperatures and ALL SIX constraints remain unchanged. '+candidatePrompt(brief,T,true);
-  const c=await invoke('aged_'+T,system,user,{maxTokens:2048,timeoutMs:180000});if(!c)return;
+  const c=await invoke('aged_'+T,system,user,{maxTokens:4096,timeoutMs:180000});if(!c)return;
   const assessment=auditCandidate(brief,T,c.o,true);
   const row=await persist(path,{stage:4,substep:T+'K',brief_sha:bf.sha,source_ids:['CHEM-KIN-V1','CAT-AGE-V2'],prior_output_sha256:decision.output_sha256,input_sha256:digest(system+'\n'+user)},c,assessment);
   aged.push(row);
