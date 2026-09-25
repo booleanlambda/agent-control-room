@@ -1,7 +1,8 @@
 // AAU autonomous recursive decomposition v0.1
 // The bound agent authors decomposition. Runtime only persists/routes/checkpoints.
 
-const MAX_DEPTH=12;
+const MAX_BRANCH_DEPTH=12;
+const MAX_SINGLE_CHILD_REFINEMENTS=12;
 const MAX_CHILDREN_PER_NODE=16;
 const MAX_CONTEXT_ROUNDS=4;
 const MAX_CONTEXT_REQUESTS_PER_ROUND=8;
@@ -424,7 +425,7 @@ export async function runAutonomousRequirementCognition({
               'A child must be a real independently completable requirement, not a vague label.',
               'Do not solve the child here.',
               'Return JSON only: {"status":"CHILD","requirement":"...","reason":"brief"} OR {"status":"DONE","coverage_note":"brief"}.',
-              'There is no required number of children. Use as many or as few as your reasoning requires.',
+              'There is no required number of children. One child is valid when it is a genuinely narrower refinement; do not merely restate the parent. Use as many or as few as your reasoning requires.',
             ].join('\n')},
             {role:'user',content:safeJson({
               parent_requirement:node.requirement_text,
@@ -442,8 +443,8 @@ export async function runAutonomousRequirementCognition({
 
       const status=text(parsed?.status).toUpperCase();
       if(status==='DONE'){
-        if(authored.length<2)
-          throw new Error('autonomous_decomposition_split_requires_multiple_children:'+node.node_path);
+        if(authored.length<1)
+          throw new Error('autonomous_decomposition_split_requires_child:'+node.node_path);
         await saveNode({
           nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
           requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
@@ -637,8 +638,10 @@ export async function runAutonomousRequirementCognition({
     return done;
   }
 
-  async function process(nodePath,parentPath=null,depth=0){
-    if(depth>MAX_DEPTH)throw new Error('autonomous_decomposition_depth_resource_limit:'+nodePath);
+  async function process(nodePath,parentPath=null,branchDepth=0,singleChildRefinements=0){
+    if(branchDepth>MAX_BRANCH_DEPTH)throw new Error('autonomous_decomposition_branch_depth_resource_limit:'+nodePath);
+    if(singleChildRefinements>MAX_SINGLE_CHILD_REFINEMENTS)
+      throw new Error('autonomous_decomposition_single_child_convergence_limit:'+nodePath);
     let node=await getNode(nodePath);
     if(node?.status!=='ready')throw new Error('autonomous_decomposition_node_missing:'+nodePath);
     node.parent_path=parentPath;
@@ -676,7 +679,13 @@ export async function runAutonomousRequirementCognition({
             });
             routed.parent_path=node.node_path;
           }
-          const done=await process(child.node_path,node.node_path,depth+1);
+          const singleChild=kids.length===1;
+          const done=await process(
+            child.node_path,
+            node.node_path,
+            singleChild?branchDepth:branchDepth+1,
+            singleChild?singleChildRefinements+1:0
+          );
           if(done.node_status!=='completed')throw new Error('autonomous_decomposition_child_not_complete:'+child.node_path);
           completed.push(done);
         }
@@ -713,7 +722,7 @@ export async function runAutonomousRequirementCognition({
     throw new Error('autonomous_decomposition_root_lookup_failed');
   }
 
-  const completedRoot=await process('R',null,0);
+  const completedRoot=await process('R',null,0,0);
   const parts=resultParts(completedRoot.result_artifact);
   if(!parts.artifact)throw new Error('autonomous_decomposition_root_artifact_empty');
 
@@ -729,6 +738,7 @@ export async function runAutonomousRequirementCognition({
       nodes_touched:counters.nodes,
       model_calls:counters.model_calls,
       context_requests:counters.context_requests,
+      convergence_policy:'branch_depth_v0_2_single_child_refinement_budget',
       decomposition_authored_by_bound_agent:true,
       runtime_role:'persist_route_resume_completion_integrity_only',
       cognition_mode:modeInfo?.mode||'deep',
