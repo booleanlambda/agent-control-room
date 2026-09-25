@@ -490,9 +490,7 @@ document.querySelectorAll('[data-scroll-target]').forEach(b=>b.onclick=()=>{docu
 document.addEventListener('click',e=>{if(!e.target.closest('.navmenuwrap'))$('#systemMenu')?.classList.remove('open')});
 document.querySelectorAll('[data-bottom-action]').forEach(b=>b.onclick=()=>{const action=b.dataset.bottomAction;if(action==='home')document.querySelector('.hero-stage')?.scrollIntoView({behavior:'smooth',block:'center'});else if(currentId())openAgent(currentId(),false,action)});
 $('#drawerbg').onclick=closeDrawer;$('#fileModalClose').onclick=closeFileViewer;$('#fileModalBg').onclick=e=>{if(e.target.id==='fileModalBg')closeFileViewer()};
-$('#logoutTop').onclick=logout;
-setInterval(()=>{if(st.sessionToken&&st.drawerAgentId&&$('#drawerbody')?.dataset?.activeTab==='intents')reloadDrawer(st.drawerAgentId,false).catch(()=>{})},2500);
-void restoreSession();
+$('#logoutTop').onclick=logout;void restoreSession();
 </script>
 </body>
 </html>
