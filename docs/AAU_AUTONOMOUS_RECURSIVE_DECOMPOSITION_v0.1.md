@@ -82,9 +82,16 @@ The agent owns those decisions.
 
 ## Routing versus substantive reasoning
 
-ATOMIC / SPLIT / NEED_CONTEXT discovery-routing and one-child-at-a-time decomposition are substantive agent cognition. They use the **same bound model with Thinking ON**, just like atomic execution, reconciliation, and bottom-up synthesis. The runtime does not choose or reinterpret the decision; it only supplies durable state, enforces mechanical availability/resource constraints, validates response integrity, and persists/routes the agent-authored result.
+ATOMIC / SPLIT / NEED_CONTEXT discovery is substantive agent cognition. It uses the **same bound model with Thinking ON**, just like child authoring, atomic execution, reconciliation, and bottom-up synthesis.
 
-Pure runtime operations such as queueing, persistence, checkpoint recovery, transport retry, schema validation, and deterministic resource limits remain non-cognitive.
+Routing uses a two-stage protocol:
+
+1. **Deep discovery checkpoint.** The agent interprets the requirement, assesses evidence and unresolved gaps, and chooses its action with Thinking ON. That result is durably checkpointed on the requirement node before routing proceeds.
+2. **Protocol commit.** A small same-model structured-output call serializes the already-checkpointed decision with thinking disabled. It may not reconsider or alter the durable discovery decision. If serialization fails, retries reuse the same discovery checkpoint rather than rerunning discovery.
+
+The runtime does not choose or reinterpret the substantive decision; it supplies durable state, enforces mechanical availability/resource constraints, validates response integrity, and persists/routes the agent-authored result.
+
+Pure runtime operations such as queueing, persistence, checkpoint recovery, transport retry, schema validation, deterministic resource limits, and protocol serialization remain non-cognitive.
 
 ## Recovery and sibling handoff
 
