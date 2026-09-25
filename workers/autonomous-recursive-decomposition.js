@@ -255,7 +255,7 @@ function agentDiscoveryState(node){
 
 export async function runAutonomousRequirementCognition({
   model,packet,modeInfo,agentId,intentExecutionId,
-  rpc,sha256,completeJson,completeRouteJson=null,researchContext=null,
+  rpc,sha256,completeJson,completeRouteJson=null,completeSerializeJson=null,researchContext=null,
 }){
   const rootReq=extractTriggerRequirement(packet);
   const assignmentKey='req:'+sha256({
@@ -319,72 +319,185 @@ export async function runAutonomousRequirementCognition({
     return fn(messages,maxTokens,phase);
   }
 
+  async function callSerialize(messages,maxTokens,phase){
+    counters.model_calls++;
+    const fn=typeof completeSerializeJson==='function'?completeSerializeJson
+      :(typeof completeRouteJson==='function'?completeRouteJson:completeJson);
+    return fn(messages,maxTokens,phase);
+  }
+
   async function decide(node,{forceReconsider=false}={}){
     let contextPayload=asObject(node.context_payload);
     const atomicExecutionFailures=Math.max(0,Number(node?.decision_payload?.atomic_execution_failures||0));
     const atomicUnavailable=atomicExecutionFailures>=MAX_ATOMIC_EXECUTION_FAILURES;
+
     for(let round=0;round<MAX_CONTEXT_ROUNDS;round++){
-      let parsed=null;
+      const contextFingerprint=sha256({
+        node_path:node.node_path,
+        requirement:node.requirement_text,
+        context_payload:contextPayload,
+        force_reconsider:Boolean(forceReconsider),
+        atomic_unavailable:atomicUnavailable,
+        atomic_execution_failures:atomicExecutionFailures,
+      });
+
+      const priorPayload=asObject(node.decision_payload);
+      const priorDiscovery=asObject(priorPayload.routing_discovery_checkpoint);
+      const reusableDiscovery=
+        priorDiscovery.version==='agent_deep_discovery_v0_1'
+        && priorDiscovery.context_fingerprint===contextFingerprint
+        && ['ATOMIC','SPLIT','NEED_CONTEXT'].includes(text(priorDiscovery.decision).toUpperCase())
+        && !(atomicUnavailable&&text(priorDiscovery.decision).toUpperCase()==='ATOMIC');
+
+      let discovery=reusableDiscovery?priorDiscovery:null;
+
+      if(!discovery){
+        for(let attempt=1;attempt<=2;attempt++){
+          try{
+            const availableDecisions=atomicUnavailable
+              ? ['SPLIT','NEED_CONTEXT']
+              : ['ATOMIC','SPLIT','NEED_CONTEXT'];
+            const response=await callJson([
+              {role:'system',content:[
+                'You are the bound autonomous agent performing a DEEP DISCOVERY pass for ONE requirement.',
+                'Thinking is enabled. This pass is where YOU determine what the requirement means and what action YOU intend to take.',
+                'The runtime does not choose, reinterpret, decompose, or repair the requirement for you.',
+                'Available decisions for this exact node: '+availableDecisions.join(', ')+'.',
+                atomicUnavailable
+                  ? 'ATOMIC is mechanically unavailable because this exact node already exhausted its bounded atomic execution. You must choose SPLIT or NEED_CONTEXT yourself.'
+                  : 'ATOMIC remains available if you judge the requirement genuinely bounded.',
+                'Before deciding, interrogate semantic equivalence, definitions, time horizons, populations/scopes, proxy metrics, evidence sufficiency, assumptions, and unresolved gaps.',
+                'Do not treat a nearby metric or label as equivalent unless YOU can justify the equivalence from supplied evidence.',
+                'Do not solve the requirement or author child requirements in this pass.',
+                'Return complete JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT","reason":"auditable reason","requirement_interpretation":"what this requirement actually demands","evidence_assessment":"what the current evidence does and does not establish","unresolved_gaps":["..."],"context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."]}.',
+                forceReconsider
+                  ? 'A prior atomic execution was rejected or exhausted. Reconsider the requirement under the persisted constraints rather than repeating the failed action.'
+                  : '',
+              ].filter(Boolean).join('\n')},
+              {role:'user',content:safeJson({
+                requirement:node.requirement_text,
+                agent_authored_discovery_state:agentDiscoveryState(node),
+                source:{kind:node.source_kind,ref:node.source_ref},
+                supplied_context:contextPayload,
+                available_context_index:idx,
+                available_decisions:availableDecisions,
+              })},
+            ],5200,'req_'+node.node_path.replaceAll('.','_')+'_discovery_'+(round+1)+'_'+attempt);
+
+            const candidate=asObject(response?.parsed);
+            const candidateDecision=text(candidate.decision).toUpperCase();
+            if(!availableDecisions.includes(candidateDecision)){
+              if(attempt===2)throw new Error('autonomous_decomposition_discovery_invalid_available_action:'+node.node_path);
+              continue;
+            }
+
+            discovery={
+              version:'agent_deep_discovery_v0_1',
+              context_fingerprint:contextFingerprint,
+              decision:candidateDecision,
+              reason:clip(candidate.reason,2200),
+              requirement_interpretation:clip(candidate.requirement_interpretation,2800),
+              evidence_assessment:clip(candidate.evidence_assessment,3200),
+              unresolved_gaps:asArray(candidate.unresolved_gaps).map(v=>clip(text(v),900)).filter(Boolean).slice(0,16),
+              context_requests:asArray(candidate.context_requests).map(text).filter(Boolean).slice(0,MAX_CONTEXT_REQUESTS_PER_ROUND),
+              research_queries:asArray(candidate.research_queries).map(text).filter(Boolean).slice(0,8),
+              research_urls:asArray(candidate.research_urls).map(text).filter(v=>/^https:\/\//i.test(v)).slice(0,8),
+              force_reconsider:Boolean(forceReconsider),
+              atomic_unavailable:atomicUnavailable,
+              atomic_execution_failures:atomicExecutionFailures,
+            };
+
+            node=await saveNode({
+              nodePath:node.node_path,
+              parentPath:node.parent_path??parentPathOf(node.node_path),
+              ordinal:node.ordinal||0,
+              requirement:node.requirement_text,
+              sourceKind:node.source_kind,
+              sourceRef:node.source_ref,
+              status:'deciding',
+              decisionType:null,
+              decisionPayload:{
+                ...(node.decision_payload||{}),
+                routing_discovery_checkpoint:discovery,
+                routing_discovery_checkpointed:true,
+                routing_discovery_checkpointed_at:new Date().toISOString(),
+                routing_protocol:'deep_discovery_then_commit_v0_1',
+              },
+              contextPayload,
+              resultArtifact:node.result_artifact||null,
+            });
+            node.parent_path=node.parent_path??parentPathOf(node.node_path);
+            break;
+          }catch(error){
+            if(attempt===2)throw error;
+            if(error?.code!=='COGNITION_RESPONSE_REJECTED'&&error?.code!=='NVIDIA_TIMEOUT'
+               &&!String(error?.message||'').startsWith('autonomous_decomposition_discovery_invalid_available_action:'))throw error;
+          }
+        }
+      }
+
+      if(!discovery)throw new Error('autonomous_decomposition_discovery_checkpoint_missing:'+node.node_path);
+
+      let serialized=null;
       for(let attempt=1;attempt<=2;attempt++){
         try{
-          const prompt=[
-            'You are the bound autonomous agent deciding how to handle ONE requirement.',
-            'The runtime does not choose your decomposition.',
-            'Choose exactly one decision:',
-            atomicUnavailable
-              ? 'ATOMIC is unavailable for this exact node because its bounded atomic execution already exhausted the allowed retries without a complete response. Choose SPLIT or NEED_CONTEXT yourself.'
-              : 'ATOMIC = you judge this requirement small and clear enough to complete as one bounded cognition.',
-            'SPLIT = you decide this requirement should be decomposed into child requirements that YOU will author.',
-            'NEED_CONTEXT = you need specific stored context before deciding or executing.',
-            'Return JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT","reason":"brief","context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."]}.',
-            'For NEED_CONTEXT, request stored context by exact paths from the supplied index or from child paths already returned for an oversized request, and/or request external research with queries/known URLs. Oversized branches return only child path metadata; narrow them yourself recursively. You choose the paths and questions; the runtime only executes them.',
-            'Do not solve the requirement in this response. Do not author child requirements yet.',
-            forceReconsider
-              ? 'A prior ATOMIC execution was rejected as incomplete. Reconsider honestly whether this requirement should be SPLIT or needs more context; do not merely repeat the failed oversized attempt.'
-              : '',
-          ].filter(Boolean).join('\n');
-          const response=await callRoute([
-            {role:'system',content:prompt},
+          const response=await callSerialize([
+            {role:'system',content:[
+              'You are serializing YOUR ALREADY-COMPLETED durable routing decision into the AAU protocol.',
+              'Do not rethink, reinterpret, improve, or change the saved decision.',
+              'Copy the saved decision faithfully into the required JSON shape.',
+              'Return JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT","reason":"...","context_requests":[],"research_queries":[],"research_urls":[]}.',
+            ].join('\n')},
             {role:'user',content:safeJson({
-              requirement:node.requirement_text,
-              agent_authored_discovery_state:agentDiscoveryState(node),
-              source:{kind:node.source_kind,ref:node.source_ref},
-              supplied_context:contextPayload,
-              available_context_index:idx,
+              saved_discovery_decision:{
+                decision:discovery.decision,
+                reason:discovery.reason,
+                context_requests:discovery.context_requests,
+                research_queries:discovery.research_queries,
+                research_urls:discovery.research_urls,
+              }
             })},
-          ],700,'req_'+node.node_path.replaceAll('.','_')+'_decision_'+(round+1)+'_'+attempt);
-          const candidate=response?.parsed;
-          const candidateDecision=text(candidate?.decision).toUpperCase();
-          if(atomicUnavailable&&candidateDecision==='ATOMIC'){
-            if(attempt===2)throw new Error('autonomous_decomposition_atomic_mode_exhausted:'+node.node_path);
+          ],700,'req_'+node.node_path.replaceAll('.','_')+'_routing_commit_'+(round+1)+'_'+attempt);
+
+          const candidate=asObject(response?.parsed);
+          if(text(candidate.decision).toUpperCase()!==discovery.decision){
+            if(attempt===2)throw new Error('autonomous_decomposition_routing_commit_mismatch:'+node.node_path);
             continue;
           }
-          parsed=candidate;
+          serialized=candidate;
           break;
         }catch(error){
           if(attempt===2)throw error;
           if(error?.code!=='COGNITION_RESPONSE_REJECTED'&&error?.code!=='NVIDIA_TIMEOUT'
-             &&!String(error?.message||'').startsWith('autonomous_decomposition_atomic_mode_exhausted:'))throw error;
+             &&!String(error?.message||'').startsWith('autonomous_decomposition_routing_commit_mismatch:'))throw error;
         }
       }
 
-      const decision=text(parsed?.decision).toUpperCase();
-      if(!['ATOMIC','SPLIT','NEED_CONTEXT'].includes(decision))
-        throw new Error('autonomous_decomposition_invalid_decision:'+node.node_path);
+      if(!serialized)throw new Error('autonomous_decomposition_routing_commit_missing:'+node.node_path);
 
+      // The durable deep-discovery checkpoint is authoritative. The serialization
+      // call is protocol packaging only and cannot alter substantive agent cognition.
+      const decision=discovery.decision;
       const decisionPayload={
         ...(node.decision_payload||{}),
-        reason:clip(parsed?.reason,1200),
+        reason:discovery.reason,
+        requirement_interpretation:discovery.requirement_interpretation,
+        evidence_assessment:discovery.evidence_assessment,
+        unresolved_gaps:discovery.unresolved_gaps,
         context_round:round,
         force_reconsider:Boolean(forceReconsider),
         atomic_execution_failures:atomicExecutionFailures,
         atomic_unavailable:atomicUnavailable,
+        routing_discovery_checkpoint:discovery,
+        routing_discovery_reused:Boolean(reusableDiscovery),
+        routing_commit_serialized:true,
+        routing_protocol:'deep_discovery_then_commit_v0_1',
       };
 
       if(decision==='NEED_CONTEXT'){
-        const requests=asArray(parsed?.context_requests).map(text).filter(Boolean).slice(0,MAX_CONTEXT_REQUESTS_PER_ROUND);
-        const researchQueries=asArray(parsed?.research_queries).map(text).filter(Boolean).slice(0,8);
-        const researchUrls=asArray(parsed?.research_urls).map(text).filter(v=>/^https:\/\//i.test(v)).slice(0,8);
+        const requests=discovery.context_requests;
+        const researchQueries=discovery.research_queries;
+        const researchUrls=discovery.research_urls;
         if(!requests.length&&!researchQueries.length&&!researchUrls.length)
           throw new Error('autonomous_decomposition_context_request_empty:'+node.node_path);
 
@@ -997,6 +1110,7 @@ export async function runAutonomousRequirementCognition({
       context_requests:counters.context_requests,
       convergence_policy:'branch_depth_v0_3_atomic_lock_single_child_contraction',
       cognitive_continuity_policy:'agent_discovery_restore_and_reconcile_v0_1',
+      routing_protocol:'deep_discovery_then_commit_v0_1',
       decomposition_authored_by_bound_agent:true,
       runtime_role:'persist_route_resume_completion_integrity_only',
       cognition_mode:modeInfo?.mode||'deep',
