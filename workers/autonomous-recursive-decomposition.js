@@ -451,11 +451,14 @@ export async function runAutonomousRequirementCognition({
   }
 
   async function authorChildren(node){
-    let existing=await children(node.node_path);
+    const allExisting=await children(node.node_path);
+    const existing=allExisting.filter((child)=>String(child?.status||'')!=='cancelled');
     if(existing.length)return existing;
 
     const authored=[];
-    for(let ordinal=1;ordinal<=MAX_CHILDREN_PER_NODE;ordinal++){
+    const startOrdinal=Math.max(0,...allExisting.map((child)=>Number(child?.ordinal||0)))+1;
+    for(let offset=0;offset<MAX_CHILDREN_PER_NODE;offset++){
+      const ordinal=startOrdinal+offset;
       const previous=authored.map(c=>({ordinal:c.ordinal,requirement:c.requirement_text}));
       let parsed=null;
       for(let attempt=1;attempt<=2;attempt++){
