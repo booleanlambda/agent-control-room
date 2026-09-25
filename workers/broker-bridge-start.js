@@ -330,3 +330,10 @@ if (isEnabled('AAU_SILAS_ENGINEERING_SINGLE_PUMP_RECOVERY')) {
     .then(m => m.runSilasEngineeringSinglePumpRecovery())
     .catch(e => console.error('AAU_SILAS_ENGINEERING_SINGLE_FATAL',JSON.stringify({code:e?.code||e?.name||'error',message:String(e?.message||e).slice(0,180)})));
 }
+
+if (isEnabled('AAU_SILAS_CHEMISTRY_KINETICS')) {
+  // Silas-only off-curriculum Master's chemistry test; thinking ON, bounded candidates.
+  void import('./silas-chemistry-kinetics.js')
+    .then(m => m.runSilasChemistryKinetics())
+    .catch(e => console.error('AAU_SILAS_CHEM_FATAL',JSON.stringify({code:e?.code||e?.name||'error',message:String(e?.message||e).slice(0,180)})));
+}
