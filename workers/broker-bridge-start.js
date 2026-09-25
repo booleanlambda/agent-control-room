@@ -316,3 +316,10 @@ if (isEnabled('AAU_SILAS_ENGINEERING_D63_RECOVERY')) {
     .then(m => m.runSilasEngineeringD63Recovery())
     .catch(e => console.error('AAU_SILAS_ENGINEERING_D63_FATAL',JSON.stringify({code:e?.code||e?.name||'error',message:String(e?.message||e).slice(0,180)})));
 }
+
+if (isEnabled('AAU_SILAS_ENGINEERING_FEASIBILITY_CONTINUATION')) {
+  // Silas-only bounded continuation after ROUTE-V2 full-matrix timeout.
+  void import('./silas-engineering-feasibility-continuation.js')
+    .then(m => m.runSilasEngineeringFeasibilityContinuation())
+    .catch(e => console.error('AAU_SILAS_ENGINEERING_CONT_FATAL',JSON.stringify({code:e?.code||e?.name||'error',message:String(e?.message||e).slice(0,180)})));
+}
