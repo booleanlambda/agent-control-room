@@ -1900,28 +1900,39 @@ async function resolveDeepCognitionWithCheckpoint(model, packet, modeInfo, agent
   const existing = await rpc('aau_bridge_deep_cognition_checkpoint', {
     ...checkpointArgs, p_action:'get',
   });
+  let reusableExisting=false;
   if (existing?.status === 'ready') {
     if (existing.model !== model
         || sha256(existing.artifact || '') !== existing.artifact_hash) {
       throw new Error('deep_checkpoint_model_or_hash_mismatch');
     }
-    console.log('AAU_DEEP_COGNITION_CHECKPOINT_REUSED', JSON.stringify({
+    reusableExisting=String(existing?.meta?.contract || '').includes('universal_cognition_cycle_v0_1');
+    if(reusableExisting){
+      console.log('AAU_DEEP_COGNITION_CHECKPOINT_REUSED', JSON.stringify({
+        agent_id:agentId,intent_execution_id:intentExecutionId,
+        checkpoint_id:existing.checkpoint_id,
+        source_wake_request_id:existing.source_wake_request_id,
+        artifact_bytes:Buffer.byteLength(existing.artifact),
+        contract:existing?.meta?.contract || null,
+      }));
+      return {
+        artifact:existing.artifact,
+        meta:{
+          ...(existing.meta || {}),
+          checkpoint_id:existing.checkpoint_id,
+          checkpoint_reused:true,
+          checkpoint_source_wake_request_id:existing.source_wake_request_id,
+        },
+      };
+    }
+    console.log('AAU_DEEP_COGNITION_LEGACY_CHECKPOINT_BYPASSED',JSON.stringify({
       agent_id:agentId,intent_execution_id:intentExecutionId,
       checkpoint_id:existing.checkpoint_id,
-      source_wake_request_id:existing.source_wake_request_id,
-      artifact_bytes:Buffer.byteLength(existing.artifact),
+      prior_contract:existing?.meta?.contract || null,
+      required_contract:'universal_cognition_cycle_v0_1',
     }));
-    return {
-      artifact:existing.artifact,
-      meta:{
-        ...(existing.meta || {}),
-        checkpoint_id:existing.checkpoint_id,
-        checkpoint_reused:true,
-        checkpoint_source_wake_request_id:existing.source_wake_request_id,
-      },
-    };
   }
-  if (existing?.status !== 'not_found') {
+  if (existing?.status !== 'not_found' && existing?.status !== 'ready') {
     throw new Error('deep_checkpoint_lookup_unexpected_status');
   }
   const fresh = await runDeepCognition(model, packet, modeInfo, agentId, intentExecutionId);
