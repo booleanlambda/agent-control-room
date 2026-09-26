@@ -14,7 +14,7 @@ const MAX_CONTEXT_RESEARCH_ROUNDS=12;
 const MAX_CONTEXT_STAGNANT_ROUNDS=2;
 const MAX_CONTEXT_UNCHANGED_GAP_ROUNDS=3;
 const MAX_CONTEXT_REPEAT_REQUEST_ROUNDS=2;
-const MAX_CONTEXT_ELAPSED_MS=30*60*1000;
+const MAX_CONTEXT_ACTIVE_ELAPSED_MS=30*60*1000;
 const MAX_CONTEXT_UNIQUE_SOURCES=250;
 const MAX_CONTEXT_REQUESTS_PER_ROUND=8;
 const MAX_CONTEXT_VALUE_BYTES=12000;
@@ -300,8 +300,7 @@ function normalizedSignal(values){
 }
 function contextResourceView(state,contextPayload){
   const s=asObject(state);
-  const startedMs=Date.parse(text(s.started_at));
-  const elapsedMs=Number.isFinite(startedMs)?Math.max(0,Date.now()-startedMs):0;
+  const activeElapsedMs=Math.max(0,Number(s.active_context_elapsed_ms||0));
   const uniqueSources=Math.max(
     asArray(contextPayload?.research_source_catalog).length,
     Number(s.total_new_sources||0)
@@ -315,7 +314,7 @@ function contextResourceView(state,contextPayload){
     reasons.push('unresolved_gap_not_changing');
   if(Number(s.repeated_request_rounds||0)>=MAX_CONTEXT_REPEAT_REQUEST_ROUNDS)
     reasons.push('research_request_repeating');
-  if(elapsedMs>=MAX_CONTEXT_ELAPSED_MS)
+  if(activeElapsedMs>=MAX_CONTEXT_ACTIVE_ELAPSED_MS)
     reasons.push('context_acquisition_elapsed_time_ceiling');
   if(uniqueSources>=MAX_CONTEXT_UNIQUE_SOURCES)
     reasons.push('unique_source_safety_ceiling');
@@ -323,7 +322,9 @@ function contextResourceView(state,contextPayload){
     available:reasons.length===0,
     exhausted:reasons.length>0,
     reasons,
-    elapsed_ms:elapsedMs,
+    elapsed_ms:activeElapsedMs,
+    active_context_elapsed_ms:activeElapsedMs,
+    elapsed_accounting:'active_context_acquisition_only_v0_2',
     unique_sources:uniqueSources,
     context_rounds_attempted:Number(s.context_rounds_attempted||0),
     research_rounds_attempted:Number(s.research_rounds_attempted||0),
@@ -1362,25 +1363,32 @@ export async function runAutonomousRequirementCognition({
     const splitAvailable=structuralBranchingAvailable||singleRefinementAvailable;
 
     let contextState=asObject(node?.decision_payload?.context_resource_state);
-    if(contextState.version!=='agent_visible_context_resource_v0_1'){
+    if(contextState.version!=='agent_visible_context_resource_v0_2'){
       const legacyRounds=Math.max(
         0,
+        Number(contextState.context_rounds_attempted||0),
         Number(node?.decision_payload?.context_round??-1)+1,
         Object.keys(contextPayload).filter(key=>/^external_research_round_\d+$/.test(key)).length
       );
+      const priorState=contextState;
       contextState={
-        version:'agent_visible_context_resource_v0_1',
-        started_at:new Date().toISOString(),
+        ...priorState,
+        version:'agent_visible_context_resource_v0_2',
+        started_at:text(priorState.started_at)||new Date().toISOString(),
+        active_context_elapsed_ms:Math.max(0,Number(priorState.active_context_elapsed_ms||0)),
+        elapsed_accounting:'active_context_acquisition_only_v0_2',
+        elapsed_accounting_migrated_at:new Date().toISOString(),
         context_rounds_attempted:legacyRounds,
-        research_rounds_attempted:legacyRounds,
-        local_context_rounds_attempted:0,
-        stagnant_rounds:0,
-        unchanged_gap_rounds:0,
-        repeated_request_rounds:0,
-        total_new_sources:0,
-        total_new_local_context_paths:0,
-        last_gap_signal:null,
-        last_request_signal:null,
+        research_rounds_attempted:Math.max(0,Number(priorState.research_rounds_attempted??legacyRounds)),
+        local_context_rounds_attempted:Math.max(0,Number(priorState.local_context_rounds_attempted||0)),
+        stagnant_rounds:Math.max(0,Number(priorState.stagnant_rounds||0)),
+        unchanged_gap_rounds:Math.max(0,Number(priorState.unchanged_gap_rounds||0)),
+        repeated_request_rounds:Math.max(0,Number(priorState.repeated_request_rounds||0)),
+        total_new_sources:Math.max(0,Number(priorState.total_new_sources||0)),
+        total_new_local_context_paths:Math.max(0,Number(priorState.total_new_local_context_paths||0)),
+        total_restored_pinned_evidence:Math.max(0,Number(priorState.total_restored_pinned_evidence||0)),
+        last_gap_signal:priorState.last_gap_signal||null,
+        last_request_signal:priorState.last_request_signal||null,
       };
     }
 
@@ -1754,6 +1762,7 @@ export async function runAutonomousRequirementCognition({
           throw new Error('autonomous_decomposition_context_request_empty:'+node.node_path);
 
         counters.context_requests+=requests.length+researchQueries.length+researchUrls.length;
+        const contextAcquisitionStartedAt=Date.now();
 
         const beforeCatalogCount=asArray(contextPayload.research_source_catalog).length;
         const resolved=resolveContext(packet,requests,cognitionContext);
@@ -1798,10 +1807,15 @@ export async function runAutonomousRequirementCognition({
           ? requirementSimilarity(contextState.last_request_signal,requestSignal)
           : 0;
         const productive=(newSourceCount>0||newLocalContextPaths>0||restoredPinnedEvidence>0);
+        const contextAcquisitionElapsedMs=Math.max(0,Date.now()-contextAcquisitionStartedAt);
 
         contextState={
           ...contextState,
-          version:'agent_visible_context_resource_v0_1',
+          version:'agent_visible_context_resource_v0_2',
+          active_context_elapsed_ms:
+            Math.max(0,Number(contextState.active_context_elapsed_ms||0))
+            +contextAcquisitionElapsedMs,
+          elapsed_accounting:'active_context_acquisition_only_v0_2',
           context_rounds_attempted:Number(contextState.context_rounds_attempted||0)+1,
           research_rounds_attempted:Number(contextState.research_rounds_attempted||0)+((researchQueries.length||researchUrls.length)?1:0),
           local_context_rounds_attempted:Number(contextState.local_context_rounds_attempted||0)+(requests.length?1:0),
@@ -1819,6 +1833,10 @@ export async function runAutonomousRequirementCognition({
           last_request_signal:requestSignal||null,
           last_round:{
             at:new Date().toISOString(),
+            active_context_acquisition_ms:contextAcquisitionElapsedMs,
+            cumulative_active_context_elapsed_ms:
+              Math.max(0,Number(contextState.active_context_elapsed_ms||0))
+              +contextAcquisitionElapsedMs,
             new_sources:newSourceCount,
             new_local_context_paths:newLocalContextPaths,
             gap_similarity:Number(gapSimilarity.toFixed(4)),
