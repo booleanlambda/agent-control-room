@@ -9,18 +9,23 @@ const KiB = 1024;
 export const MODEL_RUNTIME_PROFILES = Object.freeze({
   'google/gemma-4-31b-it': Object.freeze({
     provider: 'nvidia',
-    declared_context_window_tokens: 131072,
-    context_window_tokens: 131072,
+    // NVIDIA publishes a 256K context window. The hosted endpoint used by AAU
+    // previously rejected requests near 131K, so declared and operational
+    // context remain deliberately separate until a larger live probe passes.
+    declared_context_window_tokens: 262144,
+    context_window_tokens: 262144,
     operational_context_limit_tokens: 114688,
-    max_output_tokens: 16384,
-    operational_output_limit_tokens: 16384,
+    // NVIDIA's current chat API accepts max_tokens up to 32,768. Keep a 4K
+    // operational headroom because Gemma thinking tokens count against output.
+    max_output_tokens: 32768,
+    operational_output_limit_tokens: 28672,
     input_safety_margin_tokens: 8192,
     estimated_chars_per_token: 3.2,
     supports_thinking: true,
     reasoning_counts_against_output: true,
     supports_json_mode: true,
     max_request_timeout_ms: 900000,
-    profile_source: 'provider_observed_131072_with_calibrated_operational_headroom_2026-09-26',
+    profile_source: 'nvidia_docs_256k_context_32768_output_plus_aau_observed_hosted_context_ceiling_131072_calibrated_2026-09-26',
   }),
   'nvidia/nemotron-3.5-lightning-30b-a3b': Object.freeze({
     provider: 'nvidia',
