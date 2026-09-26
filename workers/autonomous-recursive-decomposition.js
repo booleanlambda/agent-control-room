@@ -19,6 +19,8 @@ const MAX_CONTEXT_UNIQUE_SOURCES=250;
 const MAX_CONTEXT_REQUESTS_PER_ROUND=8;
 const MAX_CONTEXT_VALUE_BYTES=12000;
 const MAX_PERSISTED_CONTEXT_BYTES=262144;
+const MAX_NODE_RPC_BODY_BYTES=220000;
+const MIN_NODE_CONTEXT_BYTES=32000;
 const MAX_PINNED_EVIDENCE_ITEMS_IN_COGNITION=16;
 const MAX_PINNED_EVIDENCE_EXCERPT_CHARS=12000;
 const MAX_SELF_REMEDIATION_ATTEMPTS=2;
@@ -359,9 +361,13 @@ function childConvergenceValidation(parentRequirement,childRequirement,scopeRemo
     failures.push('child_does_not_materially_reduce_scope');
   return {valid:failures.length===0,failures,similarity};
 }
-function boundContextPayload(payload){
+function boundContextPayload(payload,maxBytes=MAX_PERSISTED_CONTEXT_BYTES){
   const src=asObject(payload);
-  if(bytes(src)<=MAX_PERSISTED_CONTEXT_BYTES)return src;
+  const effectiveMaxBytes=Math.max(
+    MIN_NODE_CONTEXT_BYTES,
+    Math.min(MAX_PERSISTED_CONTEXT_BYTES,Math.floor(Number(maxBytes)||MAX_PERSISTED_CONTEXT_BYTES))
+  );
+  if(bytes(src)<=effectiveMaxBytes)return src;
   const entries=Object.entries(src);
   const out={};
   const evicted=[];
@@ -378,7 +384,7 @@ function boundContextPayload(payload){
   };
   const tryAdd=(key,value)=>{
     const candidate={...out,[key]:value};
-    if(bytes(candidate)<=MAX_PERSISTED_CONTEXT_BYTES-reserve){
+    if(bytes(candidate)<=effectiveMaxBytes-reserve){
       out[key]=value;
       return true;
     }
@@ -425,12 +431,12 @@ function boundContextPayload(payload){
   }
   out._context_evicted=evicted.slice(0,60);
   out._context_budget={
-    max_bytes:MAX_PERSISTED_CONTEXT_BYTES,
+    max_bytes:effectiveMaxBytes,
     policy:'durable_context_independent_of_model_v0_1_compact_catalog_never_wholesale_drop',
     evicted_count:evicted.length,
     research_source_catalog_items:asArray(out.research_source_catalog).length,
   };
-  while(bytes(out)>MAX_PERSISTED_CONTEXT_BYTES && out._context_evicted.length){
+  while(bytes(out)>effectiveMaxBytes && out._context_evicted.length){
     out._context_evicted.pop();
   }
   return out;
@@ -765,7 +771,7 @@ export async function runAutonomousRequirementCognition({
   }
 
   async function nodeRpc(action,args={}){
-    return rpc('aau_bridge_cognition_requirement_node_v0_1',{
+    const base={
       p_agent_id:agentId,
       p_wake_request_id:intentExecutionId,
       p_assignment_key:assignmentKey,
@@ -780,9 +786,51 @@ export async function runAutonomousRequirementCognition({
       p_status:args.status??null,
       p_decision_type:args.decisionType??null,
       p_decision_payload:args.decisionPayload??{},
-      p_context_payload:boundContextPayload(args.contextPayload??{}),
       p_result_artifact:args.resultArtifact??null,
-    });
+    };
+    const bridgeAndJsonReserve=8192;
+    const nonContextBytes=bytes({p_bridge_token:'x'.repeat(256),...base,p_context_payload:{}});
+    let contextAllowance=Math.max(
+      MIN_NODE_CONTEXT_BYTES,
+      Math.min(MAX_PERSISTED_CONTEXT_BYTES,MAX_NODE_RPC_BODY_BYTES-nonContextBytes-bridgeAndJsonReserve)
+    );
+    let boundedContext=boundContextPayload(args.contextPayload??{},contextAllowance);
+    let envelope={...base,p_context_payload:boundedContext};
+    let envelopeBytes=bytes({p_bridge_token:'x'.repeat(256),...envelope});
+    if(envelopeBytes>MAX_NODE_RPC_BODY_BYTES){
+      const excess=envelopeBytes-MAX_NODE_RPC_BODY_BYTES;
+      contextAllowance=Math.max(
+        MIN_NODE_CONTEXT_BYTES,
+        contextAllowance-excess-bridgeAndJsonReserve
+      );
+      boundedContext=boundContextPayload(args.contextPayload??{},contextAllowance);
+      envelope={...base,p_context_payload:boundedContext};
+      envelopeBytes=bytes({p_bridge_token:'x'.repeat(256),...envelope});
+    }
+    if(envelopeBytes>MAX_NODE_RPC_BODY_BYTES){
+      const error=new Error(
+        'autonomous_decomposition_node_rpc_envelope_exceeded:'
+        +(args.nodePath||'R')
+        +':bytes='+envelopeBytes
+        +':limit='+MAX_NODE_RPC_BODY_BYTES
+      );
+      error.code='COGNITION_NODE_RPC_ENVELOPE_EXCEEDED';
+      error.envelopeBytes=envelopeBytes;
+      error.maxEnvelopeBytes=MAX_NODE_RPC_BODY_BYTES;
+      throw error;
+    }
+    if(bytes(asObject(args.contextPayload))>bytes(boundedContext)){
+      console.log('AAU_AUTONOMOUS_NODE_CONTEXT_ENVELOPE_COMPACTED',JSON.stringify({
+        node_path:args.nodePath||'R',
+        action,
+        original_context_bytes:bytes(asObject(args.contextPayload)),
+        persisted_context_bytes:bytes(boundedContext),
+        non_context_bytes:nonContextBytes,
+        envelope_bytes:envelopeBytes,
+        envelope_limit_bytes:MAX_NODE_RPC_BODY_BYTES,
+      }));
+    }
+    return rpc('aau_bridge_cognition_requirement_node_v0_1',envelope);
   }
 
   async function saveNode(args){
@@ -2698,6 +2746,7 @@ export async function runAutonomousRequirementCognition({
       synthesis_merge_budget_policy:'dedicated_deep_budget_v0_1_6000_with_bounded_retry',
       synthesis_final_budget_policy:'dedicated_deep_budget_v0_1_7000_with_bounded_retry',
       model_context_policy:'model_profile_token_context_v0_2_in_memory_model_view_durable_catalog_rehydration',
+      node_checkpoint_transport_policy:'envelope_aware_context_compaction_v0_1_220000_bytes',
       research_batch_handoff_policy:'requirement_linked_durable_receipts_v0_1',
     },
   };
