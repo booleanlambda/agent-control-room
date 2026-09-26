@@ -246,27 +246,84 @@ async function rpc(name, args = {}) {
   if (!anon || !bridge) throw new Error('missing_broker_supabase_credentials');
   const heavySchedulerRpc = name === 'aau_bridge_begin_nvidia_intent_execution'
     || name === 'aau_bridge_apply_nvidia_intent_execution';
+  const requirementNodeCheckpointRpc = name === 'aau_bridge_cognition_requirement_node_v0_1';
   const rpcArgs = { p_bridge_token: bridge, ...args };
   const url = heavySchedulerRpc
     ? `${SB}/functions/v1/aau-scheduler-rpc`
     : `${SB}/rest/v1/rpc/${name}`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { apikey: anon, authorization: `Bearer ${anon}`, 'content-type': 'application/json' },
-    body: heavySchedulerRpc
-      ? JSON.stringify({ name, args: rpcArgs })
-      : JSON.stringify(rpcArgs),
-  });
-  const text = await response.text();
-  let body = null;
-  try { body = text ? JSON.parse(text) : null; } catch { body = text; }
-  if (!response.ok) {
-    const error = new Error(`${name}:${response.status}:${typeof body === 'string' ? body.slice(0,500) : JSON.stringify(body).slice(0,500)}`);
-    error.status = response.status;
-    error.details = body;
-    throw error;
+  const requestPayload = heavySchedulerRpc ? { name, args: rpcArgs } : rpcArgs;
+  const serializedBody = JSON.stringify(requestPayload);
+  // If this ever fails locally, retrying cannot help. PGRST102 after this point means
+  // PostgREST did not receive/parse the same valid JSON bytes we produced here.
+  JSON.parse(serializedBody);
+  const maxAttempts = requirementNodeCheckpointRpc ? 3 : 1;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    let response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { apikey: anon, authorization: `Bearer ${anon}`, 'content-type': 'application/json' },
+        body: serializedBody,
+      });
+    } catch (fetchError) {
+      lastError = fetchError;
+      if (!requirementNodeCheckpointRpc || attempt >= maxAttempts) throw fetchError;
+      console.warn('AAU_REQUIREMENT_NODE_RPC_RETRY', JSON.stringify({
+        name,
+        attempt,
+        reason: 'transport_error',
+        message: String(fetchError?.message || fetchError).slice(0,500),
+        request_body_bytes: Buffer.byteLength(serializedBody),
+      }));
+      await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+      continue;
+    }
+
+    const responseText = await response.text();
+    let body = null;
+    try { body = responseText ? JSON.parse(responseText) : null; } catch { body = responseText; }
+
+    if (!response.ok) {
+      const pgrst102 = response.status === 400
+        && body
+        && typeof body === 'object'
+        && body.code === 'PGRST102';
+      const error = new Error(`${name}:${response.status}:${typeof body === 'string' ? body.slice(0,500) : JSON.stringify(body).slice(0,500)}`);
+      error.status = response.status;
+      error.details = body;
+      lastError = error;
+
+      if (requirementNodeCheckpointRpc && pgrst102 && attempt < maxAttempts) {
+        console.warn('AAU_REQUIREMENT_NODE_RPC_RETRY', JSON.stringify({
+          name,
+          attempt,
+          reason: 'postgrest_invalid_json_transient',
+          status: response.status,
+          code: body.code,
+          request_body_bytes: Buffer.byteLength(serializedBody),
+        }));
+        // Re-parse immediately before retry so a malformed local body can never be
+        // misclassified as a transient transport/PostgREST failure.
+        JSON.parse(serializedBody);
+        await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+        continue;
+      }
+      throw error;
+    }
+
+    if (requirementNodeCheckpointRpc && attempt > 1) {
+      console.log('AAU_REQUIREMENT_NODE_RPC_RECOVERED', JSON.stringify({
+        name,
+        attempts: attempt,
+        request_body_bytes: Buffer.byteLength(serializedBody),
+      }));
+    }
+    return body;
   }
-  return body;
+
+  throw lastError || new Error(`${name}:retry_exhausted`);
 }
 
 function parseDecision(text) {
