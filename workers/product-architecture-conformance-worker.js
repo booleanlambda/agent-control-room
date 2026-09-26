@@ -1,4 +1,5 @@
 import { withReviewerNvidiaSlot, isReviewerModelInBackoff, noteReviewerModelTimeout, noteReviewerModelSuccess } from './reviewer-nvidia-endpoint-gate.js';
+import { nvidiaChatCompletion } from './providers/nvidia.js';
 
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
@@ -96,59 +97,39 @@ async function repositorySnapshot(repoFullName, branch) {
 
 async function modelCall(model, system, user, timeoutMs = 110000) {
   return withReviewerNvidiaSlot('architecture_conformance', async () => {
-  const requestStarted = Date.now();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const body = {
-      model,
-      messages: [{ role:'system', content:system }, { role:'user', content:user }],
-      max_tokens: 2800,
-      temperature: 0,
-      stream: false,
-    };
-    if (String(model).startsWith('nvidia/nemotron')) {
-      body.chat_template_kwargs = { enable_thinking:false };
-      body.response_format = { type:'json_object' }; // supported on Nemotron; still validate independently
-    }
-    const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-      method:'POST',
-      signal:controller.signal,
-      headers:{
-        authorization:`Bearer ${nvidiaKey}`,
-        'content-type':'application/json',
-        accept:'application/json',
-        'user-agent':'AAU-Product-Architecture-Conformance/0.1',
-      },
-      body:JSON.stringify(body),
-    });
-    const { raw, body:parsed } = await jsonResponse(response);
-    if (!response.ok) {
-      const error = new Error(`nvidia_${response.status}:${parsed?.error?.message || parsed?.detail || raw.slice(0,800)}`);
-      error.status = response.status;
+    const requestStarted=Date.now();
+    try{
+      const result=await nvidiaChatCompletion({
+        model,
+        messages:[{role:'system',content:system},{role:'user',content:user}],
+        maxTokens:2800,
+        temperature:0,
+        jsonMode:String(model).startsWith('nvidia/nemotron'),
+        enableThinking:String(model).startsWith('nvidia/nemotron')?false:null,
+        timeoutMs,
+        runtimeRole:'reviewer',
+      });
+      if(result.finish_reason==='length') throw new Error('conformance_response_truncated');
+      noteReviewerModelSuccess(model);
+      return {
+        model:result.model_returned||model,
+        text:String(result.content||result.reasoning_content||'').trim(),
+        usage:result.usage||null,
+        runtime_contract:result.runtime_contract||null,
+      };
+    }catch(error){
+      if(error?.name==='AbortError'){
+        noteReviewerModelTimeout(model);
+        console.warn('AAU_REVIEWER_ENDPOINT_TIMEOUT',JSON.stringify({
+          stage:'architecture_conformance',
+          model,
+          duration_ms:Date.now()-requestStarted,
+          request_chars:system.length+user.length,
+          requested_timeout_ms:timeoutMs,
+        }));
+      }
       throw error;
     }
-    noteReviewerModelSuccess(model);
-    const message = parsed?.choices?.[0]?.message || {};
-    const finishReason = parsed?.choices?.[0]?.finish_reason;
-    if (finishReason === 'length') throw new Error('conformance_response_truncated');
-    return {
-      model: parsed?.model || model,
-      text: String(message.content || message.reasoning_content || parsed?.choices?.[0]?.text || '').trim(),
-      usage: parsed?.usage || null,
-    };
-  } catch (error) {
-    if (error?.name === 'AbortError') {
-      noteReviewerModelTimeout(model);
-      console.warn('AAU_REVIEWER_ENDPOINT_TIMEOUT', JSON.stringify({
-        stage:'architecture_conformance',model,duration_ms:Date.now()-requestStarted,
-        request_chars:system.length+user.length,timeout_ms:timeoutMs,
-      }));
-    }
-    throw error;
-  } finally {
-    clearTimeout(timer);
-  }
   });
 }
 
