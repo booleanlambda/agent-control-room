@@ -263,6 +263,32 @@ function mergeResearchSourceCatalog(existing,incoming){
   }
   return out;
 }
+function resolveCatalogSourceRequests(requests,catalog){
+  const bySourceId=new Map(
+    asArray(catalog)
+      .map(raw=>asObject(raw))
+      .filter(v=>text(v.source_id))
+      .map(v=>[text(v.source_id),v])
+  );
+  const resolved=[];
+  const unresolved=[];
+  for(const raw of asArray(requests)){
+    const request=text(raw);
+    if(!request)continue;
+    const source=bySourceId.get(request);
+    if(source&&/^https:\/\//i.test(text(source.url))){
+      resolved.push({
+        source_id:request,
+        url:text(source.url),
+        sha256:text(source.sha256)||null,
+        audit_batch_id:text(source.audit_batch_id)||null,
+      });
+    }else{
+      unresolved.push(request);
+    }
+  }
+  return {resolved,unresolved};
+}
 function normalizedUrl(v){
   const raw=text(v);
   if(!raw)return '';
@@ -1752,11 +1778,17 @@ export async function runAutonomousRequirementCognition({
 
         const rawRequests=discovery.context_requests;
         const urlRequestsFromContext=rawRequests.filter(v=>/^https:\/\//i.test(text(v)));
-        const requests=rawRequests.filter(v=>!/^https:\/\//i.test(text(v)));
+        const nonUrlRequests=rawRequests.filter(v=>!/^https:\/\//i.test(text(v)));
+        const catalogSourceRequests=resolveCatalogSourceRequests(
+          nonUrlRequests,
+          contextPayload.research_source_catalog
+        );
+        const requests=catalogSourceRequests.unresolved;
         const researchQueries=discovery.research_queries;
         const researchUrls=[...new Set([
           ...discovery.research_urls,
           ...urlRequestsFromContext,
+          ...catalogSourceRequests.resolved.map(v=>v.url),
         ].map(text).filter(v=>/^https:\/\//i.test(v)))].slice(0,8);
         if(!requests.length&&!researchQueries.length&&!researchUrls.length)
           throw new Error('autonomous_decomposition_context_request_empty:'+node.node_path);
@@ -1844,6 +1876,8 @@ export async function runAutonomousRequirementCognition({
             research_status:researchObserved?.status||null,
             audit_batch_id:researchObserved?.audit_batch_id||null,
             normalized_url_requests_from_context:urlRequestsFromContext.length,
+            resolved_catalog_source_requests:catalogSourceRequests.resolved.map(v=>v.source_id),
+            resolved_catalog_source_urls:catalogSourceRequests.resolved.map(v=>v.url),
             restored_pinned_evidence:restoredPinnedEvidence,
             pinned_evidence_items:pinnedEvidence.length,
           },
