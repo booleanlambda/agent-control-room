@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { nvidiaChatCompletion } from './providers/nvidia.js';
 
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
@@ -38,43 +39,24 @@ async function rpc(name, args = {}) {
   return body;
 }
 
-async function modelCall(model, system, user, maxTokens = 3200, timeoutMs = 150000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const body = {
-      model,
-      messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-      max_tokens: maxTokens,
-      temperature: 0,
-      stream: false,
-    };
-    if (String(model).startsWith('nvidia/nemotron')) body.chat_template_kwargs = { enable_thinking: false };
-    const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        authorization: `Bearer ${nvidiaKey}`,
-        'content-type': 'application/json',
-        accept: 'application/json',
-        'user-agent': 'AAU-Product-Test-Executor/0.1',
-      },
-      body: JSON.stringify(body),
-    });
-    const { raw, body: parsed } = await jsonResponse(response);
-    if (!response.ok) {
-      const error = new Error(`nvidia_${response.status}:${parsed?.error?.message || parsed?.detail || raw.slice(0, 800)}`);
-      error.status = response.status;
-      throw error;
-    }
-    const message = parsed?.choices?.[0]?.message || {};
-    return {
-      model: parsed?.model || model,
-      text: String(message.content || message.reasoning_content || parsed?.choices?.[0]?.text || '').trim(),
-    };
-  } finally {
-    clearTimeout(timer);
-  }
+async function modelCall(model, system, user, maxTokens = 3200, timeoutMs = 150000, runtimeRole = 'reviewer') {
+  const result=await nvidiaChatCompletion({
+    model,
+    messages:[{role:'system',content:system},{role:'user',content:user}],
+    maxTokens,
+    temperature:0,
+    jsonMode:false,
+    enableThinking:String(model).startsWith('nvidia/nemotron')?false:null,
+    timeoutMs,
+    runtimeRole,
+  });
+  return {
+    model:result.model_returned||model,
+    text:String(result.content||result.reasoning_content||'').trim(),
+    usage:result.usage||null,
+    finish_reason:result.finish_reason||null,
+    runtime_contract:result.runtime_contract||null,
+  };
 }
 
 function parseJsonObject(text) {
@@ -96,7 +78,7 @@ async function modelWithFallback(system, user, maxTokens, validate = null, phase
   for (const model of models) {
     let result = null;
     try {
-      result = await modelCall(model, system, user, maxTokens);
+      result = await modelCall(model, system, user, maxTokens, 150000, phase==='planner'?'planner':'reviewer');
       // A successful HTTP completion is not a usable model result. Parse and validate
       // BEFORE selecting the model; malformed outputs must reach the fallback chain.
       const parsed = accept(result.text);
@@ -114,7 +96,7 @@ async function modelWithFallback(system, user, maxTokens, validate = null, phase
         try {
           const repairSystem = 'You repair JSON formatting, not test evidence. Return exactly ONE syntactically valid JSON object. Preserve the original fields and semantic content. Escape embedded string control characters and remove surrounding commentary. Do not invent observations, HTTP results, approval or product outcomes. If content is incomplete, report it as incomplete.';
           const repairUser = `REQUIRED SCHEMA:\n${phase === 'planner' ? '{"executable":boolean,"requests":array,"load_request_id":string|null,"unexecutable_test_ids":array,"notes":string}' : '{"gate_results":array,"adversarial_results":array,"load_test_result":object,"overall_assessment":string,"unsupported_or_missing_evidence":array}'}\nORIGINAL OUTPUT TO REPAIR:\n${String(result.text).slice(0,18000)}`;
-          const repaired = await modelCall(model, repairSystem, repairUser, Math.max(4500, maxTokens), 70000);
+          const repaired = await modelCall(model, repairSystem, repairUser, Math.max(4500, maxTokens), 70000, 'serializer');
           const parsed = accept(repaired.text);
           console.log('AAU_PRODUCT_TEST_EXECUTOR_JSON_REPAIRED', JSON.stringify({ phase, model }));
           return { ...repaired, parsed, requested_model: model, fallback_used: model !== models[0], json_repaired: true };
