@@ -1,3 +1,8 @@
+import {
+  resolveModelRuntimeContract,
+  assertModelRequestWithinBudget,
+} from '../model-runtime-profiles.js';
+
 const DEFAULT_NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1';
 const DEFAULT_NVIDIA_MODEL = 'nvidia/nemotron-3.5-lightning-30b-a3b';
 const DEFAULT_NVIDIA_TIMEOUT_MS = 60000;
@@ -264,6 +269,7 @@ export function nvidiaConfigStatus() {
     json_mode: envBool('AAU_NVIDIA_JSON_MODE'),
     enable_thinking: envBool('AAU_NVIDIA_ENABLE_THINKING'),
     timeout_ms: resolveTimeoutMs(),
+    runtime_contract: (()=>{try{return resolveModelRuntimeContract(config.model,'generic');}catch{return null;}})(),
     mode: 'experimental_only',
   };
 }
@@ -276,6 +282,7 @@ export async function nvidiaChatCompletion({
   jsonMode = null,
   enableThinking = null,
   timeoutMs = null,
+  runtimeRole = 'generic',
 } = {}) {
   const config = resolveConfig();
   if (!config.apiKey) throw new Error('NVIDIA_API_KEY is not configured');
@@ -286,22 +293,40 @@ export async function nvidiaChatCompletion({
   const resolvedMessages = applyAdminChatRoleOverride(messages);
   const envelope = adminChatEnvelope(resolvedMessages);
   const resolvedModel = clean(model) || config.model;
+  const runtimeContract = resolveModelRuntimeContract(resolvedModel,runtimeRole);
+  if(resolvedThinking === true && runtimeContract.supports_thinking !== true){
+    const error=new Error('model_thinking_not_supported:'+resolvedModel);
+    error.code='MODEL_THINKING_NOT_SUPPORTED';
+    throw error;
+  }
+  const resolvedMaxTokens=Math.max(
+    1,
+    Math.min(
+      Number(maxTokens) || runtimeContract.role_default_output_tokens || 256,
+      Number(runtimeContract.max_output_tokens) || 16384,
+      16384
+    )
+  );
+  const preflight=assertModelRequestWithinBudget({
+    messages:resolvedMessages,
+    contract:runtimeContract,
+    requestedOutputTokens:resolvedMaxTokens,
+  });
 
   const requestBody = {
     model: resolvedModel,
     messages: resolvedMessages,
-    // Allow substantive Thinking-ON calls to request enough completion budget for
-    // provider reasoning + final structured output. Individual callers still set
-    // their own bounded maxTokens; this is only the adapter ceiling.
-    max_tokens: Math.max(1, Math.min(Number(maxTokens) || 256, 16384)),
+    max_tokens: resolvedMaxTokens,
     temperature: Number.isFinite(Number(temperature)) ? Number(temperature) : 0.2,
     stream: false,
   };
   if (resolvedJsonMode === true) requestBody.response_format = { type: 'json_object' };
   if (typeof resolvedThinking === 'boolean') requestBody.chat_template_kwargs = { enable_thinking: resolvedThinking };
 
-  const resolvedTimeoutMs = resolveTimeoutMs(timeoutMs);
-  let body = await requestNvidia(config, requestBody, resolvedTimeoutMs, 'AAU-NVIDIA-Experimental-Adapter/0.8-adaptive-cognition');
+  const resolvedTimeoutMs = resolveTimeoutMs(
+    timeoutMs ?? runtimeContract.role_default_timeout_ms
+  );
+  let body = await requestNvidia(config, requestBody, resolvedTimeoutMs, 'AAU-NVIDIA-Experimental-Adapter/0.9-model-runtime-contract');
   let choice = body?.choices?.[0]?.message || {};
   let content = typeof choice?.content === 'string' ? choice.content : '';
   let reasoningContent = typeof choice?.reasoning_content === 'string' ? choice.reasoning_content : '';
@@ -344,6 +369,16 @@ export async function nvidiaChatCompletion({
     usage: body?.usage || null,
     response_id: body?.id || null,
     admin_chat_repair_attempted: repairAttempted,
+    runtime_contract:{
+      version:'model_runtime_profiles_v0_1',
+      role:runtimeContract.role,
+      operational_context_limit_tokens:runtimeContract.operational_context_limit_tokens,
+      max_output_tokens:runtimeContract.max_output_tokens,
+      input_safety_margin_tokens:runtimeContract.input_safety_margin_tokens,
+      timeout_ms:resolvedTimeoutMs,
+      estimated_input_tokens:preflight.estimated_input_tokens,
+      max_input_tokens:preflight.max_input_tokens,
+    },
   };
 }
 
