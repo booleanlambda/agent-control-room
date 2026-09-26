@@ -111,3 +111,35 @@ The model-facing context preserves the source catalog where possible, prioritize
 The in-memory context is bounded immediately after research acquisition. It is not permitted to grow unbounded between a research response and the next model call merely because the persisted database copy is smaller.
 
 This separation is required for model portability: changing the bound agent, authenticator, or adjudicator model changes the model-facing context projection without requiring durable evidence to be deleted or rewritten.
+
+
+## Workflow compatibility and enforcement
+
+The model runtime contract constrains execution capacity; it does not choose workflow semantics.
+
+A workflow owns its requested task budget. The model profile owns physical/operational capability. AAU resolves both explicitly and does not silently reduce substantive output budgets.
+
+If a workflow requests more completion tokens than the selected model profile permits, execution fails closed with `MODEL_TASK_OUTPUT_BUDGET_UNSUPPORTED`. The runtime must not silently clip a 10,000-token cognition task to an 8,192-token model ceiling and pretend the workflow was unchanged.
+
+Requested timeouts are bounded by the selected model's `max_request_timeout_ms`. The effective timeout and whether it was capped are exposed in runtime telemetry.
+
+Thinking and JSON-mode requests are capability-checked. Unsupported requested thinking fails with `MODEL_THINKING_NOT_SUPPORTED`; unsupported requested provider JSON mode fails with `MODEL_JSON_MODE_NOT_SUPPORTED`. Workflows may still ask a model for textual JSON and parse/validate it independently when native JSON mode is unavailable.
+
+Operational roles now include `agent`, `candidate`, `authenticator`, `adjudicator`, `serializer`, `planner`, `reviewer`, `vision`, and `generic`. Role policy supplies defaults only; it does not alter semantic authority.
+
+Production text-model paths governed by the shared NVIDIA adapter include autonomous cognition, expertise candidate/authenticator/adjudicator, product test execution, product test design, product/service architecture, architecture conformance, and entrepreneurship assessment.
+
+File vision is also governed by the registry, but retains direct multimodal transport because image accounting is not equivalent to text-token estimation. Its profile explicitly declares `supports_vision`, `max_image_bytes`, and multimodal accounting policy, while output and timeout are resolved through the same model task budget.
+
+Provider smoke tests, timeout probes, migration scripts, and CI workflows may intentionally call provider endpoints directly. They are diagnostics/tooling rather than production cognition or grading authority and do not define workflow model limits.
+
+The effective request contract is auditable through runtime telemetry:
+- requested/effective output tokens,
+- requested/effective timeout,
+- timeout-capped flag,
+- thinking mode,
+- JSON mode,
+- estimated/max input tokens,
+- selected model and runtime role.
+
+A model change therefore cannot silently rewrite a workflow's resource assumptions. It either satisfies the workflow request under its registered profile or produces an explicit capability mismatch that the workflow/operator must handle.
