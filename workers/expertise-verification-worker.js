@@ -1,5 +1,9 @@
 import crypto from 'node:crypto';
 import { withReviewerNvidiaSlot, isReviewerModelInBackoff, noteReviewerModelTimeout, noteReviewerModelSuccess } from './reviewer-nvidia-endpoint-gate.js';
+import {
+  resolveModelRuntimeContract,
+  assertModelRequestWithinBudget,
+} from './model-runtime-profiles.js';
 
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
@@ -81,11 +85,32 @@ async function checkpointVerification(run, stage, fields = {}) {
   return rpc('aau_bridge_checkpoint_expertise_verification', args);
 }
 
-async function nvidiaCall({ model, system, user, maxTokens = 1200, temperature = 0, timeoutMs = 180000, jsonMode = false }) {
+async function nvidiaCall({ model, system, user, maxTokens = null, temperature = 0, timeoutMs = null, jsonMode = false, runtimeRole = 'generic' }) {
+  const runtimeContract=resolveModelRuntimeContract(model,runtimeRole);
+  const messages=[{ role: 'system', content: system }, { role: 'user', content: user }];
+  const resolvedMaxTokens=Math.max(
+    1,
+    Math.min(
+      Number(maxTokens)||runtimeContract.role_default_output_tokens,
+      runtimeContract.max_output_tokens
+    )
+  );
+  const preflight=assertModelRequestWithinBudget({
+    messages,
+    contract:runtimeContract,
+    requestedOutputTokens:resolvedMaxTokens,
+  });
+  const resolvedTimeoutMs=Math.max(
+    15000,
+    Math.min(
+      Number(timeoutMs)||runtimeContract.role_default_timeout_ms,
+      runtimeContract.max_request_timeout_ms
+    )
+  );
   const body = {
     model,
-    messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-    max_tokens: maxTokens,
+    messages,
+    max_tokens: resolvedMaxTokens,
     temperature,
     stream: false,
   };
@@ -105,7 +130,7 @@ async function nvidiaCall({ model, system, user, maxTokens = 1200, temperature =
   return withReviewerNvidiaSlot('expertise_verification', async () => {
   const controller = new AbortController();
   const requestStarted = Date.now();
-  const timer = setTimeout(() => controller.abort(), Math.max(15000, Number(timeoutMs) || 180000));
+  const timer = setTimeout(() => controller.abort(), resolvedTimeoutMs);
   try {
     const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
       method: 'POST',
@@ -137,7 +162,11 @@ async function nvidiaCall({ model, system, user, maxTokens = 1200, temperature =
       noteReviewerModelTimeout(model);
       console.warn('AAU_REVIEWER_ENDPOINT_TIMEOUT', JSON.stringify({
         stage:'expertise', model, duration_ms:Date.now()-requestStarted,
-        request_chars:system.length+user.length, timeout_ms:timeoutMs,
+        request_chars:system.length+user.length,
+        timeout_ms:resolvedTimeoutMs,
+        runtime_role:runtimeRole,
+        estimated_input_tokens:preflight.estimated_input_tokens,
+        max_input_tokens:preflight.max_input_tokens,
       }));
     }
     throw error;
@@ -288,7 +317,7 @@ async function answerChallenge(run, packet, existingAnswers = [], competenceReco
         const candidate = await nvidiaCall({
           model:run.candidate_model_id,system,user:boundedUser,
           maxTokens:run?.metadata?.academic_standard_version === 'aau_owned_master_us_v0_3' ? 1800 : 700,
-          temperature:0.10,timeoutMs:120000
+          temperature:0.10,timeoutMs:120000,runtimeRole:'candidate'
         });
         if (candidate.finish_reason === 'stop' && String(candidate.text || '').trim()) {
           result=candidate;
@@ -431,6 +460,7 @@ async function gradeAnswer(run, task, answer) {
           temperature: 0,
           timeoutMs: model === primaryAuthenticator ? 65000 : model.startsWith('meta/') ? 90000 : 120000,
           jsonMode: false,
+          runtimeRole: 'authenticator',
         });
         if (result.finish_reason !== 'stop') {
           console.warn('AAU_EXPERTISE_AUTHENTICATOR_INCOMPLETE',JSON.stringify({
@@ -485,6 +515,7 @@ async function adjudicate(run, task, answer, prior) {
             : model === 'openai/gpt-oss-20b' ? (attempt === 1 ? 1800 : 3200) : 1400,
           temperature: 0,
           timeoutMs: model === primaryAdjudicator ? 120000 : model.startsWith('meta/') ? 90000 : 110000,
+          runtimeRole: 'adjudicator',
         });
         if (result.finish_reason !== 'stop') {
           console.warn('AAU_EXPERTISE_ADJUDICATOR_INCOMPLETE',JSON.stringify({
