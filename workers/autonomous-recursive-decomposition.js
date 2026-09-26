@@ -325,6 +325,8 @@ function compactCompletedSiblingResults(rows){
     const parts=resultParts(row?.result_artifact);
     return {
       path:row?.node_path||null,
+      status:row?.node_status||row?.status||null,
+      decision_type:row?.decision_type||null,
       requirement:clip(row?.requirement_text,700),
       artifact:clip(parts.artifact,3500),
       handoff_json:clip(safeJson(parts.handoff),1800),
@@ -1226,16 +1228,24 @@ export async function runAutonomousRequirementCognition({
       const parts=resultParts(child.result_artifact);
       const response=await callJson([
         {role:'system',content:[
-          'You are the bound autonomous agent synthesizing YOUR completed child requirements back into their parent.',
-          'Update a compact accumulator using exactly one newly completed child.',
-          'Do not invent facts or change the parent requirement.',
+          'You are the bound autonomous agent synthesizing YOUR resolved child requirements back into their parent.',
+          'A child may be COMPLETED or BLOCKED. BLOCKED is not successful completion; preserve its unresolved evidence or dependency explicitly.',
+          'Update a compact accumulator using exactly one newly resolved child.',
+          'Do not invent facts, erase a blocked gap, or change the parent requirement.',
           'Return JSON only: {"summary":"compact cumulative synthesis","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
         ].join('\n')},
         {role:'user',content:safeJson({
           parent_requirement:node.requirement_text,
           agent_authored_discovery_state:agentDiscoveryState(node),
           prior_accumulator:accumulator,
-          child:{path:child.node_path,requirement:child.requirement_text,artifact:clip(parts.artifact,7000),handoff:parts.handoff},
+          child:{
+            path:child.node_path,
+            status:child.node_status||child.status||null,
+            decision_type:child.decision_type||null,
+            requirement:child.requirement_text,
+            artifact:clip(parts.artifact,7000),
+            handoff:parts.handoff,
+          },
         })},
       ],1600,'req_'+node.node_path.replaceAll('.','_')+'_synthesis_merge_'+(i+1));
       accumulator={
@@ -1253,28 +1263,48 @@ export async function runAutonomousRequirementCognition({
       node.parent_path=node.parent_path??parentPathOf(node.node_path);
     }
 
+    const childStates=childRows.map(child=>({
+      path:child.node_path,
+      status:child.node_status||child.status||null,
+      decision_type:child.decision_type||null,
+    }));
     const final=await callJson([
       {role:'system',content:[
-        'You are the bound autonomous agent closing a parent requirement after all child requirements completed.',
-        'Using your cumulative synthesis, produce the parent work product.',
-        'Return JSON only: {"artifact":"concise auditable parent result","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
-        'Do not add requirements or conclusions that are not supported by the completed children.',
+        'You are the bound autonomous agent closing a parent requirement after all child requirements have resolved.',
+        'Some children may be BLOCKED. Decide whether the parent can honestly be COMPLETE from the resolved evidence or must itself be BLOCKED.',
+        'The runtime does not make that semantic decision for you.',
+        'If any essential child gap prevents the parent requirement from being satisfied, choose BLOCKED and preserve the unresolved gap.',
+        'Return JSON only: {"outcome":"COMPLETE|BLOCKED","reason":"auditable reason","artifact":"concise auditable parent result","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
+        'Do not add requirements or conclusions that are not supported by the resolved children.',
       ].join('\n')},
       {role:'user',content:safeJson({
         parent_requirement:node.requirement_text,
         agent_authored_discovery_state:agentDiscoveryState(node),
+        child_states:childStates,
         cumulative_synthesis:accumulator,
       })},
-    ],1800,'req_'+node.node_path.replaceAll('.','_')+'_synthesis_final');
+    ],2000,'req_'+node.node_path.replaceAll('.','_')+'_synthesis_final');
 
+    const outcome=text(final?.parsed?.outcome).toUpperCase();
+    if(!['COMPLETE','BLOCKED'].includes(outcome))
+      throw new Error('autonomous_decomposition_synthesis_outcome_invalid:'+node.node_path);
     const artifact=text(final?.parsed?.artifact);
     if(!artifact)throw new Error('autonomous_decomposition_synthesis_empty:'+node.node_path);
-    const resultArtifact=JSON.stringify({artifact,handoff:asObject(final?.parsed?.handoff)});
+    const resultArtifact=JSON.stringify({status:outcome,artifact,handoff:asObject(final?.parsed?.handoff)});
     const done=await saveNode({
       nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
       requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
-      status:'completed',decisionType:'SPLIT',
-      decisionPayload:{...(node.decision_payload||{}),synthesis_cursor:childRows.length,synthesis_complete:true},
+      status:outcome==='BLOCKED'?'blocked':'completed',
+      decisionType:outcome==='BLOCKED'?'BLOCKED':'SPLIT',
+      decisionPayload:{
+        ...(node.decision_payload||{}),
+        synthesis_cursor:childRows.length,
+        synthesis_complete:true,
+        synthesis_outcome:outcome,
+        synthesis_reason:clip(final?.parsed?.reason,2200),
+        decomposition_decision:'SPLIT',
+        blocked_child_count:childStates.filter(v=>v.status==='blocked'||v.decision_type==='BLOCKED').length,
+      },
       contextPayload:node.context_payload||{},resultArtifact,
     });
     done.parent_path=node.parent_path??parentPathOf(node.node_path);
@@ -1291,7 +1321,7 @@ export async function runAutonomousRequirementCognition({
     node.parent_path=parentPath;
     counters.nodes++;
 
-    if(node.node_status==='completed')return node;
+    if(node.node_status==='completed'||node.node_status==='blocked')return node;
 
     for(let transitions=0;transitions<8;transitions++){
       if(node.node_status==='split'||node.decision_type==='SPLIT'){
@@ -1360,7 +1390,8 @@ export async function runAutonomousRequirementCognition({
             nextBranchDepth,
             singleChild?singleChildRefinements+1:0
           );
-          if(done.node_status!=='completed')throw new Error('autonomous_decomposition_child_not_complete:'+child.node_path);
+          if(done.node_status!=='completed'&&done.node_status!=='blocked')
+            throw new Error('autonomous_decomposition_child_not_resolved:'+child.node_path);
           completed.push(done);
         }
         return synthesize(node,completed);
@@ -1372,6 +1403,7 @@ export async function runAutonomousRequirementCognition({
       node.parent_path=parentPath;
 
       if(decision.decision==='SPLIT')continue;
+      if(decision.decision==='BLOCKED')return node;
       if(decision.decision==='ATOMIC'){
         const result=await executeAtomic(node);
         node=result.node;
@@ -1418,6 +1450,9 @@ export async function runAutonomousRequirementCognition({
       decomposition_authored_by_bound_agent:true,
       runtime_role:'persist_route_resume_completion_integrity_only',
       cognition_mode:modeInfo?.mode||'deep',
+      root_status:completedRoot.node_status||null,
+      root_decision_type:completedRoot.decision_type||null,
+      context_resource_policy:'agent_visible_progress_based_context_resource_v0_1',
     },
   };
 }
