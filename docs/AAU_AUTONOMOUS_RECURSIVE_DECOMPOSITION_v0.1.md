@@ -201,3 +201,18 @@ After the proposal is durable, the same bound model performs only mechanical JSO
 If deep formulation or protocol serialization repeatedly truncates, times out, produces invalid output, or fails convergence validation, the wake MUST NOT fail merely because child authoring failed. Rejected model attempts remain durable in the cognition-rejection ledger, and the parent node receives an `agent_visible_child_authoring_failure_v0_1` state containing the failed phase, rejection reason, prior SPLIT decision, and failure count. The node returns to `pending` with `reconsider_decomposition=true`.
 
 The subsequent route remains agent-owned. The bound agent may choose a new SPLIT strategy, another available action, or REMEDIATE when it independently diagnoses a recoverable inconsistency. The runtime does not invent the replacement child.
+
+
+## Dedicated atomic cognition budgets
+
+Atomic execution and atomic reconciliation are substantive bound-agent cognition and MUST NOT reuse the small recursive routing budget.
+
+The production failure that motivated this rule showed a nominally bounded atomic requirement receiving only 1,800 completion tokens while Thinking was enabled. In rejected attempts, most or nearly all of that allowance was consumed by reasoning tokens, leaving insufficient visible output and causing `finish_reason=length`.
+
+The runtime therefore provides separate deep budgets:
+- atomic execution: 7,000 completion tokens,
+- atomic reconciliation: 5,000 completion tokens.
+
+These budgets do not change whether a requirement is semantically ATOMIC. The bound agent still decides that. They only prevent the control plane from starving a substantive cognition step of output capacity.
+
+Truncated atomic responses remain rejected and durable; they are never accepted, continued from partial text, or sent for grading. A genuinely oversized requirement must still be reconsidered/decomposed by the bound agent rather than made correct by silently accepting truncation.
