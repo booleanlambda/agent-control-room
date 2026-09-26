@@ -17,6 +17,23 @@ function text(v){return String(v??'').trim();}
 function bytes(v){try{return Buffer.byteLength(typeof v==='string'?v:JSON.stringify(v));}catch{return 0;}}
 function clip(s,n){const v=String(s??'');return v.length<=n?v:v.slice(0,n);}
 function safeJson(v){try{return JSON.stringify(v);}catch{return '{}';}}
+function mergeResearchSourceCatalog(existing,incoming){
+  const out=[];
+  const byKey=new Map();
+  for(const source of [...asArray(existing),...asArray(incoming)]){
+    const item=asObject(source);
+    const key=text(item.url)||text(item.source_id)||text(item.sha256)||text(item.title);
+    if(!key)continue;
+    if(byKey.has(key)){
+      const idx=byKey.get(key);
+      out[idx]={...out[idx],...item};
+      continue;
+    }
+    byKey.set(key,out.length);
+    out.push(item);
+  }
+  return out;
+}
 function normalizedRequirement(v){
   return text(v).toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
 }
@@ -52,9 +69,16 @@ function boundContextPayload(payload){
   const out={};
   const evicted=[];
   const reserve=3500;
-  const priority=(key)=>key==='completed_sibling_results'
-    ||key==='inherited_completed_sibling_results'
-    ||key.startsWith('external_research');
+  const researchRound=(key)=>{
+    const match=String(key).match(/^external_research_round_(\d+)$/);
+    return match?Number(match[1]):0;
+  };
+  const priorityScore=(key)=>{
+    if(key==='research_source_catalog')return 10000;
+    if(key==='completed_sibling_results'||key==='inherited_completed_sibling_results')return 9000;
+    if(key.startsWith('external_research'))return 7000+researchRound(key);
+    return 0;
+  };
   const tryAdd=(key,value)=>{
     const candidate={...out,[key]:value};
     if(bytes(candidate)<=MAX_PERSISTED_CONTEXT_BYTES-reserve){
@@ -64,18 +88,19 @@ function boundContextPayload(payload){
     evicted.push({path:key,bytes:bytes(value)});
     return false;
   };
-  for(const [key,value] of entries){
-    if(priority(key))tryAdd(key,value);
-  }
+  const prioritized=entries
+    .filter(([key])=>priorityScore(key)>0)
+    .sort((a,b)=>priorityScore(b[0])-priorityScore(a[0]));
+  for(const [key,value] of prioritized)tryAdd(key,value);
   for(let i=entries.length-1;i>=0;i--){
     const [key,value]=entries[i];
-    if(priority(key)||Object.prototype.hasOwnProperty.call(out,key))continue;
+    if(priorityScore(key)>0||Object.prototype.hasOwnProperty.call(out,key))continue;
     tryAdd(key,value);
   }
   out._context_evicted=evicted.slice(0,40);
   out._context_budget={
     max_bytes:MAX_PERSISTED_CONTEXT_BYTES,
-    policy:'preserve_upstream_handoffs_and_recent_requested_context_v0_1',
+    policy:'preserve_research_catalog_latest_research_and_upstream_handoffs_v0_2',
     evicted_count:evicted.length,
   };
   while(bytes(out)>MAX_PERSISTED_CONTEXT_BYTES && out._context_evicted.length){
@@ -96,16 +121,40 @@ function inheritedChildContext(parentPayload){
   return boundContextPayload(inherited);
 }
 
+function pathParts(path){
+  return String(path||'')
+    .replace(/\[([^\]]+)\]/g,'.$1')
+    .split('.')
+    .map(v=>v.trim())
+    .filter(Boolean);
+}
+function selectorKey(v){
+  return String(v??'').toLowerCase().replace(/[^a-z0-9]+/g,'');
+}
+function arraySelectorMatch(entry,selector){
+  if(!entry||typeof entry!=='object')return false;
+  const wanted=selectorKey(selector);
+  if(!wanted)return false;
+  const candidates=[
+    entry.source_id,entry.publisher,entry.title,entry.search_title,entry.url,entry.sha256
+  ].map(selectorKey).filter(Boolean);
+  return candidates.some(value=>value===wanted||value.includes(wanted)||wanted.includes(value));
+}
 function getPath(root,path){
-  const parts=String(path||'').split('.').filter(Boolean);
+  const parts=pathParts(path);
   let cur=root;
   for(const part of parts){
     if(cur===null||cur===undefined||typeof cur!=='object')return {found:false,value:null};
     if(Array.isArray(cur)){
-      if(!/^[0-9]+$/.test(part))return {found:false,value:null};
-      const index=Number(part);
-      if(index<0||index>=cur.length)return {found:false,value:null};
-      cur=cur[index];
+      if(/^[0-9]+$/.test(part)){
+        const index=Number(part);
+        if(index<0||index>=cur.length)return {found:false,value:null};
+        cur=cur[index];
+        continue;
+      }
+      const matched=cur.find(entry=>arraySelectorMatch(entry,part));
+      if(matched===undefined)return {found:false,value:null};
+      cur=matched;
       continue;
     }
     if(!(part in cur))return {found:false,value:null};
@@ -181,12 +230,14 @@ function contextIndex(packet){
   });
 }
 
-function resolveContext(packet,requests){
+function resolveContext(packet,requests,localContext={}){
   const out={};
   for(const raw of asArray(requests).slice(0,MAX_CONTEXT_REQUESTS_PER_ROUND)){
     const path=text(raw);
     if(!path||Object.prototype.hasOwnProperty.call(out,path))continue;
-    const hit=getPath(packet,path);
+    const localHit=getPath(localContext,path);
+    const packetHit=localHit.found?localHit:getPath(packet,path);
+    const hit=packetHit;
     if(!hit.found){
       out[path]={available:false};
       continue;
@@ -194,11 +245,12 @@ function resolveContext(packet,requests){
     if(bytes(hit.value)>MAX_CONTEXT_VALUE_BYTES){
       let childIndex=[];
       if(Array.isArray(hit.value)){
-        childIndex=hit.value.slice(0,48).map((v,i)=>({
-          path:path+'.'+i,bytes:bytes(v),kind:Array.isArray(v)?'array':typeof v
+        childIndex=hit.value.slice(0,80).map((v,i)=>({
+          path:path+'.'+i,bytes:bytes(v),kind:Array.isArray(v)?'array':typeof v,
+          ...(v&&typeof v==='object'&&v.source_id?{source_id:v.source_id,title:v.title||null,url:v.url||null}:{}),
         }));
       }else if(hit.value&&typeof hit.value==='object'){
-        childIndex=Object.keys(hit.value).slice(0,80).map(k=>({
+        childIndex=Object.keys(hit.value).slice(0,120).map(k=>({
           path:path+'.'+k,bytes:bytes(hit.value[k]),kind:Array.isArray(hit.value[k])?'array':typeof hit.value[k]
         }));
       }
@@ -397,6 +449,7 @@ export async function runAutonomousRequirementCognition({
                 source:{kind:node.source_kind,ref:node.source_ref},
                 supplied_context:contextPayload,
                 available_context_index:idx,
+                available_supplied_context_index:indexObject(contextPayload),
                 available_decisions:availableDecisions,
                 runtime_resource_constraints:{
                   structural_branch_depth:normalizedBranchDepth,
@@ -533,7 +586,7 @@ export async function runAutonomousRequirementCognition({
           throw new Error('autonomous_decomposition_context_request_empty:'+node.node_path);
 
         counters.context_requests+=requests.length+researchQueries.length+researchUrls.length;
-        const resolved=resolveContext(packet,requests);
+        const resolved=resolveContext(packet,requests,contextPayload);
         let researchObserved=null;
         if((researchQueries.length||researchUrls.length)&&typeof researchContext==='function'){
           researchObserved=await researchContext({
@@ -544,9 +597,13 @@ export async function runAutonomousRequirementCognition({
         }else if(researchQueries.length||researchUrls.length){
           researchObserved={status:'unavailable',reason:'research_runtime_not_configured'};
         }
+        const researchCatalog=researchObserved
+          ? mergeResearchSourceCatalog(contextPayload.research_source_catalog,researchObserved.source_index)
+          : asArray(contextPayload.research_source_catalog);
         contextPayload={
           ...contextPayload,
           ...resolved,
+          ...(researchCatalog.length?{research_source_catalog:researchCatalog}:{}),
           ...(researchObserved?{['external_research_round_'+(round+1)]:researchObserved}:{}),
         };
         node=await saveNode({
