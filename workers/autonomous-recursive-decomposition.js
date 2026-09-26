@@ -14,6 +14,8 @@ const MAX_CONTEXT_UNIQUE_SOURCES=250;
 const MAX_CONTEXT_REQUESTS_PER_ROUND=8;
 const MAX_CONTEXT_VALUE_BYTES=12000;
 const MAX_PERSISTED_CONTEXT_BYTES=52000;
+const MAX_PINNED_EVIDENCE_ITEMS_IN_COGNITION=16;
+const MAX_PINNED_EVIDENCE_EXCERPT_CHARS=12000;
 
 const asObject=(v)=>v&&typeof v==='object'&&!Array.isArray(v)?v:{};
 const asArray=(v)=>Array.isArray(v)?v:[];
@@ -38,6 +40,38 @@ function mergeResearchSourceCatalog(existing,incoming){
     out.push(item);
   }
   return out;
+}
+function normalizedUrl(v){
+  const raw=text(v);
+  if(!raw)return '';
+  try{
+    const u=new URL(raw);
+    u.hash='';
+    u.search='';
+    return u.toString().replace(/\/$/,'').toLowerCase();
+  }catch{
+    return raw.replace(/\/$/,'').toLowerCase();
+  }
+}
+function compactPinnedEvidence(rows){
+  return asArray(rows)
+    .filter(v=>v&&typeof v==='object')
+    .slice(0,MAX_PINNED_EVIDENCE_ITEMS_IN_COGNITION)
+    .map(v=>({
+      evidence_id:v.evidence_id||null,
+      source_key:v.source_key||v.source_id||v.url||null,
+      source_id:v.source_id||null,
+      url:v.url||null,
+      title:v.title||null,
+      publisher:v.publisher||null,
+      sha256:v.sha256||null,
+      fetch_status:v.fetch_status||null,
+      coverage:v.coverage||null,
+      audit_batch_id:v.audit_batch_id||null,
+      excerpt:clip(v.excerpt,MAX_PINNED_EVIDENCE_EXCERPT_CHARS),
+      excerpt_bytes:Number(v.excerpt_bytes||bytes(v.excerpt||'')),
+      durable_pinned:true,
+    }));
 }
 function normalizedSignal(values){
   return asArray(values).map(v=>normalizedRequirement(v)).filter(Boolean).sort().join(' | ');
@@ -393,6 +427,24 @@ export async function runAutonomousRequirementCognition({
     };
   }
 
+  async function pinnedEvidenceRpc(action,nodePath,evidence=[]){
+    return rpc('aau_bridge_cognition_pinned_research_v0_1',{
+      p_agent_id:agentId,
+      p_wake_request_id:intentExecutionId,
+      p_assignment_key:assignmentKey,
+      p_node_path:nodePath,
+      p_model:model,
+      p_action:action,
+      p_evidence:Array.isArray(evidence)?evidence:[],
+    });
+  }
+
+  async function loadPinnedEvidence(nodePath){
+    const row=await pinnedEvidenceRpc('list',nodePath,[]);
+    if(row?.status!=='ready')throw new Error('autonomous_decomposition_pinned_evidence_lookup_failed:'+nodePath);
+    return compactPinnedEvidence(row.evidence);
+  }
+
   async function getNode(nodePath){
     return nodeRpc('get',{nodePath});
   }
@@ -422,6 +474,7 @@ export async function runAutonomousRequirementCognition({
 
   async function decide(node,{forceReconsider=false,branchDepth=0,singleChildRefinements=0}={}){
     let contextPayload=asObject(node.context_payload);
+    let pinnedEvidence=await loadPinnedEvidence(node.node_path);
     const atomicExecutionFailures=Math.max(0,Number(node?.decision_payload?.atomic_execution_failures||0));
     const atomicUnavailable=atomicExecutionFailures>=MAX_ATOMIC_EXECUTION_FAILURES;
     const normalizedBranchDepth=Math.max(0,Math.min(Number(branchDepth)||0,MAX_BRANCH_DEPTH));
@@ -453,6 +506,10 @@ export async function runAutonomousRequirementCognition({
     }
 
     while(true){
+      const cognitionContext={
+        ...contextPayload,
+        ...(pinnedEvidence.length?{pinned_research_evidence:pinnedEvidence}:{}),
+      };
       const resourceView=contextResourceView(contextState,contextPayload);
       const availableDecisions=['ATOMIC','SPLIT',resourceView.available?'NEED_CONTEXT':'BLOCKED']
         .filter(v=>!(v==='ATOMIC'&&atomicUnavailable))
@@ -462,6 +519,9 @@ export async function runAutonomousRequirementCognition({
         node_path:node.node_path,
         requirement:node.requirement_text,
         context_payload:contextPayload,
+        pinned_evidence_index:pinnedEvidence.map(v=>({
+          source_key:v.source_key,source_id:v.source_id,url:v.url,sha256:v.sha256,excerpt_bytes:v.excerpt_bytes
+        })),
         force_reconsider:Boolean(forceReconsider),
         atomic_unavailable:atomicUnavailable,
         atomic_execution_failures:atomicExecutionFailures,
@@ -524,9 +584,9 @@ export async function runAutonomousRequirementCognition({
                 requirement:node.requirement_text,
                 agent_authored_discovery_state:agentDiscoveryState(node),
                 source:{kind:node.source_kind,ref:node.source_ref},
-                supplied_context:contextPayload,
+                supplied_context:cognitionContext,
                 available_context_index:idx,
-                available_supplied_context_index:indexObject(contextPayload),
+                available_supplied_context_index:indexObject(cognitionContext),
                 available_decisions:availableDecisions,
                 runtime_resource_constraints:{
                   structural_branch_depth:normalizedBranchDepth,
@@ -685,7 +745,7 @@ export async function runAutonomousRequirementCognition({
         counters.context_requests+=requests.length+researchQueries.length+researchUrls.length;
 
         const beforeCatalogCount=asArray(contextPayload.research_source_catalog).length;
-        const resolved=resolveContext(packet,requests,contextPayload);
+        const resolved=resolveContext(packet,requests,cognitionContext);
         const newLocalContextPaths=Object.entries(resolved)
           .filter(([path,value])=>value?.available&&!Object.prototype.hasOwnProperty.call(contextPayload,path))
           .length;
@@ -706,6 +766,38 @@ export async function runAutonomousRequirementCognition({
           : asArray(contextPayload.research_source_catalog);
         const newSourceCount=Math.max(0,researchCatalog.length-beforeCatalogCount);
 
+        let pinnedSave={status:'ready',inserted:0,extended:0,unchanged:0,restored_or_extended:0};
+        if(researchObserved&&researchUrls.length){
+          const requestedUrlKeys=new Set(researchUrls.map(normalizedUrl).filter(Boolean));
+          const pinCandidates=asArray(researchObserved.sources)
+            .filter(source=>
+              source?.fetch_status==='fetched_text'
+              && typeof source?.excerpt==='string'
+              && source.excerpt.length
+              && requestedUrlKeys.has(normalizedUrl(source?.url))
+            )
+            .slice(0,16)
+            .map(source=>({
+              source_key:source.source_id||source.url||source.sha256,
+              source_id:source.source_id||null,
+              url:source.url||null,
+              title:source.title||null,
+              publisher:source.publisher||null,
+              sha256:source.sha256||null,
+              fetch_status:source.fetch_status||null,
+              coverage:source.coverage||null,
+              excerpt:clip(source.excerpt,MAX_PINNED_EVIDENCE_EXCERPT_CHARS),
+              audit_batch_id:researchObserved.audit_batch_id||null,
+            }));
+          if(pinCandidates.length){
+            pinnedSave=await pinnedEvidenceRpc('save',node.node_path,pinCandidates);
+            if(pinnedSave?.status!=='ready')
+              throw new Error('autonomous_decomposition_pinned_evidence_save_failed:'+node.node_path);
+            pinnedEvidence=await loadPinnedEvidence(node.node_path);
+          }
+        }
+        const restoredPinnedEvidence=Math.max(0,Number(pinnedSave?.restored_or_extended||0));
+
         const gapSignal=normalizedSignal(discovery.unresolved_gaps);
         const requestSignal=normalizedSignal([
           ...requests,
@@ -718,7 +810,7 @@ export async function runAutonomousRequirementCognition({
         const requestSimilarity=contextState.last_request_signal
           ? requirementSimilarity(contextState.last_request_signal,requestSignal)
           : 0;
-        const productive=(newSourceCount>0||newLocalContextPaths>0);
+        const productive=(newSourceCount>0||newLocalContextPaths>0||restoredPinnedEvidence>0);
 
         contextState={
           ...contextState,
@@ -735,6 +827,7 @@ export async function runAutonomousRequirementCognition({
             : 0,
           total_new_sources:Number(contextState.total_new_sources||0)+newSourceCount,
           total_new_local_context_paths:Number(contextState.total_new_local_context_paths||0)+newLocalContextPaths,
+          total_restored_pinned_evidence:Number(contextState.total_restored_pinned_evidence||0)+restoredPinnedEvidence,
           last_gap_signal:gapSignal||null,
           last_request_signal:requestSignal||null,
           last_round:{
@@ -746,6 +839,8 @@ export async function runAutonomousRequirementCognition({
             research_status:researchObserved?.status||null,
             audit_batch_id:researchObserved?.audit_batch_id||null,
             normalized_url_requests_from_context:urlRequestsFromContext.length,
+            restored_pinned_evidence:restoredPinnedEvidence,
+            pinned_evidence_items:pinnedEvidence.length,
           },
         };
 
