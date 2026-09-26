@@ -716,6 +716,7 @@ export async function runAutonomousRequirementCognition({
               reason:'Self-remediation verification did not produce a valid VERIFIED or FAILED judgment.',
               observed_after:'',
               remaining_problem:'verification_output_invalid',
+              agent_authored:false,
             };
             break;
           }
@@ -726,6 +727,7 @@ export async function runAutonomousRequirementCognition({
           reason:clip(candidate.reason,2400),
           observed_after:clip(candidate.observed_after,2400),
           remaining_problem:clip(candidate.remaining_problem,2400),
+          agent_authored:true,
         };
         break;
       }catch(error){
@@ -737,6 +739,7 @@ export async function runAutonomousRequirementCognition({
             reason:'Self-remediation verification could not complete after bounded retry.',
             observed_after:'',
             remaining_problem:String(error?.rejectionReason||error?.code||'verification_incomplete'),
+            agent_authored:false,
           };
           break;
         }
@@ -760,7 +763,8 @@ export async function runAutonomousRequirementCognition({
       repair_type:episode.repair_type,
       status:verification.status,
       reason:clip(verification.reason,1600),
-      verified_by_bound_agent:true,
+      verification_agent_authored:Boolean(verification.agent_authored),
+      verified_by_bound_agent:verification.status==='VERIFIED'&&Boolean(verification.agent_authored),
     };
     finalPayload.self_remediation_attempts_used=Number(episode.attempt_no||0);
     finalPayload.reconsider_decomposition=true;
