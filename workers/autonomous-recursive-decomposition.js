@@ -20,6 +20,8 @@ const MAX_SELF_REMEDIATION_ATTEMPTS=2;
 const CHILD_FORMULATION_DEEP_TOKENS=7000;
 const ATOMIC_EXECUTION_DEEP_TOKENS=7000;
 const ATOMIC_RECONCILIATION_DEEP_TOKENS=5000;
+const SYNTHESIS_MERGE_DEEP_TOKENS=6000;
+const SYNTHESIS_FINAL_DEEP_TOKENS=7000;
 const SELF_REMEDIATION_REPAIR_TYPES=[
   'INVALIDATE_DISCOVERY_CHECKPOINT',
   'REFRESH_SIBLING_EVIDENCE',
@@ -2044,28 +2046,37 @@ export async function runAutonomousRequirementCognition({
     for(let i=cursor;i<childRows.length;i++){
       const child=childRows[i];
       const parts=resultParts(child.result_artifact);
-      const response=await callJson([
-        {role:'system',content:[
-          'You are the bound autonomous agent synthesizing YOUR resolved child requirements back into their parent.',
-          'A child may be COMPLETED or BLOCKED. BLOCKED is not successful completion; preserve its unresolved evidence or dependency explicitly.',
-          'Update a compact accumulator using exactly one newly resolved child.',
-          'Do not invent facts, erase a blocked gap, or change the parent requirement.',
-          'Return JSON only: {"summary":"compact cumulative synthesis","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
-        ].join('\n')},
-        {role:'user',content:safeJson({
-          parent_requirement:node.requirement_text,
-          agent_authored_discovery_state:agentDiscoveryState(node),
-          prior_accumulator:accumulator,
-          child:{
-            path:child.node_path,
-            status:child.node_status||child.status||null,
-            decision_type:child.decision_type||null,
-            requirement:child.requirement_text,
-            artifact:clip(parts.artifact,7000),
-            handoff:parts.handoff,
-          },
-        })},
-      ],1600,'req_'+node.node_path.replaceAll('.','_')+'_synthesis_merge_'+(i+1));
+      let response=null;
+      for(let attempt=1;attempt<=2;attempt++){
+        try{
+          response=await callJson([
+            {role:'system',content:[
+              'You are the bound autonomous agent synthesizing YOUR resolved child requirements back into their parent.',
+              'A child may be COMPLETED or BLOCKED. BLOCKED is not successful completion; preserve its unresolved evidence or dependency explicitly.',
+              'Update a compact accumulator using exactly one newly resolved child.',
+              'Do not invent facts, erase a blocked gap, or change the parent requirement.',
+              'Return JSON only: {"summary":"compact cumulative synthesis","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
+            ].join('\n')},
+            {role:'user',content:safeJson({
+              parent_requirement:node.requirement_text,
+              agent_authored_discovery_state:agentDiscoveryState(node),
+              prior_accumulator:accumulator,
+              child:{
+                path:child.node_path,
+                status:child.node_status||child.status||null,
+                decision_type:child.decision_type||null,
+                requirement:child.requirement_text,
+                artifact:clip(parts.artifact,7000),
+                handoff:parts.handoff,
+              },
+            })},
+          ],SYNTHESIS_MERGE_DEEP_TOKENS,'req_'+node.node_path.replaceAll('.','_')+'_synthesis_merge_'+(i+1)+'_'+attempt);
+          break;
+        }catch(error){
+          const recoverable=error?.code==='COGNITION_RESPONSE_REJECTED'||error?.code==='NVIDIA_TIMEOUT';
+          if(!recoverable||attempt===2)throw error;
+        }
+      }
       accumulator={
         summary:clip(response?.parsed?.summary,9000),
         handoff:asObject(response?.parsed?.handoff),
@@ -2086,22 +2097,31 @@ export async function runAutonomousRequirementCognition({
       status:child.node_status||child.status||null,
       decision_type:child.decision_type||null,
     }));
-    const final=await callJson([
-      {role:'system',content:[
-        'You are the bound autonomous agent closing a parent requirement after all child requirements have resolved.',
-        'Some children may be BLOCKED. Decide whether the parent can honestly be COMPLETE from the resolved evidence or must itself be BLOCKED.',
-        'The runtime does not make that semantic decision for you.',
-        'If any essential child gap prevents the parent requirement from being satisfied, choose BLOCKED and preserve the unresolved gap.',
-        'Return JSON only: {"outcome":"COMPLETE|BLOCKED","reason":"auditable reason","artifact":"concise auditable parent result","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
-        'Do not add requirements or conclusions that are not supported by the resolved children.',
-      ].join('\n')},
-      {role:'user',content:safeJson({
-        parent_requirement:node.requirement_text,
-        agent_authored_discovery_state:agentDiscoveryState(node),
-        child_states:childStates,
-        cumulative_synthesis:accumulator,
-      })},
-    ],2000,'req_'+node.node_path.replaceAll('.','_')+'_synthesis_final');
+    let final=null;
+    for(let attempt=1;attempt<=2;attempt++){
+      try{
+        final=await callJson([
+          {role:'system',content:[
+            'You are the bound autonomous agent closing a parent requirement after all child requirements have resolved.',
+            'Some children may be BLOCKED. Decide whether the parent can honestly be COMPLETE from the resolved evidence or must itself be BLOCKED.',
+            'The runtime does not make that semantic decision for you.',
+            'If any essential child gap prevents the parent requirement from being satisfied, choose BLOCKED and preserve the unresolved gap.',
+            'Return JSON only: {"outcome":"COMPLETE|BLOCKED","reason":"auditable reason","artifact":"concise auditable parent result","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
+            'Do not add requirements or conclusions that are not supported by the resolved children.',
+          ].join('\n')},
+          {role:'user',content:safeJson({
+            parent_requirement:node.requirement_text,
+            agent_authored_discovery_state:agentDiscoveryState(node),
+            child_states:childStates,
+            cumulative_synthesis:accumulator,
+          })},
+        ],SYNTHESIS_FINAL_DEEP_TOKENS,'req_'+node.node_path.replaceAll('.','_')+'_synthesis_final_'+attempt);
+        break;
+      }catch(error){
+        const recoverable=error?.code==='COGNITION_RESPONSE_REJECTED'||error?.code==='NVIDIA_TIMEOUT';
+        if(!recoverable||attempt===2)throw error;
+      }
+    }
 
     const outcome=text(final?.parsed?.outcome).toUpperCase();
     if(!['COMPLETE','BLOCKED'].includes(outcome))
@@ -2286,6 +2306,8 @@ export async function runAutonomousRequirementCognition({
       child_authoring_failure_policy:'durable_rejected_attempt_then_agent_reconsideration_v0_1',
       atomic_execution_budget_policy:'dedicated_deep_budget_v0_1_7000',
       atomic_reconciliation_budget_policy:'dedicated_deep_budget_v0_1_5000',
+      synthesis_merge_budget_policy:'dedicated_deep_budget_v0_1_6000_with_bounded_retry',
+      synthesis_final_budget_policy:'dedicated_deep_budget_v0_1_7000_with_bounded_retry',
     },
   };
 }
