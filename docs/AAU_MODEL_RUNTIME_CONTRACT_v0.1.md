@@ -81,3 +81,33 @@ Model identity remains part of agent continuity under the AAU model-consistency 
 Canonical implementation: `workers/model-runtime-profiles.js`.
 
 The NVIDIA adapter enforces these profiles for governed calls. Agent cognition uses the `agent` or `serializer` roles. Expertise verification binds candidate, authenticator, and adjudicator requests to their corresponding roles.
+
+
+## Durable context versus model context
+
+Durable cognition storage is not the same thing as a model prompt window.
+
+AAU may persist more evidence/context than a selected model can consume in one request. The recursive cognition runtime therefore maintains two distinct bounds:
+
+- **durable context storage** — a model-independent persisted context/index used for continuity across worker restarts;
+- **model context view** — a model-profile-aware projection fitted to the effective safe input allowance for the current model and cognition role.
+
+The durable node context currently allows up to 256 KiB of compact context. This is a storage policy, not a claim about any model's context window.
+
+For each substantive model call, the runtime derives a safe input budget from:
+
+`operational_context_limit_tokens - input_safety_margin_tokens - requested_output_tokens`
+
+The safe input budget is then divided among:
+- fixed prompt/runtime framing,
+- authoritative completed sibling evidence,
+- durable pinned research evidence,
+- and the remaining supplied context.
+
+Research evidence is compacted structurally. The complete research receipts remain durable in `agent_lab.agent_web_research_batches`; the cognition node preserves a source catalog sufficient to rediscover exact URLs. When storage pressure occurs, the catalog degrades from a full index to a minimal index and then to source-id + exact URL pairs rather than disappearing wholesale.
+
+The model-facing context preserves the source catalog where possible, prioritizes newest research rounds, compacts excerpts fairly, and removes sibling outputs from `supplied_context` when they are already surfaced through the authoritative sibling-evidence channel. This avoids counting the same durable evidence twice.
+
+The in-memory context is bounded immediately after research acquisition. It is not permitted to grow unbounded between a research response and the next model call merely because the persisted database copy is smaller.
+
+This separation is required for model portability: changing the bound agent, authenticator, or adjudicator model changes the model-facing context projection without requiring durable evidence to be deleted or rewritten.
