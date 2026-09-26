@@ -1,4 +1,5 @@
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getModelRuntimeProfile, resolveModelTaskBudget } from './model-runtime-profiles.js';
 
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
@@ -7,7 +8,16 @@ const nvidiaKey = String(process.env.NVIDIA_API_KEY || '').trim();
 const model = String(process.env.AAU_NVIDIA_VISION_MODEL || 'meta/llama-3.2-11b-vision-instruct').trim();
 const workerId = String(process.env.AAU_AGENT_FILE_VISION_WORKER_ID || `render:file-vision:${process.env.RENDER_INSTANCE_ID || process.pid}`).trim();
 const pollMs = Math.max(1000, Number(process.env.AAU_AGENT_FILE_VISION_POLL_MS || 2500));
-const maxImageBytes = Math.max(1048576, Number(process.env.AAU_AGENT_FILE_VISION_MAX_BYTES || 10485760));
+const visionProfile = getModelRuntimeProfile(model);
+if(visionProfile.supports_vision!==true) throw new Error('vision_model_capability_missing:'+model);
+const configuredMaxImageBytes = Math.max(1048576, Number(process.env.AAU_AGENT_FILE_VISION_MAX_BYTES || 10485760));
+const maxImageBytes = Math.min(configuredMaxImageBytes, Number(visionProfile.max_image_bytes||configuredMaxImageBytes));
+const visionTaskBudget = resolveModelTaskBudget(model,'vision',{
+  requested_output_tokens:900,
+  requested_timeout_ms:120000,
+  requested_thinking:false,
+  requested_json_mode:false,
+});
 
 let stopped = false;
 let running = false;
@@ -106,10 +116,10 @@ async function analyzeImage(dataUrl, job) {
         ],
       }],
       temperature: 0.1,
-      max_tokens: 900,
+      max_tokens: visionTaskBudget.effective_output_tokens,
       stream: false,
     }),
-    signal: AbortSignal.timeout(120000),
+    signal: AbortSignal.timeout(visionTaskBudget.effective_timeout_ms),
   });
 
   const raw = await response.text();
@@ -215,7 +225,23 @@ export function startAgentFileVisionWorker() {
   }
   stopped = false;
   void loop();
-  return { started: true, worker_id: workerId, model, poll_ms: pollMs, max_image_bytes: maxImageBytes, version: 'agent_file_vision_v0_1' };
+  return {
+    started:true,
+    worker_id:workerId,
+    model,
+    poll_ms:pollMs,
+    max_image_bytes:maxImageBytes,
+    model_runtime_contract:{
+      role:'vision',
+      max_output_tokens:visionProfile.max_output_tokens,
+      effective_output_tokens:visionTaskBudget.effective_output_tokens,
+      max_request_timeout_ms:visionProfile.max_request_timeout_ms,
+      effective_timeout_ms:visionTaskBudget.effective_timeout_ms,
+      supports_vision:visionProfile.supports_vision===true,
+      max_image_bytes:maxImageBytes,
+    },
+    version:'agent_file_vision_v0_2_model_runtime_contract',
+  };
 }
 
 export function stopAgentFileVisionWorker() {
