@@ -216,3 +216,14 @@ The runtime therefore provides separate deep budgets:
 These budgets do not change whether a requirement is semantically ATOMIC. The bound agent still decides that. They only prevent the control plane from starving a substantive cognition step of output capacity.
 
 Truncated atomic responses remain rejected and durable; they are never accepted, continued from partial text, or sent for grading. A genuinely oversized requirement must still be reconsidered/decomposed by the bound agent rather than made correct by silently accepting truncation.
+
+
+## Dedicated synthesis cognition budgets
+
+Synthesis is substantive bound-agent cognition and MUST NOT reuse the small recursive routing budget.
+
+The merge step now receives a 6,000-token deep completion budget and bounded retry. The final parent-closing synthesis receives a 7,000-token deep completion budget and bounded retry. Thinking remains enabled because both stages require semantic integration and, for final synthesis, a genuine COMPLETE versus BLOCKED judgment.
+
+Each successful child merge remains checkpointed through the existing `synthesis_cursor` and `synthesis_accumulator`. If a later merge truncates or times out, a retry resumes at that unresolved merge rather than recomputing already persisted merges.
+
+A truncated synthesis response remains rejected and durable. The runtime never accepts partial synthesis output, never invents the missing merge, and never changes the bound agent's COMPLETE/BLOCKED semantic decision.
