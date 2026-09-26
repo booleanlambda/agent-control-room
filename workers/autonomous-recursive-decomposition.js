@@ -513,7 +513,7 @@ export async function runAutonomousRequirementCognition({
                   : 'CONTEXT RESOURCE CONSTRAINT: further context/research acquisition is mechanically unavailable for this node because: '+resourceView.reasons.join(', ')+'. Do not request more context or research. BLOCKED is available if the remaining evidence gap prevents honest completion; ATOMIC or SPLIT remain yours to choose when mechanically available.',
                 'Before deciding, interrogate semantic equivalence, definitions, time horizons, populations/scopes, proxy metrics, evidence sufficiency, assumptions, and unresolved gaps.',
                 'Do not treat a nearby metric or label as equivalent unless YOU can justify the equivalence from supplied evidence.',
-                'When supplied_context contains research_source_catalog, treat it as the complete discoverable source index for prior research rounds. If context acquisition is available and a source is indexed but its excerpt is insufficient, request its exact listed HTTPS URL rather than assuming it is unavailable.',
+                'When supplied_context contains research_source_catalog, treat it as the complete discoverable source index for prior research rounds. If context acquisition is available and a source is indexed but its excerpt is insufficient, put its exact listed HTTPS URL in research_urls (not context_requests) so the runtime can fetch it directly.',
                 'Do not solve the requirement or author child requirements in this pass.',
                 'Return complete JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT|BLOCKED","reason":"auditable reason","requirement_interpretation":"what this requirement actually demands","evidence_assessment":"what the current evidence does and does not establish","unresolved_gaps":["..."],"context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."]}.',
                 forceReconsider
@@ -671,9 +671,14 @@ export async function runAutonomousRequirementCognition({
         if(!resourceView.available)
           throw new Error('autonomous_decomposition_context_action_protocol_violation:'+node.node_path);
 
-        const requests=discovery.context_requests;
+        const rawRequests=discovery.context_requests;
+        const urlRequestsFromContext=rawRequests.filter(v=>/^https:\/\//i.test(text(v)));
+        const requests=rawRequests.filter(v=>!/^https:\/\//i.test(text(v)));
         const researchQueries=discovery.research_queries;
-        const researchUrls=discovery.research_urls;
+        const researchUrls=[...new Set([
+          ...discovery.research_urls,
+          ...urlRequestsFromContext,
+        ].map(text).filter(v=>/^https:\/\//i.test(v)))].slice(0,8);
         if(!requests.length&&!researchQueries.length&&!researchUrls.length)
           throw new Error('autonomous_decomposition_context_request_empty:'+node.node_path);
 
@@ -740,6 +745,7 @@ export async function runAutonomousRequirementCognition({
             request_similarity:Number(requestSimilarity.toFixed(4)),
             research_status:researchObserved?.status||null,
             audit_batch_id:researchObserved?.audit_batch_id||null,
+            normalized_url_requests_from_context:urlRequestsFromContext.length,
           },
         };
 
