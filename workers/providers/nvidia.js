@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   resolveModelRuntimeContract,
   resolveModelTaskBudget,
@@ -25,6 +26,100 @@ function envBool(name) {
   if (['1','true','yes','on'].includes(raw)) return true;
   if (['0','false','no','off'].includes(raw)) return false;
   return null;
+}
+
+function nullableNonnegativeInt(value) {
+  const n=Number(value);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
+}
+
+function nodePathFromUsageContext(usageContext) {
+  const explicit=clean(usageContext?.nodePath);
+  if (explicit) return explicit;
+  const phase=clean(usageContext?.phase);
+  const match=phase.match(/^req_(R(?:_[0-9]{3})+)(?:_|$)/);
+  if (match) return match[1].replaceAll('_','.');
+  if (/^req_R(?:_|$)/.test(phase)) return 'R';
+  return null;
+}
+
+async function persistModelCallUsage({
+  callId,usageContext,requestBody,callMeta,body,callStatus,providerStatusCode,
+  errorCode,startedAt,latencyMs,
+}) {
+  if (!SB_ANON || !BRIDGE_TOKEN) return;
+  const usage=body?.usage && typeof body.usage==='object' ? body.usage : {};
+  const message=body?.choices?.[0]?.message || {};
+  const content=typeof message?.content==='string' ? message.content : '';
+  const reasoning=typeof message?.reasoning_content==='string' ? message.reasoning_content : '';
+  const payload={
+    p_bridge_token:BRIDGE_TOKEN,
+    p_call_id:callId,
+    p_agent_id:clean(usageContext?.agentId) || null,
+    p_execution_context:clean(usageContext?.executionContext) || null,
+    p_execution_id:usageContext?.executionId==null ? null : String(usageContext.executionId),
+    p_assignment_key:clean(usageContext?.assignmentKey) || null,
+    p_node_path:nodePathFromUsageContext(usageContext),
+    p_phase:clean(usageContext?.phase) || null,
+    p_provider:'nvidia',
+    p_model_requested:clean(requestBody?.model) || 'unknown',
+    p_model_returned:clean(body?.model) || null,
+    p_runtime_role:clean(callMeta?.runtimeRole) || null,
+    p_call_status:callStatus,
+    p_finish_reason:clean(body?.choices?.[0]?.finish_reason) || null,
+    p_requested_output_tokens:nullableNonnegativeInt(callMeta?.requestedOutputTokens),
+    p_effective_output_tokens:nullableNonnegativeInt(requestBody?.max_tokens),
+    p_requested_timeout_ms:nullableNonnegativeInt(callMeta?.requestedTimeoutMs),
+    p_effective_timeout_ms:nullableNonnegativeInt(callMeta?.effectiveTimeoutMs),
+    p_thinking:typeof requestBody?.chat_template_kwargs?.enable_thinking==='boolean'
+      ? requestBody.chat_template_kwargs.enable_thinking : null,
+    p_json_mode:requestBody?.response_format?.type==='json_object' ? true : false,
+    p_estimated_input_tokens:nullableNonnegativeInt(callMeta?.estimatedInputTokens),
+    p_input_chars:JSON.stringify(requestBody?.messages || []).length,
+    p_prompt_tokens:nullableNonnegativeInt(usage?.prompt_tokens),
+    p_cached_prompt_tokens:nullableNonnegativeInt(usage?.prompt_tokens_details?.cached_tokens),
+    p_completion_tokens:nullableNonnegativeInt(usage?.completion_tokens),
+    p_reasoning_tokens:nullableNonnegativeInt(usage?.completion_tokens_details?.reasoning_tokens),
+    p_total_tokens:nullableNonnegativeInt(usage?.total_tokens),
+    p_output_chars:content.length,
+    p_reasoning_chars:reasoning.length,
+    p_latency_ms:nullableNonnegativeInt(latencyMs),
+    p_response_id:clean(body?.id) || null,
+    p_provider_status_code:nullableNonnegativeInt(providerStatusCode),
+    p_error_code:clean(errorCode) || null,
+    p_usage:usage,
+    p_metadata:{
+      request_label:clean(callMeta?.requestLabel) || 'primary',
+      endpoint_kind:clean(callMeta?.endpointKind) || null,
+      runtime_contract_version:clean(callMeta?.runtimeContractVersion) || null,
+      max_input_tokens:nullableNonnegativeInt(callMeta?.maxInputTokens),
+      timeout_capped:Boolean(callMeta?.timeoutCapped),
+      telemetry_scope:usageContext?.agentId ? 'agent_attributed' : 'provider_unattributed',
+    },
+    p_started_at:new Date(startedAt).toISOString(),
+  };
+  try{
+    const response=await fetch(`${SB}/rest/v1/rpc/aau_bridge_record_model_call_usage`,{
+      method:'POST',
+      headers:{
+        apikey:SB_ANON,
+        authorization:`Bearer ${SB_ANON}`,
+        'content-type':'application/json',
+      },
+      body:JSON.stringify(payload),
+      signal:AbortSignal.timeout(10000),
+    });
+    if(!response.ok){
+      console.warn('AAU_MODEL_CALL_USAGE_PERSIST_FAILED',JSON.stringify({
+        call_id:callId,status:response.status,phase:payload.p_phase,
+        detail:(await response.text()).slice(0,500),
+      }));
+    }
+  }catch(error){
+    console.warn('AAU_MODEL_CALL_USAGE_PERSIST_FAILED',JSON.stringify({
+      call_id:callId,phase:payload.p_phase,error:String(error?.message||error).slice(0,500),
+    }));
+  }
 }
 
 function resolveTimeoutMs(overrideMs = null) {
@@ -208,7 +303,9 @@ async function persistAdminChatReplyEarly(messages, content, modelId) {
   }
 }
 
-async function requestNvidia(config, requestBody, timeoutMs, userAgent) {
+async function requestNvidia(config, requestBody, timeoutMs, userAgent, usageContext = null, callMeta = {}) {
+  const callId=randomUUID();
+  const startedAt=Date.now();
   let response;
   try {
     response = await fetch(config.url, {
@@ -223,7 +320,14 @@ async function requestNvidia(config, requestBody, timeoutMs, userAgent) {
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
-    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+    const timedOut=error?.name === 'TimeoutError' || error?.name === 'AbortError';
+    await persistModelCallUsage({
+      callId,usageContext,requestBody,callMeta,body:null,
+      callStatus:timedOut ? 'provider_timeout' : 'provider_error',
+      providerStatusCode:null,errorCode:timedOut ? 'NVIDIA_TIMEOUT' : (error?.code || error?.name || 'REQUEST_ERROR'),
+      startedAt,latencyMs:Date.now()-startedAt,
+    });
+    if (timedOut) {
       const timeoutError = new Error(`nvidia_timeout_after_${timeoutMs}ms`);
       timeoutError.code = 'NVIDIA_TIMEOUT';
       throw timeoutError;
@@ -236,10 +340,20 @@ async function requestNvidia(config, requestBody, timeoutMs, userAgent) {
   try { body = JSON.parse(raw); } catch {}
   if (!response.ok) {
     const detail = body?.error?.message || body?.detail || body?.message || raw.slice(0, 800) || `HTTP ${response.status}`;
+    await persistModelCallUsage({
+      callId,usageContext,requestBody,callMeta,body,
+      callStatus:'provider_error',providerStatusCode:response.status,
+      errorCode:`NVIDIA_HTTP_${response.status}`,startedAt,latencyMs:Date.now()-startedAt,
+    });
     const error = new Error(`nvidia_${response.status}: ${detail}`);
     error.status = response.status;
     throw error;
   }
+  await persistModelCallUsage({
+    callId,usageContext,requestBody,callMeta,body,
+    callStatus:'provider_completed',providerStatusCode:response.status,errorCode:null,
+    startedAt,latencyMs:Date.now()-startedAt,
+  });
   return body;
 }
 
@@ -284,6 +398,7 @@ export async function nvidiaChatCompletion({
   enableThinking = null,
   timeoutMs = null,
   runtimeRole = 'generic',
+  usageContext = null,
 } = {}) {
   const config = resolveConfig();
   if (!config.apiKey) throw new Error('NVIDIA_API_KEY is not configured');
@@ -328,7 +443,23 @@ export async function nvidiaChatCompletion({
   if (resolvedJsonMode === true) requestBody.response_format = { type: 'json_object' };
   if (typeof resolvedThinking === 'boolean') requestBody.chat_template_kwargs = { enable_thinking: resolvedThinking };
 
-  let body = await requestNvidia(config, requestBody, resolvedTimeoutMs, 'AAU-NVIDIA-Experimental-Adapter/1.0-model-task-contract');
+  const baseCallMeta={
+    runtimeRole,
+    requestedOutputTokens:taskBudget.requested_output_tokens,
+    requestedTimeoutMs:taskBudget.requested_timeout_ms,
+    effectiveTimeoutMs:taskBudget.effective_timeout_ms,
+    estimatedInputTokens:preflight.estimated_input_tokens,
+    maxInputTokens:preflight.max_input_tokens,
+    timeoutCapped:taskBudget.timeout_capped,
+    endpointKind:config.endpointKind,
+    runtimeContractVersion:'model_runtime_profiles_v0_2',
+    requestLabel:'primary',
+  };
+  let body = await requestNvidia(
+    config,requestBody,resolvedTimeoutMs,
+    'AAU-NVIDIA-Experimental-Adapter/1.0-model-task-contract',
+    usageContext,baseCallMeta
+  );
   let choice = body?.choices?.[0]?.message || {};
   let content = typeof choice?.content === 'string' ? choice.content : '';
   let reasoningContent = typeof choice?.reasoning_content === 'string' ? choice.reasoning_content : '';
@@ -346,12 +477,21 @@ export async function nvidiaChatCompletion({
           { role: 'user', content: correctionMessage(envelope.adminText) },
         ],
       };
-      assertModelRequestWithinBudget({
+      const repairPreflight=assertModelRequestWithinBudget({
         messages:repairBody.messages,
         contract:runtimeContract,
         requestedOutputTokens:resolvedMaxTokens,
       });
-      body = await requestNvidia(config, repairBody, resolvedTimeoutMs, 'AAU-NVIDIA-Experimental-Adapter/1.0-model-task-contract-repair');
+      body = await requestNvidia(
+        config,repairBody,resolvedTimeoutMs,
+        'AAU-NVIDIA-Experimental-Adapter/1.0-model-task-contract-repair',
+        usageContext,{
+          ...baseCallMeta,
+          estimatedInputTokens:repairPreflight.estimated_input_tokens,
+          maxInputTokens:repairPreflight.max_input_tokens,
+          requestLabel:'admin_chat_repair',
+        }
+      );
       choice = body?.choices?.[0]?.message || {};
       content = typeof choice?.content === 'string' ? choice.content : '';
       reasoningContent = typeof choice?.reasoning_content === 'string' ? choice.reasoning_content : '';
@@ -377,7 +517,7 @@ export async function nvidiaChatCompletion({
     response_id: body?.id || null,
     admin_chat_repair_attempted: repairAttempted,
     runtime_contract:{
-      version:'model_runtime_profiles_v0_1',
+      version:'model_runtime_profiles_v0_2',
       role:runtimeContract.role,
       operational_context_limit_tokens:runtimeContract.operational_context_limit_tokens,
       max_output_tokens:runtimeContract.max_output_tokens,
