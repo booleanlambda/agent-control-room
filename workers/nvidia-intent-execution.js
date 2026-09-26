@@ -1777,21 +1777,58 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
       observed.audit_error=String(error?.message||error).slice(0,300);
       observed.status='blocked_audit_persistence';
     }
-    const sources=(observed.audit_error?[]:(observed.sources||[])).slice(0,8).map(source=>({
-      title:source?.title||source?.search_title||null,
-      publisher:source?.publisher||null,
-      url:source?.url||null,
-      published_at:source?.published_at||null,
-      coverage:source?.coverage||null,
-      fetch_status:source?.fetch_status||null,
-      sha256:source?.sha256||null,
-      excerpt:typeof source?.excerpt==='string'?source.excerpt.slice(0,1800):null,
+    // Never drop research evidence by ordinal position. Persist the complete receipt
+    // set in the audit store, expose every unique source in a compact index, and share
+    // excerpt bytes fairly across all fetched sources. Large evidence sets stay
+    // discoverable without allowing one early source to monopolize cognition context.
+    const rawSources=observed.audit_error?[]:(Array.isArray(observed.sources)?observed.sources:[]);
+    const seenSourceKeys=new Set();
+    const uniqueSources=[];
+    for(const source of rawSources){
+      const identity=String(source?.url||source?.sha256||source?.title||source?.search_title||'').trim();
+      const key=identity||('ordinal:'+uniqueSources.length);
+      if(seenSourceKeys.has(key))continue;
+      seenSourceKeys.add(key);
+      uniqueSources.push(source);
+    }
+    const fetchedCount=Math.max(1,uniqueSources.filter(source=>
+      source?.fetch_status==='fetched_text'&&typeof source?.excerpt==='string'&&source.excerpt.length
+    ).length);
+    const excerptBudgetChars=32000;
+    const excerptCharsPerFetchedSource=Math.max(220,Math.min(1800,Math.floor(excerptBudgetChars/fetchedCount)));
+    const sources=uniqueSources.map((source,index)=>{
+      const sourceId='src_'+sha256(String(source?.url||source?.sha256||source?.title||source?.search_title||index)).slice(0,12);
+      const excerpt=source?.fetch_status==='fetched_text'&&typeof source?.excerpt==='string'
+        ? source.excerpt.slice(0,excerptCharsPerFetchedSource)
+        : null;
+      return {
+        source_id:sourceId,
+        ordinal:index+1,
+        query:source?.query||null,
+        title:source?.title||source?.search_title||null,
+        publisher:source?.publisher||null,
+        url:source?.url||null,
+        published_at:source?.published_at||source?.search_publication_date||null,
+        coverage:source?.coverage||null,
+        fetch_status:source?.fetch_status||null,
+        sha256:source?.sha256||null,
+        excerpt,
+        excerpt_chars_shared:excerpt?excerpt.length:0,
+        full_receipt_persisted:Boolean(observed.audit_batch_id),
+      };
+    });
+    const sourceIndex=sources.map(({source_id,ordinal,query,title,publisher,url,published_at,coverage,fetch_status,sha256,excerpt_chars_shared,full_receipt_persisted})=>({
+      source_id,ordinal,query,title,publisher,url,published_at,coverage,fetch_status,sha256,
+      excerpt_chars_shared,full_receipt_persisted,
     }));
     console.log('AAU_AUTONOMOUS_DECOMPOSITION_RESEARCH',JSON.stringify({
       agent_id:agentId,intent_execution_id:intentExecutionId,node_path:nodePath,
       query_count:Array.isArray(queries)?queries.length:0,
       url_count:Array.isArray(urls)?urls.length:0,
-      source_count:sources.length,status:observed.status||null,
+      source_count:sources.length,
+      fetched_source_count:fetchedCount,
+      excerpt_chars_per_fetched_source:excerptCharsPerFetchedSource,
+      status:observed.status||null,
       audit_batch_id:observed.audit_batch_id||null,
     }));
     return {
@@ -1799,8 +1836,10 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
       audit_batch_id:observed.audit_batch_id||null,
       requested_queries:Array.isArray(queries)?queries:[],
       requested_urls:Array.isArray(urls)?urls:[],
+      source_index:sourceIndex,
       sources,
-      evidence_rule:'Fetched receipts are observations, not automatic claim verification.',
+      handoff_policy:'all_sources_indexed_fair_excerpt_budget_v0_1',
+      evidence_rule:'Fetched receipts are observations, not automatic claim verification. Every indexed source remains discoverable; request a listed exact URL again when more source text is required.',
     };
   };
   const result=await runAutonomousRequirementCognition({
