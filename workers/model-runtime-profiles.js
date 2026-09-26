@@ -396,6 +396,7 @@ export function assertModelRequestWithinBudget({messages,contract,requestedOutpu
     error.operationalContextLimitTokens=contract.operational_context_limit_tokens;
     error.requestedOutputTokens=Math.min(
       Number(requestedOutputTokens)||contract.role_default_output_tokens,
+      Number(contract.operational_output_limit_tokens)||contract.max_output_tokens,
       contract.max_output_tokens
     );
     throw error;
@@ -409,10 +410,11 @@ export function modelRuntimeRegistryStatus(){
     models:Object.entries(MODEL_RUNTIME_PROFILES).map(([model_id,p])=>({
       model_id,
       provider:p.provider,
+      context_window_tokens:p.context_window_tokens??p.declared_context_window_tokens??null,
       declared_context_window_tokens:p.declared_context_window_tokens,
-    context_window_tokens: p.declared_context_window_tokens,
       operational_context_limit_tokens:p.operational_context_limit_tokens,
       max_output_tokens:p.max_output_tokens,
+      operational_output_limit_tokens:p.operational_output_limit_tokens??p.max_output_tokens,
       input_safety_margin_tokens:p.input_safety_margin_tokens,
       reasoning_support:p.supports_thinking===true?'thinking':'none',
       supports_thinking:p.supports_thinking,
