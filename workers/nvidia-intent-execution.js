@@ -1650,7 +1650,7 @@ async function cognitionStepCheckpoint({agentId,intentExecutionId,assignmentKey,
 
 async function completeDeepJson(model, messages, maxTokens, audit) {
   const result = await callWithCognitionIntegrity(() => nvidiaChatCompletion({
-    model,messages,maxTokens,temperature:0.1,jsonMode:true,enableThinking:true,timeoutMs:900000,runtimeRole:'agent',runtimeRole:'agent',
+    model,messages,maxTokens,temperature:0.1,jsonMode:true,enableThinking:true,timeoutMs:900000,runtimeRole:'agent',
   }), audit);
   let parsed = null;
   try { parsed = JSON.parse(String(result.content || '')); }
@@ -1676,8 +1676,8 @@ async function completeRoutingJson(model, messages, maxTokens, audit) {
   // The runtime still only validates/persists/routes the agent-authored decision.
   const requested=Math.max(1800,Number(maxTokens)||1800);
   const result = await callWithCognitionIntegrity(() => nvidiaChatCompletion({
-    model,messages,maxTokens:Math.min(requested,3200),
-    temperature:0.1,jsonMode:true,enableThinking:true,timeoutMs:900000,
+    model,messages,maxTokens:requested,
+    temperature:0.1,jsonMode:true,enableThinking:true,timeoutMs:900000,runtimeRole:'agent',
   }), audit);
   let parsed=null;
   try { parsed=JSON.parse(String(result.content || '')); }
