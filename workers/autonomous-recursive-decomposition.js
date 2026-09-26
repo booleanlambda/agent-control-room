@@ -445,6 +445,38 @@ export async function runAutonomousRequirementCognition({
     return compactPinnedEvidence(row.evidence);
   }
 
+  async function persistExplicitResearchEvidence(nodePath,researchUrls,researchObserved){
+    if(!researchObserved||!asArray(researchUrls).length)
+      return {save:{status:'ready',inserted:0,extended:0,unchanged:0,restored_or_extended:0},evidence:await loadPinnedEvidence(nodePath)};
+    const requestedUrlKeys=new Set(asArray(researchUrls).map(normalizedUrl).filter(Boolean));
+    const pinCandidates=asArray(researchObserved.sources)
+      .filter(source=>
+        source?.fetch_status==='fetched_text'
+        && typeof source?.excerpt==='string'
+        && source.excerpt.length
+        && requestedUrlKeys.has(normalizedUrl(source?.url))
+      )
+      .slice(0,16)
+      .map(source=>({
+        source_key:source.source_id||source.url||source.sha256,
+        source_id:source.source_id||null,
+        url:source.url||null,
+        title:source.title||null,
+        publisher:source.publisher||null,
+        sha256:source.sha256||null,
+        fetch_status:source.fetch_status||null,
+        coverage:source.coverage||null,
+        excerpt:clip(source.excerpt,MAX_PINNED_EVIDENCE_EXCERPT_CHARS),
+        audit_batch_id:researchObserved.audit_batch_id||null,
+      }));
+    if(!pinCandidates.length)
+      return {save:{status:'ready',inserted:0,extended:0,unchanged:0,restored_or_extended:0},evidence:await loadPinnedEvidence(nodePath)};
+    const save=await pinnedEvidenceRpc('save',nodePath,pinCandidates);
+    if(save?.status!=='ready')
+      throw new Error('autonomous_decomposition_pinned_evidence_save_failed:'+nodePath);
+    return {save,evidence:await loadPinnedEvidence(nodePath)};
+  }
+
   async function getNode(nodePath){
     return nodeRpc('get',{nodePath});
   }
@@ -766,36 +798,9 @@ export async function runAutonomousRequirementCognition({
           : asArray(contextPayload.research_source_catalog);
         const newSourceCount=Math.max(0,researchCatalog.length-beforeCatalogCount);
 
-        let pinnedSave={status:'ready',inserted:0,extended:0,unchanged:0,restored_or_extended:0};
-        if(researchObserved&&researchUrls.length){
-          const requestedUrlKeys=new Set(researchUrls.map(normalizedUrl).filter(Boolean));
-          const pinCandidates=asArray(researchObserved.sources)
-            .filter(source=>
-              source?.fetch_status==='fetched_text'
-              && typeof source?.excerpt==='string'
-              && source.excerpt.length
-              && requestedUrlKeys.has(normalizedUrl(source?.url))
-            )
-            .slice(0,16)
-            .map(source=>({
-              source_key:source.source_id||source.url||source.sha256,
-              source_id:source.source_id||null,
-              url:source.url||null,
-              title:source.title||null,
-              publisher:source.publisher||null,
-              sha256:source.sha256||null,
-              fetch_status:source.fetch_status||null,
-              coverage:source.coverage||null,
-              excerpt:clip(source.excerpt,MAX_PINNED_EVIDENCE_EXCERPT_CHARS),
-              audit_batch_id:researchObserved.audit_batch_id||null,
-            }));
-          if(pinCandidates.length){
-            pinnedSave=await pinnedEvidenceRpc('save',node.node_path,pinCandidates);
-            if(pinnedSave?.status!=='ready')
-              throw new Error('autonomous_decomposition_pinned_evidence_save_failed:'+node.node_path);
-            pinnedEvidence=await loadPinnedEvidence(node.node_path);
-          }
-        }
+        const pinnedResult=await persistExplicitResearchEvidence(node.node_path,researchUrls,researchObserved);
+        const pinnedSave=pinnedResult.save;
+        pinnedEvidence=pinnedResult.evidence;
         const restoredPinnedEvidence=Math.max(0,Number(pinnedSave?.restored_or_extended||0));
 
         const gapSignal=normalizedSignal(discovery.unresolved_gaps);
@@ -1076,6 +1081,11 @@ export async function runAutonomousRequirementCognition({
   }
 
   async function executeAtomic(node){
+    let pinnedEvidence=await loadPinnedEvidence(node.node_path);
+    const atomicCognitionContext=()=>({
+      ...(node.context_payload||{}),
+      ...(pinnedEvidence.length?{pinned_research_evidence:pinnedEvidence}:{}),
+    });
     let parsed=null;
     try{
       for(let attempt=1;attempt<=2;attempt++){
@@ -1092,8 +1102,9 @@ export async function runAutonomousRequirementCognition({
             {role:'user',content:safeJson({
               requirement:node.requirement_text,
               agent_authored_discovery_state:agentDiscoveryState(node),
-              supplied_context:node.context_payload||{},
+              supplied_context:atomicCognitionContext(),
               available_context_index:idx,
+              available_supplied_context_index:indexObject(atomicCognitionContext()),
             })},
           ],1800,'req_'+node.node_path.replaceAll('.','_')+'_atomic_'+attempt);
           parsed=response?.parsed;
@@ -1138,9 +1149,14 @@ export async function runAutonomousRequirementCognition({
       return {split:true,node:split};
     }
     if(status==='NEED_CONTEXT'){
-      const requests=asArray(parsed?.context_requests).map(text).filter(Boolean).slice(0,MAX_CONTEXT_REQUESTS_PER_ROUND);
+      const rawRequests=asArray(parsed?.context_requests).map(text).filter(Boolean).slice(0,MAX_CONTEXT_REQUESTS_PER_ROUND);
+      const urlRequestsFromContext=rawRequests.filter(v=>/^https:\/\//i.test(v));
+      const requests=rawRequests.filter(v=>!/^https:\/\//i.test(v));
       const researchQueries=asArray(parsed?.research_queries).map(text).filter(Boolean).slice(0,8);
-      const researchUrls=asArray(parsed?.research_urls).map(text).filter(v=>/^https:\/\//i.test(v)).slice(0,8);
+      const researchUrls=[...new Set([
+        ...asArray(parsed?.research_urls),
+        ...urlRequestsFromContext,
+      ].map(text).filter(v=>/^https:\/\//i.test(v)))].slice(0,8);
       if(!requests.length&&!researchQueries.length&&!researchUrls.length)
         throw new Error('autonomous_decomposition_atomic_context_empty:'+node.node_path);
       let researchObserved=null;
@@ -1149,9 +1165,11 @@ export async function runAutonomousRequirementCognition({
       }else if(researchQueries.length||researchUrls.length){
         researchObserved={status:'unavailable',reason:'research_runtime_not_configured'};
       }
+      const pinnedResult=await persistExplicitResearchEvidence(node.node_path,researchUrls,researchObserved);
+      pinnedEvidence=pinnedResult.evidence;
       const contextPayload={
         ...(node.context_payload||{}),
-        ...resolveContext(packet,requests),
+        ...resolveContext(packet,requests,atomicCognitionContext()),
         ...(researchObserved?{external_research_atomic:researchObserved}:{}),
       };
       counters.context_requests+=requests.length+researchQueries.length+researchUrls.length;
@@ -1202,8 +1220,9 @@ export async function runAutonomousRequirementCognition({
               requirement:node.requirement_text,
               agent_authored_discovery_state:agentDiscoveryState(node),
               proposed_completion:{artifact:proposedArtifact,handoff:proposedHandoff},
-              supplied_context:node.context_payload||{},
+              supplied_context:atomicCognitionContext(),
               available_context_index:idx,
+              available_supplied_context_index:indexObject(atomicCognitionContext()),
             })},
           ],1800,'req_'+node.node_path.replaceAll('.','_')+'_reconcile_'+attempt);
           reconciliation=response?.parsed;
@@ -1263,9 +1282,14 @@ export async function runAutonomousRequirementCognition({
     }
 
     if(reconciliationStatus==='NEED_CONTEXT'){
-      const requests=asArray(reconciliation?.context_requests).map(text).filter(Boolean).slice(0,MAX_CONTEXT_REQUESTS_PER_ROUND);
+      const rawRequests=asArray(reconciliation?.context_requests).map(text).filter(Boolean).slice(0,MAX_CONTEXT_REQUESTS_PER_ROUND);
+      const urlRequestsFromContext=rawRequests.filter(v=>/^https:\/\//i.test(v));
+      const requests=rawRequests.filter(v=>!/^https:\/\//i.test(v));
       const researchQueries=asArray(reconciliation?.research_queries).map(text).filter(Boolean).slice(0,8);
-      const researchUrls=asArray(reconciliation?.research_urls).map(text).filter(v=>/^https:\/\//i.test(v)).slice(0,8);
+      const researchUrls=[...new Set([
+        ...asArray(reconciliation?.research_urls),
+        ...urlRequestsFromContext,
+      ].map(text).filter(v=>/^https:\/\//i.test(v)))].slice(0,8);
       if(!requests.length&&!researchQueries.length&&!researchUrls.length)
         throw new Error('autonomous_decomposition_reconciliation_context_empty:'+node.node_path);
       let researchObserved=null;
@@ -1274,9 +1298,11 @@ export async function runAutonomousRequirementCognition({
       }else if(researchQueries.length||researchUrls.length){
         researchObserved={status:'unavailable',reason:'research_runtime_not_configured'};
       }
+      const pinnedResult=await persistExplicitResearchEvidence(node.node_path,researchUrls,researchObserved);
+      pinnedEvidence=pinnedResult.evidence;
       const contextPayload={
         ...(node.context_payload||{}),
-        ...resolveContext(packet,requests),
+        ...resolveContext(packet,requests,atomicCognitionContext()),
         ...(researchObserved?{external_research_reconciliation:researchObserved}:{}),
       };
       counters.context_requests+=requests.length+researchQueries.length+researchUrls.length;
