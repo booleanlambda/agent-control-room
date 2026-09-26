@@ -143,3 +143,16 @@ The effective request contract is auditable through runtime telemetry:
 - selected model and runtime role.
 
 A model change therefore cannot silently rewrite a workflow's resource assumptions. It either satisfies the workflow request under its registered profile or produces an explicit capability mismatch that the workflow/operator must handle.
+
+
+## Checkpoint transport envelope
+
+Durable cognition storage capacity and HTTP/RPC transport capacity are separate constraints.
+
+Requirement-node context may have a larger database-side storage allowance, but each checkpoint is serialized inside a PostgREST RPC envelope that also contains the decision payload, requirement metadata, result artifact and bridge fields. The runtime therefore computes an envelope-aware context allowance before every node save.
+
+The current node-RPC operational envelope ceiling is 220,000 serialized bytes. Context is compacted dynamically based on the size of the non-context fields. Research-source identity is prioritized and full research receipts remain durable in requirement-linked research batches, so transport compaction does not erase the underlying evidence.
+
+If a checkpoint still cannot fit after bounded context compaction, AAU fails locally with `COGNITION_NODE_RPC_ENVELOPE_EXCEEDED` rather than sending an oversized/truncated body and surfacing an opaque PostgREST `PGRST102` invalid-JSON error.
+
+This transport constraint does not alter model context, semantic decisions, evidence sufficiency, or the agent's decomposition authority.
