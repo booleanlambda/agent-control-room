@@ -10,8 +10,10 @@ export const MODEL_RUNTIME_PROFILES = Object.freeze({
   'google/gemma-4-31b-it': Object.freeze({
     provider: 'nvidia',
     declared_context_window_tokens: 131072,
+    context_window_tokens: 131072,
     operational_context_limit_tokens: 114688,
     max_output_tokens: 16384,
+    operational_output_limit_tokens: 16384,
     input_safety_margin_tokens: 8192,
     estimated_chars_per_token: 3.2,
     supports_thinking: true,
@@ -23,8 +25,10 @@ export const MODEL_RUNTIME_PROFILES = Object.freeze({
   'nvidia/nemotron-3.5-lightning-30b-a3b': Object.freeze({
     provider: 'nvidia',
     declared_context_window_tokens: null,
+    context_window_tokens: null,
     operational_context_limit_tokens: 32768,
     max_output_tokens: 8192,
+    operational_output_limit_tokens: 8192,
     input_safety_margin_tokens: 4096,
     estimated_chars_per_token: 3.2,
     supports_thinking: true,
@@ -36,8 +40,10 @@ export const MODEL_RUNTIME_PROFILES = Object.freeze({
   'moonshotai/kimi-k3': Object.freeze({
     provider: 'nvidia',
     declared_context_window_tokens: null,
+    context_window_tokens: null,
     operational_context_limit_tokens: 32768,
     max_output_tokens: 8192,
+    operational_output_limit_tokens: 8192,
     input_safety_margin_tokens: 4096,
     estimated_chars_per_token: 3.2,
     supports_thinking: true,
@@ -49,8 +55,10 @@ export const MODEL_RUNTIME_PROFILES = Object.freeze({
   'meta/muse-glimmer-30b': Object.freeze({
     provider: 'nvidia',
     declared_context_window_tokens: null,
+    context_window_tokens: null,
     operational_context_limit_tokens: 32768,
     max_output_tokens: 8192,
+    operational_output_limit_tokens: 8192,
     input_safety_margin_tokens: 4096,
     estimated_chars_per_token: 3.2,
     supports_thinking: true,
@@ -62,8 +70,10 @@ export const MODEL_RUNTIME_PROFILES = Object.freeze({
   'meta/llama-3.1-70b-instruct': Object.freeze({
     provider: 'nvidia',
     declared_context_window_tokens: null,
+    context_window_tokens: null,
     operational_context_limit_tokens: 32768,
     max_output_tokens: 8192,
+    operational_output_limit_tokens: 8192,
     input_safety_margin_tokens: 4096,
     estimated_chars_per_token: 3.2,
     supports_thinking: false,
@@ -75,8 +85,10 @@ export const MODEL_RUNTIME_PROFILES = Object.freeze({
   'openai/gpt-oss-20b': Object.freeze({
     provider: 'nvidia',
     declared_context_window_tokens: null,
+    context_window_tokens: null,
     operational_context_limit_tokens: 32768,
     max_output_tokens: 8192,
+    operational_output_limit_tokens: 8192,
     input_safety_margin_tokens: 4096,
     estimated_chars_per_token: 3.2,
     supports_thinking: true,
@@ -88,8 +100,10 @@ export const MODEL_RUNTIME_PROFILES = Object.freeze({
   'z-ai/glm-5.3': Object.freeze({
     provider: 'nvidia',
     declared_context_window_tokens: null,
+    context_window_tokens: null,
     operational_context_limit_tokens: 32768,
     max_output_tokens: 8192,
+    operational_output_limit_tokens: 8192,
     input_safety_margin_tokens: 4096,
     estimated_chars_per_token: 3.2,
     supports_thinking: true,
@@ -101,8 +115,10 @@ export const MODEL_RUNTIME_PROFILES = Object.freeze({
   'deepseek-ai/deepseek-v4-flash-0731': Object.freeze({
     provider: 'nvidia',
     declared_context_window_tokens: null,
+    context_window_tokens: null,
     operational_context_limit_tokens: 32768,
     max_output_tokens: 8192,
+    operational_output_limit_tokens: 8192,
     input_safety_margin_tokens: 4096,
     estimated_chars_per_token: 3.2,
     supports_thinking: true,
@@ -114,8 +130,10 @@ export const MODEL_RUNTIME_PROFILES = Object.freeze({
   'meta/llama-3.2-11b-vision-instruct': Object.freeze({
     provider: 'nvidia',
     declared_context_window_tokens: null,
+    context_window_tokens: null,
     operational_context_limit_tokens: 16384,
     max_output_tokens: 4096,
+    operational_output_limit_tokens: 4096,
     input_safety_margin_tokens: 2048,
     estimated_chars_per_token: 3.2,
     supports_thinking: false,
@@ -130,8 +148,10 @@ export const MODEL_RUNTIME_PROFILES = Object.freeze({
   'gpt-5.6-luna': Object.freeze({
     provider: 'openai',
     declared_context_window_tokens: null,
+    context_window_tokens: null,
     operational_context_limit_tokens: 32768,
     max_output_tokens: 8192,
+    operational_output_limit_tokens: 8192,
     input_safety_margin_tokens: 4096,
     estimated_chars_per_token: 3.2,
     supports_thinking: true,
@@ -224,14 +244,31 @@ export function resolveModelRuntimeContract(modelId,role='generic'){
     Number(policy.default_timeout_ms)||120000,
     Number(profile.max_request_timeout_ms)||900000
   );
+  const outputCeiling=Math.min(
+    Number(profile.max_output_tokens)||8192,
+    Number(profile.operational_output_limit_tokens)||Number(profile.max_output_tokens)||8192
+  );
   const output=Math.min(
     Number(policy.default_output_tokens)||2048,
-    Number(profile.max_output_tokens)||8192
+    outputCeiling
   );
   return Object.freeze({
     model_id:clean(modelId),
     role:clean(role)||'generic',
     ...profile,
+    // Canonical model/runtime variables. Keep the older max_* fields for
+    // compatibility, but make callers depend on this stable contract surface.
+    context_window_tokens:profile.context_window_tokens
+      ?? profile.declared_context_window_tokens
+      ?? null,
+    operational_context_limit_tokens:profile.operational_context_limit_tokens,
+    max_output_tokens:profile.max_output_tokens,
+    operational_output_limit_tokens:outputCeiling,
+    request_timeout_ms:timeout,
+    max_request_timeout_ms:profile.max_request_timeout_ms,
+    reasoning_support:profile.supports_thinking===true?'thinking':'none',
+    supports_thinking:profile.supports_thinking===true,
+    reasoning_counts_against_output:profile.reasoning_counts_against_output===true,
     role_default_timeout_ms:timeout,
     role_default_output_tokens:output,
     role_default_thinking:policy.default_thinking,
@@ -250,17 +287,23 @@ export function resolveModelTaskBudget(modelId,role='generic',{
   const desiredOutput=Number.isFinite(requestedOutput)&&requestedOutput>0
     ? Math.floor(requestedOutput)
     : contract.role_default_output_tokens;
-  if(desiredOutput>contract.max_output_tokens){
+  const outputCeiling=Math.min(
+    Number(contract.max_output_tokens)||8192,
+    Number(contract.operational_output_limit_tokens)||Number(contract.max_output_tokens)||8192
+  );
+  if(desiredOutput>outputCeiling){
     const error=new Error(
       'model_task_output_budget_unsupported:'+contract.model_id
       +':requested='+desiredOutput
-      +':max='+contract.max_output_tokens
+      +':operational_max='+outputCeiling
+      +':provider_max='+contract.max_output_tokens
     );
     error.code='MODEL_TASK_OUTPUT_BUDGET_UNSUPPORTED';
     error.modelId=contract.model_id;
     error.role=contract.role;
     error.requestedOutputTokens=desiredOutput;
     error.maxOutputTokens=contract.max_output_tokens;
+    error.operationalOutputLimitTokens=outputCeiling;
     throw error;
   }
 
@@ -298,7 +341,8 @@ export function resolveModelTaskBudget(modelId,role='generic',{
   return Object.freeze({
     contract,
     requested_output_tokens:desiredOutput,
-    effective_output_tokens:desiredOutput,
+    effective_output_tokens:Math.min(desiredOutput,outputCeiling),
+    operational_output_limit_tokens:outputCeiling,
     requested_timeout_ms:desiredTimeout,
     effective_timeout_ms:effectiveTimeout,
     timeout_capped:effectiveTimeout!==desiredTimeout,
@@ -321,7 +365,10 @@ export function modelInputBudgetTokens(contract,requestedOutputTokens=null){
     1,
     Math.min(
       Number(requestedOutputTokens)||Number(contract?.role_default_output_tokens)||2048,
-      Number(contract?.max_output_tokens)||8192
+      Math.min(
+        Number(contract?.max_output_tokens)||8192,
+        Number(contract?.operational_output_limit_tokens)||Number(contract?.max_output_tokens)||8192
+      )
     )
   );
   return Math.max(
@@ -358,20 +405,23 @@ export function assertModelRequestWithinBudget({messages,contract,requestedOutpu
 
 export function modelRuntimeRegistryStatus(){
   return {
-    version:'model_runtime_profiles_v0_1',
+    version:'model_runtime_profiles_v0_2',
     models:Object.entries(MODEL_RUNTIME_PROFILES).map(([model_id,p])=>({
       model_id,
       provider:p.provider,
       declared_context_window_tokens:p.declared_context_window_tokens,
+    context_window_tokens: p.declared_context_window_tokens,
       operational_context_limit_tokens:p.operational_context_limit_tokens,
       max_output_tokens:p.max_output_tokens,
       input_safety_margin_tokens:p.input_safety_margin_tokens,
+      reasoning_support:p.supports_thinking===true?'thinking':'none',
       supports_thinking:p.supports_thinking,
       reasoning_counts_against_output:p.reasoning_counts_against_output,
       supports_json_mode:p.supports_json_mode,
       supports_vision:p.supports_vision===true,
       max_image_bytes:p.max_image_bytes||null,
       multimodal_input_accounting:p.multimodal_input_accounting||null,
+      request_timeout_ms:p.max_request_timeout_ms,
       max_request_timeout_ms:p.max_request_timeout_ms,
       profile_source:p.profile_source,
     })),
