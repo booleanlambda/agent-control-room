@@ -1463,6 +1463,7 @@ export async function runAutonomousRequirementCognition({
       let discovery=reusableDiscovery?priorDiscovery:null;
 
       if(!discovery){
+        let siblingInspectionRetry=null;
         for(let attempt=1;attempt<=2;attempt++){
           try{
             const response=await callJson([
@@ -1490,6 +1491,9 @@ export async function runAutonomousRequirementCognition({
                 'Before deciding, interrogate semantic equivalence, definitions, time horizons, populations/scopes, proxy metrics, evidence sufficiency, assumptions, and unresolved gaps.',
                 'AUTHORITATIVE SIBLING HANDOFF: authoritative_completed_sibling_evidence contains durable outputs of already resolved sibling requirements. Inspect every listed sibling before deciding NEED_CONTEXT. A fact already present in a completed sibling artifact or handoff is available evidence; do not request it again merely because the original source excerpt is absent from this node. You may still reject or qualify a sibling fact if you identify a substantive insufficiency, but state that reason explicitly.',
                 'For every sibling path supplied, include it in inspected_sibling_paths. This is an attention/accounting requirement only; the runtime does not decide whether the sibling evidence is substantively sufficient.',
+                siblingInspectionRetry
+                  ? 'SIBLING INSPECTION RETRY: Your immediately prior discovery output was rejected only because it omitted required sibling path(s) from inspected_sibling_paths. Re-inspect the exact evidence rows named in sibling_inspection_retry.missing_paths before deciding again. Do not merely echo those paths: reconsider your evidence assessment and routing decision in light of the re-inspected sibling evidence. You may preserve or change your prior decision, but the new output must be fully agent-authored and must explicitly account for every supplied sibling path.'
+                  : '',
                 'Do not treat a nearby metric or label as equivalent unless YOU can justify the equivalence from supplied evidence.',
                 'When supplied_context contains research_source_catalog, treat it as the complete discoverable source index for prior research rounds. If context acquisition is available and a source is indexed but its excerpt is insufficient, put its exact listed HTTPS URL in research_urls (not context_requests) so the runtime can fetch it directly.',
                 'Do not solve the requirement or author child requirements in this pass.',
@@ -1503,6 +1507,7 @@ export async function runAutonomousRequirementCognition({
                 agent_authored_discovery_state:agentDiscoveryState(node),
                 source:{kind:node.source_kind,ref:node.source_ref},
                 authoritative_completed_sibling_evidence:siblingEvidence,
+                sibling_inspection_retry:siblingInspectionRetry,
                 prior_cognitive_state:priorCognitiveState,
                 durable_self_remediation_history:compactRemediationEpisodes(remediationEpisodes),
                 decomposition_execution_failure:asObject(node?.decision_payload?.child_authoring_failure),
@@ -1572,6 +1577,21 @@ export async function runAutonomousRequirementCognition({
             const missingSiblingInspection=requiredSiblingPaths.filter(path=>!inspectedSiblingPaths.has(path));
             if(missingSiblingInspection.length){
               if(attempt===2)throw new Error('autonomous_decomposition_discovery_sibling_evidence_uninspected:'+node.node_path+':'+missingSiblingInspection.join(','));
+              siblingInspectionRetry={
+                reason:'prior_discovery_omitted_required_sibling_attention_accounting',
+                missing_paths:missingSiblingInspection,
+                prior_inspected_paths:[...inspectedSiblingPaths],
+                prior_decision:candidateDecision,
+                prior_reason:clip(candidate.reason,1400),
+                evidence_to_reinspect:siblingEvidence.filter(v=>missingSiblingInspection.includes(text(v?.path))),
+              };
+              console.log('AAU_AUTONOMOUS_SIBLING_INSPECTION_RETRY',JSON.stringify({
+                agent_id:agentId,
+                intent_execution_id:intentExecutionId,
+                node_path:node.node_path,
+                missing_paths:missingSiblingInspection,
+                prior_decision:candidateDecision,
+              }));
               continue;
             }
 
@@ -1583,6 +1603,8 @@ export async function runAutonomousRequirementCognition({
               requirement_interpretation:clip(candidate.requirement_interpretation,2800),
               evidence_assessment:clip(candidate.evidence_assessment,3200),
               inspected_sibling_paths:asArray(candidate.inspected_sibling_paths).map(text).filter(Boolean).slice(0,16),
+              sibling_inspection_retry_applied:Boolean(siblingInspectionRetry),
+              sibling_inspection_retry_missing_paths:asArray(siblingInspectionRetry?.missing_paths).map(text).filter(Boolean).slice(0,16),
               authoritative_sibling_result_hashes:siblingEvidence.map(v=>({path:v.path,result_hash:v.result_hash})),
               remediation_prior_state:candidateDecision==='REMEDIATE'?{
                 decision:text(priorCognitiveState.decision)||null,
