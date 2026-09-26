@@ -1,3 +1,5 @@
+import { nvidiaChatCompletion } from './providers/nvidia.js';
+
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
 const bridge = String(process.env.AAU_BROKER_BRIDGE_TOKEN || '').trim();
@@ -35,42 +37,23 @@ async function rpc(name, args = {}) {
 }
 
 async function modelCall(model, system, user) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 60000);
-  try {
-    const body = {
-      model,
-      messages: [{ role:'system', content:system }, { role:'user', content:user }],
-      max_tokens: 4200,
-      temperature: 0,
-      stream: false,
-    };
-    if (String(model).startsWith('nvidia/nemotron')) body.chat_template_kwargs = { enable_thinking:false };
-    const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-      method:'POST',
-      signal:controller.signal,
-      headers:{
-        authorization:`Bearer ${nvidiaKey}`,
-        'content-type':'application/json',
-        accept:'application/json',
-        'user-agent':'AAU-Product-Service-Architect/0.1',
-      },
-      body:JSON.stringify(body),
-    });
-    const { raw, body:parsed } = await jsonResponse(response);
-    if (!response.ok) {
-      const error = new Error(`nvidia_${response.status}:${parsed?.error?.message || parsed?.detail || raw.slice(0,800)}`);
-      error.status = response.status;
-      throw error;
-    }
-    const message = parsed?.choices?.[0]?.message || {};
-    return {
-      model: parsed?.model || model,
-      text: String(message.content || message.reasoning_content || parsed?.choices?.[0]?.text || '').trim(),
-    };
-  } finally {
-    clearTimeout(timer);
-  }
+  const result=await nvidiaChatCompletion({
+    model,
+    messages:[{role:'system',content:system},{role:'user',content:user}],
+    maxTokens:4200,
+    temperature:0,
+    jsonMode:false,
+    enableThinking:String(model).startsWith('nvidia/nemotron')?false:null,
+    timeoutMs:60000,
+    runtimeRole:'planner',
+  });
+  return {
+    model:result.model_returned||model,
+    text:String(result.content||result.reasoning_content||'').trim(),
+    usage:result.usage||null,
+    finish_reason:result.finish_reason||null,
+    runtime_contract:result.runtime_contract||null,
+  };
 }
 
 function parseJsonObject(text) {
