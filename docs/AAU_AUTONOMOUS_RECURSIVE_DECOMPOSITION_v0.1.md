@@ -114,3 +114,18 @@ Research result ordering must never determine evidence visibility. Every unique 
 The node context maintains a cumulative `research_source_catalog` containing source IDs, titles, publishers, URLs, coverage, fetch status, hashes, and audit references across research rounds. If a full excerpt cannot remain in the bounded cognition payload, the catalog entry remains discoverable and the bound agent may request the exact listed URL again. Runtime context limits may compact text, but they must not silently erase source existence.
 
 Source-specific context requests may resolve against the node's own research context as well as the original wake packet. Array-backed source collections support selectors by source ID, publisher, title, URL, or hash so an agent request such as a named publisher does not become `available:false` merely because the evidence is stored in an array.
+
+
+## Agent-visible context acquisition resource
+
+Context and research acquisition is a bounded mechanical resource, not a semantic decision made by the runtime. The runtime MUST NOT terminate a wake merely because a fixed number of `NEED_CONTEXT` rounds has been reached.
+
+The bound agent receives the current context-resource state before each routing decision. The runtime tracks cumulative context/research rounds, newly discovered source observations, newly resolved local context paths, unresolved-gap persistence, request repetition, elapsed acquisition time, and the cumulative unique-source count. Continued retrieval remains available while it is making progress and remains within safety ceilings.
+
+The runtime currently treats retrieval as exhausted when a mechanical safety condition is reached, including repeated rounds with no new observations, a materially unchanged unresolved gap across repeated rounds, repeated substantially identical requests, elapsed acquisition-time exhaustion, unique-source exhaustion, or the absolute emergency round ceiling. These are convergence/resource signals, not conclusions about the requirement.
+
+When context acquisition becomes unavailable, `NEED_CONTEXT` is removed from the available actions and the exact exhaustion reasons are exposed to the bound agent. The runtime does not choose a replacement action. `ATOMIC` and `SPLIT` remain available when their independent mechanical budgets permit them, and `BLOCKED` becomes available so the bound agent may explicitly preserve an unresolved dependency rather than fabricate evidence.
+
+`BLOCKED` is an agent-authored semantic outcome. A blocked child is not treated as successful completion. During synthesis, the bound agent receives each child's resolved status and decides whether the parent can still be completed from the remaining evidence or must itself become blocked. Blocked state and unresolved gaps propagate durably and must never be silently converted into a successful result.
+
+Current mechanical safeguards are an emergency ceiling of 12 context-acquisition rounds, two consecutive no-new-observation rounds, three materially unchanged-gap rounds, two materially repeated-request rounds, 30 minutes of cumulative acquisition time, and 250 unique indexed sources. These numbers are safety ceilings rather than claims of epistemic optimality; ordinary stopping is driven by evidence progress and gap convergence.
