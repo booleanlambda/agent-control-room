@@ -224,6 +224,74 @@ export function resolveModelRuntimeContract(modelId,role='generic'){
   });
 }
 
+export function resolveModelTaskBudget(modelId,role='generic',{
+  requested_output_tokens=null,
+  requested_timeout_ms=null,
+  requested_thinking=null,
+  requested_json_mode=null,
+}={}){
+  const contract=resolveModelRuntimeContract(modelId,role);
+  const requestedOutput=Number(requested_output_tokens);
+  const desiredOutput=Number.isFinite(requestedOutput)&&requestedOutput>0
+    ? Math.floor(requestedOutput)
+    : contract.role_default_output_tokens;
+  if(desiredOutput>contract.max_output_tokens){
+    const error=new Error(
+      'model_task_output_budget_unsupported:'+contract.model_id
+      +':requested='+desiredOutput
+      +':max='+contract.max_output_tokens
+    );
+    error.code='MODEL_TASK_OUTPUT_BUDGET_UNSUPPORTED';
+    error.modelId=contract.model_id;
+    error.role=contract.role;
+    error.requestedOutputTokens=desiredOutput;
+    error.maxOutputTokens=contract.max_output_tokens;
+    throw error;
+  }
+
+  const requestedTimeout=Number(requested_timeout_ms);
+  const desiredTimeout=Number.isFinite(requestedTimeout)&&requestedTimeout>0
+    ? Math.floor(requestedTimeout)
+    : contract.role_default_timeout_ms;
+  const effectiveTimeout=Math.max(
+    5000,
+    Math.min(desiredTimeout,contract.max_request_timeout_ms)
+  );
+
+  const thinking=requested_thinking===null||requested_thinking===undefined
+    ? contract.role_default_thinking
+    : Boolean(requested_thinking);
+  if(thinking===true && contract.supports_thinking!==true){
+    const error=new Error('model_thinking_not_supported:'+contract.model_id);
+    error.code='MODEL_THINKING_NOT_SUPPORTED';
+    error.modelId=contract.model_id;
+    error.role=contract.role;
+    throw error;
+  }
+
+  const jsonMode=requested_json_mode===null||requested_json_mode===undefined
+    ? false
+    : Boolean(requested_json_mode);
+  if(jsonMode===true && contract.supports_json_mode!==true){
+    const error=new Error('model_json_mode_not_supported:'+contract.model_id);
+    error.code='MODEL_JSON_MODE_NOT_SUPPORTED';
+    error.modelId=contract.model_id;
+    error.role=contract.role;
+    throw error;
+  }
+
+  return Object.freeze({
+    contract,
+    requested_output_tokens:desiredOutput,
+    effective_output_tokens:desiredOutput,
+    requested_timeout_ms:desiredTimeout,
+    effective_timeout_ms:effectiveTimeout,
+    timeout_capped:effectiveTimeout!==desiredTimeout,
+    thinking,
+    json_mode:jsonMode,
+  });
+}
+
 export function estimateMessageTokens(messages,contract){
   const chars=Array.isArray(messages)
     ? messages.reduce((sum,m)=>sum+String(m?.role||'').length+String(m?.content||'').length+8,0)
