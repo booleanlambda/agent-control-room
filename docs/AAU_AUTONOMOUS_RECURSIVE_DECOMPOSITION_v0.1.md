@@ -105,3 +105,12 @@ When children execute sequentially, a later child receives a compact runtime-rou
 Structural depth is charged only when a node branches into multiple child requirements. A one-child split is treated as a refinement and does not consume branching depth, because a refinement may be necessary after a rejected oversized atomic attempt. Consecutive one-child refinements have their own bounded resource counter so a chain of paraphrases cannot recurse indefinitely. This keeps the runtime neutral about intellectual structure while still enforcing finite execution.
 
 The structural-depth ceiling is an agent-visible mechanical constraint, not a semantic fallback. At the ceiling, the runtime does not throw merely because the agent needs another cognition step. Multi-child branching becomes unavailable; if refinement budget remains, the agent may still choose SPLIT knowing it can author exactly one genuinely narrower refinement child. Otherwise SPLIT is removed from the available actions. The runtime never chooses the replacement action for the agent.
+
+
+## Research evidence handoff
+
+Research result ordering must never determine evidence visibility. Every unique source returned by an agent-authored research request is persisted in an immutable research batch and exposed to cognition through a compact source index. Excerpt bytes are allocated across all fetched sources under a total context budget; no fixed first-N source cutoff is allowed.
+
+The node context maintains a cumulative `research_source_catalog` containing source IDs, titles, publishers, URLs, coverage, fetch status, hashes, and audit references across research rounds. If a full excerpt cannot remain in the bounded cognition payload, the catalog entry remains discoverable and the bound agent may request the exact listed URL again. Runtime context limits may compact text, but they must not silently erase source existence.
+
+Source-specific context requests may resolve against the node's own research context as well as the original wake packet. Array-backed source collections support selectors by source ID, publisher, title, URL, or hash so an agent request such as a named publisher does not become `available:false` merely because the evidence is stored in an array.
