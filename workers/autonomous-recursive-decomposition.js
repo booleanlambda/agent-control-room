@@ -300,7 +300,10 @@ function contextResourceView(state,contextPayload){
   const s=asObject(state);
   const startedMs=Date.parse(text(s.started_at));
   const elapsedMs=Number.isFinite(startedMs)?Math.max(0,Date.now()-startedMs):0;
-  const uniqueSources=asArray(contextPayload?.research_source_catalog).length;
+  const uniqueSources=Math.max(
+    asArray(contextPayload?.research_source_catalog).length,
+    Number(s.total_new_sources||0)
+  );
   const reasons=[];
   if(Number(s.context_rounds_attempted||0)>=MAX_CONTEXT_RESEARCH_ROUNDS)
     reasons.push('absolute_context_round_safety_ceiling');
@@ -793,6 +796,52 @@ export async function runAutonomousRequirementCognition({
     };
   }
 
+  async function researchBatchRpc(action,nodePath,batchId=null){
+    return rpc('aau_bridge_cognition_research_batches_v0_1',{
+      p_agent_id:agentId,
+      p_wake_request_id:intentExecutionId,
+      p_assignment_key:assignmentKey,
+      p_node_path:nodePath,
+      p_action:action,
+      p_batch_id:batchId,
+    });
+  }
+
+  async function loadDurableResearchCatalog(nodePath){
+    const row=await researchBatchRpc('list',nodePath,null);
+    if(row?.status!=='ready')
+      throw new Error('autonomous_decomposition_research_batch_catalog_lookup_failed:'+nodePath);
+    const merged=[];
+    for(const batch of asArray(row.batches)){
+      for(const source of asArray(batch?.sources)){
+        const s=asObject(source);
+        const identity=text(s.url)||text(s.sha256)||text(s.title);
+        if(!identity)continue;
+        merged.push({
+          source_id:'src_'+sha256(identity).slice(0,12),
+          query:s.query||null,
+          title:s.title||null,
+          url:s.url||null,
+          published_at:s.published_at||null,
+          coverage:s.coverage||null,
+          fetch_status:s.fetch_status||null,
+          sha256:s.sha256||null,
+          audit_batch_id:batch.batch_id||null,
+          full_receipt_persisted:true,
+        });
+      }
+    }
+    return mergeResearchSourceCatalog([],merged);
+  }
+
+  async function linkResearchBatch(nodePath,batchId){
+    if(!batchId)return null;
+    const row=await researchBatchRpc('link',nodePath,batchId);
+    if(row?.status!=='ready')
+      throw new Error('autonomous_decomposition_research_batch_link_failed:'+nodePath);
+    return row;
+  }
+
   async function pinnedEvidenceRpc(action,nodePath,evidence=[]){
     return rpc('aau_bridge_cognition_pinned_research_v0_1',{
       p_agent_id:agentId,
@@ -1246,6 +1295,16 @@ export async function runAutonomousRequirementCognition({
   async function decide(node,{forceReconsider=false,branchDepth=0,singleChildRefinements=0}={}){
     let contextPayload=asObject(node.context_payload);
     let pinnedEvidence=await loadPinnedEvidence(node.node_path);
+    const durableResearchCatalog=await loadDurableResearchCatalog(node.node_path);
+    if(durableResearchCatalog.length){
+      contextPayload={
+        ...contextPayload,
+        research_source_catalog:mergeResearchSourceCatalog(
+          contextPayload.research_source_catalog,
+          durableResearchCatalog
+        ),
+      };
+    }
     contextPayload=boundInMemoryContext(contextPayload,pinnedEvidence,10000);
     const atomicExecutionFailures=Math.max(0,Number(node?.decision_payload?.atomic_execution_failures||0));
     const atomicUnavailable=atomicExecutionFailures>=MAX_ATOMIC_EXECUTION_FAILURES;
@@ -1643,6 +1702,9 @@ export async function runAutonomousRequirementCognition({
           researchObserved={status:'unavailable',reason:'research_runtime_not_configured'};
         }
 
+        if(researchObserved?.audit_batch_id){
+          await linkResearchBatch(node.node_path,researchObserved.audit_batch_id);
+        }
         const researchCatalog=researchObserved
           ? mergeResearchSourceCatalog(contextPayload.research_source_catalog,researchObserved.source_index)
           : asArray(contextPayload.research_source_catalog);
@@ -2619,7 +2681,8 @@ export async function runAutonomousRequirementCognition({
       atomic_reconciliation_budget_policy:'dedicated_deep_budget_v0_1_5000',
       synthesis_merge_budget_policy:'dedicated_deep_budget_v0_1_6000_with_bounded_retry',
       synthesis_final_budget_policy:'dedicated_deep_budget_v0_1_7000_with_bounded_retry',
-      model_context_policy:'model_profile_token_context_v0_1_in_memory_and_model_view',
+      model_context_policy:'model_profile_token_context_v0_2_in_memory_model_view_durable_catalog_rehydration',
+      research_batch_handoff_policy:'requirement_linked_durable_receipts_v0_1',
     },
   };
 }
