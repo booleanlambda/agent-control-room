@@ -474,7 +474,17 @@ export async function runAutonomousRequirementCognition({
     const save=await pinnedEvidenceRpc('save',nodePath,pinCandidates);
     if(save?.status!=='ready')
       throw new Error('autonomous_decomposition_pinned_evidence_save_failed:'+nodePath);
-    return {save,evidence:await loadPinnedEvidence(nodePath)};
+    const evidence=await loadPinnedEvidence(nodePath);
+    console.log('AAU_AUTONOMOUS_PINNED_EVIDENCE',JSON.stringify({
+      node_path:nodePath,
+      requested_url_count:asArray(researchUrls).length,
+      inserted:Number(save.inserted||0),
+      extended:Number(save.extended||0),
+      unchanged:Number(save.unchanged||0),
+      restored_or_extended:Number(save.restored_or_extended||0),
+      pinned_items:evidence.length,
+    }));
+    return {save,evidence};
   }
 
   async function getNode(nodePath){
@@ -1055,6 +1065,23 @@ export async function runAutonomousRequirementCognition({
         },
         contextPayload:inheritedChildContext(node.context_payload),resultArtifact:null,
       });
+      const inheritedPinned=await loadPinnedEvidence(node.node_path);
+      if(inheritedPinned.length){
+        const inheritedSave=await pinnedEvidenceRpc('save',nodePath,inheritedPinned.map(v=>({
+          source_key:v.source_key,
+          source_id:v.source_id,
+          url:v.url,
+          title:v.title,
+          publisher:v.publisher,
+          sha256:v.sha256,
+          fetch_status:v.fetch_status,
+          coverage:v.coverage,
+          excerpt:v.excerpt,
+          audit_batch_id:v.audit_batch_id,
+        })));
+        if(inheritedSave?.status!=='ready')
+          throw new Error('autonomous_decomposition_pinned_evidence_inherit_failed:'+nodePath);
+      }
       child.parent_path=node.node_path;
       authored.push(child);
       counters.nodes++;
@@ -1580,6 +1607,7 @@ export async function runAutonomousRequirementCognition({
       root_status:completedRoot.node_status||null,
       root_decision_type:completedRoot.decision_type||null,
       context_resource_policy:'agent_visible_progress_based_context_resource_v0_1',
+      evidence_retention_policy:'pinned_research_evidence_v0_1_outside_context_eviction',
     },
   };
 }
