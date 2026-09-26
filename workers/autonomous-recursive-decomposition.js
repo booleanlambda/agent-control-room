@@ -18,7 +18,7 @@ const MAX_CONTEXT_ELAPSED_MS=30*60*1000;
 const MAX_CONTEXT_UNIQUE_SOURCES=250;
 const MAX_CONTEXT_REQUESTS_PER_ROUND=8;
 const MAX_CONTEXT_VALUE_BYTES=12000;
-const MAX_PERSISTED_CONTEXT_BYTES=52000;
+const MAX_PERSISTED_CONTEXT_BYTES=262144;
 const MAX_PINNED_EVIDENCE_ITEMS_IN_COGNITION=16;
 const MAX_PINNED_EVIDENCE_EXCERPT_CHARS=12000;
 const MAX_SELF_REMEDIATION_ATTEMPTS=2;
@@ -362,7 +362,7 @@ function boundContextPayload(payload){
   const entries=Object.entries(src);
   const out={};
   const evicted=[];
-  const reserve=3500;
+  const reserve=6000;
   const researchRound=(key)=>{
     const match=String(key).match(/^external_research_round_(\d+)$/);
     return match?Number(match[1]):0;
@@ -382,20 +382,50 @@ function boundContextPayload(payload){
     evicted.push({path:key,bytes:bytes(value)});
     return false;
   };
+
+  // The durable source catalog must degrade structurally, not disappear wholesale.
+  // Full receipts remain in agent_web_research_batches; this index preserves exact
+  // URLs/source identity across worker restarts.
+  if(Array.isArray(src.research_source_catalog)&&src.research_source_catalog.length){
+    let catalog=compactResearchCatalogForModel(src.research_source_catalog,'full');
+    if(!tryAdd('research_source_catalog',catalog)){
+      evicted.pop();
+      catalog=compactResearchCatalogForModel(src.research_source_catalog,'minimal');
+      if(!tryAdd('research_source_catalog',catalog)){
+        evicted.pop();
+        catalog=src.research_source_catalog.map(v=>({
+          source_id:v?.source_id||null,
+          url:v?.url||null,
+        }));
+        if(!tryAdd('research_source_catalog',catalog)){
+          // This should only be reachable at extreme source counts/URL lengths.
+          // Preserve a durable pointer rather than pretending no catalog existed.
+          evicted.push({
+            path:'research_source_catalog',
+            bytes:bytes(src.research_source_catalog),
+            reason:'durable_context_ceiling_even_after_minimal_compaction',
+            source_count:src.research_source_catalog.length,
+          });
+        }
+      }
+    }
+  }
+
   const prioritized=entries
-    .filter(([key])=>priorityScore(key)>0)
+    .filter(([key])=>key!=='research_source_catalog'&&priorityScore(key)>0)
     .sort((a,b)=>priorityScore(b[0])-priorityScore(a[0]));
   for(const [key,value] of prioritized)tryAdd(key,value);
   for(let i=entries.length-1;i>=0;i--){
     const [key,value]=entries[i];
-    if(priorityScore(key)>0||Object.prototype.hasOwnProperty.call(out,key))continue;
+    if(key==='research_source_catalog'||priorityScore(key)>0||Object.prototype.hasOwnProperty.call(out,key))continue;
     tryAdd(key,value);
   }
-  out._context_evicted=evicted.slice(0,40);
+  out._context_evicted=evicted.slice(0,60);
   out._context_budget={
     max_bytes:MAX_PERSISTED_CONTEXT_BYTES,
-    policy:'preserve_research_catalog_latest_research_and_upstream_handoffs_v0_2',
+    policy:'durable_context_independent_of_model_v0_1_compact_catalog_never_wholesale_drop',
     evicted_count:evicted.length,
+    research_source_catalog_items:asArray(out.research_source_catalog).length,
   };
   while(bytes(out)>MAX_PERSISTED_CONTEXT_BYTES && out._context_evicted.length){
     out._context_evicted.pop();
