@@ -2143,8 +2143,18 @@ export async function runAutonomousRequirementCognition({
 
   async function executeAtomic(node){
     let pinnedEvidence=await loadPinnedEvidence(node.node_path);
+    const atomicDurableCatalog=await loadDurableResearchCatalog(node.node_path);
+    const atomicBaseContext={
+      ...(node.context_payload||{}),
+      ...(atomicDurableCatalog.length?{
+        research_source_catalog:mergeResearchSourceCatalog(
+          node.context_payload?.research_source_catalog,
+          atomicDurableCatalog
+        )
+      }:{}),
+    };
     const atomicContextView=()=>agentModelContextView(
-      node.context_payload||{},pinnedEvidence,ATOMIC_EXECUTION_DEEP_TOKENS
+      atomicBaseContext,pinnedEvidence,ATOMIC_EXECUTION_DEEP_TOKENS
     );
     const siblingEvidence=atomicContextView().siblingEvidence;
     const atomicCognitionContext=()=>atomicContextView().suppliedContext;
@@ -2229,10 +2239,13 @@ export async function runAutonomousRequirementCognition({
       }else if(researchQueries.length||researchUrls.length){
         researchObserved={status:'unavailable',reason:'research_runtime_not_configured'};
       }
+      if(researchObserved?.audit_batch_id){
+        await linkResearchBatch(node.node_path,researchObserved.audit_batch_id);
+      }
       const pinnedResult=await persistExplicitResearchEvidence(node.node_path,researchUrls,researchObserved);
       pinnedEvidence=pinnedResult.evidence;
       const contextPayload=boundInMemoryContext({
-        ...(node.context_payload||{}),
+        ...atomicBaseContext,
         ...resolveContext(packet,requests,atomicCognitionContext()),
         ...(researchObserved?{external_research_atomic:researchObserved}:{}),
       },pinnedEvidence,ATOMIC_EXECUTION_DEEP_TOKENS);
@@ -2364,10 +2377,13 @@ export async function runAutonomousRequirementCognition({
       }else if(researchQueries.length||researchUrls.length){
         researchObserved={status:'unavailable',reason:'research_runtime_not_configured'};
       }
+      if(researchObserved?.audit_batch_id){
+        await linkResearchBatch(node.node_path,researchObserved.audit_batch_id);
+      }
       const pinnedResult=await persistExplicitResearchEvidence(node.node_path,researchUrls,researchObserved);
       pinnedEvidence=pinnedResult.evidence;
       const contextPayload=boundInMemoryContext({
-        ...(node.context_payload||{}),
+        ...atomicBaseContext,
         ...resolveContext(packet,requests,atomicCognitionContext()),
         ...(researchObserved?{external_research_reconciliation:researchObserved}:{}),
       },pinnedEvidence,ATOMIC_RECONCILIATION_DEEP_TOKENS);
