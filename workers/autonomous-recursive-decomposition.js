@@ -326,10 +326,14 @@ export async function runAutonomousRequirementCognition({
     return fn(messages,maxTokens,phase);
   }
 
-  async function decide(node,{forceReconsider=false}={}){
+  async function decide(node,{forceReconsider=false,branchDepth=0,singleChildRefinements=0}={}){
     let contextPayload=asObject(node.context_payload);
     const atomicExecutionFailures=Math.max(0,Number(node?.decision_payload?.atomic_execution_failures||0));
     const atomicUnavailable=atomicExecutionFailures>=MAX_ATOMIC_EXECUTION_FAILURES;
+    const normalizedBranchDepth=Math.max(0,Math.min(Number(branchDepth)||0,MAX_BRANCH_DEPTH));
+    const structuralBranchingAvailable=normalizedBranchDepth<MAX_BRANCH_DEPTH;
+    const singleRefinementAvailable=singleChildRefinements<MAX_SINGLE_CHILD_REFINEMENTS;
+    const splitAvailable=structuralBranchingAvailable||singleRefinementAvailable;
 
     for(let round=0;round<MAX_CONTEXT_ROUNDS;round++){
       const contextFingerprint=sha256({
@@ -339,6 +343,12 @@ export async function runAutonomousRequirementCognition({
         force_reconsider:Boolean(forceReconsider),
         atomic_unavailable:atomicUnavailable,
         atomic_execution_failures:atomicExecutionFailures,
+        structural_branch_depth:normalizedBranchDepth,
+        max_structural_branch_depth:MAX_BRANCH_DEPTH,
+        structural_branching_available:structuralBranchingAvailable,
+        single_child_refinements_used:singleChildRefinements,
+        max_single_child_refinements:MAX_SINGLE_CHILD_REFINEMENTS,
+        single_refinement_available:singleRefinementAvailable,
       });
 
       const priorPayload=asObject(node.decision_payload);
@@ -347,16 +357,17 @@ export async function runAutonomousRequirementCognition({
         priorDiscovery.version==='agent_deep_discovery_v0_1'
         && priorDiscovery.context_fingerprint===contextFingerprint
         && ['ATOMIC','SPLIT','NEED_CONTEXT'].includes(text(priorDiscovery.decision).toUpperCase())
-        && !(atomicUnavailable&&text(priorDiscovery.decision).toUpperCase()==='ATOMIC');
+        && !(atomicUnavailable&&text(priorDiscovery.decision).toUpperCase()==='ATOMIC')
+        && !(text(priorDiscovery.decision).toUpperCase()==='SPLIT'&&!splitAvailable);
 
       let discovery=reusableDiscovery?priorDiscovery:null;
 
       if(!discovery){
         for(let attempt=1;attempt<=2;attempt++){
           try{
-            const availableDecisions=atomicUnavailable
-              ? ['SPLIT','NEED_CONTEXT']
-              : ['ATOMIC','SPLIT','NEED_CONTEXT'];
+            const availableDecisions=['ATOMIC','SPLIT','NEED_CONTEXT']
+              .filter(v=>!(v==='ATOMIC'&&atomicUnavailable))
+              .filter(v=>!(v==='SPLIT'&&!splitAvailable));
             const response=await callJson([
               {role:'system',content:[
                 'You are the bound autonomous agent performing a DEEP DISCOVERY pass for ONE requirement.',
@@ -364,8 +375,14 @@ export async function runAutonomousRequirementCognition({
                 'The runtime does not choose, reinterpret, decompose, or repair the requirement for you.',
                 'Available decisions for this exact node: '+availableDecisions.join(', ')+'.',
                 atomicUnavailable
-                  ? 'ATOMIC is mechanically unavailable because this exact node already exhausted its bounded atomic execution. You must choose SPLIT or NEED_CONTEXT yourself.'
+                  ? 'ATOMIC is mechanically unavailable because this exact node already exhausted its bounded atomic execution.'
                   : 'ATOMIC remains available if you judge the requirement genuinely bounded.',
+                'Mechanical decomposition budget: structural branch depth '+normalizedBranchDepth+' of '+MAX_BRANCH_DEPTH+'; consecutive single-child refinements '+singleChildRefinements+' of '+MAX_SINGLE_CHILD_REFINEMENTS+'.',
+                structuralBranchingAvailable
+                  ? 'A SPLIT may create multiple children if your reasoning requires it.'
+                  : (singleRefinementAvailable
+                    ? 'Structural branch depth is exhausted. SPLIT remains available only as exactly ONE genuinely narrower refinement child; it may not create multiple children.'
+                    : 'Structural branch depth and the single-child refinement budget are both exhausted, so SPLIT is mechanically unavailable.'),
                 'Before deciding, interrogate semantic equivalence, definitions, time horizons, populations/scopes, proxy metrics, evidence sufficiency, assumptions, and unresolved gaps.',
                 'Do not treat a nearby metric or label as equivalent unless YOU can justify the equivalence from supplied evidence.',
                 'Do not solve the requirement or author child requirements in this pass.',
@@ -381,6 +398,14 @@ export async function runAutonomousRequirementCognition({
                 supplied_context:contextPayload,
                 available_context_index:idx,
                 available_decisions:availableDecisions,
+                runtime_resource_constraints:{
+                  structural_branch_depth:normalizedBranchDepth,
+                  max_structural_branch_depth:MAX_BRANCH_DEPTH,
+                  multi_child_split_available:structuralBranchingAvailable,
+                  single_child_refinements_used:singleChildRefinements,
+                  max_single_child_refinements:MAX_SINGLE_CHILD_REFINEMENTS,
+                  single_child_refinement_available:singleRefinementAvailable,
+                },
               })},
             ],10000,'req_'+node.node_path.replaceAll('.','_')+'_discovery_'+(round+1)+'_'+attempt);
 
@@ -405,6 +430,12 @@ export async function runAutonomousRequirementCognition({
               force_reconsider:Boolean(forceReconsider),
               atomic_unavailable:atomicUnavailable,
               atomic_execution_failures:atomicExecutionFailures,
+              structural_branch_depth:normalizedBranchDepth,
+              max_structural_branch_depth:MAX_BRANCH_DEPTH,
+              multi_child_split_available:structuralBranchingAvailable,
+              single_child_refinements_used:singleChildRefinements,
+              max_single_child_refinements:MAX_SINGLE_CHILD_REFINEMENTS,
+              single_child_refinement_available:singleRefinementAvailable,
             };
 
             node=await saveNode({
@@ -576,14 +607,19 @@ export async function runAutonomousRequirementCognition({
     throw new Error('autonomous_decomposition_context_round_limit:'+node.node_path);
   }
 
-  async function authorChildren(node){
+  async function authorChildren(node,{branchDepth=0,singleChildRefinements=0}={}){
     const allExisting=await children(node.node_path);
     const existing=allExisting.filter((child)=>String(child?.status||'')!=='cancelled');
     if(existing.length)return existing;
 
     const authored=[];
+    const normalizedBranchDepth=Math.max(0,Math.min(Number(branchDepth)||0,MAX_BRANCH_DEPTH));
+    const structuralBranchingAvailable=normalizedBranchDepth<MAX_BRANCH_DEPTH;
+    const singleRefinementAvailable=singleChildRefinements<MAX_SINGLE_CHILD_REFINEMENTS;
+    const maxChildrenThisSplit=structuralBranchingAvailable?MAX_CHILDREN_PER_NODE:(singleRefinementAvailable?1:0);
+    if(maxChildrenThisSplit<1)throw new Error('autonomous_decomposition_split_mode_unavailable:'+node.node_path);
     const startOrdinal=Math.max(0,...allExisting.map((child)=>Number(child?.ordinal||0)))+1;
-    for(let offset=0;offset<MAX_CHILDREN_PER_NODE;offset++){
+    for(let offset=0;offset<maxChildrenThisSplit;offset++){
       const ordinal=startOrdinal+offset;
       const previous=authored.map(c=>({ordinal:c.ordinal,requirement:c.requirement_text}));
       let parsed=null;
@@ -598,13 +634,23 @@ export async function runAutonomousRequirementCognition({
               'Every child must materially reduce the parent scope. State what scope is removed and give a concrete completion criterion.',
               'Do not solve the child here.',
               'Return JSON only: {"status":"CHILD","requirement":"...","scope_removed":"...","completion_criterion":"...","reason":"brief"} OR {"status":"DONE","coverage_note":"brief"}.',
-              'There is no required number of children. One child is valid only when it is a genuinely narrower refinement; do not merely restate the parent. Use as many or as few as your reasoning requires.',
+              structuralBranchingAvailable
+                ? 'There is no required number of children. One child is valid only when it is a genuinely narrower refinement; do not merely restate the parent. Use as many or as few as your reasoning requires.'
+                : 'MECHANICAL DEPTH CONSTRAINT: structural branch depth is exhausted. You chose SPLIT knowing this split may author exactly ONE genuinely narrower refinement child. Do not author sibling branches.',
             ].join('\n')},
             {role:'user',content:safeJson({
               parent_requirement:node.requirement_text,
               agent_authored_discovery_state:agentDiscoveryState(node),
               supplied_context:node.context_payload||{},
               previously_authored_children:previous,
+              runtime_resource_constraints:{
+                structural_branch_depth:normalizedBranchDepth,
+                max_structural_branch_depth:MAX_BRANCH_DEPTH,
+                multi_child_split_available:structuralBranchingAvailable,
+                max_children_this_split:maxChildrenThisSplit,
+                single_child_refinements_used:singleChildRefinements,
+                max_single_child_refinements:MAX_SINGLE_CHILD_REFINEMENTS,
+              },
             })},
           ],900,'req_'+node.node_path.replaceAll('.','_')+'_author_child_'+ordinal+'_'+attempt);
           const candidate=response?.parsed;
@@ -668,6 +714,24 @@ export async function runAutonomousRequirementCognition({
       child.parent_path=node.node_path;
       authored.push(child);
       counters.nodes++;
+      if(!structuralBranchingAvailable&&authored.length===1){
+        await saveNode({
+          nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
+          requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
+          status:'split',decisionType:'SPLIT',
+          decisionPayload:{
+            ...(node.decision_payload||{}),
+            child_count:1,
+            children_authored:true,
+            mechanical_depth_constraint_applied:true,
+            structural_branch_depth:normalizedBranchDepth,
+            max_structural_branch_depth:MAX_BRANCH_DEPTH,
+            max_children_this_split:1,
+          },
+          contextPayload:node.context_payload||{},resultArtifact:null,
+        });
+        return authored;
+      }
     }
     throw new Error('autonomous_decomposition_child_resource_limit:'+node.node_path);
   }
@@ -982,7 +1046,10 @@ export async function runAutonomousRequirementCognition({
   }
 
   async function process(nodePath,parentPath=null,branchDepth=0,singleChildRefinements=0){
-    if(branchDepth>MAX_BRANCH_DEPTH)throw new Error('autonomous_decomposition_branch_depth_resource_limit:'+nodePath);
+    // Structural depth counts actual multi-child branching only. Legacy callers may
+    // arrive with an over-counted value; clamp that runtime accounting instead of
+    // killing the wake and expose the ceiling to the agent as a mechanical constraint.
+    branchDepth=Math.max(0,Math.min(Number(branchDepth)||0,MAX_BRANCH_DEPTH));
     let node=await getNode(nodePath);
     if(node?.status!=='ready')throw new Error('autonomous_decomposition_node_missing:'+nodePath);
     node.parent_path=parentPath;
@@ -993,7 +1060,7 @@ export async function runAutonomousRequirementCognition({
     for(let transitions=0;transitions<8;transitions++){
       if(node.node_status==='split'||node.decision_type==='SPLIT'){
         let kids=(await children(node.node_path)).filter((child)=>String(child?.status||'')!=='cancelled');
-        if(!kids.length)kids=await authorChildren(node);
+        if(!kids.length)kids=await authorChildren(node,{branchDepth,singleChildRefinements});
         if(kids.length===1&&singleChildRefinements>=MAX_SINGLE_CHILD_REFINEMENTS){
           const child=kids[0];
           await saveNode({
@@ -1050,10 +1117,11 @@ export async function runAutonomousRequirementCognition({
             routed.parent_path=node.node_path;
           }
           const singleChild=kids.length===1;
+          const nextBranchDepth=singleChild?branchDepth:Math.min(MAX_BRANCH_DEPTH,branchDepth+1);
           const done=await process(
             child.node_path,
             node.node_path,
-            branchDepth+1,
+            nextBranchDepth,
             singleChild?singleChildRefinements+1:0
           );
           if(done.node_status!=='completed')throw new Error('autonomous_decomposition_child_not_complete:'+child.node_path);
@@ -1063,7 +1131,7 @@ export async function runAutonomousRequirementCognition({
       }
 
       const forceReconsider=Boolean(node?.decision_payload?.reconsider_decomposition);
-      const decision=await decide(node,{forceReconsider});
+      const decision=await decide(node,{forceReconsider,branchDepth,singleChildRefinements});
       node=decision.node;
       node.parent_path=parentPath;
 
@@ -1108,7 +1176,7 @@ export async function runAutonomousRequirementCognition({
       nodes_touched:counters.nodes,
       model_calls:counters.model_calls,
       context_requests:counters.context_requests,
-      convergence_policy:'branch_depth_v0_3_atomic_lock_single_child_contraction',
+      convergence_policy:'branch_depth_v0_4_structural_only_agent_visible_ceiling',
       cognitive_continuity_policy:'agent_discovery_restore_and_reconcile_v0_1',
       routing_protocol:'deep_discovery_then_commit_v0_1',
       decomposition_authored_by_bound_agent:true,
