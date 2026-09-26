@@ -754,12 +754,12 @@ export async function runAutonomousRequirementCognition({
     Math.min(Math.floor(Number(requested)||1),operationalOutputCeiling)
   );
   const stageBudgets=Object.freeze({
-    child_formulation:stageOutputTokens(stageBudgets.child_formulation),
+    child_formulation:stageOutputTokens(CHILD_FORMULATION_DEEP_TOKENS),
     child_provenance_review:stageOutputTokens(CHILD_PROVENANCE_REVIEW_DEEP_TOKENS),
-    atomic_execution:stageOutputTokens(stageBudgets.atomic_execution),
-    atomic_reconciliation:stageOutputTokens(stageBudgets.atomic_reconciliation),
-    synthesis_merge:stageOutputTokens(stageBudgets.synthesis_merge),
-    synthesis_final:stageOutputTokens(stageBudgets.synthesis_final),
+    atomic_execution:stageOutputTokens(ATOMIC_EXECUTION_DEEP_TOKENS),
+    atomic_reconciliation:stageOutputTokens(ATOMIC_RECONCILIATION_DEEP_TOKENS),
+    synthesis_merge:stageOutputTokens(SYNTHESIS_MERGE_DEEP_TOKENS),
+    synthesis_final:stageOutputTokens(SYNTHESIS_FINAL_DEEP_TOKENS),
     synthesis_provenance_review:stageOutputTokens(SYNTHESIS_PROVENANCE_REVIEW_DEEP_TOKENS),
   });
   const rootReq=extractTriggerRequirement(packet);
