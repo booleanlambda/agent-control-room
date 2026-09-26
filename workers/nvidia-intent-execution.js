@@ -1654,6 +1654,7 @@ async function callWithCognitionIntegrity(call, audit = null) {
 async function completeStructured(model, messages, { maxTokens = 4096, timeoutMs = null, audit = null } = {}) {
   return callWithCognitionIntegrity(() => nvidiaChatCompletion({
     model, messages, maxTokens, temperature: 0.2, jsonMode: true, enableThinking: false, timeoutMs, runtimeRole:'serializer',
+    usageContext:audit,
   }), audit);
 }
 
@@ -1661,12 +1662,14 @@ async function completeDeepPass(model, messages, maxTokens = 3000, audit = null)
   return callWithCognitionIntegrity(() => nvidiaChatCompletion({
     model, messages, maxTokens, temperature: 0.15,
     jsonMode: false, enableThinking: true, timeoutMs: 300000, runtimeRole:'agent',
+    usageContext:audit,
   }), audit);
 }
 
 async function completeDeepFallback(model, messages, maxTokens = 3000, audit = null) {
   return callWithCognitionIntegrity(() => nvidiaChatCompletion({
     model, messages, maxTokens, temperature: 0.15, jsonMode: false, enableThinking: false, runtimeRole:'agent',
+    usageContext:audit,
   }), audit);
 }
 
@@ -1708,6 +1711,7 @@ async function cognitionStepCheckpoint({agentId,intentExecutionId,assignmentKey,
 async function completeDeepJson(model, messages, maxTokens, audit) {
   const result = await callWithCognitionIntegrity(() => nvidiaChatCompletion({
     model,messages,maxTokens,temperature:0.1,jsonMode:true,enableThinking:true,timeoutMs:900000,runtimeRole:'agent',
+    usageContext:audit,
   }), audit);
   let parsed = null;
   try { parsed = JSON.parse(String(result.content || '')); }
@@ -1735,6 +1739,7 @@ async function completeRoutingJson(model, messages, maxTokens, audit) {
   const result = await callWithCognitionIntegrity(() => nvidiaChatCompletion({
     model,messages,maxTokens:requested,
     temperature:0.1,jsonMode:true,enableThinking:true,timeoutMs:900000,runtimeRole:'agent',
+    usageContext:audit,
   }), audit);
   let parsed=null;
   try { parsed=JSON.parse(String(result.content || '')); }
@@ -1760,6 +1765,7 @@ async function completeProtocolSerializeJson(model, messages, maxTokens, audit) 
   const result = await callWithCognitionIntegrity(() => nvidiaChatCompletion({
     model,messages,maxTokens:Math.min(Math.max(300,Number(maxTokens)||700),900),
     temperature:0,jsonMode:true,enableThinking:false,timeoutMs:120000,runtimeRole:'serializer',
+    usageContext:audit,
   }), audit);
   let parsed=null;
   try { parsed=JSON.parse(String(result.content || '')); }
