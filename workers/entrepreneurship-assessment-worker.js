@@ -1,5 +1,7 @@
 import { withReviewerNvidiaSlot, noteReviewerModelTimeout, noteReviewerModelSuccess, isReviewerModelInBackoff } from './reviewer-nvidia-endpoint-gate.js';
 import { createHash } from 'node:crypto';
+import { nvidiaChatCompletion } from './providers/nvidia.js';
+import { getModelRuntimeProfile } from './model-runtime-profiles.js';
 
 const SB=String(process.env.AAU_SUPABASE_URL||'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/,'');
 const anon=String(process.env.AAU_SUPABASE_ANON_KEY||'').trim();
@@ -107,23 +109,21 @@ async function modelCall(model,taskType,payload){
     : `Conduct a comprehensive independent final review of the entrepreneurship master's-equivalent record. Test integration across disciplines and whether the venture reasoning would survive an adversarial board/investment-committee discussion. A final pass requires score >=0.85 and no critical failure.\n\nPAYLOAD:\n${reviewInput.serialized}`;
 
   return withReviewerNvidiaSlot('entrepreneurship_assessment',async()=>{
-    const controller=new AbortController(); const begun=Date.now();
-    const timeout=setTimeout(()=>controller.abort(),180000);
+    const begun=Date.now();
     try{
-      const body={
-        model,messages:[{role:'system',content:system},{role:'user',content:user}],
-        temperature:0,max_tokens:1800,stream:false,response_format:{type:'json_object'}
-      };
-      if(model.startsWith('nvidia/nemotron')) body.chat_template_kwargs={enable_thinking:false};
-      const r=await fetch('https://integrate.api.nvidia.com/v1/chat/completions',{
-        method:'POST',signal:controller.signal,
-        headers:{authorization:`Bearer ${nvidiaKey}`,'content-type':'application/json',accept:'application/json','user-agent':'AAU-Entrepreneurship-Assessor/0.1'},
-        body:JSON.stringify(body)
+      const profile=getModelRuntimeProfile(model);
+      const result=await nvidiaChatCompletion({
+        model,
+        messages:[{role:'system',content:system},{role:'user',content:user}],
+        maxTokens:1800,
+        temperature:0,
+        jsonMode:profile.supports_json_mode===true,
+        enableThinking:String(model).startsWith('nvidia/nemotron')?false:null,
+        timeoutMs:180000,
+        runtimeRole:'reviewer',
       });
-      const parsed=await jsonResponse(r);
-      if(!r.ok) throw new Error(`nvidia_${r.status}:${parsed.body?.error?.message||parsed.raw.slice(0,500)}`);
       noteReviewerModelSuccess(model);
-      const txt=String(parsed.body?.choices?.[0]?.message?.content||'').trim();
+      const txt=String(result.content||result.reasoning_content||'').trim();
       let grade; try{grade=JSON.parse(txt);}catch{
         const s=txt.indexOf('{'),e=txt.lastIndexOf('}'); if(s<0||e<=s) throw new Error('assessor_json_missing');
         grade=JSON.parse(txt.slice(s,e+1));
@@ -151,11 +151,21 @@ async function modelCall(model,taskType,payload){
         };
       }
       if(grade?.critical_failure===true && score>=0.80) grade.score=Math.min(score,0.69);
-      return {score:Number(grade.score),grade,model:parsed.body?.model||model,latency_ms:Date.now()-begun,reviewAudit:reviewInput.audit};
+      return {
+        score:Number(grade.score),
+        grade,
+        model:result.model_returned||model,
+        latency_ms:Date.now()-begun,
+        reviewAudit:reviewInput.audit,
+        runtime_contract:result.runtime_contract||null,
+      };
     }catch(error){
-      if(error?.name==='AbortError'){noteReviewerModelTimeout(model); throw new Error('entrepreneurship_assessor_timeout');}
+      if(error?.name==='AbortError'){
+        noteReviewerModelTimeout(model);
+        throw new Error('entrepreneurship_assessor_timeout');
+      }
       throw error;
-    }finally{clearTimeout(timeout);}
+    }
   });
 }
 
