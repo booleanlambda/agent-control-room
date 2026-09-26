@@ -10,7 +10,7 @@ export const MODEL_RUNTIME_PROFILES = Object.freeze({
   'google/gemma-4-31b-it': Object.freeze({
     provider: 'nvidia',
     declared_context_window_tokens: 131072,
-    operational_context_limit_tokens: 131072,
+    operational_context_limit_tokens: 114688,
     max_output_tokens: 16384,
     input_safety_margin_tokens: 8192,
     estimated_chars_per_token: 3.2,
@@ -18,7 +18,7 @@ export const MODEL_RUNTIME_PROFILES = Object.freeze({
     reasoning_counts_against_output: true,
     supports_json_mode: true,
     max_request_timeout_ms: 900000,
-    profile_source: 'provider_observed_context_limit_2026-09-26',
+    profile_source: 'provider_observed_131072_with_calibrated_operational_headroom_2026-09-26',
   }),
   'nvidia/nemotron-3.5-lightning-30b-a3b': Object.freeze({
     provider: 'nvidia',
