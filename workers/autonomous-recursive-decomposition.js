@@ -5,7 +5,12 @@ const MAX_BRANCH_DEPTH=12;
 const MAX_SINGLE_CHILD_REFINEMENTS=4;
 const MAX_ATOMIC_EXECUTION_FAILURES=1;
 const MAX_CHILDREN_PER_NODE=16;
-const MAX_CONTEXT_ROUNDS=4;
+const MAX_CONTEXT_RESEARCH_ROUNDS=12;
+const MAX_CONTEXT_STAGNANT_ROUNDS=2;
+const MAX_CONTEXT_UNCHANGED_GAP_ROUNDS=3;
+const MAX_CONTEXT_REPEAT_REQUEST_ROUNDS=2;
+const MAX_CONTEXT_ELAPSED_MS=30*60*1000;
+const MAX_CONTEXT_UNIQUE_SOURCES=250;
 const MAX_CONTEXT_REQUESTS_PER_ROUND=8;
 const MAX_CONTEXT_VALUE_BYTES=12000;
 const MAX_PERSISTED_CONTEXT_BYTES=52000;
@@ -33,6 +38,41 @@ function mergeResearchSourceCatalog(existing,incoming){
     out.push(item);
   }
   return out;
+}
+function normalizedSignal(values){
+  return asArray(values).map(v=>normalizedRequirement(v)).filter(Boolean).sort().join(' | ');
+}
+function contextResourceView(state,contextPayload){
+  const s=asObject(state);
+  const startedMs=Date.parse(text(s.started_at));
+  const elapsedMs=Number.isFinite(startedMs)?Math.max(0,Date.now()-startedMs):0;
+  const uniqueSources=asArray(contextPayload?.research_source_catalog).length;
+  const reasons=[];
+  if(Number(s.context_rounds_attempted||0)>=MAX_CONTEXT_RESEARCH_ROUNDS)
+    reasons.push('absolute_context_round_safety_ceiling');
+  if(Number(s.stagnant_rounds||0)>=MAX_CONTEXT_STAGNANT_ROUNDS)
+    reasons.push('no_new_observations');
+  if(Number(s.unchanged_gap_rounds||0)>=MAX_CONTEXT_UNCHANGED_GAP_ROUNDS)
+    reasons.push('unresolved_gap_not_changing');
+  if(Number(s.repeated_request_rounds||0)>=MAX_CONTEXT_REPEAT_REQUEST_ROUNDS)
+    reasons.push('research_request_repeating');
+  if(elapsedMs>=MAX_CONTEXT_ELAPSED_MS)
+    reasons.push('context_acquisition_elapsed_time_ceiling');
+  if(uniqueSources>=MAX_CONTEXT_UNIQUE_SOURCES)
+    reasons.push('unique_source_safety_ceiling');
+  return {
+    available:reasons.length===0,
+    exhausted:reasons.length>0,
+    reasons,
+    elapsed_ms:elapsedMs,
+    unique_sources:uniqueSources,
+    context_rounds_attempted:Number(s.context_rounds_attempted||0),
+    research_rounds_attempted:Number(s.research_rounds_attempted||0),
+    local_context_rounds_attempted:Number(s.local_context_rounds_attempted||0),
+    stagnant_rounds:Number(s.stagnant_rounds||0),
+    unchanged_gap_rounds:Number(s.unchanged_gap_rounds||0),
+    repeated_request_rounds:Number(s.repeated_request_rounds||0),
+  };
 }
 function normalizedRequirement(v){
   return text(v).toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
@@ -387,7 +427,35 @@ export async function runAutonomousRequirementCognition({
     const singleRefinementAvailable=singleChildRefinements<MAX_SINGLE_CHILD_REFINEMENTS;
     const splitAvailable=structuralBranchingAvailable||singleRefinementAvailable;
 
-    for(let round=0;round<MAX_CONTEXT_ROUNDS;round++){
+    let contextState=asObject(node?.decision_payload?.context_resource_state);
+    if(contextState.version!=='agent_visible_context_resource_v0_1'){
+      const legacyRounds=Math.max(
+        0,
+        Number(node?.decision_payload?.context_round??-1)+1,
+        Object.keys(contextPayload).filter(key=>/^external_research_round_\d+$/.test(key)).length
+      );
+      contextState={
+        version:'agent_visible_context_resource_v0_1',
+        started_at:new Date().toISOString(),
+        context_rounds_attempted:legacyRounds,
+        research_rounds_attempted:legacyRounds,
+        local_context_rounds_attempted:0,
+        stagnant_rounds:0,
+        unchanged_gap_rounds:0,
+        repeated_request_rounds:0,
+        total_new_sources:0,
+        total_new_local_context_paths:0,
+        last_gap_signal:null,
+        last_request_signal:null,
+      };
+    }
+
+    while(true){
+      const resourceView=contextResourceView(contextState,contextPayload);
+      const availableDecisions=['ATOMIC','SPLIT',resourceView.available?'NEED_CONTEXT':'BLOCKED']
+        .filter(v=>!(v==='ATOMIC'&&atomicUnavailable))
+        .filter(v=>!(v==='SPLIT'&&!splitAvailable));
+
       const contextFingerprint=sha256({
         node_path:node.node_path,
         requirement:node.requirement_text,
@@ -401,30 +469,33 @@ export async function runAutonomousRequirementCognition({
         single_child_refinements_used:singleChildRefinements,
         max_single_child_refinements:MAX_SINGLE_CHILD_REFINEMENTS,
         single_refinement_available:singleRefinementAvailable,
+        context_resource_available:resourceView.available,
+        context_resource_reasons:resourceView.reasons,
+        context_rounds_attempted:resourceView.context_rounds_attempted,
+        stagnant_rounds:resourceView.stagnant_rounds,
+        unchanged_gap_rounds:resourceView.unchanged_gap_rounds,
+        repeated_request_rounds:resourceView.repeated_request_rounds,
+        unique_sources:resourceView.unique_sources,
       });
 
       const priorPayload=asObject(node.decision_payload);
       const priorDiscovery=asObject(priorPayload.routing_discovery_checkpoint);
+      const priorDecision=text(priorDiscovery.decision).toUpperCase();
       const reusableDiscovery=
         priorDiscovery.version==='agent_deep_discovery_v0_1'
         && priorDiscovery.context_fingerprint===contextFingerprint
-        && ['ATOMIC','SPLIT','NEED_CONTEXT'].includes(text(priorDiscovery.decision).toUpperCase())
-        && !(atomicUnavailable&&text(priorDiscovery.decision).toUpperCase()==='ATOMIC')
-        && !(text(priorDiscovery.decision).toUpperCase()==='SPLIT'&&!splitAvailable);
+        && availableDecisions.includes(priorDecision);
 
       let discovery=reusableDiscovery?priorDiscovery:null;
 
       if(!discovery){
         for(let attempt=1;attempt<=2;attempt++){
           try{
-            const availableDecisions=['ATOMIC','SPLIT','NEED_CONTEXT']
-              .filter(v=>!(v==='ATOMIC'&&atomicUnavailable))
-              .filter(v=>!(v==='SPLIT'&&!splitAvailable));
             const response=await callJson([
               {role:'system',content:[
                 'You are the bound autonomous agent performing a DEEP DISCOVERY pass for ONE requirement.',
                 'Thinking is enabled. This pass is where YOU determine what the requirement means and what action YOU intend to take.',
-                'The runtime does not choose, reinterpret, decompose, or repair the requirement for you.',
+                'The runtime does not choose, reinterpret, decompose, repair, or declare the requirement blocked for you.',
                 'Available decisions for this exact node: '+availableDecisions.join(', ')+'.',
                 atomicUnavailable
                   ? 'ATOMIC is mechanically unavailable because this exact node already exhausted its bounded atomic execution.'
@@ -435,11 +506,14 @@ export async function runAutonomousRequirementCognition({
                   : (singleRefinementAvailable
                     ? 'Structural branch depth is exhausted. SPLIT remains available only as exactly ONE genuinely narrower refinement child; it may not create multiple children.'
                     : 'Structural branch depth and the single-child refinement budget are both exhausted, so SPLIT is mechanically unavailable.'),
+                resourceView.available
+                  ? 'Context/research acquisition remains mechanically available. NEED_CONTEXT is valid only when another retrieval or exact context lookup can materially reduce a stated gap.'
+                  : 'CONTEXT RESOURCE CONSTRAINT: further context/research acquisition is mechanically unavailable for this node because: '+resourceView.reasons.join(', ')+'. Do not request more context or research. BLOCKED is available if the remaining evidence gap prevents honest completion; ATOMIC or SPLIT remain yours to choose when mechanically available.',
                 'Before deciding, interrogate semantic equivalence, definitions, time horizons, populations/scopes, proxy metrics, evidence sufficiency, assumptions, and unresolved gaps.',
                 'Do not treat a nearby metric or label as equivalent unless YOU can justify the equivalence from supplied evidence.',
-                'When supplied_context contains research_source_catalog, treat it as the complete discoverable source index for prior research rounds. If a source is indexed but its excerpt is insufficient, request its exact listed HTTPS URL rather than assuming it is unavailable.',
+                'When supplied_context contains research_source_catalog, treat it as the complete discoverable source index for prior research rounds. If context acquisition is available and a source is indexed but its excerpt is insufficient, request its exact listed HTTPS URL rather than assuming it is unavailable.',
                 'Do not solve the requirement or author child requirements in this pass.',
-                'Return complete JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT","reason":"auditable reason","requirement_interpretation":"what this requirement actually demands","evidence_assessment":"what the current evidence does and does not establish","unresolved_gaps":["..."],"context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."]}.',
+                'Return complete JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT|BLOCKED","reason":"auditable reason","requirement_interpretation":"what this requirement actually demands","evidence_assessment":"what the current evidence does and does not establish","unresolved_gaps":["..."],"context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."]}.',
                 forceReconsider
                   ? 'A prior atomic execution was rejected or exhausted. Reconsider the requirement under the persisted constraints rather than repeating the failed action.'
                   : '',
@@ -459,9 +533,20 @@ export async function runAutonomousRequirementCognition({
                   single_child_refinements_used:singleChildRefinements,
                   max_single_child_refinements:MAX_SINGLE_CHILD_REFINEMENTS,
                   single_child_refinement_available:singleRefinementAvailable,
+                  context_acquisition_available:resourceView.available,
+                  context_acquisition_exhausted:resourceView.exhausted,
+                  context_exhaustion_reasons:resourceView.reasons,
+                  context_rounds_attempted:resourceView.context_rounds_attempted,
+                  research_rounds_attempted:resourceView.research_rounds_attempted,
+                  local_context_rounds_attempted:resourceView.local_context_rounds_attempted,
+                  stagnant_rounds:resourceView.stagnant_rounds,
+                  unchanged_gap_rounds:resourceView.unchanged_gap_rounds,
+                  repeated_request_rounds:resourceView.repeated_request_rounds,
+                  elapsed_context_acquisition_ms:resourceView.elapsed_ms,
+                  unique_research_sources:resourceView.unique_sources,
                 },
               })},
-            ],10000,'req_'+node.node_path.replaceAll('.','_')+'_discovery_'+(round+1)+'_'+attempt);
+            ],10000,'req_'+node.node_path.replaceAll('.','_')+'_discovery_'+(resourceView.context_rounds_attempted+1)+'_'+attempt);
 
             const candidate=asObject(response?.parsed);
             const candidateDecision=text(candidate.decision).toUpperCase();
@@ -490,6 +575,7 @@ export async function runAutonomousRequirementCognition({
               single_child_refinements_used:singleChildRefinements,
               max_single_child_refinements:MAX_SINGLE_CHILD_REFINEMENTS,
               single_child_refinement_available:singleRefinementAvailable,
+              context_resource_state:resourceView,
             };
 
             node=await saveNode({
@@ -503,10 +589,11 @@ export async function runAutonomousRequirementCognition({
               decisionType:null,
               decisionPayload:{
                 ...(node.decision_payload||{}),
+                context_resource_state:contextState,
                 routing_discovery_checkpoint:discovery,
                 routing_discovery_checkpointed:true,
                 routing_discovery_checkpointed_at:new Date().toISOString(),
-                routing_protocol:'deep_discovery_then_commit_v0_1',
+                routing_protocol:'deep_discovery_then_commit_v0_2_agent_visible_context_resource',
               },
               contextPayload,
               resultArtifact:node.result_artifact||null,
@@ -531,7 +618,7 @@ export async function runAutonomousRequirementCognition({
               'You are serializing YOUR ALREADY-COMPLETED durable routing decision into the AAU protocol.',
               'Do not rethink, reinterpret, improve, or change the saved decision.',
               'Copy the saved decision faithfully into the required JSON shape.',
-              'Return JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT","reason":"...","context_requests":[],"research_queries":[],"research_urls":[]}.',
+              'Return JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT|BLOCKED","reason":"...","context_requests":[],"research_queries":[],"research_urls":[]}.',
             ].join('\n')},
             {role:'user',content:safeJson({
               saved_discovery_decision:{
@@ -542,7 +629,7 @@ export async function runAutonomousRequirementCognition({
                 research_urls:discovery.research_urls,
               }
             })},
-          ],700,'req_'+node.node_path.replaceAll('.','_')+'_routing_commit_'+(round+1)+'_'+attempt);
+          ],700,'req_'+node.node_path.replaceAll('.','_')+'_routing_commit_'+(resourceView.context_rounds_attempted+1)+'_'+attempt);
 
           const candidate=asObject(response?.parsed);
           if(text(candidate.decision).toUpperCase()!==discovery.decision){
@@ -560,8 +647,6 @@ export async function runAutonomousRequirementCognition({
 
       if(!serialized)throw new Error('autonomous_decomposition_routing_commit_missing:'+node.node_path);
 
-      // The durable deep-discovery checkpoint is authoritative. The serialization
-      // call is protocol packaging only and cannot alter substantive agent cognition.
       const decision=discovery.decision;
       const decisionPayload={
         ...(node.decision_payload||{}),
@@ -569,17 +654,21 @@ export async function runAutonomousRequirementCognition({
         requirement_interpretation:discovery.requirement_interpretation,
         evidence_assessment:discovery.evidence_assessment,
         unresolved_gaps:discovery.unresolved_gaps,
-        context_round:round,
+        context_round:contextState.context_rounds_attempted,
+        context_resource_state:contextState,
         force_reconsider:Boolean(forceReconsider),
         atomic_execution_failures:atomicExecutionFailures,
         atomic_unavailable:atomicUnavailable,
         routing_discovery_checkpoint:discovery,
         routing_discovery_reused:Boolean(reusableDiscovery),
         routing_commit_serialized:true,
-        routing_protocol:'deep_discovery_then_commit_v0_1',
+        routing_protocol:'deep_discovery_then_commit_v0_2_agent_visible_context_resource',
       };
 
       if(decision==='NEED_CONTEXT'){
+        if(!resourceView.available)
+          throw new Error('autonomous_decomposition_context_action_protocol_violation:'+node.node_path);
+
         const requests=discovery.context_requests;
         const researchQueries=discovery.research_queries;
         const researchUrls=discovery.research_urls;
@@ -587,7 +676,13 @@ export async function runAutonomousRequirementCognition({
           throw new Error('autonomous_decomposition_context_request_empty:'+node.node_path);
 
         counters.context_requests+=requests.length+researchQueries.length+researchUrls.length;
+
+        const beforeCatalogCount=asArray(contextPayload.research_source_catalog).length;
         const resolved=resolveContext(packet,requests,contextPayload);
+        const newLocalContextPaths=Object.entries(resolved)
+          .filter(([path,value])=>value?.available&&!Object.prototype.hasOwnProperty.call(contextPayload,path))
+          .length;
+
         let researchObserved=null;
         if((researchQueries.length||researchUrls.length)&&typeof researchContext==='function'){
           researchObserved=await researchContext({
@@ -598,15 +693,63 @@ export async function runAutonomousRequirementCognition({
         }else if(researchQueries.length||researchUrls.length){
           researchObserved={status:'unavailable',reason:'research_runtime_not_configured'};
         }
+
         const researchCatalog=researchObserved
           ? mergeResearchSourceCatalog(contextPayload.research_source_catalog,researchObserved.source_index)
           : asArray(contextPayload.research_source_catalog);
+        const newSourceCount=Math.max(0,researchCatalog.length-beforeCatalogCount);
+
+        const gapSignal=normalizedSignal(discovery.unresolved_gaps);
+        const requestSignal=normalizedSignal([
+          ...requests,
+          ...researchQueries,
+          ...researchUrls,
+        ]);
+        const gapSimilarity=contextState.last_gap_signal
+          ? requirementSimilarity(contextState.last_gap_signal,gapSignal)
+          : 0;
+        const requestSimilarity=contextState.last_request_signal
+          ? requirementSimilarity(contextState.last_request_signal,requestSignal)
+          : 0;
+        const productive=(newSourceCount>0||newLocalContextPaths>0);
+
+        contextState={
+          ...contextState,
+          version:'agent_visible_context_resource_v0_1',
+          context_rounds_attempted:Number(contextState.context_rounds_attempted||0)+1,
+          research_rounds_attempted:Number(contextState.research_rounds_attempted||0)+((researchQueries.length||researchUrls.length)?1:0),
+          local_context_rounds_attempted:Number(contextState.local_context_rounds_attempted||0)+(requests.length?1:0),
+          stagnant_rounds:productive?0:Number(contextState.stagnant_rounds||0)+1,
+          unchanged_gap_rounds:contextState.last_gap_signal&&gapSimilarity>=0.88
+            ? Number(contextState.unchanged_gap_rounds||0)+1
+            : 0,
+          repeated_request_rounds:contextState.last_request_signal&&requestSimilarity>=0.90
+            ? Number(contextState.repeated_request_rounds||0)+1
+            : 0,
+          total_new_sources:Number(contextState.total_new_sources||0)+newSourceCount,
+          total_new_local_context_paths:Number(contextState.total_new_local_context_paths||0)+newLocalContextPaths,
+          last_gap_signal:gapSignal||null,
+          last_request_signal:requestSignal||null,
+          last_round:{
+            at:new Date().toISOString(),
+            new_sources:newSourceCount,
+            new_local_context_paths:newLocalContextPaths,
+            gap_similarity:Number(gapSimilarity.toFixed(4)),
+            request_similarity:Number(requestSimilarity.toFixed(4)),
+            research_status:researchObserved?.status||null,
+            audit_batch_id:researchObserved?.audit_batch_id||null,
+          },
+        };
+
+        const researchRoundNumber=contextState.context_rounds_attempted;
         contextPayload={
           ...contextPayload,
           ...resolved,
           ...(researchCatalog.length?{research_source_catalog:researchCatalog}:{}),
-          ...(researchObserved?{['external_research_round_'+(round+1)]:researchObserved}:{}),
+          ...(researchObserved?{['external_research_round_'+researchRoundNumber]:researchObserved}:{}),
         };
+
+        const nextResourceView=contextResourceView(contextState,contextPayload);
         node=await saveNode({
           nodePath:node.node_path,
           parentPath:node.parent_path??parentPathOf(node.node_path),
@@ -618,9 +761,11 @@ export async function runAutonomousRequirementCognition({
           decisionType:'NEED_CONTEXT',
           decisionPayload:{
             ...decisionPayload,
+            context_resource_state:contextState,
             context_requests:requests,
             research_queries:researchQueries,
             research_urls:researchUrls,
+            context_resource_after_round:nextResourceView,
           },
           contextPayload,
           resultArtifact:node.result_artifact||null,
@@ -636,15 +781,49 @@ export async function runAutonomousRequirementCognition({
           decisionType:'NEED_CONTEXT',
           decisionPayload:{
             ...decisionPayload,
+            context_resource_state:contextState,
             context_requests:requests,
             research_queries:researchQueries,
             research_urls:researchUrls,
             context_supplied:true,
+            context_resource_after_round:nextResourceView,
           },
           contextPayload,
           resultArtifact:node.result_artifact||null,
         });
         continue;
+      }
+
+      if(decision==='BLOCKED'){
+        const resultArtifact=JSON.stringify({
+          status:'BLOCKED',
+          artifact:discovery.reason||'Requirement blocked because the bound agent determined the remaining evidence gap prevents honest completion under the available runtime resources.',
+          handoff:{
+            conclusions:[],
+            facts:[],
+            unresolved:discovery.unresolved_gaps,
+          },
+        });
+        node=await saveNode({
+          nodePath:node.node_path,
+          parentPath:node.parent_path??parentPathOf(node.node_path),
+          ordinal:node.ordinal||0,
+          requirement:node.requirement_text,
+          sourceKind:node.source_kind,
+          sourceRef:node.source_ref,
+          status:'blocked',
+          decisionType:'BLOCKED',
+          decisionPayload:{
+            ...decisionPayload,
+            blocked_by_bound_agent:true,
+            block_reason:discovery.reason,
+            context_resource_state:contextState,
+            context_resource_at_block:resourceView,
+          },
+          contextPayload,
+          resultArtifact,
+        });
+        return {node,decision};
       }
 
       node=await saveNode({
@@ -662,7 +841,6 @@ export async function runAutonomousRequirementCognition({
       });
       return {node,decision};
     }
-    throw new Error('autonomous_decomposition_context_round_limit:'+node.node_path);
   }
 
   async function authorChildren(node,{branchDepth=0,singleChildRefinements=0}={}){
