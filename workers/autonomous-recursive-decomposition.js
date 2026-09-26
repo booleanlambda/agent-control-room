@@ -2246,6 +2246,7 @@ export async function runAutonomousRequirementCognition({
             if(mismatch)
               throw new Error('autonomous_decomposition_child_serialization_content_mismatch:'+node.node_path);
             candidate._convergence_validation=proposal._convergence_validation;
+            candidate._provenance_review=proposal._provenance_review;
           }else if(text(candidate.coverage_note)!==text(proposal.coverage_note)){
             throw new Error('autonomous_decomposition_child_serialization_content_mismatch:'+node.node_path);
           }
@@ -2301,6 +2302,7 @@ export async function runAutonomousRequirementCognition({
           scope_removed:clip(parsed?.scope_removed,1600),
           completion_criterion:clip(parsed?.completion_criterion,1600),
           convergence_similarity:Number(parsed?._convergence_validation?.similarity||0),
+          provenance_review:asObject(parsed?._provenance_review),
           child_proposal_checkpoint_step_key:childProposalStepKey(node,ordinal),
           child_authoring_protocol:'deep_formulation_checkpoint_then_nonthinking_serialization_v0_1',
         },
@@ -2640,6 +2642,61 @@ export async function runAutonomousRequirementCognition({
     return {completed:true,node:done};
   }
 
+  async function reviewSynthesisProvenance(node,childRows,accumulator,proposedFinal,revisionGuidance=''){
+    const childEvidence=childRows.map(child=>{
+      const parts=resultParts(child.result_artifact);
+      return {
+        path:child.node_path,
+        status:child.node_status||child.status||null,
+        decision_type:child.decision_type||null,
+        requirement:child.requirement_text,
+        artifact:clip(parts.artifact,7000),
+        handoff:parts.handoff,
+      };
+    });
+    const response=await callJson([
+      {role:'system',content:[
+        'You are the same bound autonomous agent auditing YOUR OWN proposed parent synthesis before it becomes durable.',
+        'This is a provenance-preservation review, not a new task or a runtime verdict.',
+        'Compare every number, unit, date, forecast period, source/value relationship, scope claim, and derived conclusion in the proposed synthesis against the resolved child evidence.',
+        'REVISE if the synthesis swaps values between sources, silently changes a source/value pairing, changes units or time horizons, converts a derived scenario into a sourced fact, or strengthens uncertainty beyond what the children support.',
+        'Derived calculations and scenarios are allowed only when explicitly labeled as derived, their exact source inputs remain correctly paired, and the transformation/formula is stated.',
+        'BLOCKED child gaps must remain visible when they are material to the parent requirement.',
+        'Return JSON only: {"status":"ACCEPT|REVISE","reason":"auditable explanation","issues":["..."],"evidence_bindings":[{"claim":"...","source_path_or_id":"...","preserved":true}],"revision_guidance":"specific correction when REVISE; empty when ACCEPT"}.',
+      ].join('\n')},
+      {role:'user',content:safeJson({
+        parent_requirement:node.requirement_text,
+        agent_authored_discovery_state:agentDiscoveryState(node),
+        resolved_child_evidence:childEvidence,
+        cumulative_synthesis:accumulator,
+        proposed_final:{
+          outcome:text(proposedFinal?.outcome).toUpperCase(),
+          reason:proposedFinal?.reason,
+          artifact:proposedFinal?.artifact,
+          handoff:asObject(proposedFinal?.handoff),
+        },
+        prior_provenance_revision_guidance:revisionGuidance||null,
+      })},
+    ],3200,'req_'+node.node_path.replaceAll('.','_')+'_synthesis_provenance');
+
+    const candidate=asObject(response?.parsed);
+    const status=text(candidate.status).toUpperCase();
+    if(!['ACCEPT','REVISE'].includes(status))
+      throw new Error('autonomous_decomposition_synthesis_provenance_status_invalid:'+node.node_path);
+    return {
+      status,
+      reason:clip(candidate.reason,2400),
+      issues:asArray(candidate.issues).map(v=>clip(v,800)).filter(Boolean).slice(0,16),
+      evidence_bindings:asArray(candidate.evidence_bindings).map(v=>({
+        claim:clip(v?.claim,800),
+        source_path_or_id:clip(v?.source_path_or_id,500),
+        preserved:Boolean(v?.preserved),
+      })).filter(v=>v.claim||v.source_path_or_id).slice(0,24),
+      revision_guidance:clip(candidate.revision_guidance,2400),
+      agent_authored:true,
+    };
+  }
+
   async function synthesize(node,childRows){
     let accumulator=asObject(node?.decision_payload?.synthesis_accumulator);
     let cursor=Number(node?.decision_payload?.synthesis_cursor||0);
@@ -2698,6 +2755,8 @@ export async function runAutonomousRequirementCognition({
       decision_type:child.decision_type||null,
     }));
     let final=null;
+    let synthesisProvenanceReview=null;
+    let synthesisProvenanceGuidance='';
     for(let attempt=1;attempt<=2;attempt++){
       try{
         final=await callJson([
@@ -2714,8 +2773,33 @@ export async function runAutonomousRequirementCognition({
             agent_authored_discovery_state:agentDiscoveryState(node),
             child_states:childStates,
             cumulative_synthesis:accumulator,
+            prior_provenance_revision_guidance:synthesisProvenanceGuidance||null,
           })},
         ],SYNTHESIS_FINAL_DEEP_TOKENS,'req_'+node.node_path.replaceAll('.','_')+'_synthesis_final_'+attempt);
+
+        synthesisProvenanceReview=await reviewSynthesisProvenance(
+          node,
+          childRows,
+          accumulator,
+          final?.parsed,
+          synthesisProvenanceGuidance
+        );
+        console.log('AAU_AUTONOMOUS_SYNTHESIS_PROVENANCE_REVIEW',JSON.stringify({
+          agent_id:agentId,
+          intent_execution_id:intentExecutionId,
+          node_path:node.node_path,
+          status:synthesisProvenanceReview.status,
+          issue_count:synthesisProvenanceReview.issues.length,
+        }));
+        if(synthesisProvenanceReview.status!=='ACCEPT'){
+          synthesisProvenanceGuidance=
+            synthesisProvenanceReview.revision_guidance
+            ||synthesisProvenanceReview.reason
+            ||'Revise the parent synthesis so all source/value bindings and derived transformations remain faithful to the resolved child evidence.';
+          if(attempt===2)
+            throw new Error('autonomous_decomposition_synthesis_provenance_rejected:'+node.node_path);
+          continue;
+        }
         break;
       }catch(error){
         const recoverable=error?.code==='COGNITION_RESPONSE_REJECTED'||error?.code==='NVIDIA_TIMEOUT';
@@ -2742,6 +2826,7 @@ export async function runAutonomousRequirementCognition({
         synthesis_reason:clip(final?.parsed?.reason,2200),
         decomposition_decision:'SPLIT',
         blocked_child_count:childStates.filter(v=>v.status==='blocked'||v.decision_type==='BLOCKED').length,
+        synthesis_provenance_review:asObject(synthesisProvenanceReview),
       },
       contextPayload:node.context_payload||{},resultArtifact,
     });
