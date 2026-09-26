@@ -368,6 +368,34 @@ function compactCompletedSiblingResults(rows){
     };
   });
 }
+function authoritativeSiblingEvidence(contextPayload){
+  const src=asObject(contextPayload);
+  const merged=[
+    ...asArray(src.inherited_completed_sibling_results),
+    ...asArray(src.completed_sibling_results),
+  ];
+  const out=[];
+  const seen=new Set();
+  for(const raw of merged){
+    const row=asObject(raw);
+    const key=text(row.path)||text(row.result_hash)||safeJson(row).slice(0,240);
+    if(!key||seen.has(key))continue;
+    seen.add(key);
+    out.push({
+      path:row.path||null,
+      status:row.status||null,
+      decision_type:row.decision_type||null,
+      requirement:clip(row.requirement,900),
+      artifact:clip(row.artifact,5000),
+      handoff_json:clip(row.handoff_json,2400),
+      result_hash:row.result_hash||null,
+    });
+  }
+  return out.slice(-8);
+}
+function siblingEvidencePaths(rows){
+  return asArray(rows).map(v=>text(v?.path)).filter(Boolean);
+}
 
 function agentDiscoveryState(node){
   const payload=asObject(node?.decision_payload);
@@ -548,6 +576,7 @@ export async function runAutonomousRequirementCognition({
     }
 
     while(true){
+      const siblingEvidence=authoritativeSiblingEvidence(contextPayload);
       const cognitionContext={
         ...contextPayload,
         ...(pinnedEvidence.length?{pinned_research_evidence:pinnedEvidence}:{}),
@@ -563,6 +592,9 @@ export async function runAutonomousRequirementCognition({
         context_payload:contextPayload,
         pinned_evidence_index:pinnedEvidence.map(v=>({
           source_key:v.source_key,source_id:v.source_id,url:v.url,sha256:v.sha256,excerpt_bytes:v.excerpt_bytes
+        })),
+        authoritative_sibling_results:siblingEvidence.map(v=>({
+          path:v.path,status:v.status,decision_type:v.decision_type,result_hash:v.result_hash
         })),
         force_reconsider:Boolean(forceReconsider),
         atomic_unavailable:atomicUnavailable,
@@ -614,10 +646,12 @@ export async function runAutonomousRequirementCognition({
                   ? 'Context/research acquisition remains mechanically available. NEED_CONTEXT is valid only when another retrieval or exact context lookup can materially reduce a stated gap.'
                   : 'CONTEXT RESOURCE CONSTRAINT: further context/research acquisition is mechanically unavailable for this node because: '+resourceView.reasons.join(', ')+'. Do not request more context or research. BLOCKED is available if the remaining evidence gap prevents honest completion; ATOMIC or SPLIT remain yours to choose when mechanically available.',
                 'Before deciding, interrogate semantic equivalence, definitions, time horizons, populations/scopes, proxy metrics, evidence sufficiency, assumptions, and unresolved gaps.',
+                'AUTHORITATIVE SIBLING HANDOFF: authoritative_completed_sibling_evidence contains durable outputs of already resolved sibling requirements. Inspect every listed sibling before deciding NEED_CONTEXT. A fact already present in a completed sibling artifact or handoff is available evidence; do not request it again merely because the original source excerpt is absent from this node. You may still reject or qualify a sibling fact if you identify a substantive insufficiency, but state that reason explicitly.',
+                'For every sibling path supplied, include it in inspected_sibling_paths. This is an attention/accounting requirement only; the runtime does not decide whether the sibling evidence is substantively sufficient.',
                 'Do not treat a nearby metric or label as equivalent unless YOU can justify the equivalence from supplied evidence.',
                 'When supplied_context contains research_source_catalog, treat it as the complete discoverable source index for prior research rounds. If context acquisition is available and a source is indexed but its excerpt is insufficient, put its exact listed HTTPS URL in research_urls (not context_requests) so the runtime can fetch it directly.',
                 'Do not solve the requirement or author child requirements in this pass.',
-                'Return complete JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT|BLOCKED","reason":"auditable reason","requirement_interpretation":"what this requirement actually demands","evidence_assessment":"what the current evidence does and does not establish","unresolved_gaps":["..."],"context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."]}.',
+                'Return complete JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT|BLOCKED","reason":"auditable reason","requirement_interpretation":"what this requirement actually demands","evidence_assessment":"what the current evidence does and does not establish","inspected_sibling_paths":["R.001..."],"unresolved_gaps":["..."],"context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."]}.',
                 forceReconsider
                   ? 'A prior atomic execution was rejected or exhausted. Reconsider the requirement under the persisted constraints rather than repeating the failed action.'
                   : '',
@@ -626,6 +660,7 @@ export async function runAutonomousRequirementCognition({
                 requirement:node.requirement_text,
                 agent_authored_discovery_state:agentDiscoveryState(node),
                 source:{kind:node.source_kind,ref:node.source_ref},
+                authoritative_completed_sibling_evidence:siblingEvidence,
                 supplied_context:cognitionContext,
                 available_context_index:idx,
                 available_supplied_context_index:indexObject(cognitionContext),
@@ -658,6 +693,13 @@ export async function runAutonomousRequirementCognition({
               if(attempt===2)throw new Error('autonomous_decomposition_discovery_invalid_available_action:'+node.node_path);
               continue;
             }
+            const requiredSiblingPaths=siblingEvidencePaths(siblingEvidence);
+            const inspectedSiblingPaths=new Set(asArray(candidate.inspected_sibling_paths).map(text).filter(Boolean));
+            const missingSiblingInspection=requiredSiblingPaths.filter(path=>!inspectedSiblingPaths.has(path));
+            if(missingSiblingInspection.length){
+              if(attempt===2)throw new Error('autonomous_decomposition_discovery_sibling_evidence_uninspected:'+node.node_path+':'+missingSiblingInspection.join(','));
+              continue;
+            }
 
             discovery={
               version:'agent_deep_discovery_v0_1',
@@ -666,6 +708,8 @@ export async function runAutonomousRequirementCognition({
               reason:clip(candidate.reason,2200),
               requirement_interpretation:clip(candidate.requirement_interpretation,2800),
               evidence_assessment:clip(candidate.evidence_assessment,3200),
+              inspected_sibling_paths:asArray(candidate.inspected_sibling_paths).map(text).filter(Boolean).slice(0,16),
+              authoritative_sibling_result_hashes:siblingEvidence.map(v=>({path:v.path,result_hash:v.result_hash})),
               unresolved_gaps:asArray(candidate.unresolved_gaps).map(v=>clip(text(v),900)).filter(Boolean).slice(0,16),
               context_requests:asArray(candidate.context_requests).map(text).filter(Boolean).slice(0,MAX_CONTEXT_REQUESTS_PER_ROUND),
               research_queries:asArray(candidate.research_queries).map(text).filter(Boolean).slice(0,8),
@@ -1109,6 +1153,7 @@ export async function runAutonomousRequirementCognition({
 
   async function executeAtomic(node){
     let pinnedEvidence=await loadPinnedEvidence(node.node_path);
+    const siblingEvidence=authoritativeSiblingEvidence(node.context_payload);
     const atomicCognitionContext=()=>({
       ...(node.context_payload||{}),
       ...(pinnedEvidence.length?{pinned_research_evidence:pinnedEvidence}:{}),
@@ -1121,6 +1166,7 @@ export async function runAutonomousRequirementCognition({
             {role:'system',content:[
               'You are the bound autonomous agent executing exactly ONE requirement you previously judged ATOMIC.',
               'Complete only this requirement. Do not silently expand into unrelated work.',
+              'authoritative_completed_sibling_evidence contains durable outputs from resolved sibling requirements. Treat those as available evidence and inspect them before asking for information that a sibling already supplied.',
               'If you discover it is not actually bounded, return {"status":"SPLIT","reason":"..."} instead of forcing an oversized answer.',
               'If context is missing, return {"status":"NEED_CONTEXT","context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."],"reason":"..."}. You choose any research questions; do not fabricate findings.',
               'Otherwise return JSON only: {"status":"COMPLETE","artifact":"concise auditable work product","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
@@ -1129,6 +1175,7 @@ export async function runAutonomousRequirementCognition({
             {role:'user',content:safeJson({
               requirement:node.requirement_text,
               agent_authored_discovery_state:agentDiscoveryState(node),
+              authoritative_completed_sibling_evidence:siblingEvidence,
               supplied_context:atomicCognitionContext(),
               available_context_index:idx,
               available_supplied_context_index:indexObject(atomicCognitionContext()),
@@ -1233,7 +1280,8 @@ export async function runAutonomousRequirementCognition({
             {role:'system',content:[
               'You are the bound autonomous agent reconciling YOUR proposed completion against YOUR OWN prior discovery state.',
               'This is not an external verifier. The runtime has made no substantive judgment and must not reinterpret your task for you.',
-              'Re-read your requirement, your authored discovery state, your proposed artifact, and the supplied evidence.',
+              'Re-read your requirement, your authored discovery state, your proposed artifact, the authoritative completed sibling evidence, and the supplied evidence.',
+              'Completed sibling outputs are already available evidence. Do not reopen a missing-context claim solely because the original source excerpt is absent when the sibling output already carries the required result.',
               'Decide whether YOU consider your own completion criterion actually satisfied.',
               'Return one status only:',
               'COMPLETE = you judge the requirement and your own completion criterion genuinely satisfied by the evidence. You may correct wording/calculation in artifact and handoff before finalizing.',
@@ -1247,6 +1295,7 @@ export async function runAutonomousRequirementCognition({
               requirement:node.requirement_text,
               agent_authored_discovery_state:agentDiscoveryState(node),
               proposed_completion:{artifact:proposedArtifact,handoff:proposedHandoff},
+              authoritative_completed_sibling_evidence:siblingEvidence,
               supplied_context:atomicCognitionContext(),
               available_context_index:idx,
               available_supplied_context_index:indexObject(atomicCognitionContext()),
@@ -1608,6 +1657,7 @@ export async function runAutonomousRequirementCognition({
       root_decision_type:completedRoot.decision_type||null,
       context_resource_policy:'agent_visible_progress_based_context_resource_v0_1',
       evidence_retention_policy:'pinned_research_evidence_v0_1_outside_context_eviction',
+      sibling_evidence_handoff_policy:'authoritative_completed_sibling_evidence_v0_1_attention_accounted',
     },
   };
 }
