@@ -142,3 +142,16 @@ A re-fetch of an already-known URL counts as productive context acquisition when
 Pinned evidence follows a node into a newly authored refinement child so decomposition cannot erase evidence merely by changing the node path. The evidence remains observation-level material: pinning establishes durable availability, not automatic truth or claim verification.
 
 Current cognition loading exposes up to 16 recent pinned evidence records per node, with each excerpt bounded independently; the durable table is not subject to ordinary node-context eviction.
+
+
+## Authoritative completed sibling evidence
+
+Later child requirements depend on durable outputs from earlier resolved siblings. Those outputs MUST NOT be buried only inside the general bounded context payload.
+
+Before deep discovery, atomic execution, and atomic reconciliation, the runtime mechanically extracts completed sibling outputs into a separate `authoritative_completed_sibling_evidence` channel. Each item carries the sibling path, resolved status, decision type, requirement, bounded artifact, handoff, and result hash. This is dependency delivery, not runtime interpretation: the bound agent still decides whether a sibling result is relevant, sufficient, comparable, or should be qualified.
+
+Deep discovery must account for every surfaced sibling path through `inspected_sibling_paths` before its routing decision is accepted. This requirement verifies attention to available durable dependencies; it does not force acceptance of their substantive conclusions.
+
+A bound agent MUST NOT request information solely because the original research excerpt is absent when a completed sibling output already contains the needed result. If the agent judges the sibling output insufficient, mismatched, stale, or otherwise unusable, it may still choose `NEED_CONTEXT`, but its own discovery reason must identify that substantive insufficiency.
+
+Sibling result hashes participate in the discovery context fingerprint so a sibling's repaired or newly completed result invalidates an older routing checkpoint automatically.
