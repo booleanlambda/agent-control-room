@@ -29,6 +29,8 @@ const ATOMIC_EXECUTION_DEEP_TOKENS=7000;
 const ATOMIC_RECONCILIATION_DEEP_TOKENS=5000;
 const SYNTHESIS_MERGE_DEEP_TOKENS=6000;
 const SYNTHESIS_FINAL_DEEP_TOKENS=7000;
+const CHILD_PROVENANCE_REVIEW_DEEP_TOKENS=8000;
+const SYNTHESIS_PROVENANCE_REVIEW_DEEP_TOKENS=12000;
 const SELF_REMEDIATION_REPAIR_TYPES=[
   'INVALIDATE_DISCOVERY_CHECKPOINT',
   'REFRESH_SIBLING_EVIDENCE',
@@ -738,6 +740,28 @@ export async function runAutonomousRequirementCognition({
   rpc,sha256,completeJson,completeRouteJson=null,completeSerializeJson=null,researchContext=null,
 }){
   const agentRuntimeContract=resolveModelRuntimeContract(model,'agent');
+  const operationalOutputCeiling=Math.max(
+    1,
+    Math.min(
+      Number(agentRuntimeContract.max_output_tokens)||8192,
+      Number(agentRuntimeContract.operational_output_limit_tokens)
+        ||Number(agentRuntimeContract.max_output_tokens)
+        ||8192
+    )
+  );
+  const stageOutputTokens=(requested)=>Math.max(
+    1,
+    Math.min(Math.floor(Number(requested)||1),operationalOutputCeiling)
+  );
+  const stageBudgets=Object.freeze({
+    child_formulation:stageOutputTokens(stageBudgets.child_formulation),
+    child_provenance_review:stageOutputTokens(CHILD_PROVENANCE_REVIEW_DEEP_TOKENS),
+    atomic_execution:stageOutputTokens(stageBudgets.atomic_execution),
+    atomic_reconciliation:stageOutputTokens(stageBudgets.atomic_reconciliation),
+    synthesis_merge:stageOutputTokens(stageBudgets.synthesis_merge),
+    synthesis_final:stageOutputTokens(stageBudgets.synthesis_final),
+    synthesis_provenance_review:stageOutputTokens(SYNTHESIS_PROVENANCE_REVIEW_DEEP_TOKENS),
+  });
   const rootReq=extractTriggerRequirement(packet);
   const assignmentKey='req:'+sha256({
     agent_id:agentId,
@@ -2022,7 +2046,7 @@ export async function runAutonomousRequirementCognition({
         previously_authored_children:previous,
         prior_provenance_revision_guidance:revisionGuidance||null,
       })},
-    ],3200,'req_'+node.node_path.replaceAll('.','_')+'_author_child_provenance_'+ordinal);
+    ],stageBudgets.child_provenance_review,'req_'+node.node_path.replaceAll('.','_')+'_author_child_provenance_'+ordinal);
 
     const candidate=asObject(response?.parsed);
     const status=text(candidate.status).toUpperCase();
@@ -2109,7 +2133,7 @@ export async function runAutonomousRequirementCognition({
       const previous=authored.map(c=>({ordinal:c.ordinal,requirement:c.requirement_text}));
       const childPinnedEvidence=await loadPinnedEvidence(node.node_path);
       const childContextView=agentModelContextView(
-        node.context_payload||{},childPinnedEvidence,CHILD_FORMULATION_DEEP_TOKENS
+        node.context_payload||{},childPinnedEvidence,stageBudgets.child_formulation
       );
 
       let proposalCheckpoint=await loadChildProposalCheckpoint(node,ordinal);
@@ -2150,7 +2174,7 @@ export async function runAutonomousRequirementCognition({
                   max_single_child_refinements:MAX_SINGLE_CHILD_REFINEMENTS,
                 },
               })},
-            ],CHILD_FORMULATION_DEEP_TOKENS,'req_'+node.node_path.replaceAll('.','_')+'_author_child_formulate_'+ordinal+'_'+attempt);
+            ],stageBudgets.child_formulation,'req_'+node.node_path.replaceAll('.','_')+'_author_child_formulate_'+ordinal+'_'+attempt);
 
             const candidate=asObject(response?.parsed);
             const candidateStatus=text(candidate.status).toUpperCase();
@@ -2367,7 +2391,7 @@ export async function runAutonomousRequirementCognition({
       }:{}),
     };
     const atomicContextView=()=>agentModelContextView(
-      atomicBaseContext,pinnedEvidence,ATOMIC_EXECUTION_DEEP_TOKENS
+      atomicBaseContext,pinnedEvidence,stageBudgets.atomic_execution
     );
     const siblingEvidence=atomicContextView().siblingEvidence;
     const atomicCognitionContext=()=>atomicContextView().suppliedContext;
@@ -2393,7 +2417,7 @@ export async function runAutonomousRequirementCognition({
               available_context_index:idx,
               available_supplied_context_index:indexObject(atomicCognitionContext()),
             })},
-          ],ATOMIC_EXECUTION_DEEP_TOKENS,'req_'+node.node_path.replaceAll('.','_')+'_atomic_'+attempt);
+          ],stageBudgets.atomic_execution,'req_'+node.node_path.replaceAll('.','_')+'_atomic_'+attempt);
           parsed=response?.parsed;
           break;
         }catch(error){
@@ -2461,7 +2485,7 @@ export async function runAutonomousRequirementCognition({
         ...atomicBaseContext,
         ...resolveContext(packet,requests,atomicCognitionContext()),
         ...(researchObserved?{external_research_atomic:researchObserved}:{}),
-      },pinnedEvidence,ATOMIC_EXECUTION_DEEP_TOKENS);
+      },pinnedEvidence,stageBudgets.atomic_execution);
       counters.context_requests+=requests.length+researchQueries.length+researchUrls.length;
       const reset=await saveNode({
         nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
@@ -2516,7 +2540,7 @@ export async function runAutonomousRequirementCognition({
               available_context_index:idx,
               available_supplied_context_index:indexObject(atomicCognitionContext()),
             })},
-          ],ATOMIC_RECONCILIATION_DEEP_TOKENS,'req_'+node.node_path.replaceAll('.','_')+'_reconcile_'+attempt);
+          ],stageBudgets.atomic_reconciliation,'req_'+node.node_path.replaceAll('.','_')+'_reconcile_'+attempt);
           reconciliation=response?.parsed;
           break;
         }catch(error){
@@ -2599,7 +2623,7 @@ export async function runAutonomousRequirementCognition({
         ...atomicBaseContext,
         ...resolveContext(packet,requests,atomicCognitionContext()),
         ...(researchObserved?{external_research_reconciliation:researchObserved}:{}),
-      },pinnedEvidence,ATOMIC_RECONCILIATION_DEEP_TOKENS);
+      },pinnedEvidence,stageBudgets.atomic_reconciliation);
       counters.context_requests+=requests.length+researchQueries.length+researchUrls.length;
       const reset=await saveNode({
         nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
@@ -2677,7 +2701,7 @@ export async function runAutonomousRequirementCognition({
         },
         prior_provenance_revision_guidance:revisionGuidance||null,
       })},
-    ],3200,'req_'+node.node_path.replaceAll('.','_')+'_synthesis_provenance');
+    ],stageBudgets.synthesis_provenance_review,'req_'+node.node_path.replaceAll('.','_')+'_synthesis_provenance');
 
     const candidate=asObject(response?.parsed);
     const status=text(candidate.status).toUpperCase();
@@ -2727,7 +2751,7 @@ export async function runAutonomousRequirementCognition({
                 handoff:parts.handoff,
               },
             })},
-          ],SYNTHESIS_MERGE_DEEP_TOKENS,'req_'+node.node_path.replaceAll('.','_')+'_synthesis_merge_'+(i+1)+'_'+attempt);
+          ],stageBudgets.synthesis_merge,'req_'+node.node_path.replaceAll('.','_')+'_synthesis_merge_'+(i+1)+'_'+attempt);
           break;
         }catch(error){
           const recoverable=error?.code==='COGNITION_RESPONSE_REJECTED'||error?.code==='NVIDIA_TIMEOUT';
@@ -2775,7 +2799,7 @@ export async function runAutonomousRequirementCognition({
             cumulative_synthesis:accumulator,
             prior_provenance_revision_guidance:synthesisProvenanceGuidance||null,
           })},
-        ],SYNTHESIS_FINAL_DEEP_TOKENS,'req_'+node.node_path.replaceAll('.','_')+'_synthesis_final_'+attempt);
+        ],stageBudgets.synthesis_final,'req_'+node.node_path.replaceAll('.','_')+'_synthesis_final_'+attempt);
 
         synthesisProvenanceReview=await reviewSynthesisProvenance(
           node,
@@ -2994,6 +3018,19 @@ export async function runAutonomousRequirementCognition({
       synthesis_merge_budget_policy:'dedicated_deep_budget_v0_1_6000_with_bounded_retry',
       synthesis_final_budget_policy:'dedicated_deep_budget_v0_1_7000_with_bounded_retry',
       model_context_policy:'model_profile_token_context_v0_2_in_memory_model_view_durable_catalog_rehydration',
+      model_runtime_contract_version:'model_runtime_profiles_v0_2',
+      model_runtime_variables:{
+        context_window_tokens:agentRuntimeContract.context_window_tokens??null,
+        operational_context_limit_tokens:agentRuntimeContract.operational_context_limit_tokens??null,
+        max_output_tokens:agentRuntimeContract.max_output_tokens??null,
+        operational_output_limit_tokens:agentRuntimeContract.operational_output_limit_tokens??null,
+        request_timeout_ms:agentRuntimeContract.request_timeout_ms??null,
+        max_request_timeout_ms:agentRuntimeContract.max_request_timeout_ms??null,
+        reasoning_support:agentRuntimeContract.reasoning_support??null,
+        supports_thinking:agentRuntimeContract.supports_thinking===true,
+        reasoning_counts_against_output:agentRuntimeContract.reasoning_counts_against_output===true,
+      },
+      stage_output_budgets:stageBudgets,
       node_checkpoint_transport_policy:'envelope_aware_context_compaction_v0_1_220000_bytes',
       research_batch_handoff_policy:'requirement_linked_durable_receipts_v0_1',
     },
