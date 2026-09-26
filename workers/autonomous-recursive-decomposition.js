@@ -18,6 +18,8 @@ const MAX_PINNED_EVIDENCE_ITEMS_IN_COGNITION=16;
 const MAX_PINNED_EVIDENCE_EXCERPT_CHARS=12000;
 const MAX_SELF_REMEDIATION_ATTEMPTS=2;
 const CHILD_FORMULATION_DEEP_TOKENS=7000;
+const ATOMIC_EXECUTION_DEEP_TOKENS=7000;
+const ATOMIC_RECONCILIATION_DEEP_TOKENS=5000;
 const SELF_REMEDIATION_REPAIR_TYPES=[
   'INVALIDATE_DISCOVERY_CHECKPOINT',
   'REFRESH_SIBLING_EVIDENCE',
@@ -1793,7 +1795,7 @@ export async function runAutonomousRequirementCognition({
               available_context_index:idx,
               available_supplied_context_index:indexObject(atomicCognitionContext()),
             })},
-          ],1800,'req_'+node.node_path.replaceAll('.','_')+'_atomic_'+attempt);
+          ],ATOMIC_EXECUTION_DEEP_TOKENS,'req_'+node.node_path.replaceAll('.','_')+'_atomic_'+attempt);
           parsed=response?.parsed;
           break;
         }catch(error){
@@ -1913,7 +1915,7 @@ export async function runAutonomousRequirementCognition({
               available_context_index:idx,
               available_supplied_context_index:indexObject(atomicCognitionContext()),
             })},
-          ],1800,'req_'+node.node_path.replaceAll('.','_')+'_reconcile_'+attempt);
+          ],ATOMIC_RECONCILIATION_DEEP_TOKENS,'req_'+node.node_path.replaceAll('.','_')+'_reconcile_'+attempt);
           reconciliation=response?.parsed;
           break;
         }catch(error){
@@ -2282,6 +2284,8 @@ export async function runAutonomousRequirementCognition({
       self_remediation_policy:'agent_authored_cognitive_self_remediation_v0_1_bounded_verified',
       child_authoring_protocol:'deep_formulation_checkpoint_then_nonthinking_serialization_v0_1',
       child_authoring_failure_policy:'durable_rejected_attempt_then_agent_reconsideration_v0_1',
+      atomic_execution_budget_policy:'dedicated_deep_budget_v0_1_7000',
+      atomic_reconciliation_budget_policy:'dedicated_deep_budget_v0_1_5000',
     },
   };
 }
