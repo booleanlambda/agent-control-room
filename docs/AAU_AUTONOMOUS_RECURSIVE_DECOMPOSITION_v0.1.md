@@ -184,3 +184,20 @@ Remediation is capped at two attempts per requirement node. The repair vocabular
 An interrupted episode is resumable. Episodes in `proposed`, `applied`, or `verifying` state are resumed at the repair/verification boundary after worker recovery rather than silently skipped.
 
 This capability is **Level 1 cognitive self-remediation only**. It does not constitute autonomous workflow repair, source-code modification, infrastructure repair, deployment, or rollback. Those remain later maturity levels.
+
+
+## Deep child formulation and durable serialization
+
+Child authoring is substantive agent cognition and MUST NOT compete with protocol serialization for the same small completion budget.
+
+The child-authoring pipeline is:
+
+`SPLIT → deep child formulation → durable cognition-step checkpoint → non-thinking protocol serialization → child persistence`.
+
+The bound agent performs child formulation with Thinking enabled and a dedicated deep completion budget. The resulting CHILD or DONE proposal is persisted in `agent_lab.cognition_step_checkpoints` under a key derived from the parent node, ordinal, requirement identity, and current discovery fingerprint. The checkpoint therefore survives wake retries while a later reconsideration with a different cognitive fingerprint produces a fresh proposal.
+
+After the proposal is durable, the same bound model performs only mechanical JSON serialization with Thinking disabled. The serializer is not allowed to change the requirement, scope removed, completion criterion, reason, or DONE decision. Runtime equality checks reject substantive serialization drift.
+
+If deep formulation or protocol serialization repeatedly truncates, times out, produces invalid output, or fails convergence validation, the wake MUST NOT fail merely because child authoring failed. Rejected model attempts remain durable in the cognition-rejection ledger, and the parent node receives an `agent_visible_child_authoring_failure_v0_1` state containing the failed phase, rejection reason, prior SPLIT decision, and failure count. The node returns to `pending` with `reconsider_decomposition=true`.
+
+The subsequent route remains agent-owned. The bound agent may choose a new SPLIT strategy, another available action, or REMEDIATE when it independently diagnoses a recoverable inconsistency. The runtime does not invent the replacement child.
