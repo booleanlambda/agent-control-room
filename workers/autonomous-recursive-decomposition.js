@@ -1020,6 +1020,7 @@ export async function runAutonomousRequirementCognition({
   function childProposalStepKey(node,ordinal){
     const discovery=asObject(node?.decision_payload?.routing_discovery_checkpoint);
     return 'childprop:'+sha256({
+      contract:'agent_authored_child_proposal_v0_2_provenance_review',
       node_path:node.node_path,
       ordinal,
       requirement_hash:node.requirement_hash||sha256(node.requirement_text||''),
@@ -1041,7 +1042,7 @@ export async function runAutonomousRequirementCognition({
   async function saveChildProposalCheckpoint(node,ordinal,proposal){
     const artifact=JSON.stringify(proposal);
     const row=await cognitionStepRpc('save',childProposalStepKey(node,ordinal),artifact,{
-      contract:'agent_authored_child_proposal_v0_1',
+      contract:'agent_authored_child_proposal_v0_2_provenance_review',
       node_path:node.node_path,
       ordinal,
       discovery_fingerprint:text(node?.decision_payload?.routing_discovery_checkpoint?.context_fingerprint)||null,
@@ -1985,6 +1986,63 @@ export async function runAutonomousRequirementCognition({
     }
   }
 
+  async function reviewChildProposalProvenance(node,ordinal,proposal,childContextView,previous,revisionGuidance=''){
+    if(text(proposal?.status).toUpperCase()!=='CHILD'){
+      return {
+        status:'ACCEPT',
+        reason:'No child requirement was proposed; DONE contains no child factual bindings to audit.',
+        issues:[],
+        evidence_bindings:[],
+        agent_authored:true,
+      };
+    }
+
+    const response=await callJson([
+      {role:'system',content:[
+        'You are the same bound autonomous agent auditing YOUR OWN proposed child requirement before it becomes durable.',
+        'This is a provenance-preservation review, not a new decomposition decision.',
+        'Compare every source-bound factual premise, number, date, unit, scope, entity/value relationship, and named-source attribution in the proposed child against the authoritative sibling evidence and supplied context.',
+        'REVISE if the proposed child swaps or recombines values that belong to different sources, changes a source/value pairing, changes units or forecast periods, strengthens an uncertain claim into a fact, or treats a derived/scenario value as though a source directly reported it.',
+        'Derived calculations and hypothetical scenarios are allowed only when the child explicitly labels them as derived/hypothetical, preserves the exact source inputs, and states the transformation or formula. Never silently relabel a transformation as a sourced fact.',
+        'If the evidence does not support a factual premise needed by the proposed child, REVISE the proposal so the child researches/resolves that gap instead of baking the unsupported premise into its requirement.',
+        'Do not reject merely because the child is narrower. Do not solve the child.',
+        'Return JSON only: {"status":"ACCEPT|REVISE","reason":"auditable explanation","issues":["..."],"evidence_bindings":[{"claim":"...","source_path_or_id":"...","preserved":true}],"revision_guidance":"specific guidance when REVISE; empty when ACCEPT"}.',
+      ].join('\n')},
+      {role:'user',content:safeJson({
+        parent_requirement:node.requirement_text,
+        agent_authored_discovery_state:agentDiscoveryState(node),
+        proposed_child:{
+          requirement:proposal.requirement,
+          scope_removed:proposal.scope_removed,
+          completion_criterion:proposal.completion_criterion,
+          reason:proposal.reason,
+        },
+        authoritative_completed_sibling_evidence:childContextView.siblingEvidence,
+        supplied_context:childContextView.suppliedContext,
+        previously_authored_children:previous,
+        prior_provenance_revision_guidance:revisionGuidance||null,
+      })},
+    ],3200,'req_'+node.node_path.replaceAll('.','_')+'_author_child_provenance_'+ordinal);
+
+    const candidate=asObject(response?.parsed);
+    const status=text(candidate.status).toUpperCase();
+    if(!['ACCEPT','REVISE'].includes(status))
+      throw new Error('autonomous_decomposition_child_provenance_status_invalid:'+node.node_path);
+
+    return {
+      status,
+      reason:clip(candidate.reason,2400),
+      issues:asArray(candidate.issues).map(v=>clip(v,800)).filter(Boolean).slice(0,16),
+      evidence_bindings:asArray(candidate.evidence_bindings).map(v=>({
+        claim:clip(v?.claim,800),
+        source_path_or_id:clip(v?.source_path_or_id,500),
+        preserved:Boolean(v?.preserved),
+      })).filter(v=>v.claim||v.source_path_or_id).slice(0,24),
+      revision_guidance:clip(candidate.revision_guidance,2400),
+      agent_authored:true,
+    };
+  }
+
   async function authorChildren(node,{branchDepth=0,singleChildRefinements=0}={}){
     const allExisting=await children(node.node_path);
     const existing=allExisting.filter((child)=>String(child?.status||'')!=='cancelled');
@@ -2059,6 +2117,7 @@ export async function runAutonomousRequirementCognition({
 
       if(!proposal){
         let formulationError=null;
+        let provenanceRevisionGuidance='';
         for(let attempt=1;attempt<=2;attempt++){
           try{
             const response=await callJson([
@@ -2081,6 +2140,7 @@ export async function runAutonomousRequirementCognition({
                 supplied_context:childContextView.suppliedContext,
                 previously_authored_children:previous,
                 prior_child_authoring_failure:asObject(node?.decision_payload?.child_authoring_failure),
+                provenance_revision_guidance:provenanceRevisionGuidance||null,
                 runtime_resource_constraints:{
                   structural_branch_depth:normalizedBranchDepth,
                   max_structural_branch_depth:MAX_BRANCH_DEPTH,
@@ -2106,6 +2166,33 @@ export async function runAutonomousRequirementCognition({
               if(!validation.valid)
                 throw new Error('autonomous_decomposition_nonconvergent_child:'+node.node_path+':'+validation.failures.join(','));
               candidate._convergence_validation=validation;
+
+              const provenanceReview=await reviewChildProposalProvenance(
+                node,
+                ordinal,
+                candidate,
+                childContextView,
+                previous,
+                provenanceRevisionGuidance
+              );
+              console.log('AAU_AUTONOMOUS_CHILD_PROVENANCE_REVIEW',JSON.stringify({
+                agent_id:agentId,
+                intent_execution_id:intentExecutionId,
+                node_path:node.node_path,
+                ordinal,
+                status:provenanceReview.status,
+                issue_count:provenanceReview.issues.length,
+              }));
+              if(provenanceReview.status!=='ACCEPT'){
+                provenanceRevisionGuidance=
+                  provenanceReview.revision_guidance
+                  ||provenanceReview.reason
+                  ||'Revise the child requirement so every source-bound claim preserves the authoritative evidence bindings.';
+                if(attempt===2)
+                  throw new Error('autonomous_decomposition_child_provenance_rejected:'+node.node_path);
+                continue;
+              }
+              candidate._provenance_review=provenanceReview;
             }
             proposal=candidate;
             proposalCheckpoint={row:await saveChildProposalCheckpoint(node,ordinal,proposal),proposal};
@@ -2116,7 +2203,9 @@ export async function runAutonomousRequirementCognition({
               error?.code==='COGNITION_RESPONSE_REJECTED'
               || error?.code==='NVIDIA_TIMEOUT'
               || String(error?.message||'').startsWith('autonomous_decomposition_nonconvergent_child:')
-              || String(error?.message||'').startsWith('autonomous_decomposition_child_formulation_status_invalid:');
+              || String(error?.message||'').startsWith('autonomous_decomposition_child_formulation_status_invalid:')
+              || String(error?.message||'').startsWith('autonomous_decomposition_child_provenance_status_invalid:')
+              || String(error?.message||'').startsWith('autonomous_decomposition_child_provenance_rejected:');
             if(!recoverable)throw error;
             if(attempt===2)
               return returnChildAuthoringFailure({ordinal,phase:'deep_formulation',error});
