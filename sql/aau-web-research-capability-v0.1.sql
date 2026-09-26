@@ -8,9 +8,10 @@ CREATE TABLE IF NOT EXISTS agent_lab.agent_web_research_batches (
  queries jsonb NOT NULL DEFAULT '[]'::jsonb,
  searches jsonb NOT NULL DEFAULT '[]'::jsonb,
  receipts jsonb NOT NULL DEFAULT '[]'::jsonb,
- created_at timestamptz NOT NULL DEFAULT now(),
- UNIQUE(wake_request_id)
+ created_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS agent_web_research_batches_wake_request_id_idx
+ ON agent_lab.agent_web_research_batches(wake_request_id,created_at DESC);
 ALTER TABLE agent_lab.agent_web_research_batches ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON agent_lab.agent_web_research_batches FROM PUBLIC,anon,authenticated;
 GRANT SELECT ON agent_lab.agent_web_research_batches TO service_role;
@@ -44,8 +45,6 @@ BEGIN
  )),'[]'::jsonb) INTO v_receipts FROM jsonb_array_elements(p_research->'sources') s;
  INSERT INTO agent_lab.agent_web_research_batches(agent_id,wake_request_id,status,queries,searches,receipts)
  VALUES(p_agent_id,p_wake_request_id,v_status,p_research->'requested_queries',p_research->'searches',v_receipts)
- ON CONFLICT(wake_request_id) DO UPDATE SET status=EXCLUDED.status,queries=EXCLUDED.queries,
- searches=EXCLUDED.searches,receipts=EXCLUDED.receipts
  RETURNING batch_id INTO v_id;
  RETURN v_id;
 END $function$
