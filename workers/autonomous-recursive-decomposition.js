@@ -609,36 +609,23 @@ export async function runAutonomousRequirementCognition({
     };
   }
 
-  async function executeSelfRemediation(node,discovery,{contextPayload,pinnedEvidence,siblingEvidence}){
-    const history=await loadRemediationEpisodes(node.node_path);
-    const attemptNo=history.length+1;
-    if(attemptNo>MAX_SELF_REMEDIATION_ATTEMPTS)
-      throw new Error('autonomous_decomposition_remediation_attempt_limit:'+node.node_path);
+  function cleanedRemediationDecisionPayload(payload){
+    const next={...asObject(payload)};
+    for(const key of [
+      'reason','requirement_interpretation','evidence_assessment','unresolved_gaps',
+      'context_requests','research_queries','research_urls','routing_discovery_checkpoint',
+      'routing_discovery_checkpointed','routing_discovery_checkpointed_at',
+      'routing_discovery_reused','routing_commit_serialized',
+      'blocked_by_bound_agent','block_reason','context_resource_at_block'
+    ]) delete next[key];
+    next.reconsider_decomposition=true;
+    return next;
+  }
 
-    const plan=asObject(discovery.remediation);
-    const repairType=text(plan.repair_type).toUpperCase();
+  async function applyRemediationEpisode(node,episode,{contextPayload,pinnedEvidence,siblingEvidence}){
+    const repairType=text(episode.repair_type).toUpperCase();
     if(!SELF_REMEDIATION_REPAIR_TYPES.includes(repairType))
       throw new Error('autonomous_decomposition_remediation_repair_not_allowed:'+node.node_path);
-    if(text(plan.observed_anomaly).length<8
-       || text(plan.prior_belief).length<3
-       || text(plan.diagnosis).length<8
-       || text(plan.verification_criterion).length<8)
-      throw new Error('autonomous_decomposition_remediation_reasoning_incomplete:'+node.node_path);
-
-    const preState=remediationStateSnapshot(node,contextPayload,pinnedEvidence,siblingEvidence);
-    const created=await remediationRpc('create',node.node_path,{
-      attempt_no:attemptNo,
-      observed_anomaly:clip(plan.observed_anomaly,2400),
-      prior_belief:clip(plan.prior_belief,2400),
-      contradicting_evidence:asArray(plan.contradicting_evidence).slice(0,16),
-      diagnosis:clip(plan.diagnosis,3000),
-      repair_type:repairType,
-      repair_payload:asObject(plan.repair_payload),
-      verification_criterion:clip(plan.verification_criterion,2400),
-      pre_state:preState,
-    });
-    if(created?.status!=='ready'||!created.remediation_id)
-      throw new Error('autonomous_decomposition_remediation_create_failed:'+node.node_path);
 
     let nextContext=asObject(contextPayload);
     let nextSiblingEvidence=asArray(siblingEvidence);
@@ -648,19 +635,10 @@ export async function runAutonomousRequirementCognition({
       nextSiblingEvidence=refreshed.siblingEvidence;
     }
 
-    const nextPayload={...(node.decision_payload||{})};
-    for(const key of [
-      'reason','requirement_interpretation','evidence_assessment','unresolved_gaps',
-      'context_requests','research_queries','research_urls','routing_discovery_checkpoint',
-      'routing_discovery_checkpointed','routing_discovery_checkpointed_at',
-      'routing_discovery_reused','routing_commit_serialized',
-      'blocked_by_bound_agent','block_reason','context_resource_at_block'
-    ]) delete nextPayload[key];
-
-    nextPayload.reconsider_decomposition=true;
+    const nextPayload=cleanedRemediationDecisionPayload(node.decision_payload);
     nextPayload.self_remediation_in_progress={
-      remediation_id:created.remediation_id,
-      attempt_no:attemptNo,
+      remediation_id:episode.remediation_id,
+      attempt_no:Number(episode.attempt_no||0),
       repair_type:repairType,
       requested_by_bound_agent:true,
     };
@@ -682,72 +660,109 @@ export async function runAutonomousRequirementCognition({
 
     const postState=remediationStateSnapshot(node,nextContext,pinnedEvidence,nextSiblingEvidence);
     await remediationRpc('update',node.node_path,{
-      remediation_id:created.remediation_id,
+      remediation_id:episode.remediation_id,
       status:'applied',
       post_state:postState,
     });
+
+    return {node,contextPayload:nextContext,siblingEvidence:nextSiblingEvidence,postState};
+  }
+
+  async function verifyRemediationEpisode(node,episode,{contextPayload,pinnedEvidence,siblingEvidence,postState=null}){
+    const effectivePostState=postState||remediationStateSnapshot(node,contextPayload,pinnedEvidence,siblingEvidence);
     await remediationRpc('update',node.node_path,{
-      remediation_id:created.remediation_id,
+      remediation_id:episode.remediation_id,
       status:'verifying',
-      post_state:postState,
+      post_state:effectivePostState,
     });
 
-    const verificationResponse=await callJson([
-      {role:'system',content:[
-        'You are the bound autonomous agent verifying YOUR OWN cognitive self-remediation.',
-        'You previously detected an anomaly, diagnosed it, chose a bounded repair, and stated a verification criterion.',
-        'The runtime only applied the requested mechanical repair. It does not decide whether your diagnosis was correct or whether the repair worked.',
-        'Compare the before state, after state, current durable evidence, and YOUR verification criterion.',
-        'Return VERIFIED only if the criterion is actually satisfied. Otherwise return FAILED and identify what remains wrong.',
-        'Return JSON only: {"status":"VERIFIED|FAILED","reason":"auditable verification","observed_after":"what changed or did not change","remaining_problem":"empty when verified"}.',
-      ].join('\n')},
-      {role:'user',content:safeJson({
-        requirement:node.requirement_text,
-        remediation_plan:{
-          observed_anomaly:plan.observed_anomaly,
-          prior_belief:plan.prior_belief,
-          contradicting_evidence:asArray(plan.contradicting_evidence),
-          diagnosis:plan.diagnosis,
-          repair_type:repairType,
-          repair_payload:asObject(plan.repair_payload),
-          verification_criterion:plan.verification_criterion,
-        },
-        pre_state:preState,
-        post_state:postState,
-        authoritative_completed_sibling_evidence:nextSiblingEvidence,
-        pinned_research_evidence:pinnedEvidence,
-        supplied_context:nextContext,
-      })},
-    ],2200,'req_'+node.node_path.replaceAll('.','_')+'_self_remediation_verify_'+attemptNo);
+    let verification=null;
+    for(let attempt=1;attempt<=2;attempt++){
+      try{
+        const verificationResponse=await callJson([
+          {role:'system',content:[
+            'You are the bound autonomous agent verifying YOUR OWN cognitive self-remediation.',
+            'You previously detected an anomaly, diagnosed it, chose a bounded repair, and stated a verification criterion.',
+            'The runtime only applied the requested mechanical repair. It does not decide whether your diagnosis was correct or whether the repair worked.',
+            'Compare the before state, after state, current durable evidence, and YOUR verification criterion.',
+            'Return VERIFIED only if the criterion is actually satisfied. Otherwise return FAILED and identify what remains wrong.',
+            'Return JSON only: {"status":"VERIFIED|FAILED","reason":"auditable verification","observed_after":"what changed or did not change","remaining_problem":"empty when verified"}.',
+          ].join('\n')},
+          {role:'user',content:safeJson({
+            requirement:node.requirement_text,
+            remediation_plan:{
+              observed_anomaly:episode.observed_anomaly,
+              prior_belief:episode.prior_belief,
+              contradicting_evidence:asArray(episode.contradicting_evidence),
+              diagnosis:episode.diagnosis,
+              repair_type:episode.repair_type,
+              repair_payload:asObject(episode.repair_payload),
+              verification_criterion:episode.verification_criterion,
+            },
+            pre_state:asObject(episode.pre_state),
+            post_state:effectivePostState,
+            authoritative_completed_sibling_evidence:siblingEvidence,
+            pinned_research_evidence:pinnedEvidence,
+            supplied_context:contextPayload,
+          })},
+        ],2200,'req_'+node.node_path.replaceAll('.','_')+'_self_remediation_verify_'+episode.attempt_no+'_'+attempt);
 
-    const verification=asObject(verificationResponse?.parsed);
-    const verificationStatus=text(verification.status).toUpperCase();
-    if(!['VERIFIED','FAILED'].includes(verificationStatus))
-      throw new Error('autonomous_decomposition_remediation_verification_invalid:'+node.node_path);
+        const candidate=asObject(verificationResponse?.parsed);
+        const status=text(candidate.status).toUpperCase();
+        if(!['VERIFIED','FAILED'].includes(status)){
+          if(attempt===2){
+            verification={
+              status:'FAILED',
+              reason:'Self-remediation verification did not produce a valid VERIFIED or FAILED judgment.',
+              observed_after:'',
+              remaining_problem:'verification_output_invalid',
+            };
+            break;
+          }
+          continue;
+        }
+        verification={
+          status,
+          reason:clip(candidate.reason,2400),
+          observed_after:clip(candidate.observed_after,2400),
+          remaining_problem:clip(candidate.remaining_problem,2400),
+        };
+        break;
+      }catch(error){
+        const recoverable=error?.code==='COGNITION_RESPONSE_REJECTED'||error?.code==='NVIDIA_TIMEOUT';
+        if(!recoverable)throw error;
+        if(attempt===2){
+          verification={
+            status:'FAILED',
+            reason:'Self-remediation verification could not complete after bounded retry.',
+            observed_after:'',
+            remaining_problem:String(error?.rejectionReason||error?.code||'verification_incomplete'),
+          };
+          break;
+        }
+      }
+    }
+
+    if(!verification)throw new Error('autonomous_decomposition_remediation_verification_missing:'+node.node_path);
 
     await remediationRpc('update',node.node_path,{
-      remediation_id:created.remediation_id,
-      status:verificationStatus==='VERIFIED'?'succeeded':'failed',
-      post_state:postState,
-      verification_result:{
-        status:verificationStatus,
-        reason:clip(verification.reason,2400),
-        observed_after:clip(verification.observed_after,2400),
-        remaining_problem:clip(verification.remaining_problem,2400),
-      },
+      remediation_id:episode.remediation_id,
+      status:verification.status==='VERIFIED'?'succeeded':'failed',
+      post_state:effectivePostState,
+      verification_result:verification,
     });
 
-    const finalPayload={...(node.decision_payload||{})};
+    const finalPayload=cleanedRemediationDecisionPayload(node.decision_payload);
     delete finalPayload.self_remediation_in_progress;
     finalPayload.last_self_remediation={
-      remediation_id:created.remediation_id,
-      attempt_no:attemptNo,
-      repair_type:repairType,
-      status:verificationStatus,
+      remediation_id:episode.remediation_id,
+      attempt_no:Number(episode.attempt_no||0),
+      repair_type:episode.repair_type,
+      status:verification.status,
       reason:clip(verification.reason,1600),
       verified_by_bound_agent:true,
     };
-    finalPayload.self_remediation_attempts_used=attemptNo;
+    finalPayload.self_remediation_attempts_used=Number(episode.attempt_no||0);
     finalPayload.reconsider_decomposition=true;
 
     node=await saveNode({
@@ -760,7 +775,7 @@ export async function runAutonomousRequirementCognition({
       status:'pending',
       decisionType:null,
       decisionPayload:finalPayload,
-      contextPayload:nextContext,
+      contextPayload,
       resultArtifact:node.result_artifact||null,
     });
     node.parent_path=node.parent_path??parentPathOf(node.node_path);
@@ -769,19 +784,88 @@ export async function runAutonomousRequirementCognition({
       agent_id:agentId,
       intent_execution_id:intentExecutionId,
       node_path:node.node_path,
-      remediation_id:created.remediation_id,
-      attempt_no:attemptNo,
-      repair_type:repairType,
-      verification_status:verificationStatus,
+      remediation_id:episode.remediation_id,
+      attempt_no:Number(episode.attempt_no||0),
+      repair_type:episode.repair_type,
+      verification_status:verification.status,
     }));
 
     return {
       node,
-      verified:verificationStatus==='VERIFIED',
-      verification_status:verificationStatus,
-      contextPayload:nextContext,
-      siblingEvidence:nextSiblingEvidence,
+      verified:verification.status==='VERIFIED',
+      verification_status:verification.status,
+      contextPayload,
+      siblingEvidence,
     };
+  }
+
+  async function resumeSelfRemediationEpisode(node,episode,{contextPayload,pinnedEvidence,siblingEvidence}){
+    let applied={node,contextPayload,siblingEvidence,postState:asObject(episode.post_state)};
+    if(episode.status==='proposed'){
+      applied=await applyRemediationEpisode(node,episode,{contextPayload,pinnedEvidence,siblingEvidence});
+    }else if(!['applied','verifying'].includes(String(episode.status||''))){
+      throw new Error('autonomous_decomposition_remediation_resume_status_invalid:'+node.node_path);
+    }
+    return verifyRemediationEpisode(applied.node,episode,{
+      contextPayload:applied.contextPayload,
+      pinnedEvidence,
+      siblingEvidence:applied.siblingEvidence,
+      postState:Object.keys(asObject(applied.postState)).length?applied.postState:null,
+    });
+  }
+
+  async function executeSelfRemediation(node,discovery,{contextPayload,pinnedEvidence,siblingEvidence}){
+    const history=await loadRemediationEpisodes(node.node_path);
+    const attemptNo=history.length+1;
+    if(attemptNo>MAX_SELF_REMEDIATION_ATTEMPTS)
+      throw new Error('autonomous_decomposition_remediation_attempt_limit:'+node.node_path);
+
+    const plan=asObject(discovery.remediation);
+    const repairType=text(plan.repair_type).toUpperCase();
+    if(!SELF_REMEDIATION_REPAIR_TYPES.includes(repairType))
+      throw new Error('autonomous_decomposition_remediation_repair_not_allowed:'+node.node_path);
+    if(text(plan.observed_anomaly).length<8
+       || text(plan.prior_belief).length<3
+       || text(plan.diagnosis).length<8
+       || text(plan.verification_criterion).length<8)
+      throw new Error('autonomous_decomposition_remediation_reasoning_incomplete:'+node.node_path);
+
+    const runtimePreState=remediationStateSnapshot(node,contextPayload,pinnedEvidence,siblingEvidence);
+    const preState={
+      ...runtimePreState,
+      agent_prior_cognitive_state:asObject(discovery.remediation_prior_state),
+    };
+    const created=await remediationRpc('create',node.node_path,{
+      attempt_no:attemptNo,
+      observed_anomaly:clip(plan.observed_anomaly,2400),
+      prior_belief:clip(plan.prior_belief,2400),
+      contradicting_evidence:asArray(plan.contradicting_evidence).slice(0,16),
+      diagnosis:clip(plan.diagnosis,3000),
+      repair_type:repairType,
+      repair_payload:asObject(plan.repair_payload),
+      verification_criterion:clip(plan.verification_criterion,2400),
+      pre_state:preState,
+    });
+    if(created?.status!=='ready'||!created.remediation_id)
+      throw new Error('autonomous_decomposition_remediation_create_failed:'+node.node_path);
+
+    const episodes=await loadRemediationEpisodes(node.node_path);
+    const episode=episodes.find(v=>v.remediation_id===created.remediation_id)
+      || {
+        remediation_id:created.remediation_id,
+        attempt_no:attemptNo,
+        status:'proposed',
+        observed_anomaly:plan.observed_anomaly,
+        prior_belief:plan.prior_belief,
+        contradicting_evidence:asArray(plan.contradicting_evidence),
+        diagnosis:plan.diagnosis,
+        repair_type:repairType,
+        repair_payload:asObject(plan.repair_payload),
+        verification_criterion:plan.verification_criterion,
+        pre_state:preState,
+      };
+
+    return resumeSelfRemediationEpisode(node,episode,{contextPayload,pinnedEvidence,siblingEvidence});
   }
 
   async function callJson(messages,maxTokens,phase){
@@ -844,10 +928,26 @@ export async function runAutonomousRequirementCognition({
       const resourceView=contextResourceView(contextState,contextPayload);
       const remediationEpisodes=await loadRemediationEpisodes(node.node_path);
       const remediationAttemptsUsed=remediationEpisodes.length;
+      const activeRemediation=[...remediationEpisodes].reverse()
+        .find(v=>['proposed','applied','verifying'].includes(String(v?.status||'')));
+      if(activeRemediation){
+        const resumed=await resumeSelfRemediationEpisode(node,activeRemediation,{
+          contextPayload,
+          pinnedEvidence,
+          siblingEvidence,
+        });
+        node=resumed.node;
+        contextPayload=resumed.contextPayload;
+        continue;
+      }
       const priorCognitiveState=asObject(node?.decision_payload?.routing_discovery_checkpoint);
+      const lastRemediation=asObject(node?.decision_payload?.last_self_remediation);
       const remediationAvailable=
         remediationAttemptsUsed<MAX_SELF_REMEDIATION_ATTEMPTS
-        && priorCognitiveState.version==='agent_deep_discovery_v0_1';
+        && (
+          priorCognitiveState.version==='agent_deep_discovery_v0_1'
+          || text(lastRemediation.status).toUpperCase()==='FAILED'
+        );
       const availableDecisions=[
         'ATOMIC',
         'SPLIT',
@@ -1008,6 +1108,15 @@ export async function runAutonomousRequirementCognition({
               evidence_assessment:clip(candidate.evidence_assessment,3200),
               inspected_sibling_paths:asArray(candidate.inspected_sibling_paths).map(text).filter(Boolean).slice(0,16),
               authoritative_sibling_result_hashes:siblingEvidence.map(v=>({path:v.path,result_hash:v.result_hash})),
+              remediation_prior_state:candidateDecision==='REMEDIATE'?{
+                decision:text(priorCognitiveState.decision)||null,
+                reason:clip(priorCognitiveState.reason,1800)||null,
+                requirement_interpretation:clip(priorCognitiveState.requirement_interpretation,1800)||null,
+                evidence_assessment:clip(priorCognitiveState.evidence_assessment,2200)||null,
+                unresolved_gaps:asArray(priorCognitiveState.unresolved_gaps).map(v=>clip(text(v),600)).slice(0,12),
+                context_fingerprint:text(priorCognitiveState.context_fingerprint)||null,
+                authoritative_sibling_result_hashes:asArray(priorCognitiveState.authoritative_sibling_result_hashes).slice(0,12),
+              }:null,
               remediation:candidateDecision==='REMEDIATE'?{
                 observed_anomaly:clip(candidate?.remediation?.observed_anomaly,2400),
                 prior_belief:clip(candidate?.remediation?.prior_belief,2400),
@@ -1118,7 +1227,6 @@ export async function runAutonomousRequirementCognition({
         routing_discovery_reused:Boolean(reusableDiscovery),
         routing_commit_serialized:true,
         routing_protocol:'deep_discovery_then_commit_v0_2_agent_visible_context_resource',
-        remediation_plan:discovery.remediation||null,
       };
 
       if(decision==='REMEDIATE'){
