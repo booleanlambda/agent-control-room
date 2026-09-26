@@ -15,10 +15,11 @@ export const MODEL_RUNTIME_PROFILES = Object.freeze({
     declared_context_window_tokens: 262144,
     context_window_tokens: 262144,
     operational_context_limit_tokens: 114688,
-    // NVIDIA's current chat API accepts max_tokens up to 32,768. Keep a 4K
-    // operational headroom because Gemma thinking tokens count against output.
+    // NVIDIA's current chat API explicitly accepts max_tokens up to 32,768.
+    // No lower hosted-output ceiling has been observed, so operational output
+    // follows the published limit. Thinking tokens count inside this same cap.
     max_output_tokens: 32768,
-    operational_output_limit_tokens: 28672,
+    operational_output_limit_tokens: 32768,
     input_safety_margin_tokens: 8192,
     estimated_chars_per_token: 3.2,
     supports_thinking: true,
