@@ -1795,7 +1795,7 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
       source?.fetch_status==='fetched_text'&&typeof source?.excerpt==='string'&&source.excerpt.length
     ).length);
     const excerptBudgetChars=32000;
-    const excerptCharsPerFetchedSource=Math.max(220,Math.min(1800,Math.floor(excerptBudgetChars/fetchedCount)));
+    const excerptCharsPerFetchedSource=Math.max(220,Math.min(6000,Math.floor(excerptBudgetChars/fetchedCount)));
     const sources=uniqueSources.map((source,index)=>{
       const sourceId='src_'+sha256(String(source?.url||source?.sha256||source?.title||source?.search_title||index)).slice(0,12);
       const excerpt=source?.fetch_status==='fetched_text'&&typeof source?.excerpt==='string'
