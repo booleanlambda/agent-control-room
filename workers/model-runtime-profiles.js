@@ -176,6 +176,18 @@ export const MODEL_ROLE_POLICIES = Object.freeze({
     default_thinking: false,
     max_retries: 2,
   }),
+  planner: Object.freeze({
+    default_timeout_ms: 150000,
+    default_output_tokens: 4200,
+    default_thinking: null,
+    max_retries: 2,
+  }),
+  reviewer: Object.freeze({
+    default_timeout_ms: 120000,
+    default_output_tokens: 3200,
+    default_thinking: null,
+    max_retries: 2,
+  }),
   generic: Object.freeze({
     default_timeout_ms: 120000,
     default_output_tokens: 2048,
