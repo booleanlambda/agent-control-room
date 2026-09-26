@@ -129,3 +129,16 @@ When context acquisition becomes unavailable, `NEED_CONTEXT` is removed from the
 `BLOCKED` is an agent-authored semantic outcome. A blocked child is not treated as successful completion. During synthesis, the bound agent receives each child's resolved status and decides whether the parent can still be completed from the remaining evidence or must itself become blocked. Blocked state and unresolved gaps propagate durably and must never be silently converted into a successful result.
 
 Current mechanical safeguards are an emergency ceiling of 12 context-acquisition rounds, two consecutive no-new-observation rounds, three materially unchanged-gap rounds, two materially repeated-request rounds, 30 minutes of cumulative acquisition time, and 250 unique indexed sources. These numbers are safety ceilings rather than claims of epistemic optimality; ordinary stopping is driven by evidence progress and gap convergence.
+
+
+## Durable pinned research evidence
+
+Explicitly requested source evidence must survive ordinary node-context compaction. When the bound agent requests an exact research URL and fetched text is returned, the runtime persists that source excerpt in `agent_lab.cognition_pinned_research_evidence`, keyed by agent, assignment, node, model, and source identity.
+
+Pinned evidence is outside the ordinary 52 KB `context_payload` budget. The persisted node context may still compact or evict research-round payloads, but pinned source excerpts remain durable and are rehydrated into the bound agent's cognition as `pinned_research_evidence` before deep discovery, atomic execution, and atomic reconciliation.
+
+A re-fetch of an already-known URL counts as productive context acquisition when it inserts a previously unpinned excerpt or extends the durable excerpt. Progress therefore measures restored usable evidence, not merely discovery of a new URL.
+
+Pinned evidence follows a node into a newly authored refinement child so decomposition cannot erase evidence merely by changing the node path. The evidence remains observation-level material: pinning establishes durable availability, not automatic truth or claim verification.
+
+Current cognition loading exposes up to 16 recent pinned evidence records per node, with each excerpt bounded independently; the durable table is not subject to ordinary node-context eviction.
