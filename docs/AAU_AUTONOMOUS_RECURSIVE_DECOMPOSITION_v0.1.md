@@ -103,3 +103,5 @@ When children execute sequentially, a later child receives a compact runtime-rou
 ## Convergence accounting
 
 Structural depth is charged only when a node branches into multiple child requirements. A one-child split is treated as a refinement and does not consume branching depth, because a refinement may be necessary after a rejected oversized atomic attempt. Consecutive one-child refinements have their own bounded resource counter so a chain of paraphrases cannot recurse indefinitely. This keeps the runtime neutral about intellectual structure while still enforcing finite execution.
+
+The structural-depth ceiling is an agent-visible mechanical constraint, not a semantic fallback. At the ceiling, the runtime does not throw merely because the agent needs another cognition step. Multi-child branching becomes unavailable; if refinement budget remains, the agent may still choose SPLIT knowing it can author exactly one genuinely narrower refinement child. Otherwise SPLIT is removed from the available actions. The runtime never chooses the replacement action for the agent.
