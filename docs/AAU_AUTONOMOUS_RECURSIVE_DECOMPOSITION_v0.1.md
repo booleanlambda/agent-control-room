@@ -155,3 +155,32 @@ Deep discovery must account for every surfaced sibling path through `inspected_s
 A bound agent MUST NOT request information solely because the original research excerpt is absent when a completed sibling output already contains the needed result. If the agent judges the sibling output insufficient, mismatched, stale, or otherwise unusable, it may still choose `NEED_CONTEXT`, but its own discovery reason must identify that substantive insufficiency.
 
 Sibling result hashes participate in the discovery context fingerprint so a sibling's repaired or newly completed result invalidates an older routing checkpoint automatically.
+
+
+## Level 1 cognitive self-remediation
+
+The bound agent may now choose a first-class `REMEDIATE` action when it detects a recoverable inconsistency in its own durable cognitive state. This is not runtime-authored repair: the runtime exposes prior cognition, current durable evidence, completed sibling outputs, and remediation history; the agent must identify the anomaly, state its prior belief, cite contradicting evidence, diagnose the failure, choose a bounded repair, and define its own verification criterion.
+
+A remediation episode is persisted in `agent_lab.cognition_remediation_episodes` with:
+- the observed anomaly,
+- the prior belief,
+- contradicting evidence,
+- the agent-authored diagnosis,
+- the requested repair,
+- pre-repair and post-repair state,
+- the verification criterion,
+- and the final verification result.
+
+The initial bounded repair vocabulary is deliberately narrow:
+
+`INVALIDATE_DISCOVERY_CHECKPOINT` supersedes the current routing/discovery checkpoint and returns the node to fresh reconsideration without changing evidence, atomic-failure counts, hard resource ceilings, or historical records.
+
+`REFRESH_SIBLING_EVIDENCE` mechanically reloads already resolved sibling outputs into the node context, then supersedes the current discovery checkpoint. The runtime does not decide whether those sibling outputs are relevant or sufficient.
+
+Every remediation must be verified by a separate bound-agent verification pass before the original requirement resumes. `VERIFIED` means the agent judges its own stated verification criterion satisfied. `FAILED` preserves the unsuccessful episode and allows another diagnosis while budget remains. A malformed or timed-out verification is recorded as a non-agent-authored verification failure and must never be mislabeled as successful self-remediation.
+
+Remediation is capped at two attempts per requirement node. The repair vocabulary cannot change requirement text, fabricate evidence, erase atomic execution failures, reset hard context ceilings, rewrite completed artifacts, mutate code, deploy services, or modify unrelated nodes.
+
+An interrupted episode is resumable. Episodes in `proposed`, `applied`, or `verifying` state are resumed at the repair/verification boundary after worker recovery rather than silently skipped.
+
+This capability is **Level 1 cognitive self-remediation only**. It does not constitute autonomous workflow repair, source-code modification, infrastructure repair, deployment, or rollback. Those remain later maturity levels.
