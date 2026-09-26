@@ -1,5 +1,6 @@
 import {
   resolveModelRuntimeContract,
+  resolveModelTaskBudget,
   assertModelRequestWithinBudget,
 } from '../model-runtime-profiles.js';
 
@@ -277,7 +278,7 @@ export function nvidiaConfigStatus() {
 export async function nvidiaChatCompletion({
   messages,
   model,
-  maxTokens = 256,
+  maxTokens = null,
   temperature = 0.2,
   jsonMode = null,
   enableThinking = null,
@@ -288,25 +289,29 @@ export async function nvidiaChatCompletion({
   if (!config.apiKey) throw new Error('NVIDIA_API_KEY is not configured');
   if (!Array.isArray(messages) || messages.length === 0) throw new Error('messages are required');
 
-  const resolvedJsonMode = typeof jsonMode === 'boolean' ? jsonMode : envBool('AAU_NVIDIA_JSON_MODE');
-  const resolvedThinking = typeof enableThinking === 'boolean' ? enableThinking : envBool('AAU_NVIDIA_ENABLE_THINKING');
+  const envJsonMode=envBool('AAU_NVIDIA_JSON_MODE');
+  const envThinking=envBool('AAU_NVIDIA_ENABLE_THINKING');
+  const requestedJsonMode=typeof jsonMode==='boolean' ? jsonMode : envJsonMode;
+  const requestedThinking=typeof enableThinking==='boolean' ? enableThinking : envThinking;
   const resolvedMessages = applyAdminChatRoleOverride(messages);
   const envelope = adminChatEnvelope(resolvedMessages);
   const resolvedModel = clean(model) || config.model;
-  const runtimeContract = resolveModelRuntimeContract(resolvedModel,runtimeRole);
-  if(resolvedThinking === true && runtimeContract.supports_thinking !== true){
-    const error=new Error('model_thinking_not_supported:'+resolvedModel);
-    error.code='MODEL_THINKING_NOT_SUPPORTED';
-    throw error;
-  }
-  const resolvedMaxTokens=Math.max(
-    1,
-    Math.min(
-      Number(maxTokens) || runtimeContract.role_default_output_tokens || 256,
-      Number(runtimeContract.max_output_tokens) || 16384,
-      16384
-    )
-  );
+  const requestedEnvTimeout=Number(process.env.AAU_NVIDIA_TIMEOUT_MS);
+  const taskBudget=resolveModelTaskBudget(resolvedModel,runtimeRole,{
+    requested_output_tokens:maxTokens,
+    requested_timeout_ms:timeoutMs ?? (
+      Number.isFinite(requestedEnvTimeout)&&requestedEnvTimeout>0
+        ? requestedEnvTimeout
+        : null
+    ),
+    requested_thinking:requestedThinking,
+    requested_json_mode:requestedJsonMode,
+  });
+  const runtimeContract=taskBudget.contract;
+  const resolvedJsonMode=taskBudget.json_mode;
+  const resolvedThinking=taskBudget.thinking;
+  const resolvedMaxTokens=taskBudget.effective_output_tokens;
+  const resolvedTimeoutMs=taskBudget.effective_timeout_ms;
   const preflight=assertModelRequestWithinBudget({
     messages:resolvedMessages,
     contract:runtimeContract,
@@ -323,10 +328,7 @@ export async function nvidiaChatCompletion({
   if (resolvedJsonMode === true) requestBody.response_format = { type: 'json_object' };
   if (typeof resolvedThinking === 'boolean') requestBody.chat_template_kwargs = { enable_thinking: resolvedThinking };
 
-  const resolvedTimeoutMs = resolveTimeoutMs(
-    timeoutMs ?? runtimeContract.role_default_timeout_ms
-  );
-  let body = await requestNvidia(config, requestBody, resolvedTimeoutMs, 'AAU-NVIDIA-Experimental-Adapter/0.9-model-runtime-contract');
+  let body = await requestNvidia(config, requestBody, resolvedTimeoutMs, 'AAU-NVIDIA-Experimental-Adapter/1.0-model-task-contract');
   let choice = body?.choices?.[0]?.message || {};
   let content = typeof choice?.content === 'string' ? choice.content : '';
   let reasoningContent = typeof choice?.reasoning_content === 'string' ? choice.reasoning_content : '';
@@ -344,7 +346,12 @@ export async function nvidiaChatCompletion({
           { role: 'user', content: correctionMessage(envelope.adminText) },
         ],
       };
-      body = await requestNvidia(config, repairBody, resolvedTimeoutMs, 'AAU-NVIDIA-Experimental-Adapter/0.8-adaptive-cognition');
+      assertModelRequestWithinBudget({
+        messages:repairBody.messages,
+        contract:runtimeContract,
+        requestedOutputTokens:resolvedMaxTokens,
+      });
+      body = await requestNvidia(config, repairBody, resolvedTimeoutMs, 'AAU-NVIDIA-Experimental-Adapter/1.0-model-task-contract-repair');
       choice = body?.choices?.[0]?.message || {};
       content = typeof choice?.content === 'string' ? choice.content : '';
       reasoningContent = typeof choice?.reasoning_content === 'string' ? choice.reasoning_content : '';
@@ -375,7 +382,13 @@ export async function nvidiaChatCompletion({
       operational_context_limit_tokens:runtimeContract.operational_context_limit_tokens,
       max_output_tokens:runtimeContract.max_output_tokens,
       input_safety_margin_tokens:runtimeContract.input_safety_margin_tokens,
-      timeout_ms:resolvedTimeoutMs,
+      requested_output_tokens:taskBudget.requested_output_tokens,
+      effective_output_tokens:taskBudget.effective_output_tokens,
+      requested_timeout_ms:taskBudget.requested_timeout_ms,
+      effective_timeout_ms:taskBudget.effective_timeout_ms,
+      timeout_capped:taskBudget.timeout_capped,
+      thinking:resolvedThinking,
+      json_mode:resolvedJsonMode,
       estimated_input_tokens:preflight.estimated_input_tokens,
       max_input_tokens:preflight.max_input_tokens,
     },
