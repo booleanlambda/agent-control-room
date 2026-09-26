@@ -29,7 +29,7 @@ Each registered `model_id` defines:
 
 If a vendor maximum has not been verified, AAU uses a conservative operational floor and leaves `declared_context_window_tokens` null. A conservative floor is not represented as the vendor's actual maximum.
 
-The currently bound Silas model `google/gemma-4-31b-it` has a provider-observed 131,072-token context ceiling from the NVIDIA rejection returned on 2026-09-26. AAU therefore records that observed ceiling explicitly instead of relying on a generic constant.
+The currently bound Silas model `google/gemma-4-31b-it` has a provider-observed 131,072-token combined context ceiling from NVIDIA. AAU records that as the observed/declared ceiling, but does not operate at the cliff: after a production request reached 121,527 input tokens plus a 10,000-token output request, the operational ceiling was calibrated to 114,688 tokens. The remaining provider headroom is intentional and separate from the per-request input safety margin.
 
 ## Role policies
 
