@@ -17,6 +17,7 @@ const MAX_PERSISTED_CONTEXT_BYTES=52000;
 const MAX_PINNED_EVIDENCE_ITEMS_IN_COGNITION=16;
 const MAX_PINNED_EVIDENCE_EXCERPT_CHARS=12000;
 const MAX_SELF_REMEDIATION_ATTEMPTS=2;
+const CHILD_FORMULATION_DEEP_TOKENS=7000;
 const SELF_REMEDIATION_REPAIR_TYPES=[
   'INVALIDATE_DISCOVERY_CHECKPOINT',
   'REFRESH_SIBLING_EVIDENCE',
@@ -585,6 +586,56 @@ export async function runAutonomousRequirementCognition({
     return asArray(row.episodes);
   }
 
+  async function cognitionStepRpc(action,stepKey,artifact=null,meta={}){
+    return rpc('aau_bridge_cognition_step_checkpoint',{
+      p_agent_id:agentId,
+      p_wake_request_id:intentExecutionId,
+      p_assignment_key:assignmentKey,
+      p_step_key:stepKey,
+      p_model:model,
+      p_action:action,
+      p_artifact:artifact,
+      p_meta:asObject(meta),
+    });
+  }
+
+  function childProposalStepKey(node,ordinal){
+    const discovery=asObject(node?.decision_payload?.routing_discovery_checkpoint);
+    return 'childprop:'+sha256({
+      node_path:node.node_path,
+      ordinal,
+      requirement_hash:node.requirement_hash||sha256(node.requirement_text||''),
+      discovery_fingerprint:text(discovery.context_fingerprint)||null,
+      discovery_decision:text(discovery.decision)||null,
+    }).slice(0,56);
+  }
+
+  async function loadChildProposalCheckpoint(node,ordinal){
+    const row=await cognitionStepRpc('get',childProposalStepKey(node,ordinal),null,{});
+    if(row?.status==='not_found')return null;
+    if(row?.status!=='ready')throw new Error('autonomous_decomposition_child_proposal_checkpoint_lookup_failed:'+node.node_path);
+    let proposal=null;
+    try{proposal=JSON.parse(String(row.artifact||''));}
+    catch{throw new Error('autonomous_decomposition_child_proposal_checkpoint_malformed:'+node.node_path);}
+    return {row,proposal:asObject(proposal)};
+  }
+
+  async function saveChildProposalCheckpoint(node,ordinal,proposal){
+    const artifact=JSON.stringify(proposal);
+    const row=await cognitionStepRpc('save',childProposalStepKey(node,ordinal),artifact,{
+      contract:'agent_authored_child_proposal_v0_1',
+      node_path:node.node_path,
+      ordinal,
+      discovery_fingerprint:text(node?.decision_payload?.routing_discovery_checkpoint?.context_fingerprint)||null,
+      authored_by_bound_agent:true,
+      deep_formulation:true,
+      serialization_pending:true,
+    });
+    if(row?.status!=='ready')
+      throw new Error('autonomous_decomposition_child_proposal_checkpoint_save_failed:'+node.node_path);
+    return row;
+  }
+
   async function refreshedSiblingContext(node){
     const parentPath=node.parent_path??parentPathOf(node.node_path);
     if(!parentPath){
@@ -972,6 +1023,8 @@ export async function runAutonomousRequirementCognition({
           path:v.path,status:v.status,decision_type:v.decision_type,result_hash:v.result_hash
         })),
         remediation_history:compactRemediationEpisodes(remediationEpisodes),
+        child_authoring_failure_count:Number(node?.decision_payload?.child_authoring_failure_count||0),
+        child_authoring_failure:asObject(node?.decision_payload?.child_authoring_failure),
         force_reconsider:Boolean(forceReconsider),
         atomic_unavailable:atomicUnavailable,
         atomic_execution_failures:atomicExecutionFailures,
@@ -1043,6 +1096,7 @@ export async function runAutonomousRequirementCognition({
                 authoritative_completed_sibling_evidence:siblingEvidence,
                 prior_cognitive_state:priorCognitiveState,
                 durable_self_remediation_history:compactRemediationEpisodes(remediationEpisodes),
+                decomposition_execution_failure:asObject(node?.decision_payload?.child_authoring_failure),
                 supplied_context:cognitionContext,
                 available_context_index:idx,
                 available_supplied_context_index:indexObject(cognitionContext),
@@ -1439,7 +1493,7 @@ export async function runAutonomousRequirementCognition({
   async function authorChildren(node,{branchDepth=0,singleChildRefinements=0}={}){
     const allExisting=await children(node.node_path);
     const existing=allExisting.filter((child)=>String(child?.status||'')!=='cancelled');
-    if(existing.length)return existing;
+    if(existing.length)return {children:existing,reconsider:false};
 
     const authored=[];
     const normalizedBranchDepth=Math.max(0,Math.min(Number(branchDepth)||0,MAX_BRANCH_DEPTH));
@@ -1448,64 +1502,180 @@ export async function runAutonomousRequirementCognition({
     const maxChildrenThisSplit=structuralBranchingAvailable?MAX_CHILDREN_PER_NODE:(singleRefinementAvailable?1:0);
     if(maxChildrenThisSplit<1)throw new Error('autonomous_decomposition_split_mode_unavailable:'+node.node_path);
     const startOrdinal=Math.max(0,...allExisting.map((child)=>Number(child?.ordinal||0)))+1;
+
+    const returnChildAuthoringFailure=async({ordinal,phase,error})=>{
+      const failureCount=Math.max(0,Number(node?.decision_payload?.child_authoring_failure_count||0))+1;
+      const priorDiscovery=asObject(node?.decision_payload?.routing_discovery_checkpoint);
+      const reset=await saveNode({
+        nodePath:node.node_path,
+        parentPath:node.parent_path??parentPathOf(node.node_path),
+        ordinal:node.ordinal||0,
+        requirement:node.requirement_text,
+        sourceKind:node.source_kind,
+        sourceRef:node.source_ref,
+        status:'pending',
+        decisionType:null,
+        decisionPayload:{
+          ...(node.decision_payload||{}),
+          reconsider_decomposition:true,
+          child_authoring_failure_count:failureCount,
+          child_authoring_failure:{
+            version:'agent_visible_child_authoring_failure_v0_1',
+            at:new Date().toISOString(),
+            ordinal,
+            phase,
+            rejection_reason:String(error?.rejectionReason||error?.code||error?.message||'child_authoring_failed').slice(0,300),
+            finish_reason:error?.finishReason||null,
+            prior_split_discovery:{
+              decision:text(priorDiscovery.decision)||'SPLIT',
+              reason:clip(priorDiscovery.reason,1600)||null,
+              context_fingerprint:text(priorDiscovery.context_fingerprint)||null,
+            },
+            rejected_attempt_evidence_durable:true,
+            next_action_owned_by_bound_agent:true,
+          },
+        },
+        contextPayload:node.context_payload||{},
+        resultArtifact:null,
+      });
+      reset.parent_path=node.parent_path??parentPathOf(node.node_path);
+      console.warn('AAU_AUTONOMOUS_CHILD_AUTHORING_RETURNED_TO_AGENT',JSON.stringify({
+        agent_id:agentId,
+        intent_execution_id:intentExecutionId,
+        node_path:node.node_path,
+        ordinal,
+        phase,
+        child_authoring_failure_count:failureCount,
+        rejection_reason:String(error?.rejectionReason||error?.code||error?.message||'child_authoring_failed').slice(0,300),
+      }));
+      return {children:[],reconsider:true,node:reset};
+    };
+
     for(let offset=0;offset<maxChildrenThisSplit;offset++){
       const ordinal=startOrdinal+offset;
       const previous=authored.map(c=>({ordinal:c.ordinal,requirement:c.requirement_text}));
+
+      let proposalCheckpoint=await loadChildProposalCheckpoint(node,ordinal);
+      let proposal=proposalCheckpoint?.proposal||null;
+
+      if(!proposal){
+        let formulationError=null;
+        for(let attempt=1;attempt<=2;attempt++){
+          try{
+            const response=await callJson([
+              {role:'system',content:[
+                'You are the bound autonomous agent FORMULATING the next child for ONE parent requirement.',
+                'Thinking is enabled. Do the substantive decomposition reasoning here.',
+                'You own the child requirement. The runtime will not invent, narrow, or repair it for you.',
+                'Author exactly ONE next child requirement, or declare DONE when the children already authored adequately cover the parent.',
+                'A CHILD must be independently completable, materially narrower than the parent, and include explicit scope removed plus a concrete completion criterion.',
+                'Do not execute or solve the child.',
+                'Return complete JSON only: {"status":"CHILD","requirement":"...","scope_removed":"...","completion_criterion":"...","reason":"brief"} OR {"status":"DONE","coverage_note":"brief"}.',
+                structuralBranchingAvailable
+                  ? 'There is no required number of children. One child is valid only when genuinely narrower; use as many or as few children as your reasoning requires.'
+                  : 'MECHANICAL DEPTH CONSTRAINT: structural branch depth is exhausted. You may author exactly ONE genuinely narrower refinement child and no sibling branch.',
+              ].join('\n')},
+              {role:'user',content:safeJson({
+                parent_requirement:node.requirement_text,
+                agent_authored_discovery_state:agentDiscoveryState(node),
+                authoritative_completed_sibling_evidence:authoritativeSiblingEvidence(node.context_payload),
+                supplied_context:node.context_payload||{},
+                previously_authored_children:previous,
+                prior_child_authoring_failure:asObject(node?.decision_payload?.child_authoring_failure),
+                runtime_resource_constraints:{
+                  structural_branch_depth:normalizedBranchDepth,
+                  max_structural_branch_depth:MAX_BRANCH_DEPTH,
+                  multi_child_split_available:structuralBranchingAvailable,
+                  max_children_this_split:maxChildrenThisSplit,
+                  single_child_refinements_used:singleChildRefinements,
+                  max_single_child_refinements:MAX_SINGLE_CHILD_REFINEMENTS,
+                },
+              })},
+            ],CHILD_FORMULATION_DEEP_TOKENS,'req_'+node.node_path.replaceAll('.','_')+'_author_child_formulate_'+ordinal+'_'+attempt);
+
+            const candidate=asObject(response?.parsed);
+            const candidateStatus=text(candidate.status).toUpperCase();
+            if(!['CHILD','DONE'].includes(candidateStatus))
+              throw new Error('autonomous_decomposition_child_formulation_status_invalid:'+node.node_path);
+            if(candidateStatus==='CHILD'){
+              const validation=childConvergenceValidation(
+                node.requirement_text,
+                candidate.requirement,
+                candidate.scope_removed,
+                candidate.completion_criterion
+              );
+              if(!validation.valid)
+                throw new Error('autonomous_decomposition_nonconvergent_child:'+node.node_path+':'+validation.failures.join(','));
+              candidate._convergence_validation=validation;
+            }
+            proposal=candidate;
+            proposalCheckpoint={row:await saveChildProposalCheckpoint(node,ordinal,proposal),proposal};
+            break;
+          }catch(error){
+            formulationError=error;
+            const recoverable=
+              error?.code==='COGNITION_RESPONSE_REJECTED'
+              || error?.code==='NVIDIA_TIMEOUT'
+              || String(error?.message||'').startsWith('autonomous_decomposition_nonconvergent_child:')
+              || String(error?.message||'').startsWith('autonomous_decomposition_child_formulation_status_invalid:');
+            if(!recoverable)throw error;
+            if(attempt===2)
+              return returnChildAuthoringFailure({ordinal,phase:'deep_formulation',error});
+          }
+        }
+        if(!proposal&&formulationError)
+          return returnChildAuthoringFailure({ordinal,phase:'deep_formulation',error:formulationError});
+      }
+
       let parsed=null;
+      let serializationError=null;
       for(let attempt=1;attempt<=2;attempt++){
         try{
-          const response=await callRoute([
+          const response=await callSerialize([
             {role:'system',content:[
-              'You are the bound autonomous agent decomposing ONE parent requirement.',
-              'You own the decomposition. The runtime will persist exactly what you author.',
-              'Author exactly ONE next child requirement, or declare DONE when the children already authored adequately cover the parent.',
-              'A child must be a real independently completable requirement, not a vague label.',
-              'Every child must materially reduce the parent scope. State what scope is removed and give a concrete completion criterion.',
-              'Do not solve the child here.',
-              'Return JSON only: {"status":"CHILD","requirement":"...","scope_removed":"...","completion_criterion":"...","reason":"brief"} OR {"status":"DONE","coverage_note":"brief"}.',
-              structuralBranchingAvailable
-                ? 'There is no required number of children. One child is valid only when it is a genuinely narrower refinement; do not merely restate the parent. Use as many or as few as your reasoning requires.'
-                : 'MECHANICAL DEPTH CONSTRAINT: structural branch depth is exhausted. You chose SPLIT knowing this split may author exactly ONE genuinely narrower refinement child. Do not author sibling branches.',
+              'You are the same bound model performing MECHANICAL SERIALIZATION of YOUR already-authored child proposal.',
+              'Do not redo decomposition reasoning. Do not alter the substantive requirement, scope removed, completion criterion, reason, or DONE decision.',
+              'Return only compact valid JSON in exactly one of these shapes:',
+              '{"status":"CHILD","requirement":"...","scope_removed":"...","completion_criterion":"...","reason":"brief"}',
+              'or {"status":"DONE","coverage_note":"brief"}.',
             ].join('\n')},
             {role:'user',content:safeJson({
-              parent_requirement:node.requirement_text,
-              agent_authored_discovery_state:agentDiscoveryState(node),
-              supplied_context:node.context_payload||{},
-              previously_authored_children:previous,
-              runtime_resource_constraints:{
-                structural_branch_depth:normalizedBranchDepth,
-                max_structural_branch_depth:MAX_BRANCH_DEPTH,
-                multi_child_split_available:structuralBranchingAvailable,
-                max_children_this_split:maxChildrenThisSplit,
-                single_child_refinements_used:singleChildRefinements,
-                max_single_child_refinements:MAX_SINGLE_CHILD_REFINEMENTS,
+              durable_agent_authored_child_proposal:proposal,
+              checkpoint:{
+                step_key:childProposalStepKey(node,ordinal),
+                artifact_hash:proposalCheckpoint?.row?.artifact_hash||null,
+                authored_by_bound_agent:true,
               },
             })},
-          ],900,'req_'+node.node_path.replaceAll('.','_')+'_author_child_'+ordinal+'_'+attempt);
-          const candidate=response?.parsed;
-          const candidateStatus=text(candidate?.status).toUpperCase();
+          ],700,'req_'+node.node_path.replaceAll('.','_')+'_author_child_serialize_'+ordinal+'_'+attempt);
+          const candidate=asObject(response?.parsed);
+          const candidateStatus=text(candidate.status).toUpperCase();
+          if(candidateStatus!==text(proposal.status).toUpperCase())
+            throw new Error('autonomous_decomposition_child_serialization_status_mismatch:'+node.node_path);
           if(candidateStatus==='CHILD'){
-            const validation=childConvergenceValidation(
-              node.requirement_text,
-              candidate?.requirement,
-              candidate?.scope_removed,
-              candidate?.completion_criterion
-            );
-            if(!validation.valid){
-              if(attempt===2)
-                throw new Error('autonomous_decomposition_nonconvergent_child:'+node.node_path+':'+validation.failures.join(','));
-              continue;
-            }
-            candidate._convergence_validation=validation;
+            const fields=['requirement','scope_removed','completion_criterion','reason'];
+            const mismatch=fields.some(key=>text(candidate[key])!==text(proposal[key]));
+            if(mismatch)
+              throw new Error('autonomous_decomposition_child_serialization_content_mismatch:'+node.node_path);
+            candidate._convergence_validation=proposal._convergence_validation;
+          }else if(text(candidate.coverage_note)!==text(proposal.coverage_note)){
+            throw new Error('autonomous_decomposition_child_serialization_content_mismatch:'+node.node_path);
           }
           parsed=candidate;
           break;
         }catch(error){
-          if(attempt===2)throw error;
-          if(error?.code!=='COGNITION_RESPONSE_REJECTED'&&error?.code!=='NVIDIA_TIMEOUT'
-             &&!String(error?.message||'').startsWith('autonomous_decomposition_nonconvergent_child:'))throw error;
+          serializationError=error;
+          const recoverable=
+            error?.code==='COGNITION_RESPONSE_REJECTED'
+            || error?.code==='NVIDIA_TIMEOUT'
+            || String(error?.message||'').startsWith('autonomous_decomposition_child_serialization_');
+          if(!recoverable)throw error;
+          if(attempt===2)
+            return returnChildAuthoringFailure({ordinal,phase:'protocol_serialization',error});
         }
       }
+      if(!parsed&&serializationError)
+        return returnChildAuthoringFailure({ordinal,phase:'protocol_serialization',error:serializationError});
 
       const status=text(parsed?.status).toUpperCase();
       if(status==='DONE'){
@@ -1515,12 +1685,18 @@ export async function runAutonomousRequirementCognition({
           nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
           requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
           status:'split',decisionType:'SPLIT',
-          decisionPayload:{...(node.decision_payload||{}),child_count:authored.length,coverage_note:clip(parsed?.coverage_note,1500),children_authored:true},
+          decisionPayload:{
+            ...(node.decision_payload||{}),
+            child_count:authored.length,
+            coverage_note:clip(parsed?.coverage_note,1500),
+            children_authored:true,
+            child_authoring_protocol:'deep_formulation_checkpoint_then_nonthinking_serialization_v0_1',
+          },
           contextPayload:node.context_payload||{},resultArtifact:null,
         });
-        return authored;
+        return {children:authored,reconsider:false};
       }
-      if(status!=='CHILD')throw new Error('autonomous_decomposition_child_status_invalid:'+node.node_path);
+
       const requirement=text(parsed?.requirement);
       if(requirement.length<5)throw new Error('autonomous_decomposition_child_requirement_empty:'+node.node_path);
       const duplicate=authored.some(c=>c.requirement_hash===sha256(requirement));
@@ -1537,9 +1713,12 @@ export async function runAutonomousRequirementCognition({
           scope_removed:clip(parsed?.scope_removed,1600),
           completion_criterion:clip(parsed?.completion_criterion,1600),
           convergence_similarity:Number(parsed?._convergence_validation?.similarity||0),
+          child_proposal_checkpoint_step_key:childProposalStepKey(node,ordinal),
+          child_authoring_protocol:'deep_formulation_checkpoint_then_nonthinking_serialization_v0_1',
         },
         contextPayload:inheritedChildContext(node.context_payload),resultArtifact:null,
       });
+
       const inheritedPinned=await loadPinnedEvidence(node.node_path);
       if(inheritedPinned.length){
         const inheritedSave=await pinnedEvidenceRpc('save',nodePath,inheritedPinned.map(v=>({
@@ -1557,9 +1736,11 @@ export async function runAutonomousRequirementCognition({
         if(inheritedSave?.status!=='ready')
           throw new Error('autonomous_decomposition_pinned_evidence_inherit_failed:'+nodePath);
       }
+
       child.parent_path=node.node_path;
       authored.push(child);
       counters.nodes++;
+
       if(!structuralBranchingAvailable&&authored.length===1){
         await saveNode({
           nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
@@ -1573,10 +1754,11 @@ export async function runAutonomousRequirementCognition({
             structural_branch_depth:normalizedBranchDepth,
             max_structural_branch_depth:MAX_BRANCH_DEPTH,
             max_children_this_split:1,
+            child_authoring_protocol:'deep_formulation_checkpoint_then_nonthinking_serialization_v0_1',
           },
           contextPayload:node.context_payload||{},resultArtifact:null,
         });
-        return authored;
+        return {children:authored,reconsider:false};
       }
     }
     throw new Error('autonomous_decomposition_child_resource_limit:'+node.node_path);
@@ -1960,7 +2142,15 @@ export async function runAutonomousRequirementCognition({
     for(let transitions=0;transitions<8;transitions++){
       if(node.node_status==='split'||node.decision_type==='SPLIT'){
         let kids=(await children(node.node_path)).filter((child)=>String(child?.status||'')!=='cancelled');
-        if(!kids.length)kids=await authorChildren(node,{branchDepth,singleChildRefinements});
+        if(!kids.length){
+          const authoredResult=await authorChildren(node,{branchDepth,singleChildRefinements});
+          if(authoredResult?.reconsider){
+            node=authoredResult.node;
+            node.parent_path=parentPath;
+            continue;
+          }
+          kids=asArray(authoredResult?.children);
+        }
         if(kids.length===1&&singleChildRefinements>=MAX_SINGLE_CHILD_REFINEMENTS){
           const child=kids[0];
           await saveNode({
@@ -2090,6 +2280,8 @@ export async function runAutonomousRequirementCognition({
       evidence_retention_policy:'pinned_research_evidence_v0_1_outside_context_eviction',
       sibling_evidence_handoff_policy:'authoritative_completed_sibling_evidence_v0_1_attention_accounted',
       self_remediation_policy:'agent_authored_cognitive_self_remediation_v0_1_bounded_verified',
+      child_authoring_protocol:'deep_formulation_checkpoint_then_nonthinking_serialization_v0_1',
+      child_authoring_failure_policy:'durable_rejected_attempt_then_agent_reconsideration_v0_1',
     },
   };
 }
