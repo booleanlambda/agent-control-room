@@ -1,3 +1,8 @@
+import {
+  resolveModelRuntimeContract,
+  modelInputBudgetTokens,
+} from './model-runtime-profiles.js';
+
 // AAU autonomous recursive decomposition v0.1
 // The bound agent authors decomposition. Runtime only persists/routes/checkpoints.
 
@@ -34,6 +39,211 @@ function text(v){return String(v??'').trim();}
 function bytes(v){try{return Buffer.byteLength(typeof v==='string'?v:JSON.stringify(v));}catch{return 0;}}
 function clip(s,n){const v=String(s??'');return v.length<=n?v:v.slice(0,n);}
 function safeJson(v){try{return JSON.stringify(v);}catch{return '{}';}}
+function estimatedTokens(v,contract){
+  const chars=typeof v==='string'?v.length:safeJson(v).length;
+  const charsPerToken=Math.max(1.5,Number(contract?.estimated_chars_per_token)||3.2);
+  return Math.ceil(chars/charsPerToken)+32;
+}
+function compactResearchCatalogForModel(rows,mode='full'){
+  return asArray(rows).map(raw=>{
+    const v=asObject(raw);
+    if(mode==='minimal'){
+      return {
+        source_id:v.source_id||null,
+        url:v.url||null,
+        sha256:v.sha256||null,
+        fetch_status:v.fetch_status||null,
+      };
+    }
+    return {
+      source_id:v.source_id||null,
+      ordinal:v.ordinal||null,
+      query:clip(v.query,300)||null,
+      title:clip(v.title,500)||null,
+      publisher:clip(v.publisher,240)||null,
+      url:v.url||null,
+      published_at:v.published_at||null,
+      coverage:v.coverage||null,
+      fetch_status:v.fetch_status||null,
+      sha256:v.sha256||null,
+      excerpt_chars_shared:Number(v.excerpt_chars_shared||0),
+      full_receipt_persisted:Boolean(v.full_receipt_persisted),
+    };
+  });
+}
+function compactResearchRoundForModel(raw,maxTokens,contract){
+  const round=asObject(raw);
+  const base={
+    status:round.status||null,
+    audit_batch_id:round.audit_batch_id||null,
+    requested_queries:asArray(round.requested_queries).map(v=>clip(text(v),500)).slice(0,8),
+    requested_urls:asArray(round.requested_urls).map(v=>clip(text(v),1000)).slice(0,8),
+    handoff_policy:round.handoff_policy||null,
+    evidence_rule:clip(round.evidence_rule,1200)||null,
+  };
+  const sources=asArray(round.sources);
+  if(!sources.length)return base;
+  const charsPerToken=Math.max(1.5,Number(contract?.estimated_chars_per_token)||3.2);
+  const metadataOnly=sources.map((rawSource,index)=>{
+    const s=asObject(rawSource);
+    return {
+      source_id:s.source_id||null,
+      ordinal:s.ordinal||index+1,
+      title:clip(s.title,450)||null,
+      publisher:clip(s.publisher,220)||null,
+      url:s.url||null,
+      coverage:s.coverage||null,
+      fetch_status:s.fetch_status||null,
+      sha256:s.sha256||null,
+      excerpt_chars_shared:Number(s.excerpt_chars_shared||0),
+      full_receipt_persisted:Boolean(s.full_receipt_persisted),
+    };
+  });
+  const metadataTokens=estimatedTokens({...base,sources:metadataOnly},contract);
+  if(metadataTokens>=maxTokens)return {...base,sources:metadataOnly};
+  const remainingChars=Math.max(0,Math.floor((maxTokens-metadataTokens)*charsPerToken));
+  const fetched=Math.max(1,sources.filter(s=>typeof s?.excerpt==='string'&&s.excerpt.length).length);
+  const excerptCharsEach=Math.max(0,Math.min(6000,Math.floor(remainingChars/fetched)));
+  return {
+    ...base,
+    sources:sources.map((rawSource,index)=>{
+      const s=asObject(rawSource);
+      const meta=metadataOnly[index];
+      return {
+        ...meta,
+        excerpt:excerptCharsEach>0&&typeof s.excerpt==='string'
+          ? clip(s.excerpt,excerptCharsEach)
+          : null,
+      };
+    }),
+  };
+}
+function compactPinnedEvidenceForModel(rows,maxTokens,contract){
+  const items=asArray(rows);
+  if(!items.length)return [];
+  if(estimatedTokens(items,contract)<=maxTokens)return items;
+  const metadata=items.map(v=>({
+    evidence_id:v.evidence_id||null,
+    source_key:v.source_key||null,
+    source_id:v.source_id||null,
+    url:v.url||null,
+    title:clip(v.title,450)||null,
+    publisher:clip(v.publisher,220)||null,
+    sha256:v.sha256||null,
+    fetch_status:v.fetch_status||null,
+    coverage:v.coverage||null,
+    audit_batch_id:v.audit_batch_id||null,
+    durable_pinned:true,
+  }));
+  const metadataTokens=estimatedTokens(metadata,contract);
+  if(metadataTokens>=maxTokens)return metadata;
+  const charsPerToken=Math.max(1.5,Number(contract?.estimated_chars_per_token)||3.2);
+  const excerptCharsEach=Math.max(0,Math.min(
+    MAX_PINNED_EVIDENCE_EXCERPT_CHARS,
+    Math.floor((maxTokens-metadataTokens)*charsPerToken/Math.max(1,items.length))
+  ));
+  return items.map((v,i)=>({
+    ...metadata[i],
+    excerpt:excerptCharsEach>0?clip(v.excerpt,excerptCharsEach):null,
+    excerpt_bytes:Number(v.excerpt_bytes||bytes(v.excerpt||'')),
+  }));
+}
+function compactSiblingEvidenceForModel(rows,maxTokens,contract){
+  const items=asArray(rows);
+  if(!items.length)return [];
+  if(estimatedTokens(items,contract)<=maxTokens)return items;
+  const per=Math.max(300,Math.floor(maxTokens/Math.max(1,items.length)));
+  const charsPerToken=Math.max(1.5,Number(contract?.estimated_chars_per_token)||3.2);
+  const perChars=Math.max(500,Math.floor(per*charsPerToken));
+  return items.map(v=>({
+    path:v.path||null,
+    status:v.status||null,
+    decision_type:v.decision_type||null,
+    requirement:clip(v.requirement,Math.min(700,Math.floor(perChars*0.15))),
+    artifact:clip(v.artifact,Math.max(250,Math.floor(perChars*0.58))),
+    handoff_json:clip(v.handoff_json,Math.max(180,Math.floor(perChars*0.20))),
+    result_hash:v.result_hash||null,
+  }));
+}
+function boundContextForModel(payload,maxTokens,contract){
+  const src=asObject(payload);
+  const budget=Math.max(1000,Math.floor(Number(maxTokens)||1000));
+  if(estimatedTokens(src,contract)<=budget){
+    return {
+      ...src,
+      _model_context_budget:{
+        version:'model_profile_token_context_v0_1',
+        model_id:contract?.model_id||null,
+        max_tokens:budget,
+        estimated_tokens:estimatedTokens(src,contract),
+        compacted:false,
+      },
+    };
+  }
+  const out={};
+  const evicted=[];
+  const researchRound=(key)=>{
+    const match=String(key).match(/^external_research(?:_round_)?(\d+)$/);
+    return match?Number(match[1]):0;
+  };
+  const fits=(candidate)=>estimatedTokens(candidate,contract)<=budget;
+
+  const catalog=asArray(src.research_source_catalog);
+  if(catalog.length){
+    let compact=compactResearchCatalogForModel(catalog,'full');
+    if(!fits({...out,research_source_catalog:compact}))
+      compact=compactResearchCatalogForModel(catalog,'minimal');
+    if(fits({...out,research_source_catalog:compact}))out.research_source_catalog=compact;
+    else evicted.push({path:'research_source_catalog',reason:'model_token_budget',items:catalog.length});
+  }
+
+  for(const key of ['completed_sibling_results','inherited_completed_sibling_results']){
+    if(!src[key])continue;
+    const candidate={...out,[key]:src[key]};
+    if(fits(candidate))out[key]=src[key];
+    else evicted.push({path:key,reason:'model_token_budget'});
+  }
+
+  const researchEntries=Object.entries(src)
+    .filter(([key])=>key.startsWith('external_research'))
+    .sort((a,b)=>researchRound(b[0])-researchRound(a[0]));
+  for(const [key,value] of researchEntries){
+    const remaining=Math.max(600,budget-estimatedTokens(out,contract)-128);
+    const compact=compactResearchRoundForModel(value,remaining,contract);
+    if(fits({...out,[key]:compact}))out[key]=compact;
+    else evicted.push({path:key,reason:'model_token_budget'});
+  }
+
+  const priorityExcluded=new Set([
+    'research_source_catalog','completed_sibling_results','inherited_completed_sibling_results',
+    ...researchEntries.map(([key])=>key),
+    '_context_evicted','_context_budget','_model_context_budget'
+  ]);
+  const other=Object.entries(src).filter(([key])=>!priorityExcluded.has(key)).reverse();
+  for(const [key,value] of other){
+    if(fits({...out,[key]:value}))out[key]=value;
+    else evicted.push({path:key,reason:'model_token_budget'});
+  }
+
+  out._model_context_evicted=evicted.slice(0,60);
+  out._model_context_budget={
+    version:'model_profile_token_context_v0_1',
+    model_id:contract?.model_id||null,
+    operational_context_limit_tokens:contract?.operational_context_limit_tokens||null,
+    max_tokens:budget,
+    estimated_tokens:estimatedTokens(out,contract),
+    compacted:true,
+    evicted_count:evicted.length,
+    source_catalog_items:asArray(out.research_source_catalog).length,
+  };
+  return out;
+}
+function withoutDuplicatedSiblingContext(payload){
+  const out={...asObject(payload)};
+  delete out.completed_sibling_results;
+  delete out.inherited_completed_sibling_results;
+  return out;
+}
 function mergeResearchSourceCatalog(existing,incoming){
   const out=[];
   const byKey=new Map();
@@ -461,6 +671,7 @@ export async function runAutonomousRequirementCognition({
   model,packet,modeInfo,agentId,intentExecutionId,
   rpc,sha256,completeJson,completeRouteJson=null,completeSerializeJson=null,researchContext=null,
 }){
+  const agentRuntimeContract=resolveModelRuntimeContract(model,'agent');
   const rootReq=extractTriggerRequirement(packet);
   const assignmentKey='req:'+sha256({
     agent_id:agentId,
@@ -470,6 +681,55 @@ export async function runAutonomousRequirementCognition({
   }).slice(0,48);
   const idx=contextIndex(packet);
   const counters={nodes:0,model_calls:0,context_requests:0};
+
+  function agentModelContextView(rawPayload,pinnedEvidence,outputTokens){
+    const safeInputTokens=modelInputBudgetTokens(agentRuntimeContract,outputTokens);
+    const fixedReserveTokens=Math.max(2500,Math.min(16000,Math.floor(safeInputTokens*0.18)));
+    const rawSibling=authoritativeSiblingEvidence(rawPayload);
+    const siblingBudget=Math.max(700,Math.floor(safeInputTokens*0.12));
+    const pinnedBudget=Math.max(700,Math.floor(safeInputTokens*0.22));
+    const siblingEvidence=compactSiblingEvidenceForModel(
+      rawSibling,siblingBudget,agentRuntimeContract
+    );
+    const pinned=compactPinnedEvidenceForModel(
+      pinnedEvidence,pinnedBudget,agentRuntimeContract
+    );
+    const usedByEvidence=
+      estimatedTokens(siblingEvidence,agentRuntimeContract)
+      +estimatedTokens(pinned,agentRuntimeContract);
+    const contextBudget=Math.max(
+      1000,
+      safeInputTokens-fixedReserveTokens-usedByEvidence
+    );
+    const bounded=boundContextForModel(
+      withoutDuplicatedSiblingContext(rawPayload),
+      contextBudget,
+      agentRuntimeContract
+    );
+    const suppliedContext={
+      ...bounded,
+      ...(pinned.length?{pinned_research_evidence:pinned}:{}),
+    };
+    return {
+      suppliedContext,
+      siblingEvidence,
+      safeInputTokens,
+      fixedReserveTokens,
+      contextBudget,
+      estimatedSuppliedTokens:estimatedTokens(suppliedContext,agentRuntimeContract),
+      estimatedSiblingTokens:estimatedTokens(siblingEvidence,agentRuntimeContract),
+      estimatedPinnedTokens:estimatedTokens(pinned,agentRuntimeContract),
+    };
+  }
+
+  function boundInMemoryContext(rawPayload,pinnedEvidence,outputTokens){
+    const view=agentModelContextView(rawPayload,pinnedEvidence,outputTokens);
+    return boundContextForModel(
+      rawPayload,
+      Math.max(1000,view.contextBudget+view.estimatedSiblingTokens),
+      agentRuntimeContract
+    );
+  }
 
   async function nodeRpc(action,args={}){
     return rpc('aau_bridge_cognition_requirement_node_v0_1',{
@@ -756,9 +1016,17 @@ export async function runAutonomousRequirementCognition({
             },
             pre_state:asObject(episode.pre_state),
             post_state:effectivePostState,
-            authoritative_completed_sibling_evidence:siblingEvidence,
-            pinned_research_evidence:pinnedEvidence,
-            supplied_context:contextPayload,
+            authoritative_completed_sibling_evidence:agentModelContextView(
+              contextPayload,pinnedEvidence,2200
+            ).siblingEvidence,
+            pinned_research_evidence:compactPinnedEvidenceForModel(
+              pinnedEvidence,
+              Math.max(700,Math.floor(modelInputBudgetTokens(agentRuntimeContract,2200)*0.22)),
+              agentRuntimeContract
+            ),
+            supplied_context:agentModelContextView(
+              contextPayload,pinnedEvidence,2200
+            ).suppliedContext,
           })},
         ],2200,'req_'+node.node_path.replaceAll('.','_')+'_self_remediation_verify_'+episode.attempt_no+'_'+attempt);
 
@@ -948,6 +1216,7 @@ export async function runAutonomousRequirementCognition({
   async function decide(node,{forceReconsider=false,branchDepth=0,singleChildRefinements=0}={}){
     let contextPayload=asObject(node.context_payload);
     let pinnedEvidence=await loadPinnedEvidence(node.node_path);
+    contextPayload=boundInMemoryContext(contextPayload,pinnedEvidence,10000);
     const atomicExecutionFailures=Math.max(0,Number(node?.decision_payload?.atomic_execution_failures||0));
     const atomicUnavailable=atomicExecutionFailures>=MAX_ATOMIC_EXECUTION_FAILURES;
     const normalizedBranchDepth=Math.max(0,Math.min(Number(branchDepth)||0,MAX_BRANCH_DEPTH));
@@ -979,11 +1248,10 @@ export async function runAutonomousRequirementCognition({
     }
 
     while(true){
-      const siblingEvidence=authoritativeSiblingEvidence(contextPayload);
-      const cognitionContext={
-        ...contextPayload,
-        ...(pinnedEvidence.length?{pinned_research_evidence:pinnedEvidence}:{}),
-      };
+      contextPayload=boundInMemoryContext(contextPayload,pinnedEvidence,10000);
+      const discoveryContextView=agentModelContextView(contextPayload,pinnedEvidence,10000);
+      const siblingEvidence=discoveryContextView.siblingEvidence;
+      const cognitionContext=discoveryContextView.suppliedContext;
       const resourceView=contextResourceView(contextState,contextPayload);
       const remediationEpisodes=await loadRemediationEpisodes(node.node_path);
       const remediationAttemptsUsed=remediationEpisodes.length;
@@ -1127,6 +1395,15 @@ export async function runAutonomousRequirementCognition({
                   self_remediation_attempts_used:remediationAttemptsUsed,
                   max_self_remediation_attempts:MAX_SELF_REMEDIATION_ATTEMPTS,
                   allowed_self_remediation_repairs:SELF_REMEDIATION_REPAIR_TYPES,
+                  model_runtime_contract:{
+                    model_id:agentRuntimeContract.model_id,
+                    operational_context_limit_tokens:agentRuntimeContract.operational_context_limit_tokens,
+                    max_output_tokens:agentRuntimeContract.max_output_tokens,
+                    input_safety_margin_tokens:agentRuntimeContract.input_safety_margin_tokens,
+                    safe_input_tokens:discoveryContextView.safeInputTokens,
+                    supplied_context_budget_tokens:discoveryContextView.contextBudget,
+                    estimated_supplied_context_tokens:discoveryContextView.estimatedSuppliedTokens,
+                  },
                 },
               })},
             ],10000,'req_'+node.node_path.replaceAll('.','_')+'_discovery_'+(resourceView.context_rounds_attempted+1)+'_'+attempt);
@@ -1393,12 +1670,12 @@ export async function runAutonomousRequirementCognition({
         };
 
         const researchRoundNumber=contextState.context_rounds_attempted;
-        contextPayload={
+        contextPayload=boundInMemoryContext({
           ...contextPayload,
           ...resolved,
           ...(researchCatalog.length?{research_source_catalog:researchCatalog}:{}),
           ...(researchObserved?{['external_research_round_'+researchRoundNumber]:researchObserved}:{}),
-        };
+        },pinnedEvidence,10000);
 
         const nextResourceView=contextResourceView(contextState,contextPayload);
         node=await saveNode({
@@ -1558,6 +1835,10 @@ export async function runAutonomousRequirementCognition({
     for(let offset=0;offset<maxChildrenThisSplit;offset++){
       const ordinal=startOrdinal+offset;
       const previous=authored.map(c=>({ordinal:c.ordinal,requirement:c.requirement_text}));
+      const childPinnedEvidence=await loadPinnedEvidence(node.node_path);
+      const childContextView=agentModelContextView(
+        node.context_payload||{},childPinnedEvidence,CHILD_FORMULATION_DEEP_TOKENS
+      );
 
       let proposalCheckpoint=await loadChildProposalCheckpoint(node,ordinal);
       let proposal=proposalCheckpoint?.proposal||null;
@@ -1582,8 +1863,8 @@ export async function runAutonomousRequirementCognition({
               {role:'user',content:safeJson({
                 parent_requirement:node.requirement_text,
                 agent_authored_discovery_state:agentDiscoveryState(node),
-                authoritative_completed_sibling_evidence:authoritativeSiblingEvidence(node.context_payload),
-                supplied_context:node.context_payload||{},
+                authoritative_completed_sibling_evidence:childContextView.siblingEvidence,
+                supplied_context:childContextView.suppliedContext,
                 previously_authored_children:previous,
                 prior_child_authoring_failure:asObject(node?.decision_payload?.child_authoring_failure),
                 runtime_resource_constraints:{
@@ -1770,11 +2051,11 @@ export async function runAutonomousRequirementCognition({
 
   async function executeAtomic(node){
     let pinnedEvidence=await loadPinnedEvidence(node.node_path);
-    const siblingEvidence=authoritativeSiblingEvidence(node.context_payload);
-    const atomicCognitionContext=()=>({
-      ...(node.context_payload||{}),
-      ...(pinnedEvidence.length?{pinned_research_evidence:pinnedEvidence}:{}),
-    });
+    const atomicContextView=()=>agentModelContextView(
+      node.context_payload||{},pinnedEvidence,ATOMIC_EXECUTION_DEEP_TOKENS
+    );
+    const siblingEvidence=atomicContextView().siblingEvidence;
+    const atomicCognitionContext=()=>atomicContextView().suppliedContext;
     let parsed=null;
     try{
       for(let attempt=1;attempt<=2;attempt++){
@@ -1858,11 +2139,11 @@ export async function runAutonomousRequirementCognition({
       }
       const pinnedResult=await persistExplicitResearchEvidence(node.node_path,researchUrls,researchObserved);
       pinnedEvidence=pinnedResult.evidence;
-      const contextPayload={
+      const contextPayload=boundInMemoryContext({
         ...(node.context_payload||{}),
         ...resolveContext(packet,requests,atomicCognitionContext()),
         ...(researchObserved?{external_research_atomic:researchObserved}:{}),
-      };
+      },pinnedEvidence,ATOMIC_EXECUTION_DEEP_TOKENS);
       counters.context_requests+=requests.length+researchQueries.length+researchUrls.length;
       const reset=await saveNode({
         nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
@@ -1993,11 +2274,11 @@ export async function runAutonomousRequirementCognition({
       }
       const pinnedResult=await persistExplicitResearchEvidence(node.node_path,researchUrls,researchObserved);
       pinnedEvidence=pinnedResult.evidence;
-      const contextPayload={
+      const contextPayload=boundInMemoryContext({
         ...(node.context_payload||{}),
         ...resolveContext(packet,requests,atomicCognitionContext()),
         ...(researchObserved?{external_research_reconciliation:researchObserved}:{}),
-      };
+      },pinnedEvidence,ATOMIC_RECONCILIATION_DEEP_TOKENS);
       counters.context_requests+=requests.length+researchQueries.length+researchUrls.length;
       const reset=await saveNode({
         nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
@@ -2308,6 +2589,7 @@ export async function runAutonomousRequirementCognition({
       atomic_reconciliation_budget_policy:'dedicated_deep_budget_v0_1_5000',
       synthesis_merge_budget_policy:'dedicated_deep_budget_v0_1_6000_with_bounded_retry',
       synthesis_final_budget_policy:'dedicated_deep_budget_v0_1_7000_with_bounded_retry',
+      model_context_policy:'model_profile_token_context_v0_1_in_memory_and_model_view',
     },
   };
 }
