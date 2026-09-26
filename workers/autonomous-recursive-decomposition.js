@@ -166,7 +166,7 @@ function getPath(root,path){
 function indexObject(root,prefix='',depth=0,out=[]){
   if(!root||typeof root!=='object'||depth>2)return out;
   if(Array.isArray(root)){
-    for(let i=0;i<Math.min(root.length,24)&&out.length<180;i++){
+    for(let i=0;i<Math.min(root.length,80)&&out.length<180;i++){
       const path=prefix?prefix+'.'+i:String(i);
       const value=root[i];
       out.push({path,kind:Array.isArray(value)?'array':typeof value,bytes:bytes(value)});
@@ -437,6 +437,7 @@ export async function runAutonomousRequirementCognition({
                     : 'Structural branch depth and the single-child refinement budget are both exhausted, so SPLIT is mechanically unavailable.'),
                 'Before deciding, interrogate semantic equivalence, definitions, time horizons, populations/scopes, proxy metrics, evidence sufficiency, assumptions, and unresolved gaps.',
                 'Do not treat a nearby metric or label as equivalent unless YOU can justify the equivalence from supplied evidence.',
+                'When supplied_context contains research_source_catalog, treat it as the complete discoverable source index for prior research rounds. If a source is indexed but its excerpt is insufficient, request its exact listed HTTPS URL rather than assuming it is unavailable.',
                 'Do not solve the requirement or author child requirements in this pass.',
                 'Return complete JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT","reason":"auditable reason","requirement_interpretation":"what this requirement actually demands","evidence_assessment":"what the current evidence does and does not establish","unresolved_gaps":["..."],"context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."]}.',
                 forceReconsider
