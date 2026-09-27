@@ -1530,10 +1530,19 @@ export async function runAutonomousRequirementCognition({
     contextPayload=boundInMemoryContext(contextPayload,pinnedEvidence,10000);
     const atomicExecutionFailures=Math.max(0,Number(node?.decision_payload?.atomic_execution_failures||0));
     const atomicUnavailable=atomicExecutionFailures>=MAX_ATOMIC_EXECUTION_FAILURES;
-    const normalizedBranchDepth=Math.max(0,Math.min(Number(branchDepth)||0,MAX_BRANCH_DEPTH));
-    const structuralBranchingAvailable=normalizedBranchDepth<MAX_BRANCH_DEPTH;
-    const singleRefinementAvailable=singleChildRefinements<MAX_SINGLE_CHILD_REFINEMENTS;
-    const splitAvailable=structuralBranchingAvailable||singleRefinementAvailable;
+    const runtimeView=await semanticRuntimeView();
+    const normalizedBranchDepth=pathDepth(node.node_path);
+    const storageDepthAvailable=Number.isFinite(normalizedBranchDepth)
+      &&normalizedBranchDepth<semanticRuntime.hard_storage_path_depth;
+    const availableChildCapacity=semanticChildCapacity({
+      remainingBudgetUnits:Number(runtimeView?.remaining_budget_units||0),
+      nodeCreateUnits:semanticRuntime.node_create_units,
+      safetyReserveUnits:semanticRuntime.safety_reserve_units,
+      maxChildren:MAX_CHILDREN_PER_NODE,
+    });
+    const splitAvailable=storageDepthAvailable&&availableChildCapacity>=1;
+    const structuralBranchingAvailable=splitAvailable&&availableChildCapacity>=2;
+    const singleRefinementAvailable=splitAvailable;
 
     let contextState=asObject(node?.decision_payload?.context_resource_state);
     if(contextState.version!=='agent_visible_context_resource_v0_2'){
