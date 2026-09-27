@@ -2468,21 +2468,11 @@ export async function runAutonomousRequirementCognition({
     if(existing.length)return {children:existing,reconsider:false};
 
     const authored=[];
-    const runtimeView=await semanticRuntimeView();
     const normalizedBranchDepth=pathDepth(node.node_path);
     const storageDepthAvailable=Number.isFinite(normalizedBranchDepth)
       &&normalizedBranchDepth<semanticRuntime.hard_storage_path_depth;
-    const maxChildrenThisSplit=storageDepthAvailable
-      ? semanticChildCapacity({
-          remainingBudgetUnits:Number(runtimeView?.remaining_budget_units||0),
-          nodeCreateUnits:semanticRuntime.node_create_units,
-          safetyReserveUnits:semanticRuntime.safety_reserve_units,
-          maxChildren:MAX_CHILDREN_PER_NODE,
-        })
-      : 0;
-    const structuralBranchingAvailable=maxChildrenThisSplit>=2;
-    const singleRefinementAvailable=maxChildrenThisSplit>=1;
-    if(maxChildrenThisSplit<1)throw new Error('autonomous_decomposition_split_mode_unavailable:'+node.node_path);
+    if(!storageDepthAvailable)
+      throw new Error('autonomous_decomposition_split_mode_unavailable:'+node.node_path);
     const startOrdinal=Math.max(0,...allExisting.map((child)=>Number(child?.ordinal||0)))+1;
 
     const returnChildAuthoringFailure=async({ordinal,phase,error})=>{
@@ -2533,10 +2523,56 @@ export async function runAutonomousRequirementCognition({
       return {children:[],reconsider:true,node:reset};
     };
 
-    for(let offset=0;offset<maxChildrenThisSplit;offset++){
+    const finalizeBudgetConstrainedSplit=async({
+      runtimeView,branchEconomics,availableChildCapacity
+    })=>{
+      const finalized=await saveNode({
+        nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
+        requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
+        status:'split',decisionType:'SPLIT',
+        decisionPayload:{
+          ...(node.decision_payload||{}),
+          child_count:authored.length,
+          children_authored:true,
+          conserved_branch_economics_constraint_applied:true,
+          semantic_branch_economics_contract:branchEconomics.contract,
+          expected_child_lifecycle_units:branchEconomics.expected_child_lifecycle_units,
+          completion_reserve_units:branchEconomics.completion_reserve_units,
+          branch_economics_components:branchEconomics.components,
+          remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
+          semantic_child_capacity_at_stop:availableChildCapacity,
+          storage_path_depth:normalizedBranchDepth,
+          emergency_storage_path_depth:semanticRuntime.hard_storage_path_depth,
+          child_authoring_protocol:'deep_formulation_checkpoint_then_nonthinking_serialization_v0_1',
+        },
+        contextPayload:node.context_payload||{},resultArtifact:null,
+      });
+      return {children:authored,reconsider:false,node:finalized};
+    };
+
+    for(let offset=0;offset<MAX_CHILDREN_PER_NODE;offset++){
       const ordinal=startOrdinal+offset;
       const previous=authored.map(c=>({ordinal:c.ordinal,requirement:c.requirement_text}));
+      const runtimeView=await semanticRuntimeView();
       const childPinnedEvidence=await loadPinnedEvidence(node.node_path);
+      const branchEconomics=projectedBranchEconomics(node.context_payload||{},childPinnedEvidence);
+      const currentChildCapacity=semanticChildCapacity({
+        remainingBudgetUnits:Number(runtimeView?.remaining_budget_units||0),
+        nodeCreateUnits:semanticRuntime.node_create_units,
+        safetyReserveUnits:semanticRuntime.safety_reserve_units,
+        expectedChildLifecycleUnits:branchEconomics.expected_child_lifecycle_units,
+        completionReserveUnits:branchEconomics.completion_reserve_units,
+        maxChildren:MAX_CHILDREN_PER_NODE-authored.length,
+      });
+      const structuralBranchingAvailable=currentChildCapacity>=2;
+      const singleRefinementAvailable=currentChildCapacity>=1;
+      if(currentChildCapacity<1){
+        if(authored.length<1)
+          throw new Error('autonomous_decomposition_split_mode_unavailable:'+node.node_path);
+        return finalizeBudgetConstrainedSplit({
+          runtimeView,branchEconomics,availableChildCapacity:currentChildCapacity,
+        });
+      }
       const childContextView=agentModelContextView(
         node.context_payload||{},childPinnedEvidence,stageBudgets.child_formulation
       );
@@ -2559,7 +2595,7 @@ export async function runAutonomousRequirementCognition({
                 'Do not execute or solve the child.',
                 'Return complete JSON only: {"status":"CHILD","requirement":"...","scope_removed":"...","completion_criterion":"...","reason":"brief"} OR {"status":"DONE","coverage_note":"brief"}.',
                 'There is no required number of children. One child is valid only when genuinely narrower; use as many or as few children as your reasoning requires within the conserved work budget.',
-                'Current semantic child capacity for this parent is '+maxChildrenThisSplit+'. Tree depth is not the ordinary convergence rule; the '+semanticRuntime.hard_storage_path_depth+'-level path ceiling is only an emergency persistence guard.',
+                'Current semantic child capacity from the live remaining budget is '+currentChildCapacity+'. Each additional child is priced at approximately '+branchEconomics.expected_child_lifecycle_units+' units for first-pass lifecycle work, while '+branchEconomics.completion_reserve_units+' units remain protected for terminal reconciliation/synthesis. Tree depth is not the ordinary convergence rule; the '+semanticRuntime.hard_storage_path_depth+'-level path ceiling is only an emergency persistence guard.',
               ].join('\n')},
               {role:'user',content:safeJson({
                 parent_requirement:node.requirement_text,
@@ -2572,11 +2608,16 @@ export async function runAutonomousRequirementCognition({
                 runtime_resource_constraints:{
                   semantic_runtime_contract:SEMANTIC_RUNTIME_CONTRACT,
                   remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
-                  semantic_child_capacity:maxChildrenThisSplit,
+                  semantic_child_capacity:currentChildCapacity,
+                  semantic_branch_economics_contract:branchEconomics.contract,
+                  expected_child_lifecycle_units:branchEconomics.expected_child_lifecycle_units,
+                  completion_reserve_units:branchEconomics.completion_reserve_units,
+                  branch_economics_components:branchEconomics.components,
                   storage_path_depth:normalizedBranchDepth,
                   emergency_storage_path_depth:semanticRuntime.hard_storage_path_depth,
                   multi_child_split_available:structuralBranchingAvailable,
-                  max_children_this_split:maxChildrenThisSplit,
+                  single_child_refinement_available:singleRefinementAvailable,
+                  max_children_this_split:currentChildCapacity,
                 },
               })},
             ],stageBudgets.child_formulation,'req_'+node.node_path.replaceAll('.','_')+'_author_child_formulate_'+ordinal+'_'+attempt);
@@ -2777,26 +2818,6 @@ export async function runAutonomousRequirementCognition({
       authored.push(child);
       counters.nodes++;
 
-      if(!structuralBranchingAvailable&&authored.length===1){
-        await saveNode({
-          nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
-          requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
-          status:'split',decisionType:'SPLIT',
-          decisionPayload:{
-            ...(node.decision_payload||{}),
-            child_count:1,
-            children_authored:true,
-            conserved_budget_constraint_applied:true,
-            storage_path_depth:normalizedBranchDepth,
-            emergency_storage_path_depth:semanticRuntime.hard_storage_path_depth,
-            remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
-            max_children_this_split:1,
-            child_authoring_protocol:'deep_formulation_checkpoint_then_nonthinking_serialization_v0_1',
-          },
-          contextPayload:node.context_payload||{},resultArtifact:null,
-        });
-        return {children:authored,reconsider:false};
-      }
     }
     throw new Error('autonomous_decomposition_child_resource_limit:'+node.node_path);
   }
