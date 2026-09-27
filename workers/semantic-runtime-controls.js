@@ -11,6 +11,7 @@ export const DEFAULT_SAFETY_RESERVE_TOKENS=12000;
 export const MAX_IDENTICAL_STRUCTURAL_FAILURES=2;
 export const HARD_STORAGE_PATH_DEPTH=16;
 export const MAX_CHILDREN_PER_SPLIT=16;
+export const MAX_MODEL_TRANSPORT_ATTEMPTS=2;
 
 function positiveInt(value,fallback){
   const n=Math.floor(Number(value));
@@ -144,6 +145,17 @@ export function durableSiblingInspection({
     invalidated_paths:invalidated,
     missing_paths:required.filter(path=>!inspectedSet.has(path)),
   });
+}
+
+export function retryableModelTransportError(error){
+  const code=String(error?.code||error?.cause?.code||'').trim().toUpperCase();
+  const name=String(error?.name||'').trim();
+  const message=String(error?.message||'').trim().toLowerCase();
+  const status=Number(error?.status||0);
+  if(code==='NVIDIA_TIMEOUT'||name==='AbortError'||name==='TimeoutError')return false;
+  if([429,500,502,503,504].includes(status))return true;
+  if(['ECONNRESET','ECONNREFUSED','ENETUNREACH','EAI_AGAIN','ETIMEDOUT','UND_ERR_CONNECT_TIMEOUT','UND_ERR_SOCKET','UND_ERR_HEADERS_TIMEOUT'].includes(code))return true;
+  return name==='TypeError'&&message.includes('fetch failed');
 }
 
 export function pathDepth(nodePath){
