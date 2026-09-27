@@ -9,6 +9,8 @@ import {
   semanticChildCapacity,
   repeatedStructuralFailureLocked,
   durableSiblingInspection,
+  retryableModelTransportError,
+  MAX_MODEL_TRANSPORT_ATTEMPTS,
   pathDepth,
 } from './semantic-runtime-controls.js';
 
@@ -780,7 +782,7 @@ export async function runAutonomousRequirementCognition({
   }).slice(0,48);
   const idx=contextIndex(packet);
   const counters={nodes:0,model_calls:0,context_requests:0};
-  const semanticRuntime=semanticRuntimeConfig(agentRuntimeContract);
+  const semanticRuntime={...semanticRuntimeConfig(agentRuntimeContract)};
 
   async function semanticRuntimeRpc(action,args={}){
     return rpc('aau_bridge_cognition_assignment_runtime_v0_2',{
@@ -801,20 +803,30 @@ export async function runAutonomousRequirementCognition({
     });
   }
 
-  let semanticRuntimeSnapshot=await semanticRuntimeRpc('init',{
-    initialBudgetUnits:semanticRuntime.initial_budget_units,
-    metadata:{
-      contract:SEMANTIC_RUNTIME_CONTRACT,
-      initial_budget_tokens:semanticRuntime.initial_budget_tokens,
-      budget_quantum_tokens:semanticRuntime.quantum_tokens,
-      budget_derivation:'model_operational_context_x8_or_explicit_override',
-      model_operational_context_limit_tokens:
-        agentRuntimeContract.operational_context_limit_tokens||null,
-      source_wake_request_id:intentExecutionId,
-    },
-  });
+  let semanticRuntimeSnapshot=await semanticRuntimeRpc('resolve');
   if(semanticRuntimeSnapshot?.status!=='ready')
-    throw new Error('semantic_runtime_initialization_failed');
+    throw new Error('semantic_runtime_resolution_failed');
+  if(semanticRuntimeSnapshot?.runtime_found===true){
+    const resolvedEpoch=Number(semanticRuntimeSnapshot?.epoch_no);
+    if(!Number.isInteger(resolvedEpoch)||resolvedEpoch<1)
+      throw new Error('semantic_runtime_resolved_epoch_invalid');
+    semanticRuntime.epoch_no=resolvedEpoch;
+  }else{
+    semanticRuntimeSnapshot=await semanticRuntimeRpc('init',{
+      initialBudgetUnits:semanticRuntime.initial_budget_units,
+      metadata:{
+        contract:SEMANTIC_RUNTIME_CONTRACT,
+        initial_budget_tokens:semanticRuntime.initial_budget_tokens,
+        budget_quantum_tokens:semanticRuntime.quantum_tokens,
+        budget_derivation:'model_operational_context_x8_or_explicit_override',
+        model_operational_context_limit_tokens:
+          agentRuntimeContract.operational_context_limit_tokens||null,
+        source_wake_request_id:intentExecutionId,
+      },
+    });
+    if(semanticRuntimeSnapshot?.status!=='ready')
+      throw new Error('semantic_runtime_initialization_failed');
+  }
   if(String(semanticRuntimeSnapshot?.runtime_status||'')==='budget_exhausted'){
     const error=new Error('semantic_runtime_terminal:budget_exhausted:'+assignmentKey);
     error.code='SEMANTIC_BUDGET_EXHAUSTED';
@@ -1502,12 +1514,12 @@ export async function runAutonomousRequirementCognition({
     return resumeSelfRemediationEpisode(node,episode,{contextPayload,pinnedEvidence,siblingEvidence});
   }
 
-  async function chargeModelCall(messages,maxTokens,phase,kind){
+  async function chargeModelCall(messages,maxTokens,phase,kind,attempt=1){
     const estimatedInput=estimatedTokens(messages,agentRuntimeContract);
     const fingerprint=sha256({kind,messages,max_tokens:maxTokens,model});
     const row=await chargeSemanticRuntime({
       eventKind:'model_call',
-      materialKey:phase+':'+fingerprint.slice(0,24),
+      materialKey:phase+':attempt:'+attempt+':'+fingerprint.slice(0,24),
       costUnits:modelCallCostUnits({
         estimatedInputTokens:estimatedInput,
         requestedOutputTokens:maxTokens,
@@ -1517,6 +1529,7 @@ export async function runAutonomousRequirementCognition({
       metadata:{
         phase,
         kind,
+        transport_attempt:attempt,
         estimated_input_tokens:estimatedInput,
         requested_output_tokens:maxTokens,
       },
@@ -1533,25 +1546,46 @@ export async function runAutonomousRequirementCognition({
     }
   }
 
+  async function callWithChargedTransportRetry(fn,messages,maxTokens,phase,kind){
+    let lastError=null;
+    for(let attempt=1;attempt<=MAX_MODEL_TRANSPORT_ATTEMPTS;attempt++){
+      const attemptPhase=attempt===1?phase:phase+'_transport_retry_'+attempt;
+      await chargeModelCall(messages,maxTokens,attemptPhase,kind,attempt);
+      counters.model_calls++;
+      try{
+        return await fn(messages,maxTokens,attemptPhase);
+      }catch(error){
+        lastError=error;
+        if(!retryableModelTransportError(error)||attempt>=MAX_MODEL_TRANSPORT_ATTEMPTS)throw error;
+        console.warn('AAU_MODEL_TRANSPORT_LOCAL_RETRY',JSON.stringify({
+          agent_id:agentId,
+          intent_execution_id:intentExecutionId,
+          assignment_key:assignmentKey,
+          phase,
+          failed_attempt:attempt,
+          next_attempt:attempt+1,
+          error_name:String(error?.name||'Error'),
+          error_code:String(error?.code||error?.cause?.code||''),
+          error_message:String(error?.message||error).slice(0,300),
+        }));
+      }
+    }
+    throw lastError||new Error('model_transport_retry_exhausted');
+  }
+
   async function callJson(messages,maxTokens,phase){
-    await chargeModelCall(messages,maxTokens,phase,'deep_json');
-    counters.model_calls++;
-    return completeJson(messages,maxTokens,phase);
+    return callWithChargedTransportRetry(completeJson,messages,maxTokens,phase,'deep_json');
   }
 
   async function callRoute(messages,maxTokens,phase){
-    await chargeModelCall(messages,maxTokens,phase,'route_json');
-    counters.model_calls++;
     const fn=typeof completeRouteJson==='function'?completeRouteJson:completeJson;
-    return fn(messages,maxTokens,phase);
+    return callWithChargedTransportRetry(fn,messages,maxTokens,phase,'route_json');
   }
 
   async function callSerialize(messages,maxTokens,phase){
-    await chargeModelCall(messages,maxTokens,phase,'serialize_json');
-    counters.model_calls++;
     const fn=typeof completeSerializeJson==='function'?completeSerializeJson
       :(typeof completeRouteJson==='function'?completeRouteJson:completeJson);
-    return fn(messages,maxTokens,phase);
+    return callWithChargedTransportRetry(fn,messages,maxTokens,phase,'serialize_json');
   }
 
   async function decide(node,{forceReconsider=false,branchDepth=0,singleChildRefinements=0}={}){
