@@ -213,7 +213,7 @@ export function retryableModelTransportError(error){
   const message=String(error?.message||'').trim().toLowerCase();
   const status=Number(error?.status||0);
   if(code==='NVIDIA_TIMEOUT'||name==='AbortError'||name==='TimeoutError')return false;
-  if([429,500,502,503,504].includes(status))return true;
+  if([429,500,502,503,504,529].includes(status))return true;
   if(['ECONNRESET','ECONNREFUSED','ENETUNREACH','EAI_AGAIN','ETIMEDOUT','UND_ERR_CONNECT_TIMEOUT','UND_ERR_SOCKET','UND_ERR_HEADERS_TIMEOUT'].includes(code))return true;
   return name==='TypeError'&&message.includes('fetch failed');
 }
