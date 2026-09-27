@@ -1905,7 +1905,11 @@ export async function runAutonomousRequirementCognition({
               sibling_inspection_accounting_status:durableUnconfirmedSiblingPaths.length
                 ?'evidence_delivered_acknowledgment_unconfirmed'
                 :'agent_acknowledged',
-              sibling_inspection_unconfirmed_reason:siblingInspectionUnconfirmed?.reason||null,
+              sibling_inspection_unconfirmed_reason:siblingInspectionUnconfirmed?.reason
+                ||(durableUnconfirmedSiblingPaths.length
+                  ?text(priorDiscovery.sibling_inspection_unconfirmed_reason)
+                    ||'prior_unconfirmed_acknowledgment_inherited_for_unchanged_hash'
+                  :null),
               sibling_inspection_state_version:'monotonic_result_hash_v0_2_delivery_separated_from_acknowledgment',
               sibling_inspection_retry_applied:Boolean(siblingInspectionRetry),
               sibling_inspection_retry_missing_paths:asArray(siblingInspectionRetry?.missing_paths).map(text).filter(Boolean).slice(0,16),
