@@ -1,0 +1,31 @@
+-- AAU legacy blocked-state normalization v0.1
+-- Applied to Silas Stage-4 assignment on 2026-09-27.
+-- Purpose:
+--   1. Nodes already owning child trees cannot remain terminal BLOCKED merely
+--      because legacy runtime/synthesis classified them that way; restore SPLIT.
+--   2. Legacy leaf BLOCKED states caused by old resource ceilings are reopened
+--      for fresh agent-authored semantic reconsideration.
+--   3. Dependency-stalled leaf BLOCKED states are reopened.
+--   4. Preserve context and descendant work.
+--   5. Invalidate only ancestor synthesis state/checkpoints that consumed the
+--      stale BLOCKED classifications.
+--
+-- Runtime markers written by the applied repair:
+--   decision_payload.legacy_blocked_normalization.version
+--     = legacy_blocked_state_normalization_v0_1
+--   decision_payload.legacy_descendant_state_invalidation.version
+--     = legacy_blocked_state_normalization_v0_1
+--
+-- Applied result:
+--   12 structural BLOCKED -> SPLIT
+--    7 resource-caused leaf BLOCKED -> pending reconsideration
+--    1 dependency-stalled leaf BLOCKED -> pending reconsideration
+--    0 BLOCKED nodes remaining
+--   67 total tree nodes preserved
+--    8 reopened leaves retained context
+--    0 stale synthesis cursors/accumulators on invalidated ancestors
+--
+-- This is an audit record for the one-time data normalization. The active
+-- runtime contract that prevents recurrence is:
+--   universal_durable_cognition_continuation_v0_1
+-- with resource-independent semantic discovery identity.
