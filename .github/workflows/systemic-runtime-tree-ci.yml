@@ -20,7 +20,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Syntax check recursive runtime
-        run: node --check workers/autonomous-recursive-decomposition.js
+      - name: Syntax check runtime files
+        run: |
+          node --check workers/autonomous-recursive-decomposition.js
+          node --check workers/nvidia-intent-execution.js
+          node --check workers/nvidia-autonomous-lifecycle.js
       - name: Semantic runtime control tests
         run: node --test workers/semantic-runtime-controls.test.js
