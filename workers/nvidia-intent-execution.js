@@ -1635,6 +1635,12 @@ async function callWithCognitionIntegrity(call, audit = null) {
       error.code='COGNITION_RESPONSE_REJECTED';
       error.rejectionReason=rejectionReason;
       error.finishReason=finishReason;
+      error.providerStatusCode=200;
+      error.providerUsage=result?.usage||null;
+      error.providerTotalTokens=Number.isFinite(Number(result?.usage?.total_tokens))
+        ? Math.max(0,Math.floor(Number(result.usage.total_tokens)))
+        : null;
+      error.providerUsageKnown=Boolean(result?.usage&&typeof result.usage==='object');
       throw error;
     }
     return result;
@@ -1726,6 +1732,12 @@ async function completeDeepJson(model, messages, maxTokens, audit) {
     const error=new Error('cognition_response_rejected:MALFORMED_JSON');
     error.code='COGNITION_RESPONSE_REJECTED';
     error.rejectionReason='MALFORMED_JSON';
+    error.providerStatusCode=200;
+    error.providerUsage=result?.usage||null;
+    error.providerTotalTokens=Number.isFinite(Number(result?.usage?.total_tokens))
+      ? Math.max(0,Math.floor(Number(result.usage.total_tokens)))
+      : null;
+    error.providerUsageKnown=Boolean(result?.usage&&typeof result.usage==='object');
     throw error;
   }
   return {result,parsed};
@@ -1754,6 +1766,12 @@ async function completeRoutingJson(model, messages, maxTokens, audit) {
     const error=new Error('cognition_response_rejected:MALFORMED_JSON');
     error.code='COGNITION_RESPONSE_REJECTED';
     error.rejectionReason='MALFORMED_JSON';
+    error.providerStatusCode=200;
+    error.providerUsage=result?.usage||null;
+    error.providerTotalTokens=Number.isFinite(Number(result?.usage?.total_tokens))
+      ? Math.max(0,Math.floor(Number(result.usage.total_tokens)))
+      : null;
+    error.providerUsageKnown=Boolean(result?.usage&&typeof result.usage==='object');
     throw error;
   }
   return {result,parsed};
@@ -1780,6 +1798,12 @@ async function completeProtocolSerializeJson(model, messages, maxTokens, audit) 
     const error=new Error('cognition_response_rejected:MALFORMED_JSON');
     error.code='COGNITION_RESPONSE_REJECTED';
     error.rejectionReason='MALFORMED_JSON';
+    error.providerStatusCode=200;
+    error.providerUsage=result?.usage||null;
+    error.providerTotalTokens=Number.isFinite(Number(result?.usage?.total_tokens))
+      ? Math.max(0,Math.floor(Number(result.usage.total_tokens)))
+      : null;
+    error.providerUsageKnown=Boolean(result?.usage&&typeof result.usage==='object');
     throw error;
   }
   return {result,parsed};
