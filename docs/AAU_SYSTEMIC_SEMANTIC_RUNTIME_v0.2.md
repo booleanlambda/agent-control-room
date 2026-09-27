@@ -97,6 +97,35 @@ The canonical corrective budget is therefore:
 
 This mechanism exists to repair accounting distortion caused by AAU itself, not to turn runtime failure into unlimited compute.
 
+
+### Branch lifecycle economics
+
+Tree capacity is governed by the projected cost of doing useful work on a child, not by the cheap database cost of creating the child row.
+
+For each routing decision, AAU projects a first-pass lifecycle for one additional child from the currently bound model contract and the node's current evidence/context envelope. The projected child lifecycle includes:
+
+- child formulation;
+- child provenance review;
+- mechanical serialization;
+- durable node creation;
+- first child discovery;
+- one substantive resolution attempt; and
+- small semantic-transition overhead.
+
+AAU also protects a separate completion reserve for terminal reconciliation and synthesis. The effective child capacity is:
+
+`floor((remaining_units - completion_reserve_units) / expected_child_lifecycle_units)`
+
+bounded by the structural maximum of 16 children.
+
+The projection is recomputed from the live remaining semantic budget and current context before every routing decision. During child authoring it is recomputed again before every additional child, so research, retries, prior child authoring, or other charges cannot leave a stale branch allowance in force.
+
+A node may therefore expose SPLIT only while at least one additional first-pass child lifecycle is economically supportable. Multi-child branching requires capacity for at least two. The 16-level path ceiling remains only an emergency persistence guard and is not the normal convergence rule.
+
+The branch-economics contract is `semantic_branch_economics_v0_1`. Its component estimates are persisted into agent-visible routing state and budget-constrained split checkpoints for auditability.
+
+This changes the meaning of tree capacity from **how many nodes can be written** to **how many additional branches can be responsibly started and given a substantive first-pass resolution attempt without consuming the protected completion reserve**.
+
 ## Semantic BLOCKED versus runtime hold
 
 `BLOCKED` remains an agent-authored semantic outcome. It means the bound agent judged that a requirement cannot honestly be completed under the available evidence/dependencies.
