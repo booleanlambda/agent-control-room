@@ -779,6 +779,86 @@ export async function runAutonomousRequirementCognition({
   }).slice(0,48);
   const idx=contextIndex(packet);
   const counters={nodes:0,model_calls:0,context_requests:0};
+  const semanticRuntime=semanticRuntimeConfig(agentRuntimeContract);
+
+  async function semanticRuntimeRpc(action,args={}){
+    return rpc('aau_bridge_cognition_assignment_runtime_v0_2',{
+      p_agent_id:agentId,
+      p_wake_request_id:intentExecutionId,
+      p_assignment_key:assignmentKey,
+      p_model:model,
+      p_action:action,
+      p_epoch_no:semanticRuntime.epoch_no,
+      p_initial_budget_units:args.initialBudgetUnits??null,
+      p_quantum_tokens:semanticRuntime.quantum_tokens,
+      p_event_key:args.eventKey??null,
+      p_event_kind:args.eventKind??null,
+      p_event_fingerprint:args.eventFingerprint??null,
+      p_cost_units:args.costUnits??0,
+      p_node_path:args.nodePath??null,
+      p_metadata:args.metadata??{},
+    });
+  }
+
+  let semanticRuntimeSnapshot=await semanticRuntimeRpc('init',{
+    initialBudgetUnits:semanticRuntime.initial_budget_units,
+    metadata:{
+      contract:SEMANTIC_RUNTIME_CONTRACT,
+      initial_budget_tokens:semanticRuntime.initial_budget_tokens,
+      budget_quantum_tokens:semanticRuntime.quantum_tokens,
+      budget_derivation:'model_operational_context_x8_or_explicit_override',
+      model_operational_context_limit_tokens:
+        agentRuntimeContract.operational_context_limit_tokens||null,
+      source_wake_request_id:intentExecutionId,
+    },
+  });
+  if(semanticRuntimeSnapshot?.status!=='ready')
+    throw new Error('semantic_runtime_initialization_failed');
+
+  async function semanticRuntimeView(){
+    const row=await semanticRuntimeRpc('get');
+    if(row?.status!=='ready')throw new Error('semantic_runtime_state_unavailable');
+    semanticRuntimeSnapshot=row;
+    return row;
+  }
+
+  async function chargeSemanticRuntime({
+    eventKind,materialKey,nodePath=null,costUnits,eventFingerprint=null,metadata={}
+  }){
+    const eventKey=eventKind+':'+sha256({
+      assignment_key:assignmentKey,
+      epoch_no:semanticRuntime.epoch_no,
+      event_kind:eventKind,
+      material_key:String(materialKey||''),
+    }).slice(0,64);
+    const fingerprint=eventFingerprint||sha256({
+      assignment_key:assignmentKey,
+      epoch_no:semanticRuntime.epoch_no,
+      event_kind:eventKind,
+      node_path:nodePath,
+      material_key:String(materialKey||''),
+      metadata,
+    });
+    const row=await semanticRuntimeRpc('charge',{
+      eventKey,eventKind,eventFingerprint:fingerprint,
+      costUnits:Math.max(1,Math.floor(Number(costUnits)||1)),
+      nodePath,metadata,
+    });
+    if(row?.status!=='ready')throw new Error('semantic_runtime_charge_failed');
+    semanticRuntimeSnapshot=row;
+    if(row.available!==true){
+      const error=new Error(
+        'semantic_runtime_budget_exhausted:'
+        +(nodePath||'assignment')
+        +':remaining='+String(row.remaining_budget_units??0)
+      );
+      error.code='SEMANTIC_BUDGET_EXHAUSTED';
+      error.semanticRuntime=row;
+      error.semanticEvent={eventKind,materialKey,nodePath};
+      throw error;
+    }
+    return row;
+  }
 
   function agentModelContextView(rawPayload,pinnedEvidence,outputTokens){
     const safeInputTokens=modelInputBudgetTokens(agentRuntimeContract,outputTokens);
