@@ -2981,7 +2981,23 @@ export async function runAutonomousRequirementCognition({
     );
     const siblingEvidence=atomicContextView().siblingEvidence;
     const atomicCognitionContext=()=>atomicContextView().suppliedContext;
-    let parsed=null;
+    const atomicSemanticIdentity=sha256({
+      node_path:node.node_path,
+      requirement:node.requirement_text,
+      discovery_fingerprint:text(node?.decision_payload?.routing_discovery_checkpoint?.context_fingerprint)||null,
+      authoritative_sibling_results:siblingEvidence.map(v=>({
+        path:v.path,status:v.status,decision_type:v.decision_type,result_hash:v.result_hash
+      })),
+      supplied_context:atomicCognitionContext(),
+      pinned_evidence:pinnedEvidence.map(v=>({
+        source_key:v.source_key,url:v.url,sha256:v.sha256,excerpt_bytes:v.excerpt_bytes
+      })),
+    });
+    const durableAtomic=await loadJsonPhaseCheckpoint(
+      node.node_path,'ATOMIC_EXECUTION',atomicSemanticIdentity
+    );
+    let parsed=durableAtomic.parsed;
+    if(!parsed){
     try{
       for(let attempt=1;attempt<=2;attempt++){
         try{
@@ -3033,9 +3049,17 @@ export async function runAutonomousRequirementCognition({
       }
       throw error;
     }
+    }
 
     const status=text(parsed?.status).toUpperCase();
     if(status==='SPLIT'){
+      if(!durableAtomic.parsed){
+        await saveJsonPhaseCheckpoint(
+          node.node_path,'ATOMIC_EXECUTION',atomicSemanticIdentity,parsed,{
+            atomic_status:'SPLIT',
+          }
+        );
+      }
       const split=await saveNode({
         nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
         requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
@@ -3057,6 +3081,13 @@ export async function runAutonomousRequirementCognition({
       ].map(text).filter(v=>/^https:\/\//i.test(v)))].slice(0,8);
       if(!requests.length&&!researchQueries.length&&!researchUrls.length)
         throw new Error('autonomous_decomposition_atomic_context_empty:'+node.node_path);
+      if(!durableAtomic.parsed){
+        await saveJsonPhaseCheckpoint(
+          node.node_path,'ATOMIC_EXECUTION',atomicSemanticIdentity,parsed,{
+            atomic_status:'NEED_CONTEXT',
+          }
+        );
+      }
       await chargeSemanticRuntime({
         eventKind:'context_acquisition',
         materialKey:node.node_path+':atomic:'+sha256({requests,researchQueries,researchUrls}),
@@ -3115,10 +3146,31 @@ export async function runAutonomousRequirementCognition({
     const proposedArtifact=text(parsed?.artifact);
     if(!proposedArtifact)throw new Error('autonomous_decomposition_atomic_artifact_empty:'+node.node_path);
     const proposedHandoff=asObject(parsed?.handoff);
+    if(!durableAtomic.parsed){
+      await saveJsonPhaseCheckpoint(
+        node.node_path,'ATOMIC_EXECUTION',atomicSemanticIdentity,parsed,{
+          atomic_status:'COMPLETE',
+          artifact_hash:sha256(proposedArtifact),
+        }
+      );
+    }
 
     // Cognitive continuity: before runtime may persist completion, the same bound
     // agent reconciles its proposed result against its own discovery state.
-    let reconciliation=null;
+    const reconciliationSemanticIdentity=sha256({
+      atomic_semantic_identity:atomicSemanticIdentity,
+      proposed_artifact_hash:sha256(proposedArtifact),
+      proposed_handoff:proposedHandoff,
+      authoritative_sibling_results:siblingEvidence.map(v=>({
+        path:v.path,status:v.status,decision_type:v.decision_type,result_hash:v.result_hash
+      })),
+      supplied_context:atomicCognitionContext(),
+    });
+    const durableReconciliation=await loadJsonPhaseCheckpoint(
+      node.node_path,'RECONCILIATION',reconciliationSemanticIdentity
+    );
+    let reconciliation=durableReconciliation.parsed;
+    if(!reconciliation){
     try{
       for(let attempt=1;attempt<=2;attempt++){
         try{
@@ -3178,6 +3230,7 @@ export async function runAutonomousRequirementCognition({
       }
       throw error;
     }
+    }
 
     const reconciliationStatus=text(reconciliation?.status).toUpperCase();
     const reconciliationMeta={
@@ -3189,6 +3242,13 @@ export async function runAutonomousRequirementCognition({
     };
 
     if(reconciliationStatus==='SPLIT'){
+      if(!durableReconciliation.parsed){
+        await saveJsonPhaseCheckpoint(
+          node.node_path,'RECONCILIATION',reconciliationSemanticIdentity,reconciliation,{
+            reconciliation_status:'SPLIT',
+          }
+        );
+      }
       const split=await saveNode({
         nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
         requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
@@ -3216,6 +3276,13 @@ export async function runAutonomousRequirementCognition({
       ].map(text).filter(v=>/^https:\/\//i.test(v)))].slice(0,8);
       if(!requests.length&&!researchQueries.length&&!researchUrls.length)
         throw new Error('autonomous_decomposition_reconciliation_context_empty:'+node.node_path);
+      if(!durableReconciliation.parsed){
+        await saveJsonPhaseCheckpoint(
+          node.node_path,'RECONCILIATION',reconciliationSemanticIdentity,reconciliation,{
+            reconciliation_status:'NEED_CONTEXT',
+          }
+        );
+      }
       await chargeSemanticRuntime({
         eventKind:'context_acquisition',
         materialKey:node.node_path+':reconciliation:'+sha256({requests,researchQueries,researchUrls}),
@@ -3277,6 +3344,14 @@ export async function runAutonomousRequirementCognition({
     const artifact=text(reconciliation?.artifact)||proposedArtifact;
     if(!artifact)throw new Error('autonomous_decomposition_reconciliation_artifact_empty:'+node.node_path);
     const handoff=Object.keys(asObject(reconciliation?.handoff)).length?asObject(reconciliation?.handoff):proposedHandoff;
+    if(!durableReconciliation.parsed){
+      await saveJsonPhaseCheckpoint(
+        node.node_path,'RECONCILIATION',reconciliationSemanticIdentity,reconciliation,{
+          reconciliation_status:'COMPLETE',
+          artifact_hash:sha256(artifact),
+        }
+      );
+    }
     const resultArtifact=JSON.stringify({artifact,handoff});
     const done=await saveNode({
       nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
