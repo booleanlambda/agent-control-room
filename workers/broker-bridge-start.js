@@ -13,7 +13,7 @@ if (isEnabled('AAU_EXPERTISE_NVIDIA_MIGRATION')) {
 }
 
 // one_shot_expertise_runtime_repair_v0_1
-if (true || isEnabled('AAU_EXPERTISE_RUNTIME_PATCH')) {
+if (isEnabled('AAU_EXPERTISE_RUNTIME_PATCH')) {
   try {
     const { patchExpertiseVerifierRuntime } = await import('./patch-expertise-verifier-runtime.js');
     const result = await patchExpertiseVerifierRuntime();
@@ -24,7 +24,7 @@ if (true || isEnabled('AAU_EXPERTISE_RUNTIME_PATCH')) {
 }
 
 // one_shot_file_response_runtime_repair_v0_1
-if (true || isEnabled('AAU_FILE_RESPONSE_RUNTIME_PATCH')) {
+if (isEnabled('AAU_FILE_RESPONSE_RUNTIME_PATCH')) {
   try {
     const { patchFileResponseRuntime } = await import('./patch-file-response-runtime.js');
     const result = await patchFileResponseRuntime();
@@ -35,7 +35,7 @@ if (true || isEnabled('AAU_FILE_RESPONSE_RUNTIME_PATCH')) {
 }
 
 // one_shot_control_room_intent_visibility_v0_1
-if (true || isEnabled('AAU_CONTROL_ROOM_INTENT_VISIBILITY_PATCH')) {
+if (isEnabled('AAU_CONTROL_ROOM_INTENT_VISIBILITY_PATCH')) {
   try {
     const { patchControlRoomIntentVisibility } = await import('./patch-control-room-intents.js');
     const result = await patchControlRoomIntentVisibility();
