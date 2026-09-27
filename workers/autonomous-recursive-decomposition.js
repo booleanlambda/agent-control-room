@@ -3223,7 +3223,10 @@ export async function runAutonomousRequirementCognition({
   }
 
   if(root.node_status!=='completed'&&root.node_status!=='blocked'){
+    const wakeRuntimeView=await semanticRuntimeView();
     const wakeStateFingerprint=sha256({
+      material_transition_count:Number(wakeRuntimeView?.material_transition_count||0),
+      semantic_node_count:Number(wakeRuntimeView?.semantic_node_count||0),
       root_status:root.node_status||null,
       root_decision_type:root.decision_type||null,
       root_result_hash:root.result_hash||null,
