@@ -2,13 +2,21 @@ import {
   resolveModelRuntimeContract,
   modelInputBudgetTokens,
 } from './model-runtime-profiles.js';
+import {
+  SEMANTIC_RUNTIME_CONTRACT,
+  semanticRuntimeConfig,
+  modelCallCostUnits,
+  semanticChildCapacity,
+  repeatedStructuralFailureLocked,
+  pathDepth,
+} from './semantic-runtime-controls.js';
 
 // AAU autonomous recursive decomposition v0.1
 // The bound agent authors decomposition. Runtime only persists/routes/checkpoints.
 
-const MAX_BRANCH_DEPTH=12;
-const MAX_SINGLE_CHILD_REFINEMENTS=4;
 const MAX_ATOMIC_EXECUTION_FAILURES=1;
+// Semantic work is bounded by the conserved assignment-epoch budget.
+// The 16-level path ceiling is only a storage geometry emergency brake.
 const MAX_CHILDREN_PER_NODE=16;
 const MAX_CONTEXT_RESEARCH_ROUNDS=12;
 const MAX_CONTEXT_STAGNANT_ROUNDS=2;
