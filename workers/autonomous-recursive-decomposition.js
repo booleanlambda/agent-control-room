@@ -1783,16 +1783,25 @@ export async function runAutonomousRequirementCognition({
           priorCognitiveState.version==='agent_deep_discovery_v0_1'
           || text(lastRemediation.status).toUpperCase()==='FAILED'
         );
+      // Semantic routing and runtime admission are separate authorities.
+      // The agent states what the requirement semantically needs. The runtime
+      // decides whether that already-durable decision can execute with current
+      // compute/context/storage resources. Resource depletion must never force
+      // the agent to rewrite the substantive routing decision.
       const availableDecisions=[
         'ATOMIC',
         'SPLIT',
-        resourceView.available?'NEED_CONTEXT':'BLOCKED',
+        'NEED_CONTEXT',
+        'BLOCKED',
         ...(remediationAvailable?['REMEDIATE']:[]),
-      ]
-        .filter(v=>!(v==='ATOMIC'&&atomicUnavailable))
-        .filter(v=>!(v==='SPLIT'&&!splitAvailable));
+      ];
 
+      // Semantic checkpoint identity deliberately excludes remaining budget,
+      // child capacity, wake attempt, and resource-exhaustion counters. A
+      // failed attempt spending compute cannot invalidate the cognition it is
+      // supposed to resume. Evidence/state changes still create a new identity.
       const contextFingerprint=sha256({
+        contract:'semantic_discovery_fingerprint_v0_2_resource_independent',
         node_path:node.node_path,
         requirement:node.requirement_text,
         context_payload:contextPayload,
@@ -1806,21 +1815,7 @@ export async function runAutonomousRequirementCognition({
         child_authoring_failure_count:Number(node?.decision_payload?.child_authoring_failure_count||0),
         child_authoring_failure:asObject(node?.decision_payload?.child_authoring_failure),
         force_reconsider:Boolean(forceReconsider),
-        atomic_unavailable:atomicUnavailable,
         atomic_execution_failures:atomicExecutionFailures,
-        storage_path_depth:normalizedBranchDepth,
-        emergency_storage_path_depth:semanticRuntime.hard_storage_path_depth,
-        semantic_runtime_remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
-        semantic_child_capacity:availableChildCapacity,
-        structural_branching_available:structuralBranchingAvailable,
-        single_refinement_available:singleRefinementAvailable,
-        context_resource_available:resourceView.available,
-        context_resource_reasons:resourceView.reasons,
-        context_rounds_attempted:resourceView.context_rounds_attempted,
-        stagnant_rounds:resourceView.stagnant_rounds,
-        unchanged_gap_rounds:resourceView.unchanged_gap_rounds,
-        repeated_request_rounds:resourceView.repeated_request_rounds,
-        unique_sources:resourceView.unique_sources,
       });
 
       const priorPayload=asObject(node.decision_payload);
@@ -1849,15 +1844,15 @@ export async function runAutonomousRequirementCognition({
                   : 'REMEDIATE is mechanically unavailable because there is no eligible prior cognitive state or the remediation budget is exhausted.',
                 'If you choose REMEDIATE, YOU must supply observed_anomaly, prior_belief, contradicting_evidence, diagnosis, repair_type, repair_payload, and verification_criterion. Allowed repair types are '+SELF_REMEDIATION_REPAIR_TYPES.join(', ')+'. INVALIDATE_DISCOVERY_CHECKPOINT supersedes your current discovery checkpoint and makes you reconsider. REFRESH_SIBLING_EVIDENCE mechanically reloads resolved siblings and also supersedes your current discovery checkpoint. Neither repair changes facts, conclusions, atomic-failure counts, or hard resource ceilings.',
                 atomicUnavailable
-                  ? 'ATOMIC is mechanically unavailable because this exact node already exhausted its bounded atomic execution.'
-                  : 'ATOMIC remains available if you judge the requirement genuinely bounded.',
-                'Mechanical work budget: '+Number(runtimeView?.remaining_budget_units||0)+' units remain in this assignment epoch. Current semantic child capacity is '+availableChildCapacity+' after pricing each child at approximately '+branchEconomics.expected_child_lifecycle_units+' units for first-pass lifecycle work and preserving '+branchEconomics.completion_reserve_units+' units for terminal reconciliation/synthesis.',
+                  ? 'If you still judge the requirement ATOMIC, say ATOMIC. The runtime will preserve that semantic decision but defer another atomic execution because this node exhausted its current bounded execution admission.'
+                  : 'ATOMIC is semantically available if you judge the requirement genuinely bounded.',
+                'RESOURCE ADVISORY ONLY: '+Number(runtimeView?.remaining_budget_units||0)+' units remain. Current execution admission can support '+availableChildCapacity+' child branch(es), priced at approximately '+branchEconomics.expected_child_lifecycle_units+' units each while protecting '+branchEconomics.completion_reserve_units+' units for completion. Do not change your semantic routing judgment merely to fit this resource snapshot; the runtime handles admission separately.',
                 storageDepthAvailable
-                  ? 'Tree depth is not the ordinary stopping rule. SPLIT is governed by conserved work budget and genuine semantic narrowing. The '+semanticRuntime.hard_storage_path_depth+'-level path ceiling is only an emergency persistence guard.'
-                  : 'EMERGENCY STORAGE GUARD: this durable path reached '+semanticRuntime.hard_storage_path_depth+' levels. SPLIT is mechanically unavailable at this path; this is not a substantive conclusion about the requirement.',
+                  ? 'Tree depth is not the ordinary stopping rule. If SPLIT is semantically correct, choose SPLIT; runtime admission will separately determine how many children can be started now.'
+                  : 'EMERGENCY STORAGE GUARD: this durable path reached '+semanticRuntime.hard_storage_path_depth+' levels. If SPLIT is still semantically correct, choose SPLIT anyway. The runtime will preserve the decision and defer execution rather than forcing a different substantive answer.',
                 resourceView.available
-                  ? 'Context/research acquisition remains mechanically available. NEED_CONTEXT is valid only when another retrieval or exact context lookup can materially reduce a stated gap.'
-                  : 'CONTEXT RESOURCE CONSTRAINT: further context/research acquisition is mechanically unavailable for this node because: '+resourceView.reasons.join(', ')+'. Do not request more context or research. BLOCKED is available if the remaining evidence gap prevents honest completion; ATOMIC or SPLIT remain yours to choose when mechanically available.',
+                  ? 'Context/research admission is currently available. Choose NEED_CONTEXT only when another retrieval or exact context lookup can materially reduce a stated gap.'
+                  : 'CONTEXT RESOURCE CONSTRAINT: further acquisition cannot be admitted in the current runtime state because: '+resourceView.reasons.join(', ')+'. This does NOT make NEED_CONTEXT semantically false. If more evidence is genuinely required, choose NEED_CONTEXT and the runtime will preserve and defer that decision instead of coercing BLOCKED.',
                 'Before deciding, interrogate semantic equivalence, definitions, time horizons, populations/scopes, proxy metrics, evidence sufficiency, assumptions, and unresolved gaps.',
                 'REPEATED ACQUISITION RULE: if an exact context/research request has already been repeated and the required evidence remains unresolved, do not issue the same request again. Use materially different retrieval if one exists; otherwise preserve the criterion as UNKNOWN when the task can proceed, or choose BLOCKED when the unresolved evidence prevents honest completion.',
                 'AUTHORITATIVE DEPENDENCY HANDOFF: authoritative_completed_sibling_evidence contains both direct resolved siblings and inherited prerequisite results routed from ancestor branches. evidence_scope=ancestor_dependency means the result was already made available to an ancestor and must remain available down this branch. Inspect this durable evidence before deciding NEED_CONTEXT; do not research again for information already present here.',
@@ -2172,9 +2167,60 @@ export async function runAutonomousRequirementCognition({
         continue;
       }
 
+      const admissionReasons=[];
+      if(decision==='SPLIT'&&!storageDepthAvailable)
+        admissionReasons.push('emergency_storage_path_depth_reached');
+      if(decision==='SPLIT'&&availableChildCapacity<1)
+        admissionReasons.push('insufficient_branch_lifecycle_budget');
+      if(decision==='ATOMIC'&&atomicUnavailable)
+        admissionReasons.push('bounded_atomic_execution_admission_exhausted');
+      if(decision==='NEED_CONTEXT'&&!resourceView.available)
+        admissionReasons.push('context_acquisition_resource_exhausted');
+      if(decision==='REMEDIATE'&&!remediationAvailable)
+        admissionReasons.push('self_remediation_admission_exhausted');
+
+      if(admissionReasons.length){
+        const admission={
+          contract:'cognition_resource_admission_v0_1',
+          status:'DEFERRED',
+          semantic_decision:decision,
+          reasons:admissionReasons,
+          remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
+          semantic_child_capacity:availableChildCapacity,
+          expected_child_lifecycle_units:branchEconomics.expected_child_lifecycle_units,
+          completion_reserve_units:branchEconomics.completion_reserve_units,
+          storage_path_depth:normalizedBranchDepth,
+          emergency_storage_path_depth:semanticRuntime.hard_storage_path_depth,
+          context_resource_available:resourceView.available,
+          context_resource_reasons:resourceView.reasons,
+          atomic_execution_failures:atomicExecutionFailures,
+          deferred_at:new Date().toISOString(),
+        };
+        node=await saveNode({
+          nodePath:node.node_path,
+          parentPath:node.parent_path??parentPathOf(node.node_path),
+          ordinal:node.ordinal||0,
+          requirement:node.requirement_text,
+          sourceKind:node.source_kind,
+          sourceRef:node.source_ref,
+          status:'pending',
+          decisionType:decision,
+          decisionPayload:{
+            ...decisionPayload,
+            routing_admission:admission,
+          },
+          contextPayload,
+          resultArtifact:node.result_artifact||null,
+        });
+        const error=new Error(
+          'cognition_admission_deferred:'+node.node_path+':'+admissionReasons.join(',')
+        );
+        error.code='COGNITION_ADMISSION_DEFERRED';
+        error.admission=admission;
+        throw error;
+      }
+
       if(decision==='NEED_CONTEXT'){
-        if(!resourceView.available)
-          throw new Error('autonomous_decomposition_context_action_protocol_violation:'+node.node_path);
 
         const rawRequests=discovery.context_requests;
         const urlRequestsFromContext=rawRequests.filter(v=>/^https:\/\//i.test(text(v)));
