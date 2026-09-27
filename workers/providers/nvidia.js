@@ -344,8 +344,16 @@ async function requestNvidia(config, requestBody, timeoutMs, userAgent, usageCon
     if (timedOut) {
       const timeoutError = new Error(`nvidia_timeout_after_${timeoutMs}ms`);
       timeoutError.code = 'NVIDIA_TIMEOUT';
+      timeoutError.providerStatusCode = null;
+      timeoutError.providerUsage = null;
+      timeoutError.providerTotalTokens = null;
+      timeoutError.providerUsageKnown = false;
       throw timeoutError;
     }
+    error.providerStatusCode = null;
+    error.providerUsage = null;
+    error.providerTotalTokens = null;
+    error.providerUsageKnown = false;
     throw error;
   }
 
@@ -361,6 +369,10 @@ async function requestNvidia(config, requestBody, timeoutMs, userAgent, usageCon
     });
     const error = new Error(`nvidia_${response.status}: ${detail}`);
     error.status = response.status;
+    error.providerStatusCode = response.status;
+    error.providerUsage = body?.usage && typeof body.usage==='object' ? body.usage : null;
+    error.providerTotalTokens = nullableNonnegativeInt(body?.usage?.total_tokens);
+    error.providerUsageKnown = Boolean(body?.usage && typeof body.usage==='object');
     throw error;
   }
   await persistModelCallUsage({
