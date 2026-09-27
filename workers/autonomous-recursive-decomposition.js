@@ -3380,7 +3380,23 @@ export async function runAutonomousRequirementCognition({
         handoff:parts.handoff,
       };
     });
-    const response=await callJson([
+    const provenanceSemanticIdentity=sha256({
+      parent_path:node.node_path,
+      parent_requirement:node.requirement_text,
+      child_evidence:childEvidence.map(v=>({
+        path:v.path,status:v.status,decision_type:v.decision_type,
+        artifact_hash:sha256(v.artifact||''),handoff:v.handoff,
+      })),
+      accumulator,
+      proposed_final:proposedFinal,
+      revision_guidance:revisionGuidance||null,
+    });
+    const durableProvenance=await loadJsonPhaseCheckpoint(
+      node.node_path,'SYNTHESIS_PROVENANCE',provenanceSemanticIdentity
+    );
+    const response=durableProvenance.parsed
+      ? {parsed:durableProvenance.parsed,checkpoint_reused:true}
+      : await callJson([
       {role:'system',content:[
         'You are the same bound autonomous agent auditing YOUR OWN proposed parent synthesis before it becomes durable.',
         'This is a provenance-preservation review, not a new task or a runtime verdict.',
@@ -3409,6 +3425,13 @@ export async function runAutonomousRequirementCognition({
     const status=text(candidate.status).toUpperCase();
     if(!['ACCEPT','REVISE'].includes(status))
       throw new Error('autonomous_decomposition_synthesis_provenance_status_invalid:'+node.node_path);
+    if(!durableProvenance.parsed){
+      await saveJsonPhaseCheckpoint(
+        node.node_path,'SYNTHESIS_PROVENANCE',provenanceSemanticIdentity,candidate,{
+          provenance_status:status,
+        }
+      );
+    }
     return {
       status,
       reason:clip(candidate.reason,2400),
@@ -3429,8 +3452,24 @@ export async function runAutonomousRequirementCognition({
     for(let i=cursor;i<childRows.length;i++){
       const child=childRows[i];
       const parts=resultParts(child.result_artifact);
-      let response=null;
-      for(let attempt=1;attempt<=2;attempt++){
+      const mergeSemanticIdentity=sha256({
+        parent_path:node.node_path,
+        parent_requirement:node.requirement_text,
+        discovery_fingerprint:text(node?.decision_payload?.routing_discovery_checkpoint?.context_fingerprint)||null,
+        prior_accumulator:accumulator,
+        child_path:child.node_path,
+        child_status:child.node_status||child.status||null,
+        child_decision_type:child.decision_type||null,
+        child_requirement:child.requirement_text,
+        child_result_hash:child.result_hash||sha256(child.result_artifact||''),
+      });
+      const durableMerge=await loadJsonPhaseCheckpoint(
+        node.node_path,'SYNTHESIS_MERGE_'+String(i+1),mergeSemanticIdentity
+      );
+      let response=durableMerge.parsed
+        ? {parsed:durableMerge.parsed,checkpoint_reused:true}
+        : null;
+      for(let attempt=1;attempt<=2&&!response;attempt++){
         try{
           response=await callJson([
             {role:'system',content:[
@@ -3462,6 +3501,15 @@ export async function runAutonomousRequirementCognition({
           if(!recoverable||attempt===2)throw error;
         }
       }
+      if(!durableMerge.parsed){
+        await saveJsonPhaseCheckpoint(
+          node.node_path,'SYNTHESIS_MERGE_'+String(i+1),mergeSemanticIdentity,
+          asObject(response?.parsed),{
+            child_path:child.node_path,
+            child_result_hash:child.result_hash||sha256(child.result_artifact||''),
+          }
+        );
+      }
       accumulator={
         summary:clip(response?.parsed?.summary,9000),
         handoff:asObject(response?.parsed?.handoff),
@@ -3487,7 +3535,20 @@ export async function runAutonomousRequirementCognition({
     let synthesisProvenanceGuidance='';
     for(let attempt=1;attempt<=2;attempt++){
       try{
-        final=await callJson([
+        const finalSemanticIdentity=sha256({
+          parent_path:node.node_path,
+          parent_requirement:node.requirement_text,
+          discovery_fingerprint:text(node?.decision_payload?.routing_discovery_checkpoint?.context_fingerprint)||null,
+          child_states:childStates,
+          accumulator,
+          provenance_revision_guidance:synthesisProvenanceGuidance||null,
+        });
+        const durableFinal=await loadJsonPhaseCheckpoint(
+          node.node_path,'FINAL_SYNTHESIS',finalSemanticIdentity
+        );
+        final=durableFinal.parsed
+          ? {parsed:durableFinal.parsed,checkpoint_reused:true}
+          : await callJson([
           {role:'system',content:[
             'You are the bound autonomous agent closing a parent requirement after all child requirements have resolved.',
             'Some children may be BLOCKED. Decide whether the parent can honestly be COMPLETE from the resolved evidence or must itself be BLOCKED.',
@@ -3506,6 +3567,21 @@ export async function runAutonomousRequirementCognition({
             prior_provenance_revision_guidance:synthesisProvenanceGuidance||null,
           })},
         ],stageBudgets.synthesis_final,'req_'+node.node_path.replaceAll('.','_')+'_synthesis_final_'+attempt);
+
+        const finalCandidate=asObject(final?.parsed);
+        const candidateOutcome=text(finalCandidate.outcome).toUpperCase();
+        if(!['COMPLETE','BLOCKED'].includes(candidateOutcome))
+          throw new Error('autonomous_decomposition_synthesis_outcome_invalid:'+node.node_path);
+        if(!text(finalCandidate.artifact))
+          throw new Error('autonomous_decomposition_synthesis_empty:'+node.node_path);
+        if(!durableFinal.parsed){
+          await saveJsonPhaseCheckpoint(
+            node.node_path,'FINAL_SYNTHESIS',finalSemanticIdentity,finalCandidate,{
+              synthesis_outcome:candidateOutcome,
+              artifact_hash:sha256(text(finalCandidate.artifact)),
+            }
+          );
+        }
 
         synthesisProvenanceReview=await reviewSynthesisProvenance(
           node,
