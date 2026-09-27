@@ -1285,6 +1285,66 @@ export async function runAutonomousRequirementCognition({
     });
   }
 
+  const DURABLE_CONTINUATION_CONTRACT='universal_durable_cognition_continuation_v0_1';
+
+  function phaseCheckpointStepKey(nodePath,phase,semanticIdentity){
+    return 'phase:'+sha256({
+      contract:DURABLE_CONTINUATION_CONTRACT,
+      node_path:nodePath,
+      phase,
+      semantic_identity:semanticIdentity,
+      model,
+    }).slice(0,56);
+  }
+
+  async function loadJsonPhaseCheckpoint(nodePath,phase,semanticIdentity){
+    const stepKey=phaseCheckpointStepKey(nodePath,phase,semanticIdentity);
+    const row=await cognitionStepRpc('get',stepKey,null,{});
+    if(row?.status==='not_found')return {stepKey,row:null,parsed:null};
+    if(row?.status!=='ready')
+      throw new Error('autonomous_decomposition_phase_checkpoint_lookup_failed:'+nodePath+':'+phase);
+    let parsed=null;
+    try{parsed=JSON.parse(String(row.artifact||''));}
+    catch{
+      throw new Error('autonomous_decomposition_phase_checkpoint_malformed:'+nodePath+':'+phase);
+    }
+    console.log('AAU_COGNITION_PHASE_CHECKPOINT_REUSED',JSON.stringify({
+      agent_id:agentId,
+      intent_execution_id:intentExecutionId,
+      node_path:nodePath,
+      phase,
+      step_key:stepKey,
+      checkpoint_id:row.step_checkpoint_id||null,
+      contract:DURABLE_CONTINUATION_CONTRACT,
+    }));
+    return {stepKey,row,parsed:asObject(parsed)};
+  }
+
+  async function saveJsonPhaseCheckpoint(nodePath,phase,semanticIdentity,parsed,meta={}){
+    const stepKey=phaseCheckpointStepKey(nodePath,phase,semanticIdentity);
+    const artifact=JSON.stringify(asObject(parsed));
+    const row=await cognitionStepRpc('save',stepKey,artifact,{
+      contract:DURABLE_CONTINUATION_CONTRACT,
+      node_path:nodePath,
+      phase,
+      semantic_identity:semanticIdentity,
+      immutable_completed_phase:true,
+      ...asObject(meta),
+    });
+    if(row?.status!=='ready')
+      throw new Error('autonomous_decomposition_phase_checkpoint_save_failed:'+nodePath+':'+phase);
+    console.log('AAU_COGNITION_PHASE_CHECKPOINT_SAVED',JSON.stringify({
+      agent_id:agentId,
+      intent_execution_id:intentExecutionId,
+      node_path:nodePath,
+      phase,
+      step_key:stepKey,
+      checkpoint_id:row.step_checkpoint_id||null,
+      contract:DURABLE_CONTINUATION_CONTRACT,
+    }));
+    return row;
+  }
+
   function childProposalStepKey(node,ordinal){
     const discovery=asObject(node?.decision_payload?.routing_discovery_checkpoint);
     return 'childprop:'+sha256({
