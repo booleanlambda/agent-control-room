@@ -1953,6 +1953,26 @@ export async function runAutonomousRequirementCognition({
           throw new Error('autonomous_decomposition_context_request_empty:'+node.node_path);
 
         counters.context_requests+=requests.length+researchQueries.length+researchUrls.length;
+        await chargeSemanticRuntime({
+          eventKind:'context_acquisition',
+          materialKey:node.node_path+':routing:'+String(contextState.context_rounds_attempted+1)+':'+sha256({requests,researchQueries,researchUrls}),
+          nodePath:node.node_path,
+          costUnits:semanticRuntime.context_acquire_units,
+          eventFingerprint:sha256({
+            node_path:node.node_path,
+            phase:'routing_need_context',
+            requests,
+            research_queries:researchQueries,
+            research_urls:researchUrls,
+            prior_gap_signal:contextState.last_gap_signal||null,
+          }),
+          metadata:{
+            phase:'routing_need_context',
+            request_count:requests.length,
+            query_count:researchQueries.length,
+            url_count:researchUrls.length,
+          },
+        });
         const contextAcquisitionStartedAt=Date.now();
 
         const beforeCatalogCount=asArray(contextPayload.research_source_catalog).length;
@@ -2525,9 +2545,10 @@ export async function runAutonomousRequirementCognition({
             ...(node.decision_payload||{}),
             child_count:1,
             children_authored:true,
-            mechanical_depth_constraint_applied:true,
-            structural_branch_depth:normalizedBranchDepth,
-            max_structural_branch_depth:MAX_BRANCH_DEPTH,
+            conserved_budget_constraint_applied:true,
+            storage_path_depth:normalizedBranchDepth,
+            emergency_storage_path_depth:semanticRuntime.hard_storage_path_depth,
+            remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
             max_children_this_split:1,
             child_authoring_protocol:'deep_formulation_checkpoint_then_nonthinking_serialization_v0_1',
           },
@@ -2631,6 +2652,25 @@ export async function runAutonomousRequirementCognition({
       ].map(text).filter(v=>/^https:\/\//i.test(v)))].slice(0,8);
       if(!requests.length&&!researchQueries.length&&!researchUrls.length)
         throw new Error('autonomous_decomposition_atomic_context_empty:'+node.node_path);
+      await chargeSemanticRuntime({
+        eventKind:'context_acquisition',
+        materialKey:node.node_path+':atomic:'+sha256({requests,researchQueries,researchUrls}),
+        nodePath:node.node_path,
+        costUnits:semanticRuntime.context_acquire_units,
+        eventFingerprint:sha256({
+          node_path:node.node_path,
+          phase:'atomic_need_context',
+          requests,
+          research_queries:researchQueries,
+          research_urls:researchUrls,
+        }),
+        metadata:{
+          phase:'atomic_need_context',
+          request_count:requests.length,
+          query_count:researchQueries.length,
+          url_count:researchUrls.length,
+        },
+      });
       let researchObserved=null;
       if((researchQueries.length||researchUrls.length)&&typeof researchContext==='function'){
         researchObserved=await researchContext({nodePath:node.node_path,queries:researchQueries,urls:researchUrls});
@@ -2769,6 +2809,25 @@ export async function runAutonomousRequirementCognition({
       ].map(text).filter(v=>/^https:\/\//i.test(v)))].slice(0,8);
       if(!requests.length&&!researchQueries.length&&!researchUrls.length)
         throw new Error('autonomous_decomposition_reconciliation_context_empty:'+node.node_path);
+      await chargeSemanticRuntime({
+        eventKind:'context_acquisition',
+        materialKey:node.node_path+':reconciliation:'+sha256({requests,researchQueries,researchUrls}),
+        nodePath:node.node_path,
+        costUnits:semanticRuntime.context_acquire_units,
+        eventFingerprint:sha256({
+          node_path:node.node_path,
+          phase:'reconciliation_need_context',
+          requests,
+          research_queries:researchQueries,
+          research_urls:researchUrls,
+        }),
+        metadata:{
+          phase:'reconciliation_need_context',
+          request_count:requests.length,
+          query_count:researchQueries.length,
+          url_count:researchUrls.length,
+        },
+      });
       let researchObserved=null;
       if((researchQueries.length||researchUrls.length)&&typeof researchContext==='function'){
         researchObserved=await researchContext({nodePath:node.node_path,queries:researchQueries,urls:researchUrls});
