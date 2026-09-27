@@ -70,17 +70,85 @@ export function modelCallCostUnits({estimatedInputTokens=0,requestedOutputTokens
   return Math.max(1,Math.ceil((input+output)/q));
 }
 
+export const SEMANTIC_BRANCH_ECONOMICS_CONTRACT='semantic_branch_economics_v0_1';
+
+export function semanticBranchBudget({
+  nodeCreateUnits=1,
+  childFormulationUnits=1,
+  childProvenanceUnits=1,
+  childSerializationUnits=1,
+  childDiscoveryUnits=1,
+  childResolutionUnits=1,
+  childTransitionUnits=3,
+  terminalReconciliationUnits=1,
+  terminalSynthesisUnits=1,
+  safetyReserveUnits=0,
+}={}){
+  const positive=(value,fallback=1)=>Math.max(
+    fallback,
+    Math.floor(Number(value)||0)
+  );
+  const nodeCreate=positive(nodeCreateUnits);
+  const formulation=positive(childFormulationUnits);
+  const provenance=positive(childProvenanceUnits);
+  const serialization=positive(childSerializationUnits);
+  const discovery=positive(childDiscoveryUnits);
+  const resolution=positive(childResolutionUnits);
+  const transitions=positive(childTransitionUnits);
+  const terminalReconciliation=positive(terminalReconciliationUnits);
+  const terminalSynthesis=positive(terminalSynthesisUnits);
+  const safety=Math.max(0,Math.floor(Number(safetyReserveUnits)||0));
+  const expectedChildLifecycleUnits=
+    nodeCreate
+    +formulation
+    +provenance
+    +serialization
+    +discovery
+    +resolution
+    +transitions;
+  const completionReserveUnits=Math.max(
+    safety,
+    terminalReconciliation+terminalSynthesis
+  );
+  return Object.freeze({
+    contract:SEMANTIC_BRANCH_ECONOMICS_CONTRACT,
+    expected_child_lifecycle_units:expectedChildLifecycleUnits,
+    completion_reserve_units:completionReserveUnits,
+    components:Object.freeze({
+      node_create_units:nodeCreate,
+      child_formulation_units:formulation,
+      child_provenance_units:provenance,
+      child_serialization_units:serialization,
+      child_discovery_units:discovery,
+      child_resolution_units:resolution,
+      child_transition_units:transitions,
+      terminal_reconciliation_units:terminalReconciliation,
+      terminal_synthesis_units:terminalSynthesis,
+      safety_reserve_units:safety,
+    }),
+  });
+}
+
 export function semanticChildCapacity({
   remainingBudgetUnits=0,
   nodeCreateUnits=1,
   safetyReserveUnits=0,
+  expectedChildLifecycleUnits=null,
+  completionReserveUnits=null,
   maxChildren=MAX_CHILDREN_PER_SPLIT,
 }={}){
   const remaining=Math.max(0,Math.floor(Number(remainingBudgetUnits)||0));
   const nodeCost=Math.max(1,Math.floor(Number(nodeCreateUnits)||1));
-  const reserve=Math.max(0,Math.floor(Number(safetyReserveUnits)||0));
+  const expectedRaw=Math.floor(Number(expectedChildLifecycleUnits)||0);
+  const branchCost=expectedRaw>0?Math.max(nodeCost,expectedRaw):nodeCost;
+  const safety=Math.max(0,Math.floor(Number(safetyReserveUnits)||0));
+  const completionRaw=Math.floor(Number(completionReserveUnits)||0);
+  const reserve=Math.max(safety,completionRaw>0?completionRaw:0);
   const hardMax=Math.max(0,Math.floor(Number(maxChildren)||0));
-  return Math.max(0,Math.min(hardMax,Math.floor(Math.max(0,remaining-reserve)/nodeCost)));
+  return Math.max(
+    0,
+    Math.min(hardMax,Math.floor(Math.max(0,remaining-reserve)/branchCost))
+  );
 }
 
 export function repeatedStructuralFailureLocked({
