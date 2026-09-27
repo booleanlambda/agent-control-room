@@ -11,6 +11,7 @@ import {
   durableSiblingInspection,
   retryableModelTransportError,
   mergeInheritedDependencyResults,
+  THRESHOLD_EVIDENCE_POLICY,
   MAX_MODEL_TRANSPORT_ATTEMPTS,
   pathDepth,
 } from './semantic-runtime-controls.js';
@@ -1784,6 +1785,7 @@ export async function runAutonomousRequirementCognition({
                   ? 'SIBLING INSPECTION RETRY: Your immediately prior discovery output was rejected only because it omitted required sibling path(s) from inspected_sibling_paths. Re-inspect the exact evidence rows named in sibling_inspection_retry.missing_paths before deciding again. Do not merely echo those paths: reconsider your evidence assessment and routing decision in light of the re-inspected sibling evidence. You may preserve or change your prior decision, but the new output must be fully agent-authored and must explicitly account for every supplied sibling path.'
                   : '',
                 'Do not treat a nearby metric or label as equivalent unless YOU can justify the equivalence from supplied evidence.',
+                'EPISTEMIC THRESHOLD POLICY: '+THRESHOLD_EVIDENCE_POLICY.RULE+' '+THRESHOLD_EVIDENCE_POLICY.PASS+' '+THRESHOLD_EVIDENCE_POLICY.FAIL+' '+THRESHOLD_EVIDENCE_POLICY.UNKNOWN,
                 'When supplied_context contains research_source_catalog, treat it as the complete discoverable source index for prior research rounds. If context acquisition is available and a source is indexed but its excerpt is insufficient, put its exact listed HTTPS URL in research_urls (not context_requests) so the runtime can fetch it directly.',
                 'Do not solve the requirement or author child requirements in this pass.',
                 'Return complete JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT|BLOCKED|REMEDIATE","reason":"auditable reason","requirement_interpretation":"what this requirement actually demands","evidence_assessment":"what the current evidence does and does not establish","inspected_sibling_paths":["R.001..."],"unresolved_gaps":["..."],"context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."],"remediation":{"observed_anomaly":"required when REMEDIATE","prior_belief":"required when REMEDIATE","contradicting_evidence":[],"diagnosis":"required when REMEDIATE","repair_type":"INVALIDATE_DISCOVERY_CHECKPOINT|REFRESH_SIBLING_EVIDENCE","repair_payload":{},"verification_criterion":"required when REMEDIATE"}}.',
@@ -2740,6 +2742,7 @@ export async function runAutonomousRequirementCognition({
               'If context is missing, return {"status":"NEED_CONTEXT","context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."],"reason":"..."}. You choose any research questions; do not fabricate findings.',
               'Otherwise return JSON only: {"status":"COMPLETE","artifact":"concise auditable work product","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
               'Keep the artifact bounded. Preserve uncertainty and do not claim external facts without supplied evidence.',
+               'EPISTEMIC THRESHOLD POLICY: '+THRESHOLD_EVIDENCE_POLICY.RULE+' '+THRESHOLD_EVIDENCE_POLICY.PASS+' '+THRESHOLD_EVIDENCE_POLICY.FAIL+' '+THRESHOLD_EVIDENCE_POLICY.UNKNOWN,
             ].join('\n')},
             {role:'user',content:safeJson({
               requirement:node.requirement_text,
@@ -2880,6 +2883,8 @@ export async function runAutonomousRequirementCognition({
               'SPLIT = you now judge the requirement is not actually bounded and should be decomposed by you.',
               'Do not treat a nearby metric, label, time horizon, population, market definition, or proxy as equivalent unless you can justify that equivalence from the supplied evidence.',
               'Preserve uncertainty. A retrieved source is evidence only for what it actually supports.',
+               'EPISTEMIC THRESHOLD POLICY: '+THRESHOLD_EVIDENCE_POLICY.RULE+' '+THRESHOLD_EVIDENCE_POLICY.PASS+' '+THRESHOLD_EVIDENCE_POLICY.FAIL+' '+THRESHOLD_EVIDENCE_POLICY.UNKNOWN,
+               'If a scoring framework is binary but evidence for a criterion is insufficient, preserve UNKNOWN explicitly rather than coercing UNKNOWN to FAIL. Do not compute a fully-known score by silently counting UNKNOWN as zero unless the framework itself explicitly defines that treatment.',
               'Return JSON only: {"status":"COMPLETE|NEED_CONTEXT|SPLIT","reason":"brief auditable reason","criterion_assessment":"brief comparison to your own criterion","gaps":["..."],"artifact":"required when COMPLETE","handoff":{"conclusions":[],"facts":[],"unresolved":[]},"context_requests":[],"research_queries":[],"research_urls":[]}.',
             ].join('\n')},
             {role:'user',content:safeJson({
@@ -3106,6 +3111,8 @@ export async function runAutonomousRequirementCognition({
               'A child may be COMPLETED or BLOCKED. BLOCKED is not successful completion; preserve its unresolved evidence or dependency explicitly.',
               'Update a compact accumulator using exactly one newly resolved child.',
               'Do not invent facts, erase a blocked gap, or change the parent requirement.',
+               'EPISTEMIC THRESHOLD POLICY: '+THRESHOLD_EVIDENCE_POLICY.RULE+' '+THRESHOLD_EVIDENCE_POLICY.PASS+' '+THRESHOLD_EVIDENCE_POLICY.FAIL+' '+THRESHOLD_EVIDENCE_POLICY.UNKNOWN,
+               'When merging child scoring results, preserve PASS, FAIL, and UNKNOWN distinctions; never convert missing evidence into a negative finding.',
               'Return JSON only: {"summary":"compact cumulative synthesis","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
             ].join('\n')},
             {role:'user',content:safeJson({
@@ -3161,6 +3168,8 @@ export async function runAutonomousRequirementCognition({
             'If any essential child gap prevents the parent requirement from being satisfied, choose BLOCKED and preserve the unresolved gap.',
             'Return JSON only: {"outcome":"COMPLETE|BLOCKED","reason":"auditable reason","artifact":"concise auditable parent result","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
             'Do not add requirements or conclusions that are not supported by the resolved children.',
+             'EPISTEMIC THRESHOLD POLICY: '+THRESHOLD_EVIDENCE_POLICY.RULE+' '+THRESHOLD_EVIDENCE_POLICY.PASS+' '+THRESHOLD_EVIDENCE_POLICY.FAIL+' '+THRESHOLD_EVIDENCE_POLICY.UNKNOWN,
+             'If a child contains UNKNOWN threshold states, preserve them as UNKNOWN in the parent synthesis unless later resolved by explicit evidence.',
           ].join('\n')},
           {role:'user',content:safeJson({
             parent_requirement:node.requirement_text,

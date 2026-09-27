@@ -13,6 +13,17 @@ export const HARD_STORAGE_PATH_DEPTH=16;
 export const MAX_CHILDREN_PER_SPLIT=16;
 export const MAX_MODEL_TRANSPORT_ATTEMPTS=2;
 export const MAX_INHERITED_DEPENDENCY_RESULTS=24;
+export const THRESHOLD_EVIDENCE_POLICY=Object.freeze({
+  PASS:'Use PASS only when supplied evidence explicitly satisfies the stated threshold.',
+  FAIL:'Use FAIL only when supplied evidence explicitly demonstrates the threshold is not satisfied.',
+  UNKNOWN:'Use UNKNOWN when the required measurement is absent, incomplete, incomparable, proxy-only, or otherwise insufficient to determine the threshold.',
+  RULE:'Absence of qualifying evidence is UNKNOWN, never FAIL. A single example does not prove an aggregate-count threshold unless the threshold itself is singular.',
+});
+
+export function classifyThresholdEvidence({hasComparableEvidence=false,thresholdSatisfied=null}={}){
+  if(!hasComparableEvidence||typeof thresholdSatisfied!=='boolean')return 'UNKNOWN';
+  return thresholdSatisfied?'PASS':'FAIL';
+}
 
 function positiveInt(value,fallback){
   const n=Math.floor(Number(value));
