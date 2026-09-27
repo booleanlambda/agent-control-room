@@ -1728,6 +1728,7 @@ export async function runAutonomousRequirementCognition({
 
       if(!discovery){
         let siblingInspectionRetry=null;
+        let siblingInspectionUnconfirmed=null;
         for(let attempt=1;attempt<=2;attempt++){
           try{
             const response=await callJson([
@@ -1845,25 +1846,49 @@ export async function runAutonomousRequirementCognition({
             });
             const missingSiblingInspection=siblingInspection.missing_paths;
             if(missingSiblingInspection.length){
-              if(attempt===2)throw new Error('autonomous_decomposition_discovery_sibling_evidence_uninspected:'+node.node_path+':'+missingSiblingInspection.join(','));
-              siblingInspectionRetry={
-                reason:'prior_discovery_omitted_required_or_changed_sibling_attention_accounting',
-                missing_paths:missingSiblingInspection,
-                prior_inspected_paths:siblingInspection.inspected_paths,
-                invalidated_paths:siblingInspection.invalidated_paths,
-                prior_decision:candidateDecision,
-                prior_reason:clip(candidate.reason,1400),
-                evidence_to_reinspect:siblingEvidence.filter(v=>missingSiblingInspection.includes(text(v?.path))),
-              };
-              console.log('AAU_AUTONOMOUS_SIBLING_INSPECTION_RETRY',JSON.stringify({
-                agent_id:agentId,
-                intent_execution_id:intentExecutionId,
-                node_path:node.node_path,
-                missing_paths:missingSiblingInspection,
-                prior_decision:candidateDecision,
-              }));
-              continue;
+              if(attempt===2){
+                siblingInspectionUnconfirmed={
+                  reason:'agent_did_not_serialize_sibling_attention_after_explicit_retry',
+                  paths:missingSiblingInspection,
+                  evidence_hashes:siblingEvidence
+                    .filter(v=>missingSiblingInspection.includes(text(v?.path)))
+                    .map(v=>({path:text(v?.path),result_hash:text(v?.result_hash)||null})),
+                  candidate_decision:candidateDecision,
+                  candidate_reason:clip(candidate.reason,1400),
+                };
+                console.warn('AAU_AUTONOMOUS_SIBLING_INSPECTION_UNCONFIRMED',JSON.stringify({
+                  agent_id:agentId,
+                  intent_execution_id:intentExecutionId,
+                  node_path:node.node_path,
+                  missing_paths:missingSiblingInspection,
+                  candidate_decision:candidateDecision,
+                  policy:'durable_warning_not_wake_failure',
+                }));
+              }else{
+                siblingInspectionRetry={
+                  reason:'prior_discovery_omitted_required_or_changed_sibling_attention_accounting',
+                  missing_paths:missingSiblingInspection,
+                  prior_inspected_paths:siblingInspection.inspected_paths,
+                  invalidated_paths:siblingInspection.invalidated_paths,
+                  prior_decision:candidateDecision,
+                  prior_reason:clip(candidate.reason,1400),
+                  evidence_to_reinspect:siblingEvidence.filter(v=>missingSiblingInspection.includes(text(v?.path))),
+                };
+                console.log('AAU_AUTONOMOUS_SIBLING_INSPECTION_RETRY',JSON.stringify({
+                  agent_id:agentId,
+                  intent_execution_id:intentExecutionId,
+                  node_path:node.node_path,
+                  missing_paths:missingSiblingInspection,
+                  prior_decision:candidateDecision,
+                }));
+                continue;
+              }
             }
+
+            const durableUnconfirmedSiblingPaths=[...new Set([
+              ...siblingInspection.inherited_unconfirmed_paths,
+              ...asArray(siblingInspectionUnconfirmed?.paths).map(text).filter(Boolean),
+            ])];
 
             discovery={
               version:'agent_deep_discovery_v0_1',
@@ -1874,8 +1899,14 @@ export async function runAutonomousRequirementCognition({
               evidence_assessment:clip(candidate.evidence_assessment,3200),
               inspected_sibling_paths:siblingInspection.inspected_paths.slice(0,16),
               inherited_sibling_inspection_paths:siblingInspection.inherited_paths.slice(0,16),
+              inherited_unconfirmed_sibling_inspection_paths:siblingInspection.inherited_unconfirmed_paths.slice(0,16),
               invalidated_sibling_inspection_paths:siblingInspection.invalidated_paths.slice(0,16),
-              sibling_inspection_state_version:'monotonic_result_hash_v0_1',
+              sibling_inspection_unconfirmed_paths:durableUnconfirmedSiblingPaths.slice(0,16),
+              sibling_inspection_accounting_status:durableUnconfirmedSiblingPaths.length
+                ?'evidence_delivered_acknowledgment_unconfirmed'
+                :'agent_acknowledged',
+              sibling_inspection_unconfirmed_reason:siblingInspectionUnconfirmed?.reason||null,
+              sibling_inspection_state_version:'monotonic_result_hash_v0_2_delivery_separated_from_acknowledgment',
               sibling_inspection_retry_applied:Boolean(siblingInspectionRetry),
               sibling_inspection_retry_missing_paths:asArray(siblingInspectionRetry?.missing_paths).map(text).filter(Boolean).slice(0,16),
               authoritative_sibling_result_hashes:siblingEvidence.map(v=>({path:v.path,result_hash:v.result_hash})),
