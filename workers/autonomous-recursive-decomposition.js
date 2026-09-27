@@ -1462,18 +1462,52 @@ export async function runAutonomousRequirementCognition({
     return resumeSelfRemediationEpisode(node,episode,{contextPayload,pinnedEvidence,siblingEvidence});
   }
 
+  async function chargeModelCall(messages,maxTokens,phase,kind){
+    const estimatedInput=estimatedTokens(messages,agentRuntimeContract);
+    const fingerprint=sha256({kind,messages,max_tokens:maxTokens,model});
+    const row=await chargeSemanticRuntime({
+      eventKind:'model_call',
+      materialKey:phase+':'+fingerprint.slice(0,24),
+      costUnits:modelCallCostUnits({
+        estimatedInputTokens:estimatedInput,
+        requestedOutputTokens:maxTokens,
+        quantumTokens:semanticRuntime.quantum_tokens,
+      }),
+      eventFingerprint:fingerprint,
+      metadata:{
+        phase,
+        kind,
+        estimated_input_tokens:estimatedInput,
+        requested_output_tokens:maxTokens,
+      },
+    });
+    if(Number(row?.fingerprint_repeat_count||0)>semanticRuntime.identical_structural_failure_limit){
+      console.warn('AAU_SEMANTIC_RUNTIME_REPEAT_FINGERPRINT',JSON.stringify({
+        agent_id:agentId,
+        intent_execution_id:intentExecutionId,
+        assignment_key:assignmentKey,
+        phase,
+        fingerprint,
+        repeat_count:Number(row?.fingerprint_repeat_count||0),
+      }));
+    }
+  }
+
   async function callJson(messages,maxTokens,phase){
+    await chargeModelCall(messages,maxTokens,phase,'deep_json');
     counters.model_calls++;
     return completeJson(messages,maxTokens,phase);
   }
 
   async function callRoute(messages,maxTokens,phase){
+    await chargeModelCall(messages,maxTokens,phase,'route_json');
     counters.model_calls++;
     const fn=typeof completeRouteJson==='function'?completeRouteJson:completeJson;
     return fn(messages,maxTokens,phase);
   }
 
   async function callSerialize(messages,maxTokens,phase){
+    await chargeModelCall(messages,maxTokens,phase,'serialize_json');
     counters.model_calls++;
     const fn=typeof completeSerializeJson==='function'?completeSerializeJson
       :(typeof completeRouteJson==='function'?completeRouteJson:completeJson);
