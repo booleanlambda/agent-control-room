@@ -10,6 +10,7 @@ import {
   repeatedStructuralFailureLocked,
   durableSiblingInspection,
   retryableModelTransportError,
+  mergeInheritedDependencyResults,
   MAX_MODEL_TRANSPORT_ATTEMPTS,
   pathDepth,
 } from './semantic-runtime-controls.js';
@@ -178,6 +179,7 @@ function compactSiblingEvidenceForModel(rows,maxTokens,contract){
     artifact:clip(v.artifact,Math.max(250,Math.floor(perChars*0.58))),
     handoff_json:clip(v.handoff_json,Math.max(180,Math.floor(perChars*0.20))),
     result_hash:v.result_hash||null,
+    evidence_scope:v.evidence_scope||null,
   }));
 }
 function boundContextForModel(payload,maxTokens,contract){
@@ -418,7 +420,8 @@ function boundContextPayload(payload,maxBytes=MAX_PERSISTED_CONTEXT_BYTES){
   };
   const priorityScore=(key)=>{
     if(key==='research_source_catalog')return 10000;
-    if(key==='completed_sibling_results'||key==='inherited_completed_sibling_results')return 9000;
+    if(key==='inherited_completed_sibling_results')return 9800;
+    if(key==='completed_sibling_results')return 9500;
     if(key.startsWith('external_research'))return 7000+researchRound(key);
     return 0;
   };
@@ -484,14 +487,18 @@ function boundContextPayload(payload,maxBytes=MAX_PERSISTED_CONTEXT_BYTES){
 
 function inheritedChildContext(parentPayload){
   const src=asObject(parentPayload);
-  const inherited={};
-  if(Array.isArray(src.completed_sibling_results)&&src.completed_sibling_results.length){
-    inherited.completed_sibling_results=src.completed_sibling_results;
-  }
-  if(Array.isArray(src.inherited_completed_sibling_results)&&src.inherited_completed_sibling_results.length){
-    inherited.inherited_completed_sibling_results=src.inherited_completed_sibling_results;
-  }
-  return boundContextPayload(inherited);
+  const promoted=mergeInheritedDependencyResults({
+    inheritedCompletedSiblingResults:src.inherited_completed_sibling_results,
+    completedSiblingResults:src.completed_sibling_results,
+  });
+  return boundContextPayload(
+    promoted.length
+      ?{
+        inherited_completed_sibling_results:promoted,
+        dependency_context_contract:'ancestor_dependency_propagation_v0_3',
+      }
+      :{}
+  );
 }
 
 function pathParts(path){
@@ -670,17 +677,16 @@ function compactCompletedSiblingResults(rows){
 function authoritativeSiblingEvidence(contextPayload){
   const src=asObject(contextPayload);
   const merged=[
-    ...asArray(src.inherited_completed_sibling_results),
-    ...asArray(src.completed_sibling_results),
+    ...asArray(src.inherited_completed_sibling_results).map(row=>({row,scope:'ancestor_dependency'})),
+    ...asArray(src.completed_sibling_results).map(row=>({row,scope:'direct_sibling'})),
   ];
   const out=[];
-  const seen=new Set();
-  for(const raw of merged){
-    const row=asObject(raw);
+  const byKey=new Map();
+  for(const entry of merged){
+    const row=asObject(entry.row);
     const key=text(row.path)||text(row.result_hash)||safeJson(row).slice(0,240);
-    if(!key||seen.has(key))continue;
-    seen.add(key);
-    out.push({
+    if(!key)continue;
+    const normalized={
       path:row.path||null,
       status:row.status||null,
       decision_type:row.decision_type||null,
@@ -688,12 +694,32 @@ function authoritativeSiblingEvidence(contextPayload){
       artifact:clip(row.artifact,5000),
       handoff_json:clip(row.handoff_json,2400),
       result_hash:row.result_hash||null,
-    });
+      evidence_scope:entry.scope,
+    };
+    if(byKey.has(key)){
+      out[byKey.get(key)]={...out[byKey.get(key)],...normalized};
+      continue;
+    }
+    byKey.set(key,out.length);
+    out.push(normalized);
   }
-  return out.slice(-8);
+  if(out.length<=24)return out;
+  const selected=[...out.slice(0,10),...out.slice(-14)];
+  const bounded=[];
+  const seen=new Set();
+  for(const row of selected){
+    const key=text(row.path)||text(row.result_hash)||safeJson(row).slice(0,240);
+    if(!key||seen.has(key))continue;
+    seen.add(key);
+    bounded.push(row);
+  }
+  return bounded.slice(0,24);
 }
 function siblingEvidencePaths(rows){
-  return asArray(rows).map(v=>text(v?.path)).filter(Boolean);
+  return asArray(rows)
+    .filter(v=>text(v?.evidence_scope)!=='ancestor_dependency')
+    .map(v=>text(v?.path))
+    .filter(Boolean);
 }
 function compactRemediationEpisodes(rows){
   return asArray(rows).slice(-MAX_SELF_REMEDIATION_ATTEMPTS).map(raw=>{
@@ -1752,8 +1778,8 @@ export async function runAutonomousRequirementCognition({
                   ? 'Context/research acquisition remains mechanically available. NEED_CONTEXT is valid only when another retrieval or exact context lookup can materially reduce a stated gap.'
                   : 'CONTEXT RESOURCE CONSTRAINT: further context/research acquisition is mechanically unavailable for this node because: '+resourceView.reasons.join(', ')+'. Do not request more context or research. BLOCKED is available if the remaining evidence gap prevents honest completion; ATOMIC or SPLIT remain yours to choose when mechanically available.',
                 'Before deciding, interrogate semantic equivalence, definitions, time horizons, populations/scopes, proxy metrics, evidence sufficiency, assumptions, and unresolved gaps.',
-                'AUTHORITATIVE SIBLING HANDOFF: authoritative_completed_sibling_evidence contains durable outputs of already resolved sibling requirements. Inspect every listed sibling before deciding NEED_CONTEXT. A fact already present in a completed sibling artifact or handoff is available evidence; do not request it again merely because the original source excerpt is absent from this node. You may still reject or qualify a sibling fact if you identify a substantive insufficiency, but state that reason explicitly.',
-                'For every sibling path supplied, include it in inspected_sibling_paths. This is an attention/accounting requirement only; the runtime does not decide whether the sibling evidence is substantively sufficient.',
+                'AUTHORITATIVE DEPENDENCY HANDOFF: authoritative_completed_sibling_evidence contains both direct resolved siblings and inherited prerequisite results routed from ancestor branches. evidence_scope=ancestor_dependency means the result was already made available to an ancestor and must remain available down this branch. Inspect this durable evidence before deciding NEED_CONTEXT; do not research again for information already present here.',
+                'Only evidence_scope=direct_sibling paths are subject to inspected_sibling_paths attention accounting. Inherited ancestor dependencies do not require path echoing; they are durable prerequisite context, not a serialization invariant.',
                 siblingInspectionRetry
                   ? 'SIBLING INSPECTION RETRY: Your immediately prior discovery output was rejected only because it omitted required sibling path(s) from inspected_sibling_paths. Re-inspect the exact evidence rows named in sibling_inspection_retry.missing_paths before deciding again. Do not merely echo those paths: reconsider your evidence assessment and routing decision in light of the re-inspected sibling evidence. You may preserve or change your prior decision, but the new output must be fully agent-authored and must explicitly account for every supplied sibling path.'
                   : '',
@@ -1839,8 +1865,11 @@ export async function runAutonomousRequirementCognition({
                 continue;
               }
             }
+            const directSiblingEvidence=siblingEvidence.filter(
+              row=>text(row?.evidence_scope)!=='ancestor_dependency'
+            );
             const siblingInspection=durableSiblingInspection({
-              siblingEvidence,
+              siblingEvidence:directSiblingEvidence,
               candidateInspectedPaths:asArray(candidate.inspected_sibling_paths).map(text).filter(Boolean),
               priorDiscovery,
             });
@@ -1913,7 +1942,12 @@ export async function runAutonomousRequirementCognition({
               sibling_inspection_state_version:'monotonic_result_hash_v0_2_delivery_separated_from_acknowledgment',
               sibling_inspection_retry_applied:Boolean(siblingInspectionRetry),
               sibling_inspection_retry_missing_paths:asArray(siblingInspectionRetry?.missing_paths).map(text).filter(Boolean).slice(0,16),
-              authoritative_sibling_result_hashes:siblingEvidence.map(v=>({path:v.path,result_hash:v.result_hash})),
+              authoritative_sibling_result_hashes:siblingEvidence
+                .filter(v=>text(v?.evidence_scope)!=='ancestor_dependency')
+                .map(v=>({path:v.path,result_hash:v.result_hash})),
+              authoritative_dependency_result_hashes:siblingEvidence
+                .filter(v=>text(v?.evidence_scope)==='ancestor_dependency')
+                .map(v=>({path:v.path,result_hash:v.result_hash})),
               remediation_prior_state:candidateDecision==='REMEDIATE'?{
                 decision:text(priorCognitiveState.decision)||null,
                 reason:clip(priorCognitiveState.reason,1800)||null,
@@ -2701,7 +2735,7 @@ export async function runAutonomousRequirementCognition({
             {role:'system',content:[
               'You are the bound autonomous agent executing exactly ONE requirement you previously judged ATOMIC.',
               'Complete only this requirement. Do not silently expand into unrelated work.',
-              'authoritative_completed_sibling_evidence contains durable outputs from resolved sibling requirements. Treat those as available evidence and inspect them before asking for information that a sibling already supplied.',
+              'authoritative_completed_sibling_evidence contains durable outputs from direct siblings and inherited ancestor prerequisites. Treat both as available evidence and inspect them before asking for information already supplied anywhere in the dependency chain.',
               'If you discover it is not actually bounded, return {"status":"SPLIT","reason":"..."} instead of forcing an oversized answer.',
               'If context is missing, return {"status":"NEED_CONTEXT","context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."],"reason":"..."}. You choose any research questions; do not fabricate findings.',
               'Otherwise return JSON only: {"status":"COMPLETE","artifact":"concise auditable work product","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
