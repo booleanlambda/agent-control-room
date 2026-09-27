@@ -468,6 +468,7 @@ grant execute on function public.aau_bridge_hold_semantic_runtime_terminal_v0_2(
 
 create or replace function agent_lab.renew_cognition_assignment_runtime_epoch(
   p_agent_id uuid,
+  p_assignment_key text,
   p_reason text default 'operator_renewal'
 ) returns jsonb
 language plpgsql
@@ -481,7 +482,8 @@ begin
   select * into v_prev
   from agent_lab.cognition_assignment_runtime
   where agent_id=p_agent_id
-  order by updated_at desc,epoch_no desc
+    and assignment_key=p_assignment_key
+  order by epoch_no desc
   limit 1
   for update;
 
@@ -518,6 +520,7 @@ begin
   return jsonb_build_object(
     'status','renewed',
     'agent_id',p_agent_id,
+    'assignment_key',p_assignment_key,
     'runtime_id',v_next.runtime_id,
     'epoch_no',v_next.epoch_no,
     'initial_budget_units',v_next.initial_budget_units,
@@ -531,9 +534,9 @@ begin
 end;
 $function$;
 
-revoke all on function agent_lab.renew_cognition_assignment_runtime_epoch(uuid,text)
+revoke all on function agent_lab.renew_cognition_assignment_runtime_epoch(uuid,text,text)
   from public,anon,authenticated;
-grant execute on function agent_lab.renew_cognition_assignment_runtime_epoch(uuid,text)
+grant execute on function agent_lab.renew_cognition_assignment_runtime_epoch(uuid,text,text)
   to service_role;
 
 commit;
