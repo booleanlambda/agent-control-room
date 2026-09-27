@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   semanticRuntimeConfig,
   modelCallCostUnits,
+  semanticBranchBudget,
   semanticChildCapacity,
   repeatedStructuralFailureLocked,
   durableSiblingInspection,
@@ -32,12 +33,56 @@ test('model calls consume positive cost proportional to bounded token exposure',
   assert.equal(modelCallCostUnits({estimatedInputTokens:0,requestedOutputTokens:1,quantumTokens:1000}),1);
 });
 
-test('child capacity is bounded by conserved remaining budget',()=>{
+test('legacy child capacity falls back to node creation cost when no lifecycle estimate is supplied',()=>{
   assert.equal(semanticChildCapacity({
     remainingBudgetUnits:30,nodeCreateUnits:4,safetyReserveUnits:10,maxChildren:16
   }),5);
   assert.equal(semanticChildCapacity({
     remainingBudgetUnits:13,nodeCreateUnits:4,safetyReserveUnits:10,maxChildren:16
+  }),0);
+});
+
+test('branch budget prices a child by first-pass lifecycle and reserves terminal work',()=>{
+  const budget=semanticBranchBudget({
+    nodeCreateUnits:4,
+    childFormulationUnits:70,
+    childProvenanceUnits:72,
+    childSerializationUnits:2,
+    childDiscoveryUnits:69,
+    childResolutionUnits:76,
+    childTransitionUnits:3,
+    terminalReconciliationUnits:76,
+    terminalSynthesisUnits:18,
+    safetyReserveUnits:12,
+  });
+  assert.equal(budget.expected_child_lifecycle_units,296);
+  assert.equal(budget.completion_reserve_units,94);
+});
+
+test('child capacity uses branch lifecycle cost instead of cheap node creation cost',()=>{
+  assert.equal(semanticChildCapacity({
+    remainingBudgetUnits:918,
+    nodeCreateUnits:4,
+    expectedChildLifecycleUnits:296,
+    completionReserveUnits:94,
+    safetyReserveUnits:12,
+    maxChildren:16,
+  }),2);
+  assert.equal(semanticChildCapacity({
+    remainingBudgetUnits:442,
+    nodeCreateUnits:4,
+    expectedChildLifecycleUnits:296,
+    completionReserveUnits:94,
+    safetyReserveUnits:12,
+    maxChildren:16,
+  }),1);
+  assert.equal(semanticChildCapacity({
+    remainingBudgetUnits:300,
+    nodeCreateUnits:4,
+    expectedChildLifecycleUnits:296,
+    completionReserveUnits:94,
+    safetyReserveUnits:12,
+    maxChildren:16,
   }),0);
 });
 
