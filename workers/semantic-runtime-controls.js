@@ -99,6 +99,12 @@ export function durableSiblingInspection({
       .map(v=>String(v??'').trim())
       .filter(Boolean)
   );
+  const priorUnconfirmed=new Set(
+    (Array.isArray(priorDiscovery?.sibling_inspection_unconfirmed_paths)
+      ?priorDiscovery.sibling_inspection_unconfirmed_paths:[])
+      .map(v=>String(v??'').trim())
+      .filter(Boolean)
+  );
   const priorHashes=new Map(
     (Array.isArray(priorDiscovery?.authoritative_sibling_result_hashes)
       ?priorDiscovery.authoritative_sibling_result_hashes:[])
@@ -107,6 +113,7 @@ export function durableSiblingInspection({
   );
   const required=[];
   const inherited=[];
+  const inheritedUnconfirmed=[];
   const inspected=[];
   const newlyInspected=[];
   const invalidated=[];
@@ -118,32 +125,33 @@ export function durableSiblingInspection({
     const currentHash=String(raw?.result_hash??'').trim();
     const priorHash=priorHashes.get(path)||'';
     const candidateHas=candidate.has(path);
-    const canInherit=
-      !candidateHas
-      &&priorInspected.has(path)
-      &&Boolean(currentHash)
-      &&Boolean(priorHash)
-      &&currentHash===priorHash;
+    const sameDurableHash=Boolean(currentHash)&&Boolean(priorHash)&&currentHash===priorHash;
+    const canInheritInspection=!candidateHas&&priorInspected.has(path)&&sameDurableHash;
+    const canInheritUnconfirmed=!candidateHas&&priorUnconfirmed.has(path)&&sameDurableHash;
 
     if(candidateHas){
       inspected.push(path);
       newlyInspected.push(path);
-    }else if(canInherit){
+    }else if(canInheritInspection){
       inspected.push(path);
       inherited.push(path);
-    }else if(priorInspected.has(path)&&currentHash&&priorHash&&currentHash!==priorHash){
+    }else if(canInheritUnconfirmed){
+      inheritedUnconfirmed.push(path);
+    }else if((priorInspected.has(path)||priorUnconfirmed.has(path))
+      &&currentHash&&priorHash&&currentHash!==priorHash){
       invalidated.push(path);
     }
   }
 
-  const inspectedSet=new Set(inspected);
+  const mechanicallyAccounted=new Set([...inspected,...inheritedUnconfirmed]);
   return Object.freeze({
     required_paths:required,
     inspected_paths:inspected,
     newly_inspected_paths:newlyInspected,
     inherited_paths:inherited,
+    inherited_unconfirmed_paths:inheritedUnconfirmed,
     invalidated_paths:invalidated,
-    missing_paths:required.filter(path=>!inspectedSet.has(path)),
+    missing_paths:required.filter(path=>!mechanicallyAccounted.has(path)),
   });
 }
 
