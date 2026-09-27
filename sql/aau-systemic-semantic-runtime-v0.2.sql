@@ -394,7 +394,7 @@ begin
   update agent_lab.agent_existence_accounts
      set account_state='suspended',
          levy_enabled=false,
-         next_due_at=null,
+         -- Preserve next_due_at because the column is NOT NULL; levy_enabled=false is the pause gate.
          metadata=coalesce(metadata,'{}'::jsonb)||jsonb_build_object(
            'suspended_reason',v_class,
            'suspended_at',now(),

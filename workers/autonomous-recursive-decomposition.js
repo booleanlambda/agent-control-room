@@ -8,6 +8,7 @@ import {
   modelCallCostUnits,
   semanticChildCapacity,
   repeatedStructuralFailureLocked,
+  durableSiblingInspection,
   pathDepth,
 } from './semantic-runtime-controls.js';
 
@@ -1803,15 +1804,19 @@ export async function runAutonomousRequirementCognition({
                 continue;
               }
             }
-            const requiredSiblingPaths=siblingEvidencePaths(siblingEvidence);
-            const inspectedSiblingPaths=new Set(asArray(candidate.inspected_sibling_paths).map(text).filter(Boolean));
-            const missingSiblingInspection=requiredSiblingPaths.filter(path=>!inspectedSiblingPaths.has(path));
+            const siblingInspection=durableSiblingInspection({
+              siblingEvidence,
+              candidateInspectedPaths:asArray(candidate.inspected_sibling_paths).map(text).filter(Boolean),
+              priorDiscovery,
+            });
+            const missingSiblingInspection=siblingInspection.missing_paths;
             if(missingSiblingInspection.length){
               if(attempt===2)throw new Error('autonomous_decomposition_discovery_sibling_evidence_uninspected:'+node.node_path+':'+missingSiblingInspection.join(','));
               siblingInspectionRetry={
-                reason:'prior_discovery_omitted_required_sibling_attention_accounting',
+                reason:'prior_discovery_omitted_required_or_changed_sibling_attention_accounting',
                 missing_paths:missingSiblingInspection,
-                prior_inspected_paths:[...inspectedSiblingPaths],
+                prior_inspected_paths:siblingInspection.inspected_paths,
+                invalidated_paths:siblingInspection.invalidated_paths,
                 prior_decision:candidateDecision,
                 prior_reason:clip(candidate.reason,1400),
                 evidence_to_reinspect:siblingEvidence.filter(v=>missingSiblingInspection.includes(text(v?.path))),
@@ -1833,7 +1838,10 @@ export async function runAutonomousRequirementCognition({
               reason:clip(candidate.reason,2200),
               requirement_interpretation:clip(candidate.requirement_interpretation,2800),
               evidence_assessment:clip(candidate.evidence_assessment,3200),
-              inspected_sibling_paths:asArray(candidate.inspected_sibling_paths).map(text).filter(Boolean).slice(0,16),
+              inspected_sibling_paths:siblingInspection.inspected_paths.slice(0,16),
+              inherited_sibling_inspection_paths:siblingInspection.inherited_paths.slice(0,16),
+              invalidated_sibling_inspection_paths:siblingInspection.invalidated_paths.slice(0,16),
+              sibling_inspection_state_version:'monotonic_result_hash_v0_1',
               sibling_inspection_retry_applied:Boolean(siblingInspectionRetry),
               sibling_inspection_retry_missing_paths:asArray(siblingInspectionRetry?.missing_paths).map(text).filter(Boolean).slice(0,16),
               authoritative_sibling_result_hashes:siblingEvidence.map(v=>({path:v.path,result_hash:v.result_hash})),
