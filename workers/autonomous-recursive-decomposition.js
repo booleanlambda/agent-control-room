@@ -2,13 +2,21 @@ import {
   resolveModelRuntimeContract,
   modelInputBudgetTokens,
 } from './model-runtime-profiles.js';
+import {
+  SEMANTIC_RUNTIME_CONTRACT,
+  semanticRuntimeConfig,
+  modelCallCostUnits,
+  semanticChildCapacity,
+  repeatedStructuralFailureLocked,
+  pathDepth,
+} from './semantic-runtime-controls.js';
 
 // AAU autonomous recursive decomposition v0.1
 // The bound agent authors decomposition. Runtime only persists/routes/checkpoints.
 
-const MAX_BRANCH_DEPTH=12;
-const MAX_SINGLE_CHILD_REFINEMENTS=4;
 const MAX_ATOMIC_EXECUTION_FAILURES=1;
+// Semantic work is bounded by the conserved assignment-epoch budget.
+// The 16-level path ceiling is only a storage geometry emergency brake.
 const MAX_CHILDREN_PER_NODE=16;
 const MAX_CONTEXT_RESEARCH_ROUNDS=12;
 const MAX_CONTEXT_STAGNANT_ROUNDS=2;
@@ -771,6 +779,101 @@ export async function runAutonomousRequirementCognition({
   }).slice(0,48);
   const idx=contextIndex(packet);
   const counters={nodes:0,model_calls:0,context_requests:0};
+  const semanticRuntime=semanticRuntimeConfig(agentRuntimeContract);
+
+  async function semanticRuntimeRpc(action,args={}){
+    return rpc('aau_bridge_cognition_assignment_runtime_v0_2',{
+      p_agent_id:agentId,
+      p_wake_request_id:intentExecutionId,
+      p_assignment_key:assignmentKey,
+      p_model:model,
+      p_action:action,
+      p_epoch_no:semanticRuntime.epoch_no,
+      p_initial_budget_units:args.initialBudgetUnits??null,
+      p_quantum_tokens:semanticRuntime.quantum_tokens,
+      p_event_key:args.eventKey??null,
+      p_event_kind:args.eventKind??null,
+      p_event_fingerprint:args.eventFingerprint??null,
+      p_cost_units:args.costUnits??0,
+      p_node_path:args.nodePath??null,
+      p_metadata:args.metadata??{},
+    });
+  }
+
+  let semanticRuntimeSnapshot=await semanticRuntimeRpc('init',{
+    initialBudgetUnits:semanticRuntime.initial_budget_units,
+    metadata:{
+      contract:SEMANTIC_RUNTIME_CONTRACT,
+      initial_budget_tokens:semanticRuntime.initial_budget_tokens,
+      budget_quantum_tokens:semanticRuntime.quantum_tokens,
+      budget_derivation:'model_operational_context_x8_or_explicit_override',
+      model_operational_context_limit_tokens:
+        agentRuntimeContract.operational_context_limit_tokens||null,
+      source_wake_request_id:intentExecutionId,
+    },
+  });
+  if(semanticRuntimeSnapshot?.status!=='ready')
+    throw new Error('semantic_runtime_initialization_failed');
+  if(String(semanticRuntimeSnapshot?.runtime_status||'')==='budget_exhausted'){
+    const error=new Error('semantic_runtime_terminal:budget_exhausted:'+assignmentKey);
+    error.code='SEMANTIC_BUDGET_EXHAUSTED';
+    error.semanticRuntime=semanticRuntimeSnapshot;
+    throw error;
+  }
+
+  async function semanticRuntimeView(){
+    const row=await semanticRuntimeRpc('get');
+    if(row?.status!=='ready')throw new Error('semantic_runtime_state_unavailable');
+    semanticRuntimeSnapshot=row;
+    return row;
+  }
+
+  async function closeSemanticRuntime(status,metadata={}){
+    const row=await semanticRuntimeRpc('close',{
+      metadata:{status,...metadata},
+    });
+    if(row?.status!=='ready')throw new Error('semantic_runtime_close_failed');
+    semanticRuntimeSnapshot=row;
+    return row;
+  }
+
+  async function chargeSemanticRuntime({
+    eventKind,materialKey,nodePath=null,costUnits,eventFingerprint=null,metadata={}
+  }){
+    const eventKey=eventKind+':'+sha256({
+      assignment_key:assignmentKey,
+      epoch_no:semanticRuntime.epoch_no,
+      event_kind:eventKind,
+      material_key:String(materialKey||''),
+    }).slice(0,64);
+    const fingerprint=eventFingerprint||sha256({
+      assignment_key:assignmentKey,
+      epoch_no:semanticRuntime.epoch_no,
+      event_kind:eventKind,
+      node_path:nodePath,
+      material_key:String(materialKey||''),
+      metadata,
+    });
+    const row=await semanticRuntimeRpc('charge',{
+      eventKey,eventKind,eventFingerprint:fingerprint,
+      costUnits:Math.max(1,Math.floor(Number(costUnits)||1)),
+      nodePath,metadata,
+    });
+    if(row?.status!=='ready')throw new Error('semantic_runtime_charge_failed');
+    semanticRuntimeSnapshot=row;
+    if(row.available!==true){
+      const error=new Error(
+        'semantic_runtime_budget_exhausted:'
+        +(nodePath||'assignment')
+        +':remaining='+String(row.remaining_budget_units??0)
+      );
+      error.code='SEMANTIC_BUDGET_EXHAUSTED';
+      error.semanticRuntime=row;
+      error.semanticEvent={eventKind,materialKey,nodePath};
+      throw error;
+    }
+    return row;
+  }
 
   function agentModelContextView(rawPayload,pinnedEvidence,outputTokens){
     const safeInputTokens=modelInputBudgetTokens(agentRuntimeContract,outputTokens);
@@ -885,6 +988,30 @@ export async function runAutonomousRequirementCognition({
   }
 
   async function saveNode(args){
+    const transitionFingerprint=sha256({
+      node_path:args.nodePath||'R',
+      parent_path:args.parentPath??null,
+      ordinal:args.ordinal??0,
+      requirement:args.requirement??null,
+      source_kind:args.sourceKind??'requirement',
+      source_ref:args.sourceRef??null,
+      status:args.status??null,
+      decision_type:args.decisionType??null,
+      decision_payload:args.decisionPayload??{},
+      context_payload_hash:sha256(args.contextPayload??{}),
+      result_artifact_hash:args.resultArtifact==null?null:sha256(String(args.resultArtifact)),
+    });
+    await chargeSemanticRuntime({
+      eventKind:'semantic_transition',
+      materialKey:(args.nodePath||'R')+':'+transitionFingerprint,
+      nodePath:args.nodePath||'R',
+      costUnits:1,
+      eventFingerprint:transitionFingerprint,
+      metadata:{
+        status:args.status??null,
+        decision_type:args.decisionType??null,
+      },
+    });
     const row=await nodeRpc('save',args);
     if(row?.status!=='ready')throw new Error('autonomous_decomposition_checkpoint_save_failed:'+args.nodePath);
     return {
@@ -1374,18 +1501,52 @@ export async function runAutonomousRequirementCognition({
     return resumeSelfRemediationEpisode(node,episode,{contextPayload,pinnedEvidence,siblingEvidence});
   }
 
+  async function chargeModelCall(messages,maxTokens,phase,kind){
+    const estimatedInput=estimatedTokens(messages,agentRuntimeContract);
+    const fingerprint=sha256({kind,messages,max_tokens:maxTokens,model});
+    const row=await chargeSemanticRuntime({
+      eventKind:'model_call',
+      materialKey:phase+':'+fingerprint.slice(0,24),
+      costUnits:modelCallCostUnits({
+        estimatedInputTokens:estimatedInput,
+        requestedOutputTokens:maxTokens,
+        quantumTokens:semanticRuntime.quantum_tokens,
+      }),
+      eventFingerprint:fingerprint,
+      metadata:{
+        phase,
+        kind,
+        estimated_input_tokens:estimatedInput,
+        requested_output_tokens:maxTokens,
+      },
+    });
+    if(Number(row?.fingerprint_repeat_count||0)>semanticRuntime.identical_structural_failure_limit){
+      console.warn('AAU_SEMANTIC_RUNTIME_REPEAT_FINGERPRINT',JSON.stringify({
+        agent_id:agentId,
+        intent_execution_id:intentExecutionId,
+        assignment_key:assignmentKey,
+        phase,
+        fingerprint,
+        repeat_count:Number(row?.fingerprint_repeat_count||0),
+      }));
+    }
+  }
+
   async function callJson(messages,maxTokens,phase){
+    await chargeModelCall(messages,maxTokens,phase,'deep_json');
     counters.model_calls++;
     return completeJson(messages,maxTokens,phase);
   }
 
   async function callRoute(messages,maxTokens,phase){
+    await chargeModelCall(messages,maxTokens,phase,'route_json');
     counters.model_calls++;
     const fn=typeof completeRouteJson==='function'?completeRouteJson:completeJson;
     return fn(messages,maxTokens,phase);
   }
 
   async function callSerialize(messages,maxTokens,phase){
+    await chargeModelCall(messages,maxTokens,phase,'serialize_json');
     counters.model_calls++;
     const fn=typeof completeSerializeJson==='function'?completeSerializeJson
       :(typeof completeRouteJson==='function'?completeRouteJson:completeJson);
@@ -1408,10 +1569,19 @@ export async function runAutonomousRequirementCognition({
     contextPayload=boundInMemoryContext(contextPayload,pinnedEvidence,10000);
     const atomicExecutionFailures=Math.max(0,Number(node?.decision_payload?.atomic_execution_failures||0));
     const atomicUnavailable=atomicExecutionFailures>=MAX_ATOMIC_EXECUTION_FAILURES;
-    const normalizedBranchDepth=Math.max(0,Math.min(Number(branchDepth)||0,MAX_BRANCH_DEPTH));
-    const structuralBranchingAvailable=normalizedBranchDepth<MAX_BRANCH_DEPTH;
-    const singleRefinementAvailable=singleChildRefinements<MAX_SINGLE_CHILD_REFINEMENTS;
-    const splitAvailable=structuralBranchingAvailable||singleRefinementAvailable;
+    const runtimeView=await semanticRuntimeView();
+    const normalizedBranchDepth=pathDepth(node.node_path);
+    const storageDepthAvailable=Number.isFinite(normalizedBranchDepth)
+      &&normalizedBranchDepth<semanticRuntime.hard_storage_path_depth;
+    const availableChildCapacity=semanticChildCapacity({
+      remainingBudgetUnits:Number(runtimeView?.remaining_budget_units||0),
+      nodeCreateUnits:semanticRuntime.node_create_units,
+      safetyReserveUnits:semanticRuntime.safety_reserve_units,
+      maxChildren:MAX_CHILDREN_PER_NODE,
+    });
+    const splitAvailable=storageDepthAvailable&&availableChildCapacity>=1;
+    const structuralBranchingAvailable=splitAvailable&&availableChildCapacity>=2;
+    const singleRefinementAvailable=splitAvailable;
 
     let contextState=asObject(node?.decision_payload?.context_resource_state);
     if(contextState.version!=='agent_visible_context_resource_v0_2'){
@@ -1496,11 +1666,11 @@ export async function runAutonomousRequirementCognition({
         force_reconsider:Boolean(forceReconsider),
         atomic_unavailable:atomicUnavailable,
         atomic_execution_failures:atomicExecutionFailures,
-        structural_branch_depth:normalizedBranchDepth,
-        max_structural_branch_depth:MAX_BRANCH_DEPTH,
+        storage_path_depth:normalizedBranchDepth,
+        emergency_storage_path_depth:semanticRuntime.hard_storage_path_depth,
+        semantic_runtime_remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
+        semantic_child_capacity:availableChildCapacity,
         structural_branching_available:structuralBranchingAvailable,
-        single_child_refinements_used:singleChildRefinements,
-        max_single_child_refinements:MAX_SINGLE_CHILD_REFINEMENTS,
         single_refinement_available:singleRefinementAvailable,
         context_resource_available:resourceView.available,
         context_resource_reasons:resourceView.reasons,
@@ -1538,12 +1708,10 @@ export async function runAutonomousRequirementCognition({
                 atomicUnavailable
                   ? 'ATOMIC is mechanically unavailable because this exact node already exhausted its bounded atomic execution.'
                   : 'ATOMIC remains available if you judge the requirement genuinely bounded.',
-                'Mechanical decomposition budget: structural branch depth '+normalizedBranchDepth+' of '+MAX_BRANCH_DEPTH+'; consecutive single-child refinements '+singleChildRefinements+' of '+MAX_SINGLE_CHILD_REFINEMENTS+'.',
-                structuralBranchingAvailable
-                  ? 'A SPLIT may create multiple children if your reasoning requires it.'
-                  : (singleRefinementAvailable
-                    ? 'Structural branch depth is exhausted. SPLIT remains available only as exactly ONE genuinely narrower refinement child; it may not create multiple children.'
-                    : 'Structural branch depth and the single-child refinement budget are both exhausted, so SPLIT is mechanically unavailable.'),
+                'Mechanical work budget: '+Number(runtimeView?.remaining_budget_units||0)+' units remain in this assignment epoch. Current semantic child capacity is '+availableChildCapacity+' after preserving the safety reserve.',
+                storageDepthAvailable
+                  ? 'Tree depth is not the ordinary stopping rule. SPLIT is governed by conserved work budget and genuine semantic narrowing. The '+semanticRuntime.hard_storage_path_depth+'-level path ceiling is only an emergency persistence guard.'
+                  : 'EMERGENCY STORAGE GUARD: this durable path reached '+semanticRuntime.hard_storage_path_depth+' levels. SPLIT is mechanically unavailable at this path; this is not a substantive conclusion about the requirement.',
                 resourceView.available
                   ? 'Context/research acquisition remains mechanically available. NEED_CONTEXT is valid only when another retrieval or exact context lookup can materially reduce a stated gap.'
                   : 'CONTEXT RESOURCE CONSTRAINT: further context/research acquisition is mechanically unavailable for this node because: '+resourceView.reasons.join(', ')+'. Do not request more context or research. BLOCKED is available if the remaining evidence gap prevents honest completion; ATOMIC or SPLIT remain yours to choose when mechanically available.',
@@ -1575,11 +1743,15 @@ export async function runAutonomousRequirementCognition({
                 available_supplied_context_index:indexObject(cognitionContext),
                 available_decisions:availableDecisions,
                 runtime_resource_constraints:{
-                  structural_branch_depth:normalizedBranchDepth,
-                  max_structural_branch_depth:MAX_BRANCH_DEPTH,
+                  semantic_runtime_contract:SEMANTIC_RUNTIME_CONTRACT,
+                  epoch_no:semanticRuntime.epoch_no,
+                  remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
+                  initial_budget_units:Number(runtimeView?.initial_budget_units||semanticRuntime.initial_budget_units),
+                  budget_quantum_tokens:semanticRuntime.quantum_tokens,
+                  semantic_child_capacity:availableChildCapacity,
+                  storage_path_depth:normalizedBranchDepth,
+                  emergency_storage_path_depth:semanticRuntime.hard_storage_path_depth,
                   multi_child_split_available:structuralBranchingAvailable,
-                  single_child_refinements_used:singleChildRefinements,
-                  max_single_child_refinements:MAX_SINGLE_CHILD_REFINEMENTS,
                   single_child_refinement_available:singleRefinementAvailable,
                   context_acquisition_available:resourceView.available,
                   context_acquisition_exhausted:resourceView.exhausted,
@@ -1690,11 +1862,12 @@ export async function runAutonomousRequirementCognition({
               force_reconsider:Boolean(forceReconsider),
               atomic_unavailable:atomicUnavailable,
               atomic_execution_failures:atomicExecutionFailures,
-              structural_branch_depth:normalizedBranchDepth,
-              max_structural_branch_depth:MAX_BRANCH_DEPTH,
+              semantic_runtime_contract:SEMANTIC_RUNTIME_CONTRACT,
+              remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
+              semantic_child_capacity:availableChildCapacity,
+              storage_path_depth:normalizedBranchDepth,
+              emergency_storage_path_depth:semanticRuntime.hard_storage_path_depth,
               multi_child_split_available:structuralBranchingAvailable,
-              single_child_refinements_used:singleChildRefinements,
-              max_single_child_refinements:MAX_SINGLE_CHILD_REFINEMENTS,
               single_child_refinement_available:singleRefinementAvailable,
               context_resource_state:resourceView,
             };
@@ -1819,6 +1992,26 @@ export async function runAutonomousRequirementCognition({
           throw new Error('autonomous_decomposition_context_request_empty:'+node.node_path);
 
         counters.context_requests+=requests.length+researchQueries.length+researchUrls.length;
+        await chargeSemanticRuntime({
+          eventKind:'context_acquisition',
+          materialKey:node.node_path+':routing:'+String(contextState.context_rounds_attempted+1)+':'+sha256({requests,researchQueries,researchUrls}),
+          nodePath:node.node_path,
+          costUnits:semanticRuntime.context_acquire_units,
+          eventFingerprint:sha256({
+            node_path:node.node_path,
+            phase:'routing_need_context',
+            requests,
+            research_queries:researchQueries,
+            research_urls:researchUrls,
+            prior_gap_signal:contextState.last_gap_signal||null,
+          }),
+          metadata:{
+            phase:'routing_need_context',
+            request_count:requests.length,
+            query_count:researchQueries.length,
+            url_count:researchUrls.length,
+          },
+        });
         const contextAcquisitionStartedAt=Date.now();
 
         const beforeCatalogCount=asArray(contextPayload.research_source_catalog).length;
@@ -2073,10 +2266,20 @@ export async function runAutonomousRequirementCognition({
     if(existing.length)return {children:existing,reconsider:false};
 
     const authored=[];
-    const normalizedBranchDepth=Math.max(0,Math.min(Number(branchDepth)||0,MAX_BRANCH_DEPTH));
-    const structuralBranchingAvailable=normalizedBranchDepth<MAX_BRANCH_DEPTH;
-    const singleRefinementAvailable=singleChildRefinements<MAX_SINGLE_CHILD_REFINEMENTS;
-    const maxChildrenThisSplit=structuralBranchingAvailable?MAX_CHILDREN_PER_NODE:(singleRefinementAvailable?1:0);
+    const runtimeView=await semanticRuntimeView();
+    const normalizedBranchDepth=pathDepth(node.node_path);
+    const storageDepthAvailable=Number.isFinite(normalizedBranchDepth)
+      &&normalizedBranchDepth<semanticRuntime.hard_storage_path_depth;
+    const maxChildrenThisSplit=storageDepthAvailable
+      ? semanticChildCapacity({
+          remainingBudgetUnits:Number(runtimeView?.remaining_budget_units||0),
+          nodeCreateUnits:semanticRuntime.node_create_units,
+          safetyReserveUnits:semanticRuntime.safety_reserve_units,
+          maxChildren:MAX_CHILDREN_PER_NODE,
+        })
+      : 0;
+    const structuralBranchingAvailable=maxChildrenThisSplit>=2;
+    const singleRefinementAvailable=maxChildrenThisSplit>=1;
     if(maxChildrenThisSplit<1)throw new Error('autonomous_decomposition_split_mode_unavailable:'+node.node_path);
     const startOrdinal=Math.max(0,...allExisting.map((child)=>Number(child?.ordinal||0)))+1;
 
@@ -2153,9 +2356,8 @@ export async function runAutonomousRequirementCognition({
                 'A CHILD must be independently completable, materially narrower than the parent, and include explicit scope removed plus a concrete completion criterion.',
                 'Do not execute or solve the child.',
                 'Return complete JSON only: {"status":"CHILD","requirement":"...","scope_removed":"...","completion_criterion":"...","reason":"brief"} OR {"status":"DONE","coverage_note":"brief"}.',
-                structuralBranchingAvailable
-                  ? 'There is no required number of children. One child is valid only when genuinely narrower; use as many or as few children as your reasoning requires.'
-                  : 'MECHANICAL DEPTH CONSTRAINT: structural branch depth is exhausted. You may author exactly ONE genuinely narrower refinement child and no sibling branch.',
+                'There is no required number of children. One child is valid only when genuinely narrower; use as many or as few children as your reasoning requires within the conserved work budget.',
+                'Current semantic child capacity for this parent is '+maxChildrenThisSplit+'. Tree depth is not the ordinary convergence rule; the '+semanticRuntime.hard_storage_path_depth+'-level path ceiling is only an emergency persistence guard.',
               ].join('\n')},
               {role:'user',content:safeJson({
                 parent_requirement:node.requirement_text,
@@ -2166,12 +2368,13 @@ export async function runAutonomousRequirementCognition({
                 prior_child_authoring_failure:asObject(node?.decision_payload?.child_authoring_failure),
                 provenance_revision_guidance:provenanceRevisionGuidance||null,
                 runtime_resource_constraints:{
-                  structural_branch_depth:normalizedBranchDepth,
-                  max_structural_branch_depth:MAX_BRANCH_DEPTH,
+                  semantic_runtime_contract:SEMANTIC_RUNTIME_CONTRACT,
+                  remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
+                  semantic_child_capacity:maxChildrenThisSplit,
+                  storage_path_depth:normalizedBranchDepth,
+                  emergency_storage_path_depth:semanticRuntime.hard_storage_path_depth,
                   multi_child_split_available:structuralBranchingAvailable,
                   max_children_this_split:maxChildrenThisSplit,
-                  single_child_refinements_used:singleChildRefinements,
-                  max_single_child_refinements:MAX_SINGLE_CHILD_REFINEMENTS,
                 },
               })},
             ],stageBudgets.child_formulation,'req_'+node.node_path.replaceAll('.','_')+'_author_child_formulate_'+ordinal+'_'+attempt);
@@ -2316,6 +2519,23 @@ export async function runAutonomousRequirementCognition({
       if(duplicate)throw new Error('autonomous_decomposition_duplicate_child:'+node.node_path);
 
       const nodePath=node.node_path+'.'+String(ordinal).padStart(3,'0');
+      const childRequirementHash=sha256(requirement);
+      await chargeSemanticRuntime({
+        eventKind:'semantic_node_created',
+        materialKey:nodePath+':'+childRequirementHash,
+        nodePath,
+        costUnits:semanticRuntime.node_create_units,
+        eventFingerprint:sha256({
+          parent_path:node.node_path,
+          child_path:nodePath,
+          requirement_hash:childRequirementHash,
+        }),
+        metadata:{
+          parent_path:node.node_path,
+          ordinal,
+          requirement_hash:childRequirementHash,
+        },
+      });
       const child=await saveNode({
         nodePath,parentPath:node.node_path,ordinal,
         requirement,sourceKind:'agent_decomposition',sourceRef:node.node_path,
@@ -2364,9 +2584,10 @@ export async function runAutonomousRequirementCognition({
             ...(node.decision_payload||{}),
             child_count:1,
             children_authored:true,
-            mechanical_depth_constraint_applied:true,
-            structural_branch_depth:normalizedBranchDepth,
-            max_structural_branch_depth:MAX_BRANCH_DEPTH,
+            conserved_budget_constraint_applied:true,
+            storage_path_depth:normalizedBranchDepth,
+            emergency_storage_path_depth:semanticRuntime.hard_storage_path_depth,
+            remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
             max_children_this_split:1,
             child_authoring_protocol:'deep_formulation_checkpoint_then_nonthinking_serialization_v0_1',
           },
@@ -2470,6 +2691,25 @@ export async function runAutonomousRequirementCognition({
       ].map(text).filter(v=>/^https:\/\//i.test(v)))].slice(0,8);
       if(!requests.length&&!researchQueries.length&&!researchUrls.length)
         throw new Error('autonomous_decomposition_atomic_context_empty:'+node.node_path);
+      await chargeSemanticRuntime({
+        eventKind:'context_acquisition',
+        materialKey:node.node_path+':atomic:'+sha256({requests,researchQueries,researchUrls}),
+        nodePath:node.node_path,
+        costUnits:semanticRuntime.context_acquire_units,
+        eventFingerprint:sha256({
+          node_path:node.node_path,
+          phase:'atomic_need_context',
+          requests,
+          research_queries:researchQueries,
+          research_urls:researchUrls,
+        }),
+        metadata:{
+          phase:'atomic_need_context',
+          request_count:requests.length,
+          query_count:researchQueries.length,
+          url_count:researchUrls.length,
+        },
+      });
       let researchObserved=null;
       if((researchQueries.length||researchUrls.length)&&typeof researchContext==='function'){
         researchObserved=await researchContext({nodePath:node.node_path,queries:researchQueries,urls:researchUrls});
@@ -2608,6 +2848,25 @@ export async function runAutonomousRequirementCognition({
       ].map(text).filter(v=>/^https:\/\//i.test(v)))].slice(0,8);
       if(!requests.length&&!researchQueries.length&&!researchUrls.length)
         throw new Error('autonomous_decomposition_reconciliation_context_empty:'+node.node_path);
+      await chargeSemanticRuntime({
+        eventKind:'context_acquisition',
+        materialKey:node.node_path+':reconciliation:'+sha256({requests,researchQueries,researchUrls}),
+        nodePath:node.node_path,
+        costUnits:semanticRuntime.context_acquire_units,
+        eventFingerprint:sha256({
+          node_path:node.node_path,
+          phase:'reconciliation_need_context',
+          requests,
+          research_queries:researchQueries,
+          research_urls:researchUrls,
+        }),
+        metadata:{
+          phase:'reconciliation_need_context',
+          request_count:requests.length,
+          query_count:researchQueries.length,
+          url_count:researchUrls.length,
+        },
+      });
       let researchObserved=null;
       if((researchQueries.length||researchUrls.length)&&typeof researchContext==='function'){
         researchObserved=await researchContext({nodePath:node.node_path,queries:researchQueries,urls:researchUrls});
@@ -2859,10 +3118,9 @@ export async function runAutonomousRequirementCognition({
   }
 
   async function process(nodePath,parentPath=null,branchDepth=0,singleChildRefinements=0){
-    // Structural depth counts actual multi-child branching only. Legacy callers may
-    // arrive with an over-counted value; clamp that runtime accounting instead of
-    // killing the wake and expose the ceiling to the agent as a mechanical constraint.
-    branchDepth=Math.max(0,Math.min(Number(branchDepth)||0,MAX_BRANCH_DEPTH));
+    // Depth is persisted for addressability only. It is not the normal convergence budget.
+    branchDepth=pathDepth(nodePath);
+    singleChildRefinements=0;
     let node=await getNode(nodePath);
     if(node?.status!=='ready')throw new Error('autonomous_decomposition_node_missing:'+nodePath);
     node.parent_path=parentPath;
@@ -2881,35 +3139,6 @@ export async function runAutonomousRequirementCognition({
             continue;
           }
           kids=asArray(authoredResult?.children);
-        }
-        if(kids.length===1&&singleChildRefinements>=MAX_SINGLE_CHILD_REFINEMENTS){
-          const child=kids[0];
-          await saveNode({
-            nodePath:child.node_path,parentPath:node.node_path,ordinal:child.ordinal||0,
-            requirement:child.requirement_text,sourceKind:child.source_kind||'agent_decomposition',
-            sourceRef:child.source_ref??node.node_path,status:'cancelled',
-            decisionType:child.decision_type??null,
-            decisionPayload:{
-              ...(child.decision_payload||{}),
-              cancelled_for_nonconvergence:true,
-              cancellation_reason:'single_child_refinement_budget_exhausted',
-            },
-            contextPayload:child.context_payload||{},resultArtifact:child.result_artifact||null,
-          });
-          node=await saveNode({
-            nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
-            requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
-            status:'pending',decisionType:null,
-            decisionPayload:{
-              ...(node.decision_payload||{}),
-              reconsider_decomposition:true,
-              convergence_recovery:'single_child_refinement_budget_exhausted',
-              cancelled_child_path:child.node_path,
-            },
-            contextPayload:node.context_payload||{},resultArtifact:null,
-          });
-          node.parent_path=parentPath;
-          continue;
         }
         const completed=[];
         for(const child of kids){
@@ -2937,13 +3166,11 @@ export async function runAutonomousRequirementCognition({
             });
             routed.parent_path=node.node_path;
           }
-          const singleChild=kids.length===1;
-          const nextBranchDepth=singleChild?branchDepth:Math.min(MAX_BRANCH_DEPTH,branchDepth+1);
           const done=await process(
             child.node_path,
             node.node_path,
-            nextBranchDepth,
-            singleChild?singleChildRefinements+1:0
+            pathDepth(child.node_path),
+            0
           );
           if(done.node_status!=='completed'&&done.node_status!=='blocked')
             throw new Error('autonomous_decomposition_child_not_resolved:'+child.node_path);
@@ -2972,6 +3199,14 @@ export async function runAutonomousRequirementCognition({
 
   let root=await getNode('R');
   if(root?.status==='not_found'){
+    await chargeSemanticRuntime({
+      eventKind:'semantic_node_created',
+      materialKey:'R:'+sha256(rootReq.requirement),
+      nodePath:'R',
+      costUnits:semanticRuntime.node_create_units,
+      eventFingerprint:sha256({node_path:'R',requirement:rootReq.requirement}),
+      metadata:{root:true},
+    });
     root=await saveNode({
       nodePath:'R',parentPath:null,ordinal:0,
       requirement:rootReq.requirement,sourceKind:rootReq.source_kind,sourceRef:rootReq.source_ref,
@@ -2983,14 +3218,81 @@ export async function runAutonomousRequirementCognition({
     throw new Error('autonomous_decomposition_root_lookup_failed');
   }
 
-  const completedRoot=await process('R',null,0,0);
+  if(String(semanticRuntimeSnapshot?.runtime_status||'')==='blocked'
+     &&root.node_status!=='blocked'
+     &&root.node_status!=='completed'){
+    const error=new Error('semantic_runtime_terminal:cycle_lock:'+assignmentKey);
+    error.code='SEMANTIC_RUNTIME_CYCLE_LOCK';
+    error.semanticRuntime=semanticRuntimeSnapshot;
+    throw error;
+  }
+
+  if(root.node_status!=='completed'&&root.node_status!=='blocked'){
+    const wakeRuntimeView=await semanticRuntimeView();
+    const wakeStateFingerprint=sha256({
+      material_transition_count:Number(wakeRuntimeView?.material_transition_count||0),
+      semantic_node_count:Number(wakeRuntimeView?.semantic_node_count||0),
+      root_status:root.node_status||null,
+      root_decision_type:root.decision_type||null,
+      root_result_hash:root.result_hash||null,
+      root_updated_at:root.updated_at||null,
+      root_decision_payload:root.decision_payload||{},
+      root_context_hash:sha256(root.context_payload||{}),
+    });
+    const wakeCharge=await chargeSemanticRuntime({
+      eventKind:'wake_resume',
+      materialKey:String(intentExecutionId),
+      nodePath:'R',
+      costUnits:1,
+      eventFingerprint:wakeStateFingerprint,
+      metadata:{root_status:root.node_status||null},
+    });
+    const cycleLocked=repeatedStructuralFailureLocked({
+      repeatCount:Number(wakeCharge?.fingerprint_repeat_count||0),
+      currentMaterialFingerprint:wakeStateFingerprint,
+      lockedMaterialFingerprint:wakeStateFingerprint,
+      limit:semanticRuntime.identical_structural_failure_limit+1,
+    });
+    if(cycleLocked){
+      await closeSemanticRuntime('blocked',{
+        block_reason:'repeated_wake_without_material_state_progress',
+        repeated_state_fingerprint:wakeStateFingerprint,
+        repeat_count:Number(wakeCharge?.fingerprint_repeat_count||0),
+      });
+      const error=new Error('semantic_runtime_cycle_lock:'+assignmentKey);
+      error.code='SEMANTIC_RUNTIME_CYCLE_LOCK';
+      error.semanticRuntime=semanticRuntimeSnapshot;
+      throw error;
+    }
+  }
+
+  let completedRoot;
+  try{
+    completedRoot=await process('R',null,0,0);
+  }catch(error){
+    if(error?.code==='SEMANTIC_BUDGET_EXHAUSTED'){
+      semanticRuntimeSnapshot=await semanticRuntimeView().catch(()=>semanticRuntimeSnapshot);
+    }
+    throw error;
+  }
+
+  if(completedRoot.node_status==='completed'||completedRoot.node_status==='blocked'){
+    semanticRuntimeSnapshot=await closeSemanticRuntime(
+      completedRoot.node_status==='blocked'?'blocked':'complete',
+      {
+        root_node_id:completedRoot.node_id,
+        root_status:completedRoot.node_status,
+        root_result_hash:completedRoot.result_hash||null,
+      }
+    );
+  }
   const parts=resultParts(completedRoot.result_artifact);
   if(!parts.artifact)throw new Error('autonomous_decomposition_root_artifact_empty');
 
   return {
     artifact:parts.artifact,
     meta:{
-      contract:'autonomous_recursive_decomposition_v0_1',
+      contract:'autonomous_recursive_decomposition_v0_2',
       assignment_key:assignmentKey,
       root_node_id:completedRoot.node_id,
       root_requirement_hash:completedRoot.requirement_hash,
@@ -2999,11 +3301,11 @@ export async function runAutonomousRequirementCognition({
       nodes_touched:counters.nodes,
       model_calls:counters.model_calls,
       context_requests:counters.context_requests,
-      convergence_policy:'branch_depth_v0_4_structural_only_agent_visible_ceiling',
+      convergence_policy:'conserved_work_budget_v0_2_with_emergency_storage_depth_only',
       cognitive_continuity_policy:'agent_discovery_restore_and_reconcile_v0_1',
       routing_protocol:'deep_discovery_then_commit_v0_1',
       decomposition_authored_by_bound_agent:true,
-      runtime_role:'persist_route_resume_completion_integrity_only',
+      runtime_role:'semantic_tree_persistence_plus_separate_execution_budget_ledger',
       cognition_mode:modeInfo?.mode||'deep',
       root_status:completedRoot.node_status||null,
       root_decision_type:completedRoot.decision_type||null,
@@ -3033,6 +3335,14 @@ export async function runAutonomousRequirementCognition({
       stage_output_budgets:stageBudgets,
       node_checkpoint_transport_policy:'envelope_aware_context_compaction_v0_1_220000_bytes',
       research_batch_handoff_policy:'requirement_linked_durable_receipts_v0_1',
+      semantic_runtime_contract:SEMANTIC_RUNTIME_CONTRACT,
+      semantic_runtime_epoch:semanticRuntime.epoch_no,
+      semantic_runtime_budget_quantum_tokens:semanticRuntime.quantum_tokens,
+      semantic_runtime_initial_budget_units:semanticRuntime.initial_budget_units,
+      semantic_runtime_remaining_budget_units:Number(semanticRuntimeSnapshot?.remaining_budget_units||0),
+      semantic_runtime_transition_count:Number(semanticRuntimeSnapshot?.transition_count||0),
+      semantic_runtime_semantic_node_count:Number(semanticRuntimeSnapshot?.semantic_node_count||0),
+      semantic_runtime_status:semanticRuntimeSnapshot?.runtime_status||null,
     },
   };
 }

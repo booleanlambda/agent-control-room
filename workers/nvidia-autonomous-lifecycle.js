@@ -344,18 +344,28 @@ async function handleIntent(channel, msg) {
     }));
   } catch (error) {
     const message = String(error?.message || error);
-    if (event.legacy) {
-      await rpc('aau_bridge_reset_autonomous_wake_arm', {
-        p_wake_request_id: event.intent_execution_id,
-        p_worker_id: workerId,
-        p_error: message.slice(0,1200),
-      }).catch(() => {});
+    const terminalSemanticRuntime=
+      ['SEMANTIC_BUDGET_EXHAUSTED','SEMANTIC_RUNTIME_CYCLE_LOCK'].includes(String(error?.code||''));
+    if (!terminalSemanticRuntime) {
+      if (event.legacy) {
+        await rpc('aau_bridge_reset_autonomous_wake_arm', {
+          p_wake_request_id: event.intent_execution_id,
+          p_worker_id: workerId,
+          p_error: message.slice(0,1200),
+        }).catch(() => {});
+      } else {
+        await rpc('aau_bridge_reset_autonomous_intent_arm', {
+          p_intent_execution_id: event.intent_execution_id,
+          p_worker_id: workerId,
+          p_error: message.slice(0,1200),
+        }).catch(() => {});
+      }
     } else {
-      await rpc('aau_bridge_reset_autonomous_intent_arm', {
-        p_intent_execution_id: event.intent_execution_id,
-        p_worker_id: workerId,
-        p_error: message.slice(0,1200),
-      }).catch(() => {});
+      console.warn('AAU_SEMANTIC_RUNTIME_TERMINAL_NOT_REARMED',JSON.stringify({
+        intent_execution_id:event.intent_execution_id,
+        agent_id:event.agent_id,
+        terminal_code:error.code,
+      }));
     }
     if (event.delay_queue) await channel.deleteQueue(event.delay_queue).catch(() => {});
     channel.ack(msg);

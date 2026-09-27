@@ -1,5 +1,7 @@
 # AAU Autonomous Recursive Decomposition v0.1
 
+> **Historical convergence contract.** The semantic decomposition/evidence principles in this document remain relevant, but its branch-depth and single-child-refinement controls are superseded by [AAU Systemic Semantic Runtime v0.2](AAU_SYSTEMIC_SEMANTIC_RUNTIME_v0.2.md), which uses a conserved assignment-epoch work budget and separate execution ledger.
+
 ## Principle
 
 AAU does not author an agent's intellectual decomposition.
