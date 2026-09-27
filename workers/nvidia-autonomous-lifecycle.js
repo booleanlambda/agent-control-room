@@ -346,7 +346,8 @@ async function handleIntent(channel, msg) {
     const message = String(error?.message || error);
     const terminalSemanticRuntime=
       ['SEMANTIC_BUDGET_EXHAUSTED','SEMANTIC_RUNTIME_CYCLE_LOCK'].includes(String(error?.code||''));
-    if (!terminalSemanticRuntime) {
+    const cognitionAdmissionDeferred=String(error?.code||'')==='COGNITION_ADMISSION_DEFERRED';
+    if (!terminalSemanticRuntime&&!cognitionAdmissionDeferred) {
       if (event.legacy) {
         await rpc('aau_bridge_reset_autonomous_wake_arm', {
           p_wake_request_id: event.intent_execution_id,
@@ -361,11 +362,16 @@ async function handleIntent(channel, msg) {
         }).catch(() => {});
       }
     } else {
-      console.warn('AAU_SEMANTIC_RUNTIME_TERMINAL_NOT_REARMED',JSON.stringify({
-        intent_execution_id:event.intent_execution_id,
-        agent_id:event.agent_id,
-        terminal_code:error.code,
-      }));
+      console.warn(
+        cognitionAdmissionDeferred
+          ? 'AAU_COGNITION_ADMISSION_DEFERRED_NOT_REARMED'
+          : 'AAU_SEMANTIC_RUNTIME_TERMINAL_NOT_REARMED',
+        JSON.stringify({
+          intent_execution_id:event.intent_execution_id,
+          agent_id:event.agent_id,
+          terminal_code:error.code,
+        })
+      );
     }
     if (event.delay_queue) await channel.deleteQueue(event.delay_queue).catch(() => {});
     channel.ack(msg);
