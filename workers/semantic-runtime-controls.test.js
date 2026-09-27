@@ -103,6 +103,7 @@ test('transport retry classification is bounded to transient transport failures'
   assert.equal(retryableModelTransportError(fetchError),true);
   assert.equal(retryableModelTransportError({cause:{code:'ECONNRESET'}}),true);
   assert.equal(retryableModelTransportError({status:503}),true);
+  assert.equal(retryableModelTransportError({status:529}),true);
   assert.equal(retryableModelTransportError({status:400}),false);
   assert.equal(retryableModelTransportError({code:'NVIDIA_TIMEOUT',name:'Error'}),false);
   assert.equal(retryableModelTransportError({name:'AbortError',message:'aborted'}),false);
