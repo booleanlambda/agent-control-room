@@ -8,6 +8,7 @@ import {
   repeatedStructuralFailureLocked,
   durableSiblingInspection,
   retryableModelTransportError,
+  autonomousEvidenceWindowDecision,
   mergeInheritedDependencyResults,
   classifyThresholdEvidence,
   pathDepth,
@@ -239,4 +240,49 @@ test('threshold evidence distinguishes unknown from fail',()=>{
   assert.equal(classifyThresholdEvidence({hasComparableEvidence:true,thresholdSatisfied:null}),'UNKNOWN');
   assert.equal(classifyThresholdEvidence({hasComparableEvidence:true,thresholdSatisfied:true}),'PASS');
   assert.equal(classifyThresholdEvidence({hasComparableEvidence:true,thresholdSatisfied:false}),'FAIL');
+});
+
+
+test('autonomous evidence renewal grants only renewable productive windows with protected completion reserve',()=>{
+  const granted=autonomousEvidenceWindowDecision({
+    resourceReasons:['evidence_window_source_ceiling','evidence_window_round_ceiling'],
+    remainingBudgetUnits:328,
+    projectedRoundUnits:84,
+    completionReserveUnits:150,
+    renewalsUsed:0,
+    maxRenewals:6,
+    lastRoundProductive:true,
+  });
+  assert.equal(granted.granted,true);
+  assert.equal(granted.required_budget_units,234);
+
+  const hard=autonomousEvidenceWindowDecision({
+    resourceReasons:['research_request_repeating'],
+    remainingBudgetUnits:900,
+    projectedRoundUnits:80,
+    completionReserveUnits:150,
+    lastRoundProductive:true,
+  });
+  assert.equal(hard.granted,false);
+  assert.equal(hard.reason,'hard_context_constraint');
+
+  const poor=autonomousEvidenceWindowDecision({
+    resourceReasons:['evidence_window_source_ceiling'],
+    remainingBudgetUnits:200,
+    projectedRoundUnits:84,
+    completionReserveUnits:150,
+    lastRoundProductive:true,
+  });
+  assert.equal(poor.granted,false);
+  assert.equal(poor.reason,'insufficient_semantic_budget');
+
+  const unproductive=autonomousEvidenceWindowDecision({
+    resourceReasons:['evidence_window_round_ceiling'],
+    remainingBudgetUnits:900,
+    projectedRoundUnits:84,
+    completionReserveUnits:150,
+    lastRoundProductive:false,
+  });
+  assert.equal(unproductive.granted,false);
+  assert.equal(unproductive.reason,'prior_evidence_round_unproductive');
 });
