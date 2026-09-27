@@ -81,6 +81,71 @@ export function repeatedStructuralFailureLocked({
   return same&&Math.max(0,Number(repeatCount)||0)>=Math.max(1,Number(limit)||1);
 }
 
+
+export function durableSiblingInspection({
+  siblingEvidence=[],
+  candidateInspectedPaths=[],
+  priorDiscovery={},
+}={}){
+  const evidence=Array.isArray(siblingEvidence)?siblingEvidence:[];
+  const candidate=new Set(
+    (Array.isArray(candidateInspectedPaths)?candidateInspectedPaths:[])
+      .map(v=>String(v??'').trim())
+      .filter(Boolean)
+  );
+  const priorInspected=new Set(
+    (Array.isArray(priorDiscovery?.inspected_sibling_paths)?priorDiscovery.inspected_sibling_paths:[])
+      .map(v=>String(v??'').trim())
+      .filter(Boolean)
+  );
+  const priorHashes=new Map(
+    (Array.isArray(priorDiscovery?.authoritative_sibling_result_hashes)
+      ?priorDiscovery.authoritative_sibling_result_hashes:[])
+      .map(v=>[String(v?.path??'').trim(),String(v?.result_hash??'').trim()])
+      .filter(([path,hash])=>path&&hash)
+  );
+  const required=[];
+  const inherited=[];
+  const inspected=[];
+  const newlyInspected=[];
+  const invalidated=[];
+
+  for(const raw of evidence){
+    const path=String(raw?.path??'').trim();
+    if(!path||required.includes(path))continue;
+    required.push(path);
+    const currentHash=String(raw?.result_hash??'').trim();
+    const priorHash=priorHashes.get(path)||'';
+    const candidateHas=candidate.has(path);
+    const canInherit=
+      !candidateHas
+      &&priorInspected.has(path)
+      &&Boolean(currentHash)
+      &&Boolean(priorHash)
+      &&currentHash===priorHash;
+
+    if(candidateHas){
+      inspected.push(path);
+      newlyInspected.push(path);
+    }else if(canInherit){
+      inspected.push(path);
+      inherited.push(path);
+    }else if(priorInspected.has(path)&&currentHash&&priorHash&&currentHash!==priorHash){
+      invalidated.push(path);
+    }
+  }
+
+  const inspectedSet=new Set(inspected);
+  return Object.freeze({
+    required_paths:required,
+    inspected_paths:inspected,
+    newly_inspected_paths:newlyInspected,
+    inherited_paths:inherited,
+    invalidated_paths:invalidated,
+    missing_paths:required.filter(path=>!inspectedSet.has(path)),
+  });
+}
+
 export function pathDepth(nodePath){
   const path=String(nodePath||'');
   if(path==='R')return 0;
