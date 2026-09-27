@@ -3029,7 +3029,8 @@ export async function runAutonomousRequirementCognition({
         }
       }
     }catch(error){
-      if(error?.code==='COGNITION_RESPONSE_REJECTED'||error?.code==='NVIDIA_TIMEOUT'){
+      if(error?.code==='NVIDIA_TIMEOUT')throw error;
+      if(error?.code==='COGNITION_RESPONSE_REJECTED'){
         const atomicExecutionFailures=Math.max(0,Number(node?.decision_payload?.atomic_execution_failures||0))+1;
         const reset=await saveNode({
           nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
@@ -3209,24 +3210,14 @@ export async function runAutonomousRequirementCognition({
         }
       }
     }catch(error){
-      if(error?.code==='COGNITION_RESPONSE_REJECTED'||error?.code==='NVIDIA_TIMEOUT'){
-        const atomicExecutionFailures=Math.max(0,Number(node?.decision_payload?.atomic_execution_failures||0))+1;
-        const reset=await saveNode({
-          nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
-          requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
-          status:'pending',decisionType:null,
-          decisionPayload:{
-            ...(node.decision_payload||{}),
-            prior_atomic_rejection:String(error?.rejectionReason||error?.code||'reconciliation_incomplete'),
-            reconsider_decomposition:true,
-            atomic_execution_failures:atomicExecutionFailures,
-            atomic_unavailable:atomicExecutionFailures>=MAX_ATOMIC_EXECUTION_FAILURES,
-            reconciliation_incomplete:true,
-          },
-          contextPayload:node.context_payload||{},resultArtifact:null,
-        });
-        reset.parent_path=node.parent_path??parentPathOf(node.node_path);
-        return {reconsider:true,node:reset};
+      if(error?.code==='NVIDIA_TIMEOUT')throw error;
+      if(error?.code==='COGNITION_RESPONSE_REJECTED'){
+        const phaseError=new Error(
+          'autonomous_decomposition_reconciliation_response_exhausted:'+node.node_path
+        );
+        phaseError.code='COGNITION_PHASE_VALIDATION_EXHAUSTED';
+        phaseError.cause=error;
+        throw phaseError;
       }
       throw error;
     }
