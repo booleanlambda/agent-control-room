@@ -8,7 +8,7 @@ create or replace function agent_lab.renew_cognition_assignment_runtime_epoch(
   p_reason text default 'operator_renewal'
 ) returns jsonb
 language plpgsql
-set search_path to 'pg_catalog','agent_lab','extensions'
+set search_path to 'pg_catalog','agent_lab','public','extensions'
 as $function$
 declare
   v_prev agent_lab.cognition_assignment_runtime%rowtype;
@@ -69,6 +69,42 @@ begin
   )
   returning * into v_next;
 
+  -- A new semantic epoch supersedes terminal metadata from the old epoch.
+  -- Renewal does not unpause the lifecycle; it only normalizes epoch identity
+  -- so a subsequent operator resume cannot inherit stale terminal state.
+  update agent_lab.autonomous_lifecycle_runs
+     set metadata=(
+           coalesce(metadata,'{}'::jsonb)
+           -'semantic_runtime_terminal'
+           -'semantic_runtime_terminal_code'
+           -'semantic_runtime_failure_class'
+           -'semantic_runtime_terminal_at'
+           -'semantic_runtime_state'
+         ) || jsonb_build_object(
+           'semantic_runtime_active_epoch',v_next.epoch_no,
+           'semantic_runtime_active_runtime_id',v_next.runtime_id,
+           'semantic_runtime_epoch_renewed_at',now(),
+           'semantic_runtime_epoch_renewal_reason',v_reason
+         ),
+         updated_at=now()
+   where agent_id=p_agent_id;
+
+  update agent_lab.state
+     set state_payload=(
+           coalesce(state_payload,'{}'::jsonb)
+           -'semantic_runtime_terminal_code'
+           -'semantic_runtime_terminal_at'
+         ),
+         updated_at=now()
+   where agent_id=p_agent_id;
+
+  update agent_lab.state
+     set state_payload=state_payload-'repair_pause_reason',
+         updated_at=now()
+   where agent_id=p_agent_id
+     and coalesce(state_payload->>'repair_pause_reason','')
+         in ('semantic_runtime_budget_exhausted','semantic_runtime_cycle_lock');
+
   return jsonb_build_object(
     'status','renewed',
     'agent_id',p_agent_id,
@@ -83,6 +119,7 @@ begin
     'previous_status',v_prev.status,
     'corrective_epoch_budget_inheritance_normalized',
       coalesce(v_prev.metadata->>'renewal_kind','')='corrective_infrastructure_compensation',
+    'terminal_metadata_cleared',true,
     'history_preserved',true
   );
 end;
