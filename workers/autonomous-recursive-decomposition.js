@@ -2460,6 +2460,23 @@ export async function runAutonomousRequirementCognition({
       if(duplicate)throw new Error('autonomous_decomposition_duplicate_child:'+node.node_path);
 
       const nodePath=node.node_path+'.'+String(ordinal).padStart(3,'0');
+      const childRequirementHash=sha256(requirement);
+      await chargeSemanticRuntime({
+        eventKind:'semantic_node_created',
+        materialKey:nodePath+':'+childRequirementHash,
+        nodePath,
+        costUnits:semanticRuntime.node_create_units,
+        eventFingerprint:sha256({
+          parent_path:node.node_path,
+          child_path:nodePath,
+          requirement_hash:childRequirementHash,
+        }),
+        metadata:{
+          parent_path:node.node_path,
+          ordinal,
+          requirement_hash:childRequirementHash,
+        },
+      });
       const child=await saveNode({
         nodePath,parentPath:node.node_path,ordinal,
         requirement,sourceKind:'agent_decomposition',sourceRef:node.node_path,
@@ -3003,10 +3020,9 @@ export async function runAutonomousRequirementCognition({
   }
 
   async function process(nodePath,parentPath=null,branchDepth=0,singleChildRefinements=0){
-    // Structural depth counts actual multi-child branching only. Legacy callers may
-    // arrive with an over-counted value; clamp that runtime accounting instead of
-    // killing the wake and expose the ceiling to the agent as a mechanical constraint.
-    branchDepth=Math.max(0,Math.min(Number(branchDepth)||0,MAX_BRANCH_DEPTH));
+    // Depth is persisted for addressability only. It is not the normal convergence budget.
+    branchDepth=pathDepth(nodePath);
+    singleChildRefinements=0;
     let node=await getNode(nodePath);
     if(node?.status!=='ready')throw new Error('autonomous_decomposition_node_missing:'+nodePath);
     node.parent_path=parentPath;
@@ -3025,35 +3041,6 @@ export async function runAutonomousRequirementCognition({
             continue;
           }
           kids=asArray(authoredResult?.children);
-        }
-        if(kids.length===1&&singleChildRefinements>=MAX_SINGLE_CHILD_REFINEMENTS){
-          const child=kids[0];
-          await saveNode({
-            nodePath:child.node_path,parentPath:node.node_path,ordinal:child.ordinal||0,
-            requirement:child.requirement_text,sourceKind:child.source_kind||'agent_decomposition',
-            sourceRef:child.source_ref??node.node_path,status:'cancelled',
-            decisionType:child.decision_type??null,
-            decisionPayload:{
-              ...(child.decision_payload||{}),
-              cancelled_for_nonconvergence:true,
-              cancellation_reason:'single_child_refinement_budget_exhausted',
-            },
-            contextPayload:child.context_payload||{},resultArtifact:child.result_artifact||null,
-          });
-          node=await saveNode({
-            nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
-            requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
-            status:'pending',decisionType:null,
-            decisionPayload:{
-              ...(node.decision_payload||{}),
-              reconsider_decomposition:true,
-              convergence_recovery:'single_child_refinement_budget_exhausted',
-              cancelled_child_path:child.node_path,
-            },
-            contextPayload:node.context_payload||{},resultArtifact:null,
-          });
-          node.parent_path=parentPath;
-          continue;
         }
         const completed=[];
         for(const child of kids){
@@ -3081,13 +3068,11 @@ export async function runAutonomousRequirementCognition({
             });
             routed.parent_path=node.node_path;
           }
-          const singleChild=kids.length===1;
-          const nextBranchDepth=singleChild?branchDepth:Math.min(MAX_BRANCH_DEPTH,branchDepth+1);
           const done=await process(
             child.node_path,
             node.node_path,
-            nextBranchDepth,
-            singleChild?singleChildRefinements+1:0
+            pathDepth(child.node_path),
+            0
           );
           if(done.node_status!=='completed'&&done.node_status!=='blocked')
             throw new Error('autonomous_decomposition_child_not_resolved:'+child.node_path);
