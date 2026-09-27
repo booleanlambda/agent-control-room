@@ -6,6 +6,7 @@ import {
   semanticChildCapacity,
   repeatedStructuralFailureLocked,
   durableSiblingInspection,
+  retryableModelTransportError,
   pathDepth,
 } from './semantic-runtime-controls.js';
 
@@ -92,4 +93,15 @@ test('current inspection satisfies a changed sibling and becomes durable',()=>{
   });
   assert.deepEqual(result.newly_inspected_paths,['R.001']);
   assert.deepEqual(result.missing_paths,[]);
+});
+
+
+test('transport retry classification is bounded to transient transport failures',()=>{
+  const fetchError=new TypeError('fetch failed');
+  assert.equal(retryableModelTransportError(fetchError),true);
+  assert.equal(retryableModelTransportError({cause:{code:'ECONNRESET'}}),true);
+  assert.equal(retryableModelTransportError({status:503}),true);
+  assert.equal(retryableModelTransportError({status:400}),false);
+  assert.equal(retryableModelTransportError({code:'NVIDIA_TIMEOUT',name:'Error'}),false);
+  assert.equal(retryableModelTransportError({name:'AbortError',message:'aborted'}),false);
 });
