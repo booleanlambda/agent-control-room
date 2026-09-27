@@ -1678,60 +1678,82 @@ export async function runAutonomousRequirementCognition({
     return resumeSelfRemediationEpisode(node,episode,{contextPayload,pinnedEvidence,siblingEvidence});
   }
 
-  async function chargeModelCall(messages,maxTokens,phase,kind,attempt=1){
+  async function reserveModelCall(messages,maxTokens,phase,kind,attempt=1){
     const estimatedInput=estimatedTokens(messages,agentRuntimeContract);
     const fingerprint=sha256({kind,messages,max_tokens:maxTokens,model});
-    const row=await chargeSemanticRuntime({
-      eventKind:'model_call',
-      materialKey:phase+':attempt:'+attempt+':'+fingerprint.slice(0,24),
-      costUnits:modelCallCostUnits({
-        estimatedInputTokens:estimatedInput,
-        requestedOutputTokens:maxTokens,
-        quantumTokens:semanticRuntime.quantum_tokens,
-      }),
-      eventFingerprint:fingerprint,
-      metadata:{
-        phase,
-        kind,
-        transport_attempt:attempt,
-        estimated_input_tokens:estimatedInput,
-        requested_output_tokens:maxTokens,
-      },
+    const reservedUnits=modelCallCostUnits({
+      estimatedInputTokens:estimatedInput,
+      requestedOutputTokens:maxTokens,
+      quantumTokens:semanticRuntime.quantum_tokens,
     });
-    if(Number(row?.fingerprint_repeat_count||0)>semanticRuntime.identical_structural_failure_limit){
-      console.warn('AAU_SEMANTIC_RUNTIME_REPEAT_FINGERPRINT',JSON.stringify({
-        agent_id:agentId,
-        intent_execution_id:intentExecutionId,
-        assignment_key:assignmentKey,
-        phase,
-        fingerprint,
-        repeat_count:Number(row?.fingerprint_repeat_count||0),
-      }));
+    const eventKey='modelreserve:'+sha256({
+      assignment_key:assignmentKey,epoch_no:semanticRuntime.epoch_no,
+      phase,attempt,fingerprint,
+    }).slice(0,64);
+    const row=await rpc('aau_bridge_reserve_semantic_model_call_v0_1',{
+      p_agent_id:agentId,p_wake_request_id:intentExecutionId,
+      p_assignment_key:assignmentKey,p_model:model,p_epoch_no:semanticRuntime.epoch_no,
+      p_event_key:eventKey,p_event_fingerprint:fingerprint,p_reserved_units:reservedUnits,
+      p_metadata:{phase,kind,transport_attempt:attempt,estimated_input_tokens:estimatedInput,requested_output_tokens:maxTokens},
+    });
+    if(row?.status!=='ready')throw new Error('autonomous_decomposition_model_call_reservation_failed:'+phase);
+    semanticRuntimeSnapshot=row;
+    if(row.available!==true){
+      const error=new Error('semantic_runtime_budget_exhausted:model_call:'+phase+':remaining='+String(row.remaining_budget_units??0));
+      error.code='SEMANTIC_BUDGET_EXHAUSTED'; error.semanticRuntime=row;
+      error.semanticEvent={eventKind:'model_call_reservation',materialKey:eventKey,nodePath:null};
+      throw error;
     }
+    return {reservationEventId:row.reservation_event_id,reservedUnits:Number(row.reserved_units||reservedUnits),estimatedInput,phase,kind,attempt};
+  }
+
+  function providerUsageSettlement(response,error,reservation){
+    const usage=response?.result?.usage||response?.usage||error?.providerUsage||error?.usage||null;
+    const explicitTotal=Number(usage?.total_tokens ?? error?.providerTotalTokens);
+    const hasReportedTotal=Number.isFinite(explicitTotal)&&explicitTotal>=0;
+    const providerStatus=response?200:(Number.isFinite(Number(error?.providerStatusCode))?Math.floor(Number(error.providerStatusCode)):(Number.isFinite(Number(error?.status))?Math.floor(Number(error.status)):null));
+    if(hasReportedTotal){
+      const actualUnits=explicitTotal>0?Math.max(1,Math.ceil(explicitTotal/semanticRuntime.quantum_tokens)):(providerStatus===200?1:0);
+      return {settledUnits:Math.min(reservation.reservedUnits,actualUnits),providerStatus,providerTotalTokens:Math.floor(explicitTotal),reason:providerStatus===200?'provider_completed_actual_usage':'provider_error_reported_usage',settlementCapped:actualUnits>reservation.reservedUnits};
+    }
+    if(providerStatus!==null&&providerStatus>=400)
+      return {settledUnits:0,providerStatus,providerTotalTokens:null,reason:'provider_http_error_no_reported_usage',settlementCapped:false};
+    return {settledUnits:reservation.reservedUnits,providerStatus,providerTotalTokens:null,reason:'provider_usage_unknown_conservative_settlement',settlementCapped:false};
+  }
+
+  async function settleModelCall(reservation,{response=null,error=null}={}){
+    const settlement=providerUsageSettlement(response,error,reservation);
+    const row=await rpc('aau_bridge_settle_semantic_model_call_v0_1',{
+      p_agent_id:agentId,p_assignment_key:assignmentKey,p_model:model,p_epoch_no:semanticRuntime.epoch_no,
+      p_reservation_event_id:reservation.reservationEventId,p_settled_units:settlement.settledUnits,
+      p_settlement_reason:settlement.reason,p_provider_status_code:settlement.providerStatus,
+      p_provider_total_tokens:settlement.providerTotalTokens,
+      p_metadata:{phase:reservation.phase,kind:reservation.kind,transport_attempt:reservation.attempt,estimated_input_tokens:reservation.estimatedInput,reserved_units:reservation.reservedUnits,settlement_capped_to_reservation:settlement.settlementCapped,error_code:error?String(error?.code||error?.cause?.code||'').slice(0,120):null,error_message:error?String(error?.message||error).slice(0,500):null},
+    });
+    if(row?.status!=='ready'){
+      const e=new Error('autonomous_decomposition_model_call_settlement_failed:'+reservation.phase);
+      e.code='COGNITION_RUNTIME_ACCOUNTING_FAULT'; throw e;
+    }
+    semanticRuntimeSnapshot=row;
+    console.log('AAU_MODEL_CALL_SEMANTIC_SETTLEMENT',JSON.stringify({agent_id:agentId,intent_execution_id:intentExecutionId,phase:reservation.phase,reserved_units:reservation.reservedUnits,settled_units:Number(row.settled_units??settlement.settledUnits),refund_units:Number(row.refund_units||0),settlement_reason:settlement.reason,provider_status_code:settlement.providerStatus,provider_total_tokens:settlement.providerTotalTokens,idempotent:Boolean(row.idempotent)}));
+    return row;
   }
 
   async function callWithChargedTransportRetry(fn,messages,maxTokens,phase,kind){
     let lastError=null;
     for(let attempt=1;attempt<=MAX_MODEL_TRANSPORT_ATTEMPTS;attempt++){
       const attemptPhase=attempt===1?phase:phase+'_transport_retry_'+attempt;
-      await chargeModelCall(messages,maxTokens,attemptPhase,kind,attempt);
+      const reservation=await reserveModelCall(messages,maxTokens,attemptPhase,kind,attempt);
       counters.model_calls++;
       try{
-        return await fn(messages,maxTokens,attemptPhase);
+        const response=await fn(messages,maxTokens,attemptPhase);
+        await settleModelCall(reservation,{response});
+        return response;
       }catch(error){
         lastError=error;
+        await settleModelCall(reservation,{error});
         if(!retryableModelTransportError(error)||attempt>=MAX_MODEL_TRANSPORT_ATTEMPTS)throw error;
-        console.warn('AAU_MODEL_TRANSPORT_LOCAL_RETRY',JSON.stringify({
-          agent_id:agentId,
-          intent_execution_id:intentExecutionId,
-          assignment_key:assignmentKey,
-          phase,
-          failed_attempt:attempt,
-          next_attempt:attempt+1,
-          error_name:String(error?.name||'Error'),
-          error_code:String(error?.code||error?.cause?.code||''),
-          error_message:String(error?.message||error).slice(0,300),
-        }));
+        console.warn('AAU_MODEL_TRANSPORT_LOCAL_RETRY',JSON.stringify({agent_id:agentId,intent_execution_id:intentExecutionId,assignment_key:assignmentKey,phase,failed_attempt:attempt,next_attempt:attempt+1,error_name:String(error?.name||'Error'),error_code:String(error?.code||error?.cause?.code||''),error_message:String(error?.message||error).slice(0,300)}));
       }
     }
     throw lastError||new Error('model_transport_retry_exhausted');
