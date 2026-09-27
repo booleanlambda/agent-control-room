@@ -1627,11 +1627,11 @@ export async function runAutonomousRequirementCognition({
         force_reconsider:Boolean(forceReconsider),
         atomic_unavailable:atomicUnavailable,
         atomic_execution_failures:atomicExecutionFailures,
-        structural_branch_depth:normalizedBranchDepth,
-        max_structural_branch_depth:MAX_BRANCH_DEPTH,
+        storage_path_depth:normalizedBranchDepth,
+        emergency_storage_path_depth:semanticRuntime.hard_storage_path_depth,
+        semantic_runtime_remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
+        semantic_child_capacity:availableChildCapacity,
         structural_branching_available:structuralBranchingAvailable,
-        single_child_refinements_used:singleChildRefinements,
-        max_single_child_refinements:MAX_SINGLE_CHILD_REFINEMENTS,
         single_refinement_available:singleRefinementAvailable,
         context_resource_available:resourceView.available,
         context_resource_reasons:resourceView.reasons,
@@ -1669,12 +1669,10 @@ export async function runAutonomousRequirementCognition({
                 atomicUnavailable
                   ? 'ATOMIC is mechanically unavailable because this exact node already exhausted its bounded atomic execution.'
                   : 'ATOMIC remains available if you judge the requirement genuinely bounded.',
-                'Mechanical decomposition budget: structural branch depth '+normalizedBranchDepth+' of '+MAX_BRANCH_DEPTH+'; consecutive single-child refinements '+singleChildRefinements+' of '+MAX_SINGLE_CHILD_REFINEMENTS+'.',
-                structuralBranchingAvailable
-                  ? 'A SPLIT may create multiple children if your reasoning requires it.'
-                  : (singleRefinementAvailable
-                    ? 'Structural branch depth is exhausted. SPLIT remains available only as exactly ONE genuinely narrower refinement child; it may not create multiple children.'
-                    : 'Structural branch depth and the single-child refinement budget are both exhausted, so SPLIT is mechanically unavailable.'),
+                'Mechanical work budget: '+Number(runtimeView?.remaining_budget_units||0)+' units remain in this assignment epoch. Current semantic child capacity is '+availableChildCapacity+' after preserving the safety reserve.',
+                storageDepthAvailable
+                  ? 'Tree depth is not the ordinary stopping rule. SPLIT is governed by conserved work budget and genuine semantic narrowing. The '+semanticRuntime.hard_storage_path_depth+'-level path ceiling is only an emergency persistence guard.'
+                  : 'EMERGENCY STORAGE GUARD: this durable path reached '+semanticRuntime.hard_storage_path_depth+' levels. SPLIT is mechanically unavailable at this path; this is not a substantive conclusion about the requirement.',
                 resourceView.available
                   ? 'Context/research acquisition remains mechanically available. NEED_CONTEXT is valid only when another retrieval or exact context lookup can materially reduce a stated gap.'
                   : 'CONTEXT RESOURCE CONSTRAINT: further context/research acquisition is mechanically unavailable for this node because: '+resourceView.reasons.join(', ')+'. Do not request more context or research. BLOCKED is available if the remaining evidence gap prevents honest completion; ATOMIC or SPLIT remain yours to choose when mechanically available.',
@@ -1706,11 +1704,15 @@ export async function runAutonomousRequirementCognition({
                 available_supplied_context_index:indexObject(cognitionContext),
                 available_decisions:availableDecisions,
                 runtime_resource_constraints:{
-                  structural_branch_depth:normalizedBranchDepth,
-                  max_structural_branch_depth:MAX_BRANCH_DEPTH,
+                  semantic_runtime_contract:SEMANTIC_RUNTIME_CONTRACT,
+                  epoch_no:semanticRuntime.epoch_no,
+                  remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
+                  initial_budget_units:Number(runtimeView?.initial_budget_units||semanticRuntime.initial_budget_units),
+                  budget_quantum_tokens:semanticRuntime.quantum_tokens,
+                  semantic_child_capacity:availableChildCapacity,
+                  storage_path_depth:normalizedBranchDepth,
+                  emergency_storage_path_depth:semanticRuntime.hard_storage_path_depth,
                   multi_child_split_available:structuralBranchingAvailable,
-                  single_child_refinements_used:singleChildRefinements,
-                  max_single_child_refinements:MAX_SINGLE_CHILD_REFINEMENTS,
                   single_child_refinement_available:singleRefinementAvailable,
                   context_acquisition_available:resourceView.available,
                   context_acquisition_exhausted:resourceView.exhausted,
@@ -1821,11 +1823,12 @@ export async function runAutonomousRequirementCognition({
               force_reconsider:Boolean(forceReconsider),
               atomic_unavailable:atomicUnavailable,
               atomic_execution_failures:atomicExecutionFailures,
-              structural_branch_depth:normalizedBranchDepth,
-              max_structural_branch_depth:MAX_BRANCH_DEPTH,
+              semantic_runtime_contract:SEMANTIC_RUNTIME_CONTRACT,
+              remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
+              semantic_child_capacity:availableChildCapacity,
+              storage_path_depth:normalizedBranchDepth,
+              emergency_storage_path_depth:semanticRuntime.hard_storage_path_depth,
               multi_child_split_available:structuralBranchingAvailable,
-              single_child_refinements_used:singleChildRefinements,
-              max_single_child_refinements:MAX_SINGLE_CHILD_REFINEMENTS,
               single_child_refinement_available:singleRefinementAvailable,
               context_resource_state:resourceView,
             };
