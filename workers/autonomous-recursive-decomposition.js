@@ -6,6 +6,7 @@ import {
   SEMANTIC_RUNTIME_CONTRACT,
   semanticRuntimeConfig,
   modelCallCostUnits,
+  semanticBranchBudget,
   semanticChildCapacity,
   repeatedStructuralFailureLocked,
   durableSiblingInspection,
@@ -964,6 +965,82 @@ export async function runAutonomousRequirementCognition({
     );
   }
 
+  function projectedModelCallEconomics(rawPayload,pinnedEvidence,outputTokens){
+    const view=agentModelContextView(rawPayload,pinnedEvidence,outputTokens);
+    const estimatedInputTokens=Math.max(
+      1,
+      Math.min(
+        view.safeInputTokens,
+        view.fixedReserveTokens
+          +view.estimatedSuppliedTokens
+          +view.estimatedSiblingTokens
+      )
+    );
+    return Object.freeze({
+      estimated_input_tokens:estimatedInputTokens,
+      requested_output_tokens:outputTokens,
+      cost_units:modelCallCostUnits({
+        estimatedInputTokens,
+        requestedOutputTokens:outputTokens,
+        quantumTokens:semanticRuntime.quantum_tokens,
+      }),
+    });
+  }
+
+  function projectedBranchEconomics(rawPayload,pinnedEvidence){
+    const childFormulation=projectedModelCallEconomics(
+      rawPayload,pinnedEvidence,stageBudgets.child_formulation
+    );
+    const childProvenance=projectedModelCallEconomics(
+      rawPayload,pinnedEvidence,stageBudgets.child_provenance_review
+    );
+    const childDiscovery=projectedModelCallEconomics(
+      rawPayload,pinnedEvidence,10000
+    );
+    const childResolution=projectedModelCallEconomics(
+      rawPayload,pinnedEvidence,stageBudgets.atomic_execution
+    );
+    const terminalReconciliation=projectedModelCallEconomics(
+      rawPayload,pinnedEvidence,stageBudgets.atomic_reconciliation
+    );
+    const terminalSynthesis=projectedModelCallEconomics(
+      rawPayload,pinnedEvidence,stageBudgets.synthesis_final
+    );
+    const childSerializationUnits=modelCallCostUnits({
+      estimatedInputTokens:2500,
+      requestedOutputTokens:700,
+      quantumTokens:semanticRuntime.quantum_tokens,
+    });
+    const budget=semanticBranchBudget({
+      nodeCreateUnits:semanticRuntime.node_create_units,
+      childFormulationUnits:childFormulation.cost_units,
+      childProvenanceUnits:childProvenance.cost_units,
+      childSerializationUnits,
+      childDiscoveryUnits:childDiscovery.cost_units,
+      childResolutionUnits:childResolution.cost_units,
+      childTransitionUnits:3,
+      terminalReconciliationUnits:terminalReconciliation.cost_units,
+      terminalSynthesisUnits:terminalSynthesis.cost_units,
+      safetyReserveUnits:semanticRuntime.safety_reserve_units,
+    });
+    return Object.freeze({
+      ...budget,
+      projected_calls:Object.freeze({
+        child_formulation:childFormulation,
+        child_provenance:childProvenance,
+        child_discovery:childDiscovery,
+        child_resolution:childResolution,
+        terminal_reconciliation:terminalReconciliation,
+        terminal_synthesis:terminalSynthesis,
+        child_serialization:Object.freeze({
+          estimated_input_tokens:2500,
+          requested_output_tokens:700,
+          cost_units:childSerializationUnits,
+        }),
+      }),
+    });
+  }
+
   async function nodeRpc(action,args={}){
     const base={
       p_agent_id:agentId,
@@ -1631,19 +1708,9 @@ export async function runAutonomousRequirementCognition({
     contextPayload=boundInMemoryContext(contextPayload,pinnedEvidence,10000);
     const atomicExecutionFailures=Math.max(0,Number(node?.decision_payload?.atomic_execution_failures||0));
     const atomicUnavailable=atomicExecutionFailures>=MAX_ATOMIC_EXECUTION_FAILURES;
-    const runtimeView=await semanticRuntimeView();
     const normalizedBranchDepth=pathDepth(node.node_path);
     const storageDepthAvailable=Number.isFinite(normalizedBranchDepth)
       &&normalizedBranchDepth<semanticRuntime.hard_storage_path_depth;
-    const availableChildCapacity=semanticChildCapacity({
-      remainingBudgetUnits:Number(runtimeView?.remaining_budget_units||0),
-      nodeCreateUnits:semanticRuntime.node_create_units,
-      safetyReserveUnits:semanticRuntime.safety_reserve_units,
-      maxChildren:MAX_CHILDREN_PER_NODE,
-    });
-    const splitAvailable=storageDepthAvailable&&availableChildCapacity>=1;
-    const structuralBranchingAvailable=splitAvailable&&availableChildCapacity>=2;
-    const singleRefinementAvailable=splitAvailable;
 
     let contextState=asObject(node?.decision_payload?.context_resource_state);
     if(contextState.version!=='agent_visible_context_resource_v0_2'){
@@ -1680,6 +1747,19 @@ export async function runAutonomousRequirementCognition({
       const discoveryContextView=agentModelContextView(contextPayload,pinnedEvidence,10000);
       const siblingEvidence=discoveryContextView.siblingEvidence;
       const cognitionContext=discoveryContextView.suppliedContext;
+      const runtimeView=await semanticRuntimeView();
+      const branchEconomics=projectedBranchEconomics(contextPayload,pinnedEvidence);
+      const availableChildCapacity=semanticChildCapacity({
+        remainingBudgetUnits:Number(runtimeView?.remaining_budget_units||0),
+        nodeCreateUnits:semanticRuntime.node_create_units,
+        safetyReserveUnits:semanticRuntime.safety_reserve_units,
+        expectedChildLifecycleUnits:branchEconomics.expected_child_lifecycle_units,
+        completionReserveUnits:branchEconomics.completion_reserve_units,
+        maxChildren:MAX_CHILDREN_PER_NODE,
+      });
+      const splitAvailable=storageDepthAvailable&&availableChildCapacity>=1;
+      const structuralBranchingAvailable=splitAvailable&&availableChildCapacity>=2;
+      const singleRefinementAvailable=splitAvailable;
       const resourceView=contextResourceView(contextState,contextPayload);
       const remediationEpisodes=await loadRemediationEpisodes(node.node_path);
       const remediationAttemptsUsed=remediationEpisodes.length;
@@ -1771,7 +1851,7 @@ export async function runAutonomousRequirementCognition({
                 atomicUnavailable
                   ? 'ATOMIC is mechanically unavailable because this exact node already exhausted its bounded atomic execution.'
                   : 'ATOMIC remains available if you judge the requirement genuinely bounded.',
-                'Mechanical work budget: '+Number(runtimeView?.remaining_budget_units||0)+' units remain in this assignment epoch. Current semantic child capacity is '+availableChildCapacity+' after preserving the safety reserve.',
+                'Mechanical work budget: '+Number(runtimeView?.remaining_budget_units||0)+' units remain in this assignment epoch. Current semantic child capacity is '+availableChildCapacity+' after pricing each child at approximately '+branchEconomics.expected_child_lifecycle_units+' units for first-pass lifecycle work and preserving '+branchEconomics.completion_reserve_units+' units for terminal reconciliation/synthesis.',
                 storageDepthAvailable
                   ? 'Tree depth is not the ordinary stopping rule. SPLIT is governed by conserved work budget and genuine semantic narrowing. The '+semanticRuntime.hard_storage_path_depth+'-level path ceiling is only an emergency persistence guard.'
                   : 'EMERGENCY STORAGE GUARD: this durable path reached '+semanticRuntime.hard_storage_path_depth+' levels. SPLIT is mechanically unavailable at this path; this is not a substantive conclusion about the requirement.',
@@ -1814,6 +1894,10 @@ export async function runAutonomousRequirementCognition({
                   initial_budget_units:Number(runtimeView?.initial_budget_units||semanticRuntime.initial_budget_units),
                   budget_quantum_tokens:semanticRuntime.quantum_tokens,
                   semantic_child_capacity:availableChildCapacity,
+                  semantic_branch_economics_contract:branchEconomics.contract,
+                  expected_child_lifecycle_units:branchEconomics.expected_child_lifecycle_units,
+                  completion_reserve_units:branchEconomics.completion_reserve_units,
+                  branch_economics_components:branchEconomics.components,
                   storage_path_depth:normalizedBranchDepth,
                   emergency_storage_path_depth:semanticRuntime.hard_storage_path_depth,
                   multi_child_split_available:structuralBranchingAvailable,
@@ -1979,6 +2063,10 @@ export async function runAutonomousRequirementCognition({
               semantic_runtime_contract:SEMANTIC_RUNTIME_CONTRACT,
               remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
               semantic_child_capacity:availableChildCapacity,
+              semantic_branch_economics_contract:branchEconomics.contract,
+              expected_child_lifecycle_units:branchEconomics.expected_child_lifecycle_units,
+              completion_reserve_units:branchEconomics.completion_reserve_units,
+              branch_economics_components:branchEconomics.components,
               storage_path_depth:normalizedBranchDepth,
               emergency_storage_path_depth:semanticRuntime.hard_storage_path_depth,
               multi_child_split_available:structuralBranchingAvailable,
