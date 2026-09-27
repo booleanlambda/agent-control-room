@@ -275,6 +275,63 @@ export function mergeInheritedDependencyResults({
   return out.slice(0,limit);
 }
 
+export function autonomousEvidenceWindowDecision({
+  resourceReasons=[],
+  remainingBudgetUnits=0,
+  projectedRoundUnits=0,
+  completionReserveUnits=0,
+  renewalsUsed=0,
+  maxRenewals=6,
+  lastRoundProductive=true,
+}={}){
+  const reasons=(Array.isArray(resourceReasons)?resourceReasons:[])
+    .map(v=>String(v??'').trim()).filter(Boolean);
+  if(!reasons.length)return Object.freeze({
+    action:'not_needed',granted:false,reason:'resource_available',
+    renewable_reasons:[],hard_reasons:[],required_budget_units:0,
+  });
+  const renewableSet=new Set([
+    'evidence_window_round_ceiling',
+    'evidence_window_source_ceiling',
+    'evidence_window_elapsed_ceiling',
+  ]);
+  const renewable=reasons.filter(v=>renewableSet.has(v));
+  const hard=reasons.filter(v=>!renewableSet.has(v));
+  const used=Math.max(0,Math.floor(Number(renewalsUsed)||0));
+  const max=Math.max(0,Math.floor(Number(maxRenewals)||0));
+  const remaining=Math.max(0,Math.floor(Number(remainingBudgetUnits)||0));
+  const roundCost=Math.max(0,Math.floor(Number(projectedRoundUnits)||0));
+  const completionReserve=Math.max(0,Math.floor(Number(completionReserveUnits)||0));
+  const required=roundCost+completionReserve;
+
+  if(hard.length)return Object.freeze({
+    action:'deny',granted:false,reason:'hard_context_constraint',
+    renewable_reasons:renewable,hard_reasons:hard,required_budget_units:required,
+  });
+  if(!renewable.length)return Object.freeze({
+    action:'deny',granted:false,reason:'no_renewable_context_constraint',
+    renewable_reasons:[],hard_reasons:[],required_budget_units:required,
+  });
+  if(used>=max)return Object.freeze({
+    action:'deny',granted:false,reason:'evidence_window_renewal_limit',
+    renewable_reasons:renewable,hard_reasons:[],required_budget_units:required,
+  });
+  if(!lastRoundProductive)return Object.freeze({
+    action:'deny',granted:false,reason:'prior_evidence_round_unproductive',
+    renewable_reasons:renewable,hard_reasons:[],required_budget_units:required,
+  });
+  if(remaining<required)return Object.freeze({
+    action:'deny',granted:false,reason:'insufficient_semantic_budget',
+    renewable_reasons:renewable,hard_reasons:[],required_budget_units:required,
+  });
+  return Object.freeze({
+    action:'grant',granted:true,reason:'bounded_evidence_window_economically_admissible',
+    renewable_reasons:renewable,hard_reasons:[],required_budget_units:required,
+    projected_round_units:roundCost,completion_reserve_units:completionReserve,
+    remaining_budget_units:remaining,next_renewal_no:used+1,
+  });
+}
+
 export function retryableModelTransportError(error){
   const code=String(error?.code||error?.cause?.code||'').trim().toUpperCase();
   const name=String(error?.name||'').trim();
