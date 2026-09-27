@@ -78,6 +78,25 @@ Budget exhaustion is terminal for that epoch. It is not routed into generic orph
 
 A later resource renewal does not erase the old epoch history. Work may resume only under an explicitly authorized new epoch or another material change permitted by policy.
 
+### Corrective infrastructure compensation
+
+A verified AAU infrastructure defect may justify a bounded corrective epoch without granting a fresh full epoch.
+
+A corrective epoch:
+- requires the prior epoch to be `budget_exhausted`;
+- carries forward the prior epoch's genuinely unspent units;
+- adds only explicitly quantified infrastructure-loss compensation;
+- may not exceed the prior epoch's original budget ceiling;
+- preserves the entire prior event/model-call history;
+- records the compensation amount and reason durably; and
+- does not automatically refund provider-policy failures such as a charged NVIDIA 529 retry.
+
+The canonical corrective budget is therefore:
+
+`corrective_epoch_units = prior_remaining_units + verified_infrastructure_loss_units`
+
+This mechanism exists to repair accounting distortion caused by AAU itself, not to turn runtime failure into unlimited compute.
+
 ## Semantic BLOCKED versus runtime hold
 
 `BLOCKED` remains an agent-authored semantic outcome. It means the bound agent judged that a requirement cannot honestly be completed under the available evidence/dependencies.
