@@ -3039,6 +3039,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       ['SEMANTIC_BUDGET_EXHAUSTED','SEMANTIC_RUNTIME_CYCLE_LOCK'].includes(String(error?.code||''))
         ? String(error.code)
         : null;
+    const cognitionAdmissionDeferred=String(error?.code||'')==='COGNITION_ADMISSION_DEFERRED';
     if (begun) {
       if (terminalSemanticRuntimeCode) {
         await rpc('aau_bridge_hold_semantic_runtime_terminal_v0_2',{
@@ -3052,6 +3053,19 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
           console.error('AAU_SEMANTIC_RUNTIME_TERMINAL_HOLD_FAILED',JSON.stringify({
             intent_execution_id:requestedIntentExecutionId,
             terminal_code:terminalSemanticRuntimeCode,
+            error:String(holdError?.message||holdError).slice(0,800),
+          }));
+        });
+      } else if (cognitionAdmissionDeferred) {
+        await rpc('aau_bridge_hold_cognition_admission_v0_1',{
+          p_intent_execution_id:requestedIntentExecutionId,
+          p_error:message,
+          p_admission:error?.admission&&typeof error.admission==='object'
+            ? error.admission
+            : {},
+        }).catch((holdError)=>{
+          console.error('AAU_COGNITION_ADMISSION_HOLD_FAILED',JSON.stringify({
+            intent_execution_id:requestedIntentExecutionId,
             error:String(holdError?.message||holdError).slice(0,800),
           }));
         });
@@ -3071,13 +3085,15 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       agent_id: requestedAgentId,
       error: message,
       terminal_semantic_runtime_code:terminalSemanticRuntimeCode,
+      cognition_admission_deferred:cognitionAdmissionDeferred,
       validation_failures: failureDetails?.validation?.failures || null,
       failure_details_persist_requested: Boolean(failureDetails),
     }));
     const wrapped = new Error(message);
     wrapped.cause = error;
-    wrapped.code = terminalSemanticRuntimeCode || error?.code || null;
+    wrapped.code = terminalSemanticRuntimeCode || (cognitionAdmissionDeferred?'COGNITION_ADMISSION_DEFERRED':null) || error?.code || null;
     wrapped.semanticRuntime = error?.semanticRuntime || null;
+    wrapped.admission = error?.admission || null;
     wrapped.intentBegun = Boolean(begun);
     wrapped.failureDetails = failureDetails;
     throw wrapped;
