@@ -7,6 +7,7 @@ import {
   repeatedStructuralFailureLocked,
   durableSiblingInspection,
   retryableModelTransportError,
+  mergeInheritedDependencyResults,
   pathDepth,
 } from './semantic-runtime-controls.js';
 
@@ -145,4 +146,42 @@ test('explicit inspection upgrades an inherited unconfirmed sibling',()=>{
   assert.deepEqual(result.newly_inspected_paths,['R.001']);
   assert.deepEqual(result.inherited_unconfirmed_paths,[]);
   assert.deepEqual(result.missing_paths,[]);
+});
+
+
+test('ancestor dependency promotion preserves earlier prerequisites when direct siblings change',()=>{
+  const framework={path:'R.001.002',result_hash:'framework-hash',artifact:'framework'};
+  const earlier={path:'R.001.001',result_hash:'earlier-hash',artifact:'earlier'};
+  const direct={path:'R.001.003.001',result_hash:'direct-hash',artifact:'direct'};
+  const promoted=mergeInheritedDependencyResults({
+    inheritedCompletedSiblingResults:[earlier,framework],
+    completedSiblingResults:[direct],
+  });
+  assert.deepEqual(promoted.map(v=>v.path),['R.001.001','R.001.002','R.001.003.001']);
+  assert.equal(promoted[1].artifact,'framework');
+  assert.ok(promoted.every(v=>v.dependency_scope==='ancestor_dependency'));
+});
+
+test('ancestor dependency promotion updates same path by latest hash without duplicating it',()=>{
+  const promoted=mergeInheritedDependencyResults({
+    inheritedCompletedSiblingResults:[{path:'R.001.002',result_hash:'old',artifact:'old'}],
+    completedSiblingResults:[{path:'R.001.002',result_hash:'new',artifact:'new'}],
+  });
+  assert.equal(promoted.length,1);
+  assert.equal(promoted[0].result_hash,'new');
+  assert.equal(promoted[0].artifact,'new');
+});
+
+test('bounded ancestor dependency promotion retains both old prerequisites and recent dependencies',()=>{
+  const rows=Array.from({length:30},(_,i)=>({
+    path:'R.'+String(i+1).padStart(3,'0'),
+    result_hash:'h'+i,
+  }));
+  const promoted=mergeInheritedDependencyResults({
+    inheritedCompletedSiblingResults:rows,
+    maxItems:10,
+  });
+  assert.equal(promoted.length,10);
+  assert.ok(promoted.some(v=>v.path==='R.001'));
+  assert.ok(promoted.some(v=>v.path==='R.030'));
 });

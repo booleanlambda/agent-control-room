@@ -12,6 +12,7 @@ export const MAX_IDENTICAL_STRUCTURAL_FAILURES=2;
 export const HARD_STORAGE_PATH_DEPTH=16;
 export const MAX_CHILDREN_PER_SPLIT=16;
 export const MAX_MODEL_TRANSPORT_ATTEMPTS=2;
+export const MAX_INHERITED_DEPENDENCY_RESULTS=24;
 
 function positiveInt(value,fallback){
   const n=Math.floor(Number(value));
@@ -153,6 +154,46 @@ export function durableSiblingInspection({
     invalidated_paths:invalidated,
     missing_paths:required.filter(path=>!mechanicallyAccounted.has(path)),
   });
+}
+
+export function mergeInheritedDependencyResults({
+  inheritedCompletedSiblingResults=[],
+  completedSiblingResults=[],
+  maxItems=MAX_INHERITED_DEPENDENCY_RESULTS,
+}={}){
+  const limit=Math.max(1,Math.floor(Number(maxItems)||MAX_INHERITED_DEPENDENCY_RESULTS));
+  const merged=[];
+  const byKey=new Map();
+  for(const raw of [
+    ...(Array.isArray(inheritedCompletedSiblingResults)?inheritedCompletedSiblingResults:[]),
+    ...(Array.isArray(completedSiblingResults)?completedSiblingResults:[]),
+  ]){
+    if(!raw||typeof raw!=='object')continue;
+    const path=String(raw.path??'').trim();
+    const hash=String(raw.result_hash??'').trim();
+    const key=path||hash;
+    if(!key)continue;
+    const normalized={...raw,dependency_scope:'ancestor_dependency'};
+    if(byKey.has(key)){
+      merged[byKey.get(key)]={...merged[byKey.get(key)],...normalized};
+      continue;
+    }
+    byKey.set(key,merged.length);
+    merged.push(normalized);
+  }
+  if(merged.length<=limit)return merged;
+  const headCount=Math.max(1,Math.floor(limit*0.4));
+  const tailCount=Math.max(1,limit-headCount);
+  const selected=[...merged.slice(0,headCount),...merged.slice(-tailCount)];
+  const out=[];
+  const seen=new Set();
+  for(const row of selected){
+    const key=String(row.path??'').trim()||String(row.result_hash??'').trim();
+    if(!key||seen.has(key))continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out.slice(0,limit);
 }
 
 export function retryableModelTransportError(error){
