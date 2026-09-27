@@ -13,6 +13,7 @@ create table if not exists agent_lab.cognition_assignment_runtime (
   initial_budget_units integer not null check (initial_budget_units between 1 and 10000000),
   remaining_budget_units integer not null check (remaining_budget_units between 0 and 10000000),
   transition_count integer not null default 0 check (transition_count >= 0),
+  material_transition_count integer not null default 0 check (material_transition_count >= 0),
   semantic_node_count integer not null default 0 check (semantic_node_count >= 0),
   status text not null default 'active'
     check (status in ('active','complete','blocked','budget_exhausted')),
@@ -138,6 +139,7 @@ begin
       'initial_budget_units',v_runtime.initial_budget_units,
       'remaining_budget_units',v_runtime.remaining_budget_units,
       'transition_count',v_runtime.transition_count,
+      'material_transition_count',v_runtime.material_transition_count,
       'semantic_node_count',v_runtime.semantic_node_count,
       'runtime_status',v_runtime.status,'idempotent',true
     );
@@ -161,6 +163,7 @@ begin
       'initial_budget_units',v_runtime.initial_budget_units,
       'remaining_budget_units',v_runtime.remaining_budget_units,
       'transition_count',v_runtime.transition_count,
+      'material_transition_count',v_runtime.material_transition_count,
       'semantic_node_count',v_runtime.semantic_node_count,
       'runtime_status',v_runtime.status
     );
@@ -182,6 +185,7 @@ begin
       'runtime_id',v_runtime.runtime_id,'epoch_no',v_runtime.epoch_no,
       'remaining_budget_units',v_runtime.remaining_budget_units,
       'transition_count',v_runtime.transition_count,
+      'material_transition_count',v_runtime.material_transition_count,
       'semantic_node_count',v_runtime.semantic_node_count,
       'runtime_status',v_runtime.status
     );
@@ -219,6 +223,7 @@ begin
       'runtime_status',v_runtime.status,
       'remaining_budget_units',v_runtime.remaining_budget_units,
       'transition_count',v_runtime.transition_count,
+      'material_transition_count',v_runtime.material_transition_count,
       'semantic_node_count',v_runtime.semantic_node_count,
       'event_id',v_existing.event_id,'event_outcome',v_existing.outcome,
       'fingerprint_repeat_count',v_repeat,'idempotent',true,
@@ -249,6 +254,7 @@ begin
       'runtime_status','budget_exhausted',
       'remaining_budget_units',v_before,
       'transition_count',v_runtime.transition_count,
+      'material_transition_count',v_runtime.material_transition_count,
       'semantic_node_count',v_runtime.semantic_node_count,
       'event_id',v_existing.event_id,'event_outcome','budget_exhausted',
       'fingerprint_repeat_count',0,'idempotent',false,'available',false
@@ -259,6 +265,8 @@ begin
   update agent_lab.cognition_assignment_runtime
      set remaining_budget_units=v_after,
          transition_count=transition_count+1,
+         material_transition_count=material_transition_count+
+           case when p_event_kind in ('semantic_transition','semantic_node_created') then 1 else 0 end,
          semantic_node_count=semantic_node_count+
            case when p_event_kind='semantic_node_created' then 1 else 0 end,
          updated_at=now()
