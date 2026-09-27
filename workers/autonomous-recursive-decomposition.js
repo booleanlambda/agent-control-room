@@ -1891,9 +1891,14 @@ export async function runAutonomousRequirementCognition({
       if(!discovery){
         let siblingInspectionRetry=null;
         let siblingInspectionUnconfirmed=null;
+        const durableDiscovery=await loadJsonPhaseCheckpoint(
+          node.node_path,'DISCOVERY',contextFingerprint
+        );
         for(let attempt=1;attempt<=2;attempt++){
           try{
-            const response=await callJson([
+            const response=durableDiscovery.parsed
+              ? {parsed:durableDiscovery.parsed,checkpoint_reused:true}
+              : await callJson([
               {role:'system',content:[
                 'You are the bound autonomous agent performing a DEEP DISCOVERY pass for ONE requirement.',
                 'Thinking is enabled. This pass is where YOU determine what the requirement means and what action YOU intend to take.',
@@ -2061,6 +2066,16 @@ export async function runAutonomousRequirementCognition({
               ...asArray(siblingInspectionUnconfirmed?.paths).map(text).filter(Boolean),
             ])];
 
+            if(!durableDiscovery.parsed){
+              await saveJsonPhaseCheckpoint(
+                node.node_path,'DISCOVERY',contextFingerprint,candidate,{
+                  semantic_fingerprint:contextFingerprint,
+                  semantic_decision:candidateDecision,
+                  resource_independent_identity:true,
+                }
+              );
+            }
+
             discovery={
               version:'agent_deep_discovery_v0_1',
               context_fingerprint:contextFingerprint,
@@ -2162,9 +2177,22 @@ export async function runAutonomousRequirementCognition({
       if(!discovery)throw new Error('autonomous_decomposition_discovery_checkpoint_missing:'+node.node_path);
 
       let serialized=null;
+      const routingCommitIdentity=sha256({
+        discovery_fingerprint:discovery.context_fingerprint,
+        decision:discovery.decision,
+        reason:discovery.reason,
+        context_requests:discovery.context_requests,
+        research_queries:discovery.research_queries,
+        research_urls:discovery.research_urls,
+      });
+      const durableRoutingCommit=await loadJsonPhaseCheckpoint(
+        node.node_path,'ROUTE_COMMIT',routingCommitIdentity
+      );
       for(let attempt=1;attempt<=2;attempt++){
         try{
-          const response=await callSerialize([
+          const response=durableRoutingCommit.parsed
+            ? {parsed:durableRoutingCommit.parsed,checkpoint_reused:true}
+            : await callSerialize([
             {role:'system',content:[
               'You are serializing YOUR ALREADY-COMPLETED durable routing decision into the AAU protocol.',
               'Do not rethink, reinterpret, improve, or change the saved decision.',
@@ -2186,6 +2214,14 @@ export async function runAutonomousRequirementCognition({
           if(text(candidate.decision).toUpperCase()!==discovery.decision){
             if(attempt===2)throw new Error('autonomous_decomposition_routing_commit_mismatch:'+node.node_path);
             continue;
+          }
+          if(!durableRoutingCommit.parsed){
+            await saveJsonPhaseCheckpoint(
+              node.node_path,'ROUTE_COMMIT',routingCommitIdentity,candidate,{
+                discovery_fingerprint:discovery.context_fingerprint,
+                semantic_decision:discovery.decision,
+              }
+            );
           }
           serialized=candidate;
           break;
