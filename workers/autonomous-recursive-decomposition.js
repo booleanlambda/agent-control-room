@@ -1940,6 +1940,7 @@ export async function runAutonomousRequirementCognition({
                 resourceView.available
                   ? 'Context/research admission is currently available. Choose NEED_CONTEXT only when another retrieval or exact context lookup can materially reduce a stated gap.'
                   : 'CONTEXT RESOURCE CONSTRAINT: further acquisition cannot be admitted in the current runtime state because: '+resourceView.reasons.join(', ')+'. This does NOT make NEED_CONTEXT semantically false. If more evidence is genuinely required, choose NEED_CONTEXT and the runtime will preserve and defer that decision instead of coercing BLOCKED.',
+                'BLOCKED BASIS CONTRACT: BLOCKED is a semantic conclusion, never a resource status. If the current evidence itself proves the requirement cannot honestly be completed, choose BLOCKED with block_basis=EVIDENCE_PROVES_BLOCKED. If completion merely requires evidence/context that is not currently available, choose NEED_CONTEXT. If you nevertheless serialize BLOCKED with block_basis=MORE_EVIDENCE_REQUIRED, the runtime will normalize it to NEED_CONTEXT without changing the stated evidence gap.',
                 'Before deciding, interrogate semantic equivalence, definitions, time horizons, populations/scopes, proxy metrics, evidence sufficiency, assumptions, and unresolved gaps.',
                 'REPEATED ACQUISITION RULE: if an exact context/research request has already been repeated and the required evidence remains unresolved, do not issue the same request again. Use materially different retrieval if one exists; otherwise preserve the criterion as UNKNOWN when the task can proceed, or choose BLOCKED when the unresolved evidence prevents honest completion.',
                 'AUTHORITATIVE DEPENDENCY HANDOFF: authoritative_completed_sibling_evidence contains both direct resolved siblings and inherited prerequisite results routed from ancestor branches. evidence_scope=ancestor_dependency means the result was already made available to an ancestor and must remain available down this branch. Inspect this durable evidence before deciding NEED_CONTEXT; do not research again for information already present here.',
@@ -1951,7 +1952,7 @@ export async function runAutonomousRequirementCognition({
                 'EPISTEMIC THRESHOLD POLICY: '+THRESHOLD_EVIDENCE_POLICY.RULE+' '+THRESHOLD_EVIDENCE_POLICY.PASS+' '+THRESHOLD_EVIDENCE_POLICY.FAIL+' '+THRESHOLD_EVIDENCE_POLICY.UNKNOWN,
                 'When supplied_context contains research_source_catalog, treat it as the complete discoverable source index for prior research rounds. If context acquisition is available and a source is indexed but its excerpt is insufficient, put its exact listed HTTPS URL in research_urls (not context_requests) so the runtime can fetch it directly.',
                 'Do not solve the requirement or author child requirements in this pass.',
-                'Return complete JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT|BLOCKED|REMEDIATE","reason":"auditable reason","requirement_interpretation":"what this requirement actually demands","evidence_assessment":"what the current evidence does and does not establish","inspected_sibling_paths":["R.001..."],"unresolved_gaps":["..."],"context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."],"remediation":{"observed_anomaly":"required when REMEDIATE","prior_belief":"required when REMEDIATE","contradicting_evidence":[],"diagnosis":"required when REMEDIATE","repair_type":"INVALIDATE_DISCOVERY_CHECKPOINT|REFRESH_SIBLING_EVIDENCE","repair_payload":{},"verification_criterion":"required when REMEDIATE"}}.',
+                'Return complete JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT|BLOCKED|REMEDIATE","block_basis":"EVIDENCE_PROVES_BLOCKED|MORE_EVIDENCE_REQUIRED|null","reason":"auditable reason","requirement_interpretation":"what this requirement actually demands","evidence_assessment":"what the current evidence does and does not establish","inspected_sibling_paths":["R.001..."],"unresolved_gaps":["..."],"context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."],"remediation":{"observed_anomaly":"required when REMEDIATE","prior_belief":"required when REMEDIATE","contradicting_evidence":[],"diagnosis":"required when REMEDIATE","repair_type":"INVALIDATE_DISCOVERY_CHECKPOINT|REFRESH_SIBLING_EVIDENCE","repair_payload":{},"verification_criterion":"required when REMEDIATE"}}. When decision=BLOCKED, block_basis is required. Use MORE_EVIDENCE_REQUIRED when the gap could be resolved by additional evidence, even if runtime resources are currently exhausted.',
                 forceReconsider
                   ? 'A prior atomic execution was rejected or exhausted. Reconsider the requirement under the persisted constraints rather than repeating the failed action.'
                   : '',
@@ -2013,7 +2014,43 @@ export async function runAutonomousRequirementCognition({
             ],10000,'req_'+node.node_path.replaceAll('.','_')+'_discovery_'+(resourceView.context_rounds_attempted+1)+'_'+attempt);
 
             const candidate=asObject(response?.parsed);
-            const candidateDecision=text(candidate.decision).toUpperCase();
+            const rawCandidateDecision=text(candidate.decision).toUpperCase();
+            let candidateDecision=rawCandidateDecision;
+            const blockBasis=text(candidate.block_basis).toUpperCase();
+            let blockNormalization=null;
+
+            if(rawCandidateDecision==='BLOCKED'){
+              const validBlockBasis=['EVIDENCE_PROVES_BLOCKED','MORE_EVIDENCE_REQUIRED'].includes(blockBasis);
+              if(!validBlockBasis&&!durableDiscovery.parsed){
+                if(attempt===2)
+                  throw new Error('autonomous_decomposition_block_basis_invalid:'+node.node_path);
+                continue;
+              }
+              if(blockBasis==='MORE_EVIDENCE_REQUIRED'){
+                candidateDecision='NEED_CONTEXT';
+                blockNormalization={
+                  contract:'resource_independent_block_normalization_v0_1',
+                  raw_decision:'BLOCKED',
+                  normalized_decision:'NEED_CONTEXT',
+                  block_basis:blockBasis,
+                  reason:'more_evidence_required_is_not_semantic_blocked',
+                  context_resource_available:resourceView.available,
+                  context_resource_reasons:resourceView.reasons,
+                  normalized_at:new Date().toISOString(),
+                };
+                console.warn('AAU_RESOURCE_BLOCK_NORMALIZED',JSON.stringify({
+                  agent_id:agentId,
+                  intent_execution_id:intentExecutionId,
+                  node_path:node.node_path,
+                  raw_decision:'BLOCKED',
+                  normalized_decision:'NEED_CONTEXT',
+                  block_basis:blockBasis,
+                  context_resource_available:resourceView.available,
+                  context_resource_reasons:resourceView.reasons,
+                }));
+              }
+            }
+
             if(!availableDecisions.includes(candidateDecision)){
               if(attempt===2)throw new Error('autonomous_decomposition_discovery_invalid_available_action:'+node.node_path);
               continue;
@@ -2088,11 +2125,22 @@ export async function runAutonomousRequirementCognition({
               ...asArray(siblingInspectionUnconfirmed?.paths).map(text).filter(Boolean),
             ])];
 
+            const normalizedCandidate={
+              ...candidate,
+              decision:candidateDecision,
+              raw_decision:rawCandidateDecision,
+              block_basis:blockBasis||null,
+              block_normalization:blockNormalization,
+            };
+
             if(!durableDiscovery.parsed){
               await saveJsonPhaseCheckpoint(
-                node.node_path,'DISCOVERY',contextFingerprint,candidate,{
+                node.node_path,'DISCOVERY',contextFingerprint,normalizedCandidate,{
                   semantic_fingerprint:contextFingerprint,
                   semantic_decision:candidateDecision,
+                  raw_semantic_decision:rawCandidateDecision,
+                  block_basis:blockBasis||null,
+                  resource_block_normalized:Boolean(blockNormalization),
                   resource_independent_identity:true,
                 }
               );
@@ -2102,6 +2150,9 @@ export async function runAutonomousRequirementCognition({
               version:'agent_deep_discovery_v0_1',
               context_fingerprint:contextFingerprint,
               decision:candidateDecision,
+              raw_decision:rawCandidateDecision,
+              block_basis:blockBasis||null,
+              block_normalization:blockNormalization,
               reason:clip(candidate.reason,2200),
               requirement_interpretation:clip(candidate.requirement_interpretation,2800),
               evidence_assessment:clip(candidate.evidence_assessment,3200),
@@ -3545,7 +3596,10 @@ export async function runAutonomousRequirementCognition({
     }));
     let final=null;
     let synthesisProvenanceReview=null;
-    let synthesisProvenanceGuidance='';
+    const priorProvenanceContinuation=asObject(node?.decision_payload?.synthesis_provenance_pending);
+    let synthesisProvenanceGuidance=clip(priorProvenanceContinuation.revision_guidance,5000);
+    let provenanceContinuationRound=Math.max(0,Number(priorProvenanceContinuation.continuation_round||0));
+    const MAX_SYNTHESIS_PROVENANCE_CONTINUATION_ROUNDS=3;
     for(let attempt=1;attempt<=2;attempt++){
       try{
         const finalSemanticIdentity=sha256({
@@ -3615,8 +3669,55 @@ export async function runAutonomousRequirementCognition({
             synthesisProvenanceReview.revision_guidance
             ||synthesisProvenanceReview.reason
             ||'Revise the parent synthesis so all source/value bindings and derived transformations remain faithful to the resolved child evidence.';
-          if(attempt===2)
-            throw new Error('autonomous_decomposition_synthesis_provenance_rejected:'+node.node_path);
+          if(attempt===2){
+            const nextContinuationRound=provenanceContinuationRound+1;
+            const continuation={
+              contract:'synthesis_provenance_continuation_v0_1',
+              phase:'FINAL_SYNTHESIS_TO_PROVENANCE',
+              node_path:node.node_path,
+              continuation_round:nextContinuationRound,
+              max_continuation_rounds:MAX_SYNTHESIS_PROVENANCE_CONTINUATION_ROUNDS,
+              revision_guidance:synthesisProvenanceGuidance,
+              review:asObject(synthesisProvenanceReview),
+              child_state_hash:sha256(childStates),
+              accumulator_hash:sha256(accumulator),
+              semantic_state_preserved:true,
+              merges_reused:true,
+              deferred_at:new Date().toISOString(),
+            };
+            node=await saveNode({
+              nodePath:node.node_path,
+              parentPath:node.parent_path??parentPathOf(node.node_path),
+              ordinal:node.ordinal||0,
+              requirement:node.requirement_text,
+              sourceKind:node.source_kind,
+              sourceRef:node.source_ref,
+              status:'split',
+              decisionType:'SPLIT',
+              decisionPayload:{
+                ...(node.decision_payload||{}),
+                synthesis_cursor:childRows.length,
+                synthesis_accumulator:accumulator,
+                synthesis_complete:false,
+                synthesis_provenance_pending:continuation,
+              },
+              contextPayload:node.context_payload||{},
+              resultArtifact:null,
+            });
+            node.parent_path=node.parent_path??parentPathOf(node.node_path);
+            const exhausted=nextContinuationRound>=MAX_SYNTHESIS_PROVENANCE_CONTINUATION_ROUNDS;
+            const error=new Error(
+              (exhausted
+                ?'cognition_provenance_continuation_exhausted:'
+                :'cognition_provenance_continuation_required:')
+              +node.node_path
+            );
+            error.code=exhausted
+              ?'COGNITION_PROVENANCE_CONTINUATION_EXHAUSTED'
+              :'COGNITION_PROVENANCE_CONTINUATION_REQUIRED';
+            error.provenanceContinuation=continuation;
+            throw error;
+          }
           continue;
         }
         break;
@@ -3632,13 +3733,15 @@ export async function runAutonomousRequirementCognition({
     const artifact=text(final?.parsed?.artifact);
     if(!artifact)throw new Error('autonomous_decomposition_synthesis_empty:'+node.node_path);
     const resultArtifact=JSON.stringify({status:outcome,artifact,handoff:asObject(final?.parsed?.handoff)});
+    const completedDecisionPayload={...(node.decision_payload||{})};
+    delete completedDecisionPayload.synthesis_provenance_pending;
     const done=await saveNode({
       nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
       requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
       status:outcome==='BLOCKED'?'blocked':'completed',
       decisionType:outcome==='BLOCKED'?'BLOCKED':'SPLIT',
       decisionPayload:{
-        ...(node.decision_payload||{}),
+        ...completedDecisionPayload,
         synthesis_cursor:childRows.length,
         synthesis_complete:true,
         synthesis_outcome:outcome,

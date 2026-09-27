@@ -3064,12 +3064,18 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
         ? String(error.code)
         : null;
     const cognitionAdmissionDeferred=String(error?.code||'')==='COGNITION_ADMISSION_DEFERRED';
+    const cognitionProvenanceContinuationRequired=
+      String(error?.code||'')==='COGNITION_PROVENANCE_CONTINUATION_REQUIRED';
+    const cognitionProvenanceContinuationExhausted=
+      String(error?.code||'')==='COGNITION_PROVENANCE_CONTINUATION_EXHAUSTED';
     const providerTransient=/^nvidia_(502|503|504|529):/i.test(message)
       || ['NVIDIA_HTTP_502','NVIDIA_HTTP_503','NVIDIA_HTTP_504','NVIDIA_HTTP_529'].includes(String(error?.code||error?.cause?.code||''));
     const cognitionRuntimeFault=
       !failureDetails
       && !terminalSemanticRuntimeCode
       && !cognitionAdmissionDeferred
+      && !cognitionProvenanceContinuationRequired
+      && !cognitionProvenanceContinuationExhausted
       && /^autonomous_decomposition_/i.test(message);
     if (begun) {
       if (terminalSemanticRuntimeCode) {
@@ -3097,6 +3103,23 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
         }).catch((holdError)=>{
           console.error('AAU_COGNITION_ADMISSION_HOLD_FAILED',JSON.stringify({
             intent_execution_id:requestedIntentExecutionId,
+            error:String(holdError?.message||holdError).slice(0,800),
+          }));
+        });
+      } else if (cognitionProvenanceContinuationRequired||cognitionProvenanceContinuationExhausted) {
+        const continuation=error?.provenanceContinuation&&typeof error.provenanceContinuation==='object'
+          ? error.provenanceContinuation
+          : {};
+        await rpc('aau_bridge_cognition_provenance_continuation_v0_1',{
+          p_intent_execution_id:requestedIntentExecutionId,
+          p_error:message,
+          p_round:Math.max(1,Number(continuation.continuation_round||1)),
+          p_max_rounds:Math.max(1,Number(continuation.max_continuation_rounds||3)),
+          p_state:continuation,
+        }).catch((holdError)=>{
+          console.error('AAU_COGNITION_PROVENANCE_CONTINUATION_FAILED',JSON.stringify({
+            intent_execution_id:requestedIntentExecutionId,
+            exhausted:cognitionProvenanceContinuationExhausted,
             error:String(holdError?.message||holdError).slice(0,800),
           }));
         });
@@ -3137,6 +3160,8 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       error: message,
       terminal_semantic_runtime_code:terminalSemanticRuntimeCode,
       cognition_admission_deferred:cognitionAdmissionDeferred,
+      cognition_provenance_continuation_required:cognitionProvenanceContinuationRequired,
+      cognition_provenance_continuation_exhausted:cognitionProvenanceContinuationExhausted,
       cognition_runtime_fault:cognitionRuntimeFault,
       provider_transient:providerTransient,
       validation_failures: failureDetails?.validation?.failures || null,
@@ -3146,11 +3171,14 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
     wrapped.cause = error;
     wrapped.code = terminalSemanticRuntimeCode
       || (cognitionAdmissionDeferred?'COGNITION_ADMISSION_DEFERRED':null)
+      || (cognitionProvenanceContinuationRequired?'COGNITION_PROVENANCE_CONTINUATION_REQUIRED':null)
+      || (cognitionProvenanceContinuationExhausted?'COGNITION_PROVENANCE_CONTINUATION_EXHAUSTED':null)
       || (cognitionRuntimeFault?'COGNITION_RUNTIME_FAULT':null)
       || error?.code
       || null;
     wrapped.semanticRuntime = error?.semanticRuntime || null;
     wrapped.admission = error?.admission || null;
+    wrapped.provenanceContinuation = error?.provenanceContinuation || null;
     wrapped.intentBegun = Boolean(begun);
     wrapped.failureDetails = failureDetails;
     throw wrapped;
