@@ -814,13 +814,9 @@ export async function runAutonomousRequirementCognition({
   });
   if(semanticRuntimeSnapshot?.status!=='ready')
     throw new Error('semantic_runtime_initialization_failed');
-  if(['blocked','budget_exhausted'].includes(String(semanticRuntimeSnapshot?.runtime_status||''))){
-    const error=new Error(
-      'semantic_runtime_terminal:'+String(semanticRuntimeSnapshot.runtime_status)+':'+assignmentKey
-    );
-    error.code=semanticRuntimeSnapshot.runtime_status==='budget_exhausted'
-      ? 'SEMANTIC_BUDGET_EXHAUSTED'
-      : 'SEMANTIC_RUNTIME_CYCLE_LOCK';
+  if(String(semanticRuntimeSnapshot?.runtime_status||'')==='budget_exhausted'){
+    const error=new Error('semantic_runtime_terminal:budget_exhausted:'+assignmentKey);
+    error.code='SEMANTIC_BUDGET_EXHAUSTED';
     error.semanticRuntime=semanticRuntimeSnapshot;
     throw error;
   }
@@ -3220,6 +3216,15 @@ export async function runAutonomousRequirementCognition({
     });
   }else if(root?.status!=='ready'){
     throw new Error('autonomous_decomposition_root_lookup_failed');
+  }
+
+  if(String(semanticRuntimeSnapshot?.runtime_status||'')==='blocked'
+     &&root.node_status!=='blocked'
+     &&root.node_status!=='completed'){
+    const error=new Error('semantic_runtime_terminal:cycle_lock:'+assignmentKey);
+    error.code='SEMANTIC_RUNTIME_CYCLE_LOCK';
+    error.semanticRuntime=semanticRuntimeSnapshot;
+    throw error;
   }
 
   if(root.node_status!=='completed'&&root.node_status!=='blocked'){
