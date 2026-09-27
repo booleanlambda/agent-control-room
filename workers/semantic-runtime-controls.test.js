@@ -5,6 +5,7 @@ import {
   modelCallCostUnits,
   semanticChildCapacity,
   repeatedStructuralFailureLocked,
+  durableSiblingInspection,
   pathDepth,
 } from './semantic-runtime-controls.js';
 
@@ -53,4 +54,42 @@ test('path depth is only an emergency storage geometry check',()=>{
   assert.equal(pathDepth('R'),0);
   assert.equal(pathDepth('R.001.002'),2);
   assert.equal(pathDepth('bad'),Infinity);
+});
+
+
+test('durable sibling inspection is inherited only while result hash is unchanged',()=>{
+  const prior={
+    inspected_sibling_paths:['R.001'],
+    authoritative_sibling_result_hashes:[{path:'R.001',result_hash:'hash-a'}],
+  };
+  const stable=durableSiblingInspection({
+    siblingEvidence:[{path:'R.001',result_hash:'hash-a'}],
+    candidateInspectedPaths:[],
+    priorDiscovery:prior,
+  });
+  assert.deepEqual(stable.inspected_paths,['R.001']);
+  assert.deepEqual(stable.inherited_paths,['R.001']);
+  assert.deepEqual(stable.missing_paths,[]);
+
+  const changed=durableSiblingInspection({
+    siblingEvidence:[{path:'R.001',result_hash:'hash-b'}],
+    candidateInspectedPaths:[],
+    priorDiscovery:prior,
+  });
+  assert.deepEqual(changed.inspected_paths,[]);
+  assert.deepEqual(changed.invalidated_paths,['R.001']);
+  assert.deepEqual(changed.missing_paths,['R.001']);
+});
+
+test('current inspection satisfies a changed sibling and becomes durable',()=>{
+  const result=durableSiblingInspection({
+    siblingEvidence:[{path:'R.001',result_hash:'hash-b'}],
+    candidateInspectedPaths:['R.001'],
+    priorDiscovery:{
+      inspected_sibling_paths:['R.001'],
+      authoritative_sibling_result_hashes:[{path:'R.001',result_hash:'hash-a'}],
+    },
+  });
+  assert.deepEqual(result.newly_inspected_paths,['R.001']);
+  assert.deepEqual(result.missing_paths,[]);
 });
