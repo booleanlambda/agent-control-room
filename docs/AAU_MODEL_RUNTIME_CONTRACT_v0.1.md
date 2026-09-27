@@ -142,6 +142,16 @@ The effective request contract is auditable through runtime telemetry:
 - estimated/max input tokens,
 - selected model and runtime role.
 
+## Transport deadline ownership
+
+The model runtime contract must remain the single authority for model-call duration. A lower implicit HTTP-client parser timeout must never preempt a longer request timeout that the model+role contract explicitly permits.
+
+For NVIDIA text inference, AAU therefore uses a dedicated Undici dispatcher with independent `headersTimeout` and `bodyTimeout` parser timers disabled. The resolved per-request `AbortSignal` remains the actual deadline and is derived from the model task budget.
+
+Transport configuration is part of model-call provenance. Governed calls record the transport contract version, deadline owner, and effective parser-timeout settings alongside requested/effective model timeouts. A provider HTTP error such as 529 remains distinct from an AAU deadline expiration or client transport failure.
+
+This rule changes transport mechanics only. It does not increase model output budgets, alter semantic authority, authorize extra retries, or erase charged runtime history.
+
 A model change therefore cannot silently rewrite a workflow's resource assumptions. It either satisfies the workflow request under its registered profile or produces an explicit capability mismatch that the workflow/operator must handle.
 
 
