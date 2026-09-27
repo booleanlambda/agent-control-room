@@ -992,6 +992,30 @@ export async function runAutonomousRequirementCognition({
   }
 
   async function saveNode(args){
+    const transitionFingerprint=sha256({
+      node_path:args.nodePath||'R',
+      parent_path:args.parentPath??null,
+      ordinal:args.ordinal??0,
+      requirement:args.requirement??null,
+      source_kind:args.sourceKind??'requirement',
+      source_ref:args.sourceRef??null,
+      status:args.status??null,
+      decision_type:args.decisionType??null,
+      decision_payload:args.decisionPayload??{},
+      context_payload_hash:sha256(args.contextPayload??{}),
+      result_artifact_hash:args.resultArtifact==null?null:sha256(String(args.resultArtifact)),
+    });
+    await chargeSemanticRuntime({
+      eventKind:'semantic_transition',
+      materialKey:(args.nodePath||'R')+':'+transitionFingerprint,
+      nodePath:args.nodePath||'R',
+      costUnits:1,
+      eventFingerprint:transitionFingerprint,
+      metadata:{
+        status:args.status??null,
+        decision_type:args.decisionType??null,
+      },
+    });
     const row=await nodeRpc('save',args);
     if(row?.status!=='ready')throw new Error('autonomous_decomposition_checkpoint_save_failed:'+args.nodePath);
     return {
