@@ -105,3 +105,44 @@ test('transport retry classification is bounded to transient transport failures'
   assert.equal(retryableModelTransportError({code:'NVIDIA_TIMEOUT',name:'Error'}),false);
   assert.equal(retryableModelTransportError({name:'AbortError',message:'aborted'}),false);
 });
+
+
+test('unconfirmed sibling accounting is inherited only while result hash is unchanged',()=>{
+  const prior={
+    inspected_sibling_paths:[],
+    sibling_inspection_unconfirmed_paths:['R.001'],
+    authoritative_sibling_result_hashes:[{path:'R.001',result_hash:'hash-a'}],
+  };
+  const stable=durableSiblingInspection({
+    siblingEvidence:[{path:'R.001',result_hash:'hash-a'}],
+    candidateInspectedPaths:[],
+    priorDiscovery:prior,
+  });
+  assert.deepEqual(stable.inspected_paths,[]);
+  assert.deepEqual(stable.inherited_unconfirmed_paths,['R.001']);
+  assert.deepEqual(stable.missing_paths,[]);
+
+  const changed=durableSiblingInspection({
+    siblingEvidence:[{path:'R.001',result_hash:'hash-b'}],
+    candidateInspectedPaths:[],
+    priorDiscovery:prior,
+  });
+  assert.deepEqual(changed.inherited_unconfirmed_paths,[]);
+  assert.deepEqual(changed.invalidated_paths,['R.001']);
+  assert.deepEqual(changed.missing_paths,['R.001']);
+});
+
+test('explicit inspection upgrades an inherited unconfirmed sibling',()=>{
+  const result=durableSiblingInspection({
+    siblingEvidence:[{path:'R.001',result_hash:'hash-a'}],
+    candidateInspectedPaths:['R.001'],
+    priorDiscovery:{
+      sibling_inspection_unconfirmed_paths:['R.001'],
+      authoritative_sibling_result_hashes:[{path:'R.001',result_hash:'hash-a'}],
+    },
+  });
+  assert.deepEqual(result.inspected_paths,['R.001']);
+  assert.deepEqual(result.newly_inspected_paths,['R.001']);
+  assert.deepEqual(result.inherited_unconfirmed_paths,[]);
+  assert.deepEqual(result.missing_paths,[]);
+});
