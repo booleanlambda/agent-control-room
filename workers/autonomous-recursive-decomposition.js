@@ -2207,10 +2207,20 @@ export async function runAutonomousRequirementCognition({
     if(existing.length)return {children:existing,reconsider:false};
 
     const authored=[];
-    const normalizedBranchDepth=Math.max(0,Math.min(Number(branchDepth)||0,MAX_BRANCH_DEPTH));
-    const structuralBranchingAvailable=normalizedBranchDepth<MAX_BRANCH_DEPTH;
-    const singleRefinementAvailable=singleChildRefinements<MAX_SINGLE_CHILD_REFINEMENTS;
-    const maxChildrenThisSplit=structuralBranchingAvailable?MAX_CHILDREN_PER_NODE:(singleRefinementAvailable?1:0);
+    const runtimeView=await semanticRuntimeView();
+    const normalizedBranchDepth=pathDepth(node.node_path);
+    const storageDepthAvailable=Number.isFinite(normalizedBranchDepth)
+      &&normalizedBranchDepth<semanticRuntime.hard_storage_path_depth;
+    const maxChildrenThisSplit=storageDepthAvailable
+      ? semanticChildCapacity({
+          remainingBudgetUnits:Number(runtimeView?.remaining_budget_units||0),
+          nodeCreateUnits:semanticRuntime.node_create_units,
+          safetyReserveUnits:semanticRuntime.safety_reserve_units,
+          maxChildren:MAX_CHILDREN_PER_NODE,
+        })
+      : 0;
+    const structuralBranchingAvailable=maxChildrenThisSplit>=2;
+    const singleRefinementAvailable=maxChildrenThisSplit>=1;
     if(maxChildrenThisSplit<1)throw new Error('autonomous_decomposition_split_mode_unavailable:'+node.node_path);
     const startOrdinal=Math.max(0,...allExisting.map((child)=>Number(child?.ordinal||0)))+1;
 
@@ -2287,9 +2297,8 @@ export async function runAutonomousRequirementCognition({
                 'A CHILD must be independently completable, materially narrower than the parent, and include explicit scope removed plus a concrete completion criterion.',
                 'Do not execute or solve the child.',
                 'Return complete JSON only: {"status":"CHILD","requirement":"...","scope_removed":"...","completion_criterion":"...","reason":"brief"} OR {"status":"DONE","coverage_note":"brief"}.',
-                structuralBranchingAvailable
-                  ? 'There is no required number of children. One child is valid only when genuinely narrower; use as many or as few children as your reasoning requires.'
-                  : 'MECHANICAL DEPTH CONSTRAINT: structural branch depth is exhausted. You may author exactly ONE genuinely narrower refinement child and no sibling branch.',
+                'There is no required number of children. One child is valid only when genuinely narrower; use as many or as few children as your reasoning requires within the conserved work budget.',
+                'Current semantic child capacity for this parent is '+maxChildrenThisSplit+'. Tree depth is not the ordinary convergence rule; the '+semanticRuntime.hard_storage_path_depth+'-level path ceiling is only an emergency persistence guard.',
               ].join('\n')},
               {role:'user',content:safeJson({
                 parent_requirement:node.requirement_text,
@@ -2300,12 +2309,13 @@ export async function runAutonomousRequirementCognition({
                 prior_child_authoring_failure:asObject(node?.decision_payload?.child_authoring_failure),
                 provenance_revision_guidance:provenanceRevisionGuidance||null,
                 runtime_resource_constraints:{
-                  structural_branch_depth:normalizedBranchDepth,
-                  max_structural_branch_depth:MAX_BRANCH_DEPTH,
+                  semantic_runtime_contract:SEMANTIC_RUNTIME_CONTRACT,
+                  remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
+                  semantic_child_capacity:maxChildrenThisSplit,
+                  storage_path_depth:normalizedBranchDepth,
+                  emergency_storage_path_depth:semanticRuntime.hard_storage_path_depth,
                   multi_child_split_available:structuralBranchingAvailable,
                   max_children_this_split:maxChildrenThisSplit,
-                  single_child_refinements_used:singleChildRefinements,
-                  max_single_child_refinements:MAX_SINGLE_CHILD_REFINEMENTS,
                 },
               })},
             ],stageBudgets.child_formulation,'req_'+node.node_path.replaceAll('.','_')+'_author_child_formulate_'+ordinal+'_'+attempt);
