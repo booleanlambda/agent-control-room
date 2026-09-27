@@ -26,7 +26,7 @@ const MAX_CHILDREN_PER_NODE=16;
 const MAX_CONTEXT_RESEARCH_ROUNDS=12;
 const MAX_CONTEXT_STAGNANT_ROUNDS=2;
 const MAX_CONTEXT_UNCHANGED_GAP_ROUNDS=3;
-const MAX_CONTEXT_REPEAT_REQUEST_ROUNDS=2;
+const MAX_CONTEXT_REPEAT_REQUEST_ROUNDS=1;
 const MAX_CONTEXT_ACTIVE_ELAPSED_MS=30*60*1000;
 const MAX_CONTEXT_UNIQUE_SOURCES=250;
 const MAX_CONTEXT_REQUESTS_PER_ROUND=8;
@@ -1779,6 +1779,7 @@ export async function runAutonomousRequirementCognition({
                   ? 'Context/research acquisition remains mechanically available. NEED_CONTEXT is valid only when another retrieval or exact context lookup can materially reduce a stated gap.'
                   : 'CONTEXT RESOURCE CONSTRAINT: further context/research acquisition is mechanically unavailable for this node because: '+resourceView.reasons.join(', ')+'. Do not request more context or research. BLOCKED is available if the remaining evidence gap prevents honest completion; ATOMIC or SPLIT remain yours to choose when mechanically available.',
                 'Before deciding, interrogate semantic equivalence, definitions, time horizons, populations/scopes, proxy metrics, evidence sufficiency, assumptions, and unresolved gaps.',
+                'REPEATED ACQUISITION RULE: if an exact context/research request has already been repeated and the required evidence remains unresolved, do not issue the same request again. Use materially different retrieval if one exists; otherwise preserve the criterion as UNKNOWN when the task can proceed, or choose BLOCKED when the unresolved evidence prevents honest completion.',
                 'AUTHORITATIVE DEPENDENCY HANDOFF: authoritative_completed_sibling_evidence contains both direct resolved siblings and inherited prerequisite results routed from ancestor branches. evidence_scope=ancestor_dependency means the result was already made available to an ancestor and must remain available down this branch. Inspect this durable evidence before deciding NEED_CONTEXT; do not research again for information already present here.',
                 'Only evidence_scope=direct_sibling paths are subject to inspected_sibling_paths attention accounting. Inherited ancestor dependencies do not require path echoing; they are durable prerequisite context, not a serialization invariant.',
                 siblingInspectionRetry
