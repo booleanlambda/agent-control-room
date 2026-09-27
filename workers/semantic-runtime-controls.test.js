@@ -8,6 +8,7 @@ import {
   durableSiblingInspection,
   retryableModelTransportError,
   mergeInheritedDependencyResults,
+  classifyThresholdEvidence,
   pathDepth,
 } from './semantic-runtime-controls.js';
 
@@ -184,4 +185,12 @@ test('bounded ancestor dependency promotion retains both old prerequisites and r
   assert.equal(promoted.length,10);
   assert.ok(promoted.some(v=>v.path==='R.001'));
   assert.ok(promoted.some(v=>v.path==='R.030'));
+});
+
+
+test('threshold evidence distinguishes unknown from fail',()=>{
+  assert.equal(classifyThresholdEvidence({hasComparableEvidence:false,thresholdSatisfied:false}),'UNKNOWN');
+  assert.equal(classifyThresholdEvidence({hasComparableEvidence:true,thresholdSatisfied:null}),'UNKNOWN');
+  assert.equal(classifyThresholdEvidence({hasComparableEvidence:true,thresholdSatisfied:true}),'PASS');
+  assert.equal(classifyThresholdEvidence({hasComparableEvidence:true,thresholdSatisfied:false}),'FAIL');
 });
