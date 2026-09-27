@@ -3035,8 +3035,27 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
   } catch (error) {
     const message = String(error?.message || error).slice(0,3000);
     const failureDetails = error?.failureDetails && typeof error.failureDetails === 'object' ? error.failureDetails : null;
+    const terminalSemanticRuntimeCode=
+      ['SEMANTIC_BUDGET_EXHAUSTED','SEMANTIC_RUNTIME_CYCLE_LOCK'].includes(String(error?.code||''))
+        ? String(error.code)
+        : null;
     if (begun) {
-      if (failureDetails) {
+      if (terminalSemanticRuntimeCode) {
+        await rpc('aau_bridge_hold_semantic_runtime_terminal_v0_2',{
+          p_intent_execution_id:requestedIntentExecutionId,
+          p_terminal_code:terminalSemanticRuntimeCode,
+          p_error:message,
+          p_runtime_state:error?.semanticRuntime&&typeof error.semanticRuntime==='object'
+            ? error.semanticRuntime
+            : {},
+        }).catch((holdError)=>{
+          console.error('AAU_SEMANTIC_RUNTIME_TERMINAL_HOLD_FAILED',JSON.stringify({
+            intent_execution_id:requestedIntentExecutionId,
+            terminal_code:terminalSemanticRuntimeCode,
+            error:String(holdError?.message||holdError).slice(0,800),
+          }));
+        });
+      } else if (failureDetails) {
         await rpc('aau_bridge_fail_nvidia_intent_execution_detailed', {
           p_intent_execution_id: requestedIntentExecutionId,
           p_error: message,
@@ -3051,11 +3070,14 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       intent_execution_id: requestedIntentExecutionId,
       agent_id: requestedAgentId,
       error: message,
+      terminal_semantic_runtime_code:terminalSemanticRuntimeCode,
       validation_failures: failureDetails?.validation?.failures || null,
       failure_details_persist_requested: Boolean(failureDetails),
     }));
     const wrapped = new Error(message);
     wrapped.cause = error;
+    wrapped.code = terminalSemanticRuntimeCode || error?.code || null;
+    wrapped.semanticRuntime = error?.semanticRuntime || null;
     wrapped.intentBegun = Boolean(begun);
     wrapped.failureDetails = failureDetails;
     throw wrapped;
