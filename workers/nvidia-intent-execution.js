@@ -3040,6 +3040,13 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
         ? String(error.code)
         : null;
     const cognitionAdmissionDeferred=String(error?.code||'')==='COGNITION_ADMISSION_DEFERRED';
+    const providerTransient=/^nvidia_(502|503|504|529):/i.test(message)
+      || ['NVIDIA_HTTP_502','NVIDIA_HTTP_503','NVIDIA_HTTP_504','NVIDIA_HTTP_529'].includes(String(error?.code||error?.cause?.code||''));
+    const cognitionRuntimeFault=
+      !failureDetails
+      && !terminalSemanticRuntimeCode
+      && !cognitionAdmissionDeferred
+      && /^autonomous_decomposition_/i.test(message);
     if (begun) {
       if (terminalSemanticRuntimeCode) {
         await rpc('aau_bridge_hold_semantic_runtime_terminal_v0_2',{
@@ -3069,6 +3076,26 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
             error:String(holdError?.message||holdError).slice(0,800),
           }));
         });
+      } else if (cognitionRuntimeFault) {
+        await rpc('aau_bridge_hold_cognition_runtime_fault_v0_1',{
+          p_intent_execution_id:requestedIntentExecutionId,
+          p_error:message,
+        }).catch((holdError)=>{
+          console.error('AAU_COGNITION_RUNTIME_FAULT_HOLD_FAILED',JSON.stringify({
+            intent_execution_id:requestedIntentExecutionId,
+            error:String(holdError?.message||holdError).slice(0,800),
+          }));
+        });
+      } else if (providerTransient) {
+        await rpc('aau_bridge_fail_nvidia_provider_transient_v0_1',{
+          p_intent_execution_id:requestedIntentExecutionId,
+          p_error:message,
+        }).catch((providerError)=>{
+          console.error('AAU_NVIDIA_PROVIDER_TRANSIENT_RECOVERY_FAILED',JSON.stringify({
+            intent_execution_id:requestedIntentExecutionId,
+            error:String(providerError?.message||providerError).slice(0,800),
+          }));
+        });
       } else if (failureDetails) {
         await rpc('aau_bridge_fail_nvidia_intent_execution_detailed', {
           p_intent_execution_id: requestedIntentExecutionId,
@@ -3086,12 +3113,18 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       error: message,
       terminal_semantic_runtime_code:terminalSemanticRuntimeCode,
       cognition_admission_deferred:cognitionAdmissionDeferred,
+      cognition_runtime_fault:cognitionRuntimeFault,
+      provider_transient:providerTransient,
       validation_failures: failureDetails?.validation?.failures || null,
       failure_details_persist_requested: Boolean(failureDetails),
     }));
     const wrapped = new Error(message);
     wrapped.cause = error;
-    wrapped.code = terminalSemanticRuntimeCode || (cognitionAdmissionDeferred?'COGNITION_ADMISSION_DEFERRED':null) || error?.code || null;
+    wrapped.code = terminalSemanticRuntimeCode
+      || (cognitionAdmissionDeferred?'COGNITION_ADMISSION_DEFERRED':null)
+      || (cognitionRuntimeFault?'COGNITION_RUNTIME_FAULT':null)
+      || error?.code
+      || null;
     wrapped.semanticRuntime = error?.semanticRuntime || null;
     wrapped.admission = error?.admission || null;
     wrapped.intentBegun = Boolean(begun);
