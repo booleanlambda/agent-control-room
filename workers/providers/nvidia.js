@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { Agent } from 'undici';
 import {
   resolveModelRuntimeContract,
   resolveModelTaskBudget,
@@ -8,6 +9,13 @@ import {
 const DEFAULT_NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1';
 const DEFAULT_NVIDIA_MODEL = 'nvidia/nemotron-3.5-lightning-30b-a3b';
 const DEFAULT_NVIDIA_TIMEOUT_MS = 60000;
+const NVIDIA_TRANSPORT_DISPATCHER = new Agent({
+  // AAU's resolved per-request AbortSignal is the sole inference deadline.
+  // Disable Undici's independent 300s parser timers so they cannot preempt
+  // a model contract that explicitly permits a longer request.
+  headersTimeout: 0,
+  bodyTimeout: 0,
+});
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const SB_ANON = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
 const BRIDGE_TOKEN = String(process.env.AAU_BROKER_BRIDGE_TOKEN || '').trim();
@@ -317,14 +325,16 @@ async function requestNvidia(config, requestBody, timeoutMs, userAgent, usageCon
         'user-agent': userAgent,
       },
       body: JSON.stringify(requestBody),
+      dispatcher: NVIDIA_TRANSPORT_DISPATCHER,
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
     const timedOut=error?.name === 'TimeoutError' || error?.name === 'AbortError';
+    const transportCode=error?.code || error?.cause?.code || error?.name || 'REQUEST_ERROR';
     await persistModelCallUsage({
       callId,usageContext,requestBody,callMeta,body:null,
       callStatus:timedOut ? 'provider_timeout' : 'provider_error',
-      providerStatusCode:null,errorCode:timedOut ? 'NVIDIA_TIMEOUT' : (error?.code || error?.name || 'REQUEST_ERROR'),
+      providerStatusCode:null,errorCode:timedOut ? 'NVIDIA_TIMEOUT' : transportCode,
       startedAt,latencyMs:Date.now()-startedAt,
     });
     if (timedOut) {
@@ -384,6 +394,12 @@ export function nvidiaConfigStatus() {
     json_mode: envBool('AAU_NVIDIA_JSON_MODE'),
     enable_thinking: envBool('AAU_NVIDIA_ENABLE_THINKING'),
     timeout_ms: resolveTimeoutMs(),
+    transport: {
+      dispatcher: 'undici_agent',
+      headers_timeout_ms: 0,
+      body_timeout_ms: 0,
+      deadline_owner: 'model_runtime_contract_abort_signal',
+    },
     runtime_contract: (()=>{try{return resolveModelRuntimeContract(config.model,'generic');}catch{return null;}})(),
     mode: 'experimental_only',
   };
@@ -453,6 +469,9 @@ export async function nvidiaChatCompletion({
     timeoutCapped:taskBudget.timeout_capped,
     endpointKind:config.endpointKind,
     runtimeContractVersion:'model_runtime_profiles_v0_2',
+    transportDeadlineOwner:'model_runtime_contract_abort_signal',
+    transportHeadersTimeoutMs:0,
+    transportBodyTimeoutMs:0,
     requestLabel:'primary',
   };
   let body = await requestNvidia(
