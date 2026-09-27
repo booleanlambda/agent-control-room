@@ -11,6 +11,7 @@ import {
   repeatedStructuralFailureLocked,
   durableSiblingInspection,
   retryableModelTransportError,
+  autonomousEvidenceWindowDecision,
   mergeInheritedDependencyResults,
   THRESHOLD_EVIDENCE_POLICY,
   MAX_MODEL_TRANSPORT_ATTEMPTS,
@@ -24,12 +25,19 @@ const MAX_ATOMIC_EXECUTION_FAILURES=1;
 // Semantic work is bounded by the conserved assignment-epoch budget.
 // The 16-level path ceiling is only a storage geometry emergency brake.
 const MAX_CHILDREN_PER_NODE=16;
-const MAX_CONTEXT_RESEARCH_ROUNDS=12;
+const MAX_CONTEXT_RESEARCH_ROUNDS=24;
 const MAX_CONTEXT_STAGNANT_ROUNDS=2;
 const MAX_CONTEXT_UNCHANGED_GAP_ROUNDS=3;
 const MAX_CONTEXT_REPEAT_REQUEST_ROUNDS=1;
-const MAX_CONTEXT_ACTIVE_ELAPSED_MS=30*60*1000;
-const MAX_CONTEXT_UNIQUE_SOURCES=250;
+const MAX_CONTEXT_ACTIVE_ELAPSED_MS=90*60*1000;
+const MAX_CONTEXT_UNIQUE_SOURCES=1000;
+// Renewable evidence windows are intentionally much smaller than lifetime caps.
+// The runtime may grant another window only when marginal evidence acquisition is
+// productive and the conserved semantic budget still protects completion.
+const EVIDENCE_WINDOW_MAX_CONTEXT_ROUNDS=2;
+const EVIDENCE_WINDOW_MAX_NEW_SOURCES=40;
+const EVIDENCE_WINDOW_MAX_ACTIVE_ELAPSED_MS=10*60*1000;
+const MAX_AUTONOMOUS_EVIDENCE_WINDOW_RENEWALS=6;
 const MAX_CONTEXT_REQUESTS_PER_ROUND=8;
 const MAX_CONTEXT_VALUE_BYTES=12000;
 const MAX_PERSISTED_CONTEXT_BYTES=262144;
@@ -344,37 +352,77 @@ function normalizedSignal(values){
 function contextResourceView(state,contextPayload){
   const s=asObject(state);
   const activeElapsedMs=Math.max(0,Number(s.active_context_elapsed_ms||0));
+  const contextRounds=Math.max(0,Number(s.context_rounds_attempted||0));
   const uniqueSources=Math.max(
     asArray(contextPayload?.research_source_catalog).length,
     Number(s.total_new_sources||0)
   );
+  const windowRoundBaseline=Math.max(0,Number(s.evidence_window_round_baseline||0));
+  const windowSourceBaseline=Math.max(0,Number(s.evidence_window_source_baseline||0));
+  const windowElapsedBaseline=Math.max(0,Number(s.evidence_window_elapsed_baseline_ms||0));
+  const windowRounds=Math.max(0,contextRounds-windowRoundBaseline);
+  const windowSources=Math.max(0,uniqueSources-windowSourceBaseline);
+  const windowElapsedMs=Math.max(0,activeElapsedMs-windowElapsedBaseline);
+
   const reasons=[];
-  if(Number(s.context_rounds_attempted||0)>=MAX_CONTEXT_RESEARCH_ROUNDS)
+  if(contextRounds>=MAX_CONTEXT_RESEARCH_ROUNDS)
     reasons.push('absolute_context_round_safety_ceiling');
+  if(uniqueSources>=MAX_CONTEXT_UNIQUE_SOURCES)
+    reasons.push('absolute_unique_source_safety_ceiling');
+  if(activeElapsedMs>=MAX_CONTEXT_ACTIVE_ELAPSED_MS)
+    reasons.push('absolute_context_elapsed_time_ceiling');
   if(Number(s.stagnant_rounds||0)>=MAX_CONTEXT_STAGNANT_ROUNDS)
     reasons.push('no_new_observations');
   if(Number(s.unchanged_gap_rounds||0)>=MAX_CONTEXT_UNCHANGED_GAP_ROUNDS)
     reasons.push('unresolved_gap_not_changing');
   if(Number(s.repeated_request_rounds||0)>=MAX_CONTEXT_REPEAT_REQUEST_ROUNDS)
     reasons.push('research_request_repeating');
-  if(activeElapsedMs>=MAX_CONTEXT_ACTIVE_ELAPSED_MS)
-    reasons.push('context_acquisition_elapsed_time_ceiling');
-  if(uniqueSources>=MAX_CONTEXT_UNIQUE_SOURCES)
-    reasons.push('unique_source_safety_ceiling');
+  if(windowRounds>=EVIDENCE_WINDOW_MAX_CONTEXT_ROUNDS)
+    reasons.push('evidence_window_round_ceiling');
+  if(windowSources>=EVIDENCE_WINDOW_MAX_NEW_SOURCES)
+    reasons.push('evidence_window_source_ceiling');
+  if(windowElapsedMs>=EVIDENCE_WINDOW_MAX_ACTIVE_ELAPSED_MS)
+    reasons.push('evidence_window_elapsed_ceiling');
+
+  const renewableSet=new Set([
+    'evidence_window_round_ceiling',
+    'evidence_window_source_ceiling',
+    'evidence_window_elapsed_ceiling',
+  ]);
   return {
     available:reasons.length===0,
     exhausted:reasons.length>0,
     reasons,
+    renewable_reasons:reasons.filter(v=>renewableSet.has(v)),
+    hard_reasons:reasons.filter(v=>!renewableSet.has(v)),
     elapsed_ms:activeElapsedMs,
     active_context_elapsed_ms:activeElapsedMs,
-    elapsed_accounting:'active_context_acquisition_only_v0_2',
+    elapsed_accounting:'active_context_acquisition_only_v0_3_evidence_windows',
     unique_sources:uniqueSources,
-    context_rounds_attempted:Number(s.context_rounds_attempted||0),
+    context_rounds_attempted:contextRounds,
     research_rounds_attempted:Number(s.research_rounds_attempted||0),
     local_context_rounds_attempted:Number(s.local_context_rounds_attempted||0),
     stagnant_rounds:Number(s.stagnant_rounds||0),
     unchanged_gap_rounds:Number(s.unchanged_gap_rounds||0),
     repeated_request_rounds:Number(s.repeated_request_rounds||0),
+    evidence_window_no:Math.max(0,Number(s.evidence_window_no||0)),
+    evidence_window_renewals:Math.max(0,Number(s.evidence_window_renewals||0)),
+    evidence_window_round_baseline:windowRoundBaseline,
+    evidence_window_source_baseline:windowSourceBaseline,
+    evidence_window_elapsed_baseline_ms:windowElapsedBaseline,
+    evidence_window_rounds_used:windowRounds,
+    evidence_window_new_sources:windowSources,
+    evidence_window_elapsed_ms:windowElapsedMs,
+    evidence_window_limits:{
+      context_rounds:EVIDENCE_WINDOW_MAX_CONTEXT_ROUNDS,
+      new_sources:EVIDENCE_WINDOW_MAX_NEW_SOURCES,
+      active_elapsed_ms:EVIDENCE_WINDOW_MAX_ACTIVE_ELAPSED_MS,
+    },
+    lifetime_limits:{
+      context_rounds:MAX_CONTEXT_RESEARCH_ROUNDS,
+      unique_sources:MAX_CONTEXT_UNIQUE_SOURCES,
+      active_elapsed_ms:MAX_CONTEXT_ACTIVE_ELAPSED_MS,
+    },
   };
 }
 function normalizedRequirement(v){
@@ -1038,6 +1086,33 @@ export async function runAutonomousRequirementCognition({
           cost_units:childSerializationUnits,
         }),
       }),
+    });
+  }
+
+  function projectedEvidenceRoundEconomics(rawPayload,pinnedEvidence,branchEconomics){
+    const discovery=projectedModelCallEconomics(rawPayload,pinnedEvidence,10000);
+    const routingSerializationUnits=modelCallCostUnits({
+      estimatedInputTokens:2500,
+      requestedOutputTokens:700,
+      quantumTokens:semanticRuntime.quantum_tokens,
+    });
+    const projectedRoundUnits=
+      semanticRuntime.context_acquire_units
+      +discovery.cost_units
+      +routingSerializationUnits
+      +3; // context transition + routing transition + checkpoint transition
+    const completionReserveUnits=Math.max(
+      semanticRuntime.safety_reserve_units,
+      Number(branchEconomics?.completion_reserve_units||0)
+    );
+    return Object.freeze({
+      contract:'autonomous_evidence_round_economics_v0_1',
+      projected_round_units:projectedRoundUnits,
+      completion_reserve_units:completionReserveUnits,
+      discovery_units:discovery.cost_units,
+      routing_serialization_units:routingSerializationUnits,
+      context_acquisition_units:semanticRuntime.context_acquire_units,
+      transition_units:3,
     });
   }
 
@@ -1795,7 +1870,7 @@ export async function runAutonomousRequirementCognition({
       &&normalizedBranchDepth<semanticRuntime.hard_storage_path_depth;
 
     let contextState=asObject(node?.decision_payload?.context_resource_state);
-    if(contextState.version!=='agent_visible_context_resource_v0_2'){
+    if(!['agent_visible_context_resource_v0_2','agent_visible_context_resource_v0_3_autonomous_evidence_windows'].includes(contextState.version)){
       const legacyRounds=Math.max(
         0,
         Number(contextState.context_rounds_attempted||0),
@@ -1939,7 +2014,7 @@ export async function runAutonomousRequirementCognition({
                   : 'EMERGENCY STORAGE GUARD: this durable path reached '+semanticRuntime.hard_storage_path_depth+' levels. If SPLIT is still semantically correct, choose SPLIT anyway. The runtime will preserve the decision and defer execution rather than forcing a different substantive answer.',
                 resourceView.available
                   ? 'Context/research admission is currently available. Choose NEED_CONTEXT only when another retrieval or exact context lookup can materially reduce a stated gap.'
-                  : 'CONTEXT RESOURCE CONSTRAINT: further acquisition cannot be admitted in the current runtime state because: '+resourceView.reasons.join(', ')+'. This does NOT make NEED_CONTEXT semantically false. If more evidence is genuinely required, choose NEED_CONTEXT and the runtime will preserve and defer that decision instead of coercing BLOCKED.',
+                  : 'CONTEXT RESOURCE CONSTRAINT: the current evidence window reports: '+resourceView.reasons.join(', ')+'. This does NOT make NEED_CONTEXT semantically false. If more evidence is genuinely required, choose NEED_CONTEXT. The runtime will autonomously test whether another bounded evidence window is economically admissible; only a true hard/economic stop is deferred.',
                 'BLOCKED BASIS CONTRACT: BLOCKED is a semantic conclusion, never a resource status. If the current evidence itself proves the requirement cannot honestly be completed, choose BLOCKED with block_basis=EVIDENCE_PROVES_BLOCKED. If completion merely requires evidence/context that is not currently available, choose NEED_CONTEXT. If you nevertheless serialize BLOCKED with block_basis=MORE_EVIDENCE_REQUIRED, the runtime will normalize it to NEED_CONTEXT without changing the stated evidence gap.',
                 'Before deciding, interrogate semantic equivalence, definitions, time horizons, populations/scopes, proxy metrics, evidence sufficiency, assumptions, and unresolved gaps.',
                 'REPEATED ACQUISITION RULE: if an exact context/research request has already been repeated and the required evidence remains unresolved, do not issue the same request again. Use materially different retrieval if one exists; otherwise preserve the criterion as UNKNOWN when the task can proceed, or choose BLOCKED when the unresolved evidence prevents honest completion.',
@@ -2336,6 +2411,110 @@ export async function runAutonomousRequirementCognition({
         continue;
       }
 
+      let effectiveResourceView=resourceView;
+      let evidenceRenewalAssessment=null;
+
+      if(decision==='NEED_CONTEXT'&&!effectiveResourceView.available){
+        const evidenceEconomics=projectedEvidenceRoundEconomics(
+          contextPayload,pinnedEvidence,branchEconomics
+        );
+        const lastRound=asObject(contextState.last_round);
+        const lastRoundProductive=
+          !Object.keys(lastRound).length
+          ||Number(lastRound.new_sources||0)>0
+          ||Number(lastRound.new_local_context_paths||0)>0
+          ||Number(lastRound.restored_pinned_evidence||0)>0;
+
+        evidenceRenewalAssessment=autonomousEvidenceWindowDecision({
+          resourceReasons:effectiveResourceView.reasons,
+          remainingBudgetUnits:Number(runtimeView?.remaining_budget_units||0),
+          projectedRoundUnits:evidenceEconomics.projected_round_units,
+          completionReserveUnits:evidenceEconomics.completion_reserve_units,
+          renewalsUsed:Number(contextState.evidence_window_renewals||0),
+          maxRenewals:MAX_AUTONOMOUS_EVIDENCE_WINDOW_RENEWALS,
+          lastRoundProductive,
+        });
+
+        if(evidenceRenewalAssessment.granted){
+          const nextWindowNo=Math.max(0,Number(contextState.evidence_window_no||0))+1;
+          const renewalAt=new Date().toISOString();
+          contextState={
+            ...contextState,
+            version:'agent_visible_context_resource_v0_3_autonomous_evidence_windows',
+            evidence_window_contract:'autonomous_evidence_window_v0_1',
+            evidence_window_no:nextWindowNo,
+            evidence_window_renewals:Number(contextState.evidence_window_renewals||0)+1,
+            evidence_window_round_baseline:effectiveResourceView.context_rounds_attempted,
+            evidence_window_source_baseline:effectiveResourceView.unique_sources,
+            evidence_window_elapsed_baseline_ms:effectiveResourceView.active_context_elapsed_ms,
+            evidence_window_started_at:renewalAt,
+            evidence_window_last_grant:{
+              ...evidenceRenewalAssessment,
+              granted_at:renewalAt,
+              prior_resource_reasons:effectiveResourceView.reasons,
+              projected_economics:evidenceEconomics,
+              last_round_productive:lastRoundProductive,
+            },
+          };
+
+          await chargeSemanticRuntime({
+            eventKind:'semantic_transition',
+            materialKey:node.node_path+':evidence_window_renewal:'+String(nextWindowNo),
+            nodePath:node.node_path,
+            costUnits:1,
+            eventFingerprint:sha256({
+              node_path:node.node_path,
+              phase:'autonomous_evidence_window_renewal',
+              window_no:nextWindowNo,
+              prior_resource_reasons:effectiveResourceView.reasons,
+              unresolved_gaps:discovery.unresolved_gaps,
+            }),
+            metadata:{
+              phase:'autonomous_evidence_window_renewal',
+              contract:'autonomous_evidence_window_v0_1',
+              window_no:nextWindowNo,
+              prior_resource_reasons:effectiveResourceView.reasons,
+              projected_round_units:evidenceEconomics.projected_round_units,
+              completion_reserve_units:evidenceEconomics.completion_reserve_units,
+              remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
+              operator_approval_required:false,
+            },
+          });
+
+          delete decisionPayload.routing_admission;
+          decisionPayload.context_resource_state=contextState;
+          decisionPayload.autonomous_evidence_window={
+            status:'GRANTED',
+            ...evidenceRenewalAssessment,
+            window_no:nextWindowNo,
+            granted_at:renewalAt,
+            operator_approval_required:false,
+          };
+          effectiveResourceView=contextResourceView(contextState,contextPayload);
+
+          console.log('AAU_AUTONOMOUS_EVIDENCE_WINDOW_GRANTED',JSON.stringify({
+            agent_id:agentId,
+            intent_execution_id:intentExecutionId,
+            node_path:node.node_path,
+            window_no:nextWindowNo,
+            prior_resource_reasons:resourceView.reasons,
+            remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
+            projected_round_units:evidenceEconomics.projected_round_units,
+            completion_reserve_units:evidenceEconomics.completion_reserve_units,
+            operator_approval_required:false,
+          }));
+        }else{
+          decisionPayload.autonomous_evidence_window={
+            status:'DENIED',
+            ...evidenceRenewalAssessment,
+            evaluated_at:new Date().toISOString(),
+            operator_approval_required:
+              evidenceRenewalAssessment.reason==='insufficient_semantic_budget'
+              ||evidenceRenewalAssessment.reason==='evidence_window_renewal_limit',
+          };
+        }
+      }
+
       const admissionReasons=[];
       if(decision==='SPLIT'&&!storageDepthAvailable)
         admissionReasons.push('emergency_storage_path_depth_reached');
@@ -2343,14 +2522,14 @@ export async function runAutonomousRequirementCognition({
         admissionReasons.push('insufficient_branch_lifecycle_budget');
       if(decision==='ATOMIC'&&atomicUnavailable)
         admissionReasons.push('bounded_atomic_execution_admission_exhausted');
-      if(decision==='NEED_CONTEXT'&&!resourceView.available)
+      if(decision==='NEED_CONTEXT'&&!effectiveResourceView.available)
         admissionReasons.push('context_acquisition_resource_exhausted');
       if(decision==='REMEDIATE'&&!remediationAvailable)
         admissionReasons.push('self_remediation_admission_exhausted');
 
       if(admissionReasons.length){
         const admission={
-          contract:'cognition_resource_admission_v0_1',
+          contract:'cognition_resource_admission_v0_2_autonomous_evidence_windows',
           status:'DEFERRED',
           semantic_decision:decision,
           reasons:admissionReasons,
@@ -2360,8 +2539,9 @@ export async function runAutonomousRequirementCognition({
           completion_reserve_units:branchEconomics.completion_reserve_units,
           storage_path_depth:normalizedBranchDepth,
           emergency_storage_path_depth:semanticRuntime.hard_storage_path_depth,
-          context_resource_available:resourceView.available,
-          context_resource_reasons:resourceView.reasons,
+          context_resource_available:effectiveResourceView.available,
+          context_resource_reasons:effectiveResourceView.reasons,
+          evidence_window_renewal:evidenceRenewalAssessment,
           atomic_execution_failures:atomicExecutionFailures,
           deferred_at:new Date().toISOString(),
         };
@@ -2478,11 +2658,11 @@ export async function runAutonomousRequirementCognition({
 
         contextState={
           ...contextState,
-          version:'agent_visible_context_resource_v0_2',
+          version:'agent_visible_context_resource_v0_3_autonomous_evidence_windows',
           active_context_elapsed_ms:
             Math.max(0,Number(contextState.active_context_elapsed_ms||0))
             +contextAcquisitionElapsedMs,
-          elapsed_accounting:'active_context_acquisition_only_v0_2',
+          elapsed_accounting:'active_context_acquisition_only_v0_3_evidence_windows',
           context_rounds_attempted:Number(contextState.context_rounds_attempted||0)+1,
           research_rounds_attempted:Number(contextState.research_rounds_attempted||0)+((researchQueries.length||researchUrls.length)?1:0),
           local_context_rounds_attempted:Number(contextState.local_context_rounds_attempted||0)+(requests.length?1:0),
