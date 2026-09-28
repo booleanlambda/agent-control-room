@@ -65,6 +65,12 @@ function text(v){return String(v??'').trim();}
 function bytes(v){try{return Buffer.byteLength(typeof v==='string'?v:JSON.stringify(v));}catch{return 0;}}
 function clip(s,n){const v=String(s??'');return v.length<=n?v:v.slice(0,n);}
 function safeJson(v){try{return JSON.stringify(v);}catch{return '{}';}}
+function artifactText(v){
+  if(v===null||v===undefined)return '';
+  if(typeof v==='string')return v.trim();
+  if(typeof v==='object')return safeJson(v);
+  return String(v).trim();
+}
 function canonicalizeHashValue(v){
   if(Array.isArray(v))return v.map(canonicalizeHashValue);
   if(v&&typeof v==='object'){
@@ -843,7 +849,7 @@ function resultParts(raw){
   try{
     const parsed=JSON.parse(raw);
     return {
-      artifact:text(parsed.artifact)||text(parsed.summary)||raw,
+      artifact:artifactText(parsed.artifact)||artifactText(parsed.summary)||String(raw),
       handoff:asObject(parsed.handoff),
     };
   }catch{
@@ -3725,7 +3731,8 @@ export async function runAutonomousRequirementCognition({
               'authoritative_completed_sibling_evidence contains durable outputs from direct siblings and inherited ancestor prerequisites. Treat both as available evidence and inspect them before asking for information already supplied anywhere in the dependency chain.',
               'If you discover it is not actually bounded, return {"status":"SPLIT","reason":"..."} instead of forcing an oversized answer.',
               'If context is missing, return {"status":"NEED_CONTEXT","context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."],"reason":"..."}. You choose any research questions; do not fabricate findings.',
-              'Otherwise return JSON only: {"status":"COMPLETE","artifact":"concise auditable work product","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
+              'Otherwise return JSON only: {"status":"COMPLETE","artifact":"concise auditable work product OR a real nested JSON object when the requirement names a structured lifecycle contract","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
+              'Never stringify an object as "[object Object]". If the work product is structured, place the actual JSON object in artifact.',
               'Keep the artifact bounded. Preserve uncertainty and do not claim external facts without supplied evidence.',
                'EPISTEMIC THRESHOLD POLICY: '+THRESHOLD_EVIDENCE_POLICY.RULE+' '+THRESHOLD_EVIDENCE_POLICY.PASS+' '+THRESHOLD_EVIDENCE_POLICY.FAIL+' '+THRESHOLD_EVIDENCE_POLICY.UNKNOWN,
             ].join('\n')},
@@ -3861,7 +3868,7 @@ export async function runAutonomousRequirementCognition({
     }
     if(status!=='COMPLETE')throw new Error('autonomous_decomposition_atomic_status_invalid:'+node.node_path);
 
-    const proposedArtifact=text(parsed?.artifact);
+    const proposedArtifact=artifactText(parsed?.artifact);
     if(!proposedArtifact)throw new Error('autonomous_decomposition_atomic_artifact_empty:'+node.node_path);
     const proposedHandoff=asObject(parsed?.handoff);
     if(!durableAtomic.parsed){
@@ -3901,7 +3908,8 @@ export async function runAutonomousRequirementCognition({
               'Decide whether YOU consider your own completion criterion actually satisfied.',
               'Return one status only:',
               'COMPLETE = you judge the requirement and your own completion criterion genuinely satisfied by the evidence. You may correct wording/calculation in artifact and handoff before finalizing.',
-              'NEED_CONTEXT = evidence or stored context is still missing. Supply exact context_requests and/or research_queries/research_urls you choose.',
+              'NEED_CONTEXT = evidence or stored context is still missing. Supply at least one exact context_request and/or research_query/research_url you choose.',
+              'A formatting/serialization defect is NOT missing context. If the proposed completion already contains the underlying structured work product, choose COMPLETE and correct the artifact representation.',
               'SPLIT = you now judge the requirement is not actually bounded and should be decomposed by you.',
               'Do not treat a nearby metric, label, time horizon, population, market definition, or proxy as equivalent unless you can justify that equivalence from the supplied evidence.',
               'Preserve uncertainty. A retrieved source is evidence only for what it actually supports.',
@@ -3919,7 +3927,24 @@ export async function runAutonomousRequirementCognition({
               available_supplied_context_index:indexObject(atomicCognitionContext()),
             })},
           ],stageBudgets.atomic_reconciliation,'req_'+node.node_path.replaceAll('.','_')+'_reconcile_'+attempt);
-          reconciliation=response?.parsed;
+          const candidate=asObject(response?.parsed);
+          const candidateStatus=text(candidate?.status).toUpperCase();
+          if(candidateStatus==='NEED_CONTEXT'){
+            const hasContextRequest=
+              asArray(candidate?.context_requests).map(text).some(Boolean)
+              ||asArray(candidate?.research_queries).map(text).some(Boolean)
+              ||asArray(candidate?.research_urls).map(text).some(Boolean);
+            if(!hasContextRequest){
+              const validationError=new Error(
+                'reconciliation_need_context_requires_retrieval_request:'+node.node_path
+              );
+              validationError.code='COGNITION_RESPONSE_REJECTED';
+              validationError.rejectionReason=
+                'NEED_CONTEXT requires an actual retrieval request. Formatting or serialization defects must be corrected under COMPLETE using the durable proposed artifact.';
+              throw validationError;
+            }
+          }
+          reconciliation=candidate;
           break;
         }catch(error){
           if(attempt===2)throw error;
@@ -4049,9 +4074,34 @@ export async function runAutonomousRequirementCognition({
     if(reconciliationStatus!=='COMPLETE')
       throw new Error('autonomous_decomposition_reconciliation_status_invalid:'+node.node_path);
 
-    const artifact=text(reconciliation?.artifact)||proposedArtifact;
+    let artifact=artifactText(reconciliation?.artifact)||proposedArtifact;
     if(!artifact)throw new Error('autonomous_decomposition_reconciliation_artifact_empty:'+node.node_path);
     const handoff=Object.keys(asObject(reconciliation?.handoff)).length?asObject(reconciliation?.handoff):proposedHandoff;
+    const atomicStageContract=stageContractForRequirement(packet,node.requirement_text);
+    let atomicStageProposal=null;
+    let atomicStageMaterializationVersion=null;
+    if(atomicStageContract.applies&&atomicStageContract.name==='expertise_viability_proposal_v0_1'){
+      const directValidation=validateStageContractArtifact(
+        atomicStageContract.definition,
+        artifact
+      );
+      if(directValidation.valid){
+        atomicStageProposal=directValidation.artifact;
+        artifact=safeJson(atomicStageProposal);
+        atomicStageMaterializationVersion='atomic_stage_contract_direct_v0_1';
+      }else{
+        atomicStageProposal=await materializeTerminalStageContract(
+          node,[],{},{
+            outcome:'COMPLETE',
+            reason:reconciliation?.reason,
+            artifact,
+            handoff,
+          },atomicStageContract
+        );
+        artifact=safeJson(atomicStageProposal);
+        atomicStageMaterializationVersion=STAGE_CONTRACT_MATERIALIZATION_VERSION;
+      }
+    }
     if(!durableReconciliation.parsed){
       await saveJsonPhaseCheckpoint(
         node.node_path,'RECONCILIATION',reconciliationSemanticIdentity,reconciliation,{
@@ -4069,11 +4119,19 @@ export async function runAutonomousRequirementCognition({
         ...(node.decision_payload||{}),
         ...reconciliationMeta,
         completed_as_atomic:true,
+        ...(atomicStageProposal?{
+          atomic_stage_contract_validated:true,
+          terminal_stage_contract_name:atomicStageContract.name,
+          stage_contract_materialization_version:atomicStageMaterializationVersion,
+        }:{}),
       },
       contextPayload:node.context_payload||{},resultArtifact,
     });
     done.parent_path=node.parent_path??parentPathOf(node.node_path);
-    return {completed:true,node:done};
+    const persistedDone=atomicStageProposal
+      ? await ensureCanonicalStageCandidateSubmission(done,atomicStageProposal)
+      : done;
+    return {completed:true,node:persistedDone};
   }
 
   async function reviewSynthesisProvenance(node,childRows,accumulator,proposedFinal,revisionGuidance=''){
@@ -4275,8 +4333,9 @@ export async function runAutonomousRequirementCognition({
   }
 
   function materializedStageProposalFromNode(node){
-    if(text(node?.decision_payload?.stage_contract_materialization_version)
-      !==STAGE_CONTRACT_MATERIALIZATION_VERSION)return null;
+    const version=text(node?.decision_payload?.stage_contract_materialization_version);
+    const directAtomic=Boolean(node?.decision_payload?.atomic_stage_contract_validated);
+    if(version!==STAGE_CONTRACT_MATERIALIZATION_VERSION&&!directAtomic)return null;
     const parts=resultParts(node?.result_artifact);
     if(!parts.artifact)return null;
     try{
@@ -4635,7 +4694,7 @@ export async function runAutonomousRequirementCognition({
     const outcome=text(final?.parsed?.outcome).toUpperCase();
     if(!['COMPLETE','BLOCKED'].includes(outcome))
       throw new Error('autonomous_decomposition_synthesis_outcome_invalid:'+node.node_path);
-    const artifact=text(final?.parsed?.artifact);
+    const artifact=artifactText(final?.parsed?.artifact);
     if(!artifact)throw new Error('autonomous_decomposition_synthesis_empty:'+node.node_path);
     const resultArtifact=JSON.stringify({status:outcome,artifact,handoff:asObject(final?.parsed?.handoff)});
     const completedDecisionPayload={...(node.decision_payload||{})};
