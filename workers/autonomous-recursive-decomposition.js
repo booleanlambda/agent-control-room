@@ -1537,20 +1537,32 @@ export async function runAutonomousRequirementCognition({
     return row;
   }
 
-  function childProposalStepKey(node,ordinal){
+  function childProposalSiblingSignature(previous=[]){
+    return sha256(asArray(previous).map(v=>({
+      node_path:text(v?.node_path)||null,
+      ordinal:Number(v?.ordinal||0),
+      status:text(v?.status)||null,
+      requirement:text(v?.requirement),
+      scope_removed:text(v?.scope_removed)||null,
+      completion_criterion:text(v?.completion_criterion)||null,
+    })));
+  }
+
+  function childProposalStepKey(node,ordinal,previous=[]){
     const discovery=asObject(node?.decision_payload?.routing_discovery_checkpoint);
     return 'childprop:'+sha256({
-      contract:'agent_authored_child_proposal_v0_2_provenance_review',
+      contract:'agent_authored_child_proposal_v0_3_remaining_scope',
       node_path:node.node_path,
       ordinal,
       requirement_hash:node.requirement_hash||sha256(node.requirement_text||''),
       discovery_fingerprint:text(discovery.context_fingerprint)||null,
       discovery_decision:text(discovery.decision)||null,
+      prior_children_signature:childProposalSiblingSignature(previous),
     }).slice(0,56);
   }
 
-  async function loadChildProposalCheckpoint(node,ordinal){
-    const row=await cognitionStepRpc('get',childProposalStepKey(node,ordinal),null,{});
+  async function loadChildProposalCheckpoint(node,ordinal,previous=[]){
+    const row=await cognitionStepRpc('get',childProposalStepKey(node,ordinal,previous),null,{});
     if(row?.status==='not_found')return null;
     if(row?.status!=='ready')throw new Error('autonomous_decomposition_child_proposal_checkpoint_lookup_failed:'+node.node_path);
     let proposal=null;
@@ -1559,13 +1571,14 @@ export async function runAutonomousRequirementCognition({
     return {row,proposal:asObject(proposal)};
   }
 
-  async function saveChildProposalCheckpoint(node,ordinal,proposal){
+  async function saveChildProposalCheckpoint(node,ordinal,proposal,previous=[]){
     const artifact=JSON.stringify(proposal);
-    const row=await cognitionStepRpc('save',childProposalStepKey(node,ordinal),artifact,{
-      contract:'agent_authored_child_proposal_v0_2_provenance_review',
+    const row=await cognitionStepRpc('save',childProposalStepKey(node,ordinal,previous),artifact,{
+      contract:'agent_authored_child_proposal_v0_3_remaining_scope',
       node_path:node.node_path,
       ordinal,
       discovery_fingerprint:text(node?.decision_payload?.routing_discovery_checkpoint?.context_fingerprint)||null,
+      prior_children_signature:childProposalSiblingSignature(previous),
       authored_by_bound_agent:true,
       deep_formulation:true,
       serialization_pending:true,
@@ -3169,10 +3182,19 @@ export async function runAutonomousRequirementCognition({
 
   async function authorChildren(node,{branchDepth=0,singleChildRefinements=0}={}){
     const allExisting=await children(node.node_path);
-    const existing=allExisting.filter((child)=>String(child?.status||'')!=='cancelled');
-    if(existing.length)return {children:existing,reconsider:false};
+    const existing=allExisting
+      .filter((child)=>String(child?.status||'')!=='cancelled')
+      .sort((a,b)=>Number(a?.ordinal||0)-Number(b?.ordinal||0));
+    const childAuthoringFinalized=Boolean(node?.decision_payload?.children_authored);
+    if(existing.length&&childAuthoringFinalized)
+      return {children:existing,reconsider:false};
 
-    const authored=[];
+    // Durable children are authoritative accepted work. A restart continues from them;
+    // it never starts the decomposition over from the parent requirement.
+    const authored=existing.map(child=>({
+      ...child,
+      parent_path:child.parent_path??node.node_path,
+    }));
     const normalizedBranchDepth=pathDepth(node.node_path);
     const storageDepthAvailable=Number.isFinite(normalizedBranchDepth)
       &&normalizedBranchDepth<semanticRuntime.hard_storage_path_depth;
@@ -3257,7 +3279,14 @@ export async function runAutonomousRequirementCognition({
 
     for(let offset=0;offset<MAX_CHILDREN_PER_NODE;offset++){
       const ordinal=startOrdinal+offset;
-      const previous=authored.map(c=>({ordinal:c.ordinal,requirement:c.requirement_text}));
+      const previous=authored.map(c=>({
+        node_path:c.node_path||null,
+        ordinal:Number(c.ordinal||0),
+        status:c.node_status||c.status||null,
+        requirement:c.requirement_text,
+        scope_removed:c?.decision_payload?.scope_removed||null,
+        completion_criterion:c?.decision_payload?.completion_criterion||null,
+      }));
       const runtimeView=await semanticRuntimeView();
       const childPinnedEvidence=await loadPinnedEvidence(node.node_path);
       const branchEconomics=projectedBranchEconomics(node.context_payload||{},childPinnedEvidence);
@@ -3282,7 +3311,7 @@ export async function runAutonomousRequirementCognition({
         node.context_payload||{},childPinnedEvidence,stageBudgets.child_formulation
       );
 
-      let proposalCheckpoint=await loadChildProposalCheckpoint(node,ordinal);
+      let proposalCheckpoint=await loadChildProposalCheckpoint(node,ordinal,previous);
       let proposal=proposalCheckpoint?.proposal||null;
 
       if(!proposal){
@@ -3296,7 +3325,10 @@ export async function runAutonomousRequirementCognition({
                 'Thinking is enabled. Do the substantive decomposition reasoning here.',
                 'You own the child requirement. The runtime will not invent, narrow, or repair it for you.',
                 'Author exactly ONE next child requirement, or declare DONE when the children already authored adequately cover the parent.',
-                'A CHILD must be independently completable, materially narrower than the parent, and include explicit scope removed plus a concrete completion criterion.',
+                'previously_authored_children are durable, accepted, and authoritative. Do NOT restate, paraphrase, re-research, or recreate work already assigned to any previous child.',
+                'Derive the NEXT child only from the parent scope that remains uncovered after subtracting previously_authored_children. If no independently executable scope remains, return DONE.',
+                'The runtime performs terminal parent synthesis automatically after all children resolve. Do NOT create a child whose sole purpose is to merge, format, summarize, reconcile, or submit the other children; return DONE instead when only terminal synthesis remains.',
+                'A CHILD must be independently completable, materially narrower than the parent, non-overlapping with accepted children, and include explicit scope removed plus a concrete completion criterion.',
                 'Do not execute or solve the child.',
                 'Return complete JSON only: {"status":"CHILD","requirement":"...","scope_removed":"...","completion_criterion":"...","reason":"brief"} OR {"status":"DONE","coverage_note":"brief"}.',
                 'There is no required number of children. One child is valid only when genuinely narrower; use as many or as few children as your reasoning requires within the conserved work budget.',
@@ -3342,6 +3374,29 @@ export async function runAutonomousRequirementCognition({
                 throw new Error('autonomous_decomposition_nonconvergent_child:'+node.node_path+':'+validation.failures.join(','));
               candidate._convergence_validation=validation;
 
+              const siblingOverlap=previous
+                .map(v=>({
+                  ordinal:Number(v?.ordinal||0),
+                  requirement:text(v?.requirement),
+                  similarity:requirementSimilarity(candidate.requirement,v?.requirement),
+                }))
+                .sort((a,b)=>b.similarity-a.similarity)[0]||null;
+              if(siblingOverlap&&siblingOverlap.similarity>=0.78){
+                provenanceRevisionGuidance=
+                  'The proposed child overlaps accepted child ordinal '
+                  +siblingOverlap.ordinal
+                  +' (requirement similarity '+siblingOverlap.similarity.toFixed(3)+'). '
+                  +'Treat that child as already assigned. Author only uncovered parent scope, or return DONE if only terminal parent synthesis remains.';
+                const overlapError=new Error('autonomous_decomposition_overlapping_child:'+node.node_path);
+                overlapError.code='COGNITION_CHILD_OVERLAP';
+                throw overlapError;
+              }
+              candidate._sibling_overlap_validation={
+                valid:true,
+                max_similarity:Number(siblingOverlap?.similarity||0),
+                compared_children:previous.length,
+              };
+
               const provenanceReview=await reviewChildProposalProvenance(
                 node,
                 ordinal,
@@ -3370,7 +3425,7 @@ export async function runAutonomousRequirementCognition({
               candidate._provenance_review=provenanceReview;
             }
             proposal=candidate;
-            proposalCheckpoint={row:await saveChildProposalCheckpoint(node,ordinal,proposal),proposal};
+            proposalCheckpoint={row:await saveChildProposalCheckpoint(node,ordinal,proposal,previous),proposal};
             break;
           }catch(error){
             formulationError=error;
@@ -3379,6 +3434,8 @@ export async function runAutonomousRequirementCognition({
               || error?.code==='NVIDIA_TIMEOUT'
               || String(error?.message||'').startsWith('autonomous_decomposition_nonconvergent_child:')
               || String(error?.message||'').startsWith('autonomous_decomposition_child_formulation_status_invalid:')
+              || error?.code==='COGNITION_CHILD_OVERLAP'
+              || String(error?.message||'').startsWith('autonomous_decomposition_overlapping_child:')
               || String(error?.message||'').startsWith('autonomous_decomposition_child_provenance_status_invalid:')
               || String(error?.message||'').startsWith('autonomous_decomposition_child_provenance_rejected:');
             if(!recoverable)throw error;
@@ -3405,7 +3462,7 @@ export async function runAutonomousRequirementCognition({
             {role:'user',content:safeJson({
               durable_agent_authored_child_proposal:proposal,
               checkpoint:{
-                step_key:childProposalStepKey(node,ordinal),
+                step_key:childProposalStepKey(node,ordinal,previous),
                 artifact_hash:proposalCheckpoint?.row?.artifact_hash||null,
                 authored_by_bound_agent:true,
               },
@@ -3463,8 +3520,21 @@ export async function runAutonomousRequirementCognition({
 
       const requirement=text(parsed?.requirement);
       if(requirement.length<5)throw new Error('autonomous_decomposition_child_requirement_empty:'+node.node_path);
-      const duplicate=authored.some(c=>c.requirement_hash===sha256(requirement));
-      if(duplicate)throw new Error('autonomous_decomposition_duplicate_child:'+node.node_path);
+      const duplicate=authored.some(c=>
+        c.requirement_hash===sha256(requirement)
+        || normalizedRequirement(c.requirement_text)===normalizedRequirement(requirement)
+      );
+      if(duplicate){
+        const duplicateError=new Error('autonomous_decomposition_duplicate_child:'+node.node_path);
+        duplicateError.code='COGNITION_CHILD_OVERLAP';
+        duplicateError.rejectionReason=
+          'accepted_child_already_covers_proposed_scope; formulate_only_remaining_scope_or_DONE';
+        return returnChildAuthoringFailure({
+          ordinal,
+          phase:'duplicate_child_remaining_scope',
+          error:duplicateError,
+        });
+      }
 
       const nodePath=node.node_path+'.'+String(ordinal).padStart(3,'0');
       const childRequirementHash=sha256(requirement);
@@ -4259,8 +4329,11 @@ export async function runAutonomousRequirementCognition({
 
     for(let transitions=0;transitions<8;transitions++){
       if(node.node_status==='split'||node.decision_type==='SPLIT'){
-        let kids=(await children(node.node_path)).filter((child)=>String(child?.status||'')!=='cancelled');
-        if(!kids.length){
+        let kids=(await children(node.node_path))
+          .filter((child)=>String(child?.status||'')!=='cancelled')
+          .sort((a,b)=>Number(a?.ordinal||0)-Number(b?.ordinal||0));
+        const childAuthoringFinalized=Boolean(node?.decision_payload?.children_authored);
+        if(!childAuthoringFinalized){
           const authoredResult=await authorChildren(node,{branchDepth,singleChildRefinements});
           if(authoredResult?.reconsider){
             node=authoredResult.node;
@@ -4269,6 +4342,8 @@ export async function runAutonomousRequirementCognition({
           }
           kids=asArray(authoredResult?.children);
         }
+        if(!kids.length)
+          throw new Error('autonomous_decomposition_split_requires_child:'+node.node_path);
         const completed=[];
         for(const child of kids){
           child.parent_path=node.node_path;
