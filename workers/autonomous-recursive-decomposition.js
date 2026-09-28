@@ -4270,6 +4270,106 @@ export async function runAutonomousRequirementCognition({
     throw error;
   }
 
+  function isTopLevelViabilityCandidateNode(node){
+    return /^R[.]\d{3}$/.test(text(node?.node_path));
+  }
+
+  function materializedStageProposalFromNode(node){
+    if(text(node?.decision_payload?.stage_contract_materialization_version)
+      !==STAGE_CONTRACT_MATERIALIZATION_VERSION)return null;
+    const parts=resultParts(node?.result_artifact);
+    if(!parts.artifact)return null;
+    try{
+      const proposal=JSON.parse(parts.artifact);
+      return proposal&&typeof proposal==='object'&&!Array.isArray(proposal)?proposal:null;
+    }catch{return null;}
+  }
+
+  async function ensureCanonicalStageCandidateSubmission(node,proposalOverride=null){
+    if(node?.node_status!=='completed'||!isTopLevelViabilityCandidateNode(node))
+      return node;
+    const stageContract=stageContractForRequirement(packet,node.requirement_text);
+    if(!stageContract.applies||stageContract.name!=='expertise_viability_proposal_v0_1')
+      return node;
+
+    const prior=asObject(node?.decision_payload?.canonical_stage_candidate_submission);
+    if(text(prior.proposal_id)&&prior.persisted===true)return node;
+
+    const proposal=proposalOverride||materializedStageProposalFromNode(node);
+    // Legacy completed nodes that predate stage-contract materialization are not
+    // silently promoted. They must first be rematerialized under the current
+    // contract before they are eligible for canonical candidate persistence.
+    if(!proposal)return node;
+
+    const validation=validateStageContractArtifact(stageContract.definition,safeJson(proposal));
+    if(!validation.valid){
+      const error=new Error(
+        'autonomous_decomposition_canonical_candidate_contract_invalid:'
+        +node.node_path+':'+validation.issues.join(',')
+      );
+      error.code='COGNITION_RUNTIME_ACCOUNTING_FAULT';
+      throw error;
+    }
+
+    const persisted=await rpc('aau_bridge_ensure_expertise_viability_candidate_v0_1',{
+      p_agent_id:agentId,
+      p_wake_request_id:intentExecutionId,
+      p_proposal:proposal,
+    });
+    if(!persisted?.proposal_id){
+      const error=new Error(
+        'autonomous_decomposition_canonical_candidate_persistence_failed:'
+        +node.node_path
+      );
+      error.code='COGNITION_RUNTIME_ACCOUNTING_FAULT';
+      throw error;
+    }
+
+    const decisionPayload={
+      ...(node.decision_payload||{}),
+      canonical_stage_candidate_submission:{
+        persisted:true,
+        proposal_id:persisted.proposal_id,
+        domain:persisted.domain||proposal.domain||null,
+        status:persisted.status||null,
+        candidate_ordinal:persisted.candidate_ordinal??null,
+        candidate_count:persisted.candidate_count??null,
+        target_count:persisted.target_count??null,
+        candidate_cohort:persisted.candidate_cohort??null,
+        idempotent_domain_replay:Boolean(persisted.idempotent_domain_replay),
+        persistence_contract:'canonical_stage_candidate_submission_v0_1',
+        persisted_at:new Date().toISOString(),
+      },
+    };
+    const saved=await saveNode({
+      nodePath:node.node_path,
+      parentPath:node.parent_path??parentPathOf(node.node_path),
+      ordinal:node.ordinal||0,
+      requirement:node.requirement_text,
+      sourceKind:node.source_kind,
+      sourceRef:node.source_ref,
+      status:'completed',
+      decisionType:node.decision_type||'SPLIT',
+      decisionPayload,
+      contextPayload:node.context_payload||{},
+      resultArtifact:node.result_artifact,
+    });
+    saved.parent_path=node.parent_path??parentPathOf(node.node_path);
+    console.log('AAU_AUTONOMOUS_CANONICAL_STAGE_CANDIDATE_PERSISTED',JSON.stringify({
+      agent_id:agentId,
+      intent_execution_id:intentExecutionId,
+      node_path:node.node_path,
+      proposal_id:persisted.proposal_id,
+      domain:persisted.domain||proposal.domain||null,
+      status:persisted.status||null,
+      candidate_ordinal:persisted.candidate_ordinal??null,
+      candidate_count:persisted.candidate_count??null,
+      target_count:persisted.target_count??null,
+      idempotent_domain_replay:Boolean(persisted.idempotent_domain_replay),
+    }));
+    return saved;
+  }
+
   async function synthesize(node,childRows){
     let accumulator=asObject(node?.decision_payload?.synthesis_accumulator);
     let cursor=Number(node?.decision_payload?.synthesis_cursor||0);
@@ -4562,6 +4662,13 @@ export async function runAutonomousRequirementCognition({
       contextPayload:node.context_payload||{},resultArtifact,
     });
     done.parent_path=node.parent_path??parentPathOf(node.node_path);
+    if(outcome==='COMPLETE')
+      return ensureCanonicalStageCandidateSubmission(
+        done,
+        terminalStageContract.applies
+          ? JSON.parse(text(final?.parsed?.artifact))
+          : null
+      );
     return done;
   }
 
@@ -4574,7 +4681,9 @@ export async function runAutonomousRequirementCognition({
     node.parent_path=parentPath;
     counters.nodes++;
 
-    if(node.node_status==='completed'||node.node_status==='blocked')return node;
+    if(node.node_status==='completed')
+      return ensureCanonicalStageCandidateSubmission(node);
+    if(node.node_status==='blocked')return node;
 
     for(let transitions=0;transitions<8;transitions++){
       if(node.node_status==='split'||node.decision_type==='SPLIT'){
