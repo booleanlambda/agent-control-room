@@ -1281,6 +1281,42 @@ export async function runAutonomousRequirementCognition({
     });
   }
 
+  async function loadExpertiseCandidateLedger(){
+    const row=await rpc('aau_bridge_expertise_candidate_ledger_v0_1',{
+      p_agent_id:agentId,
+    });
+    if(row?.status!=='ready')
+      throw new Error('autonomous_decomposition_candidate_ledger_lookup_failed');
+    return row;
+  }
+
+  function expertiseCandidateLedgerContext(row){
+    const ledger=asObject(row);
+    if(text(ledger.candidate_mode)!=='four_viability_proposals_v0_1')return {};
+    return {
+      expertise_candidate_ledger:{
+        available:true,
+        source:'canonical_expertise_economic_proposals_current_cohort',
+        value:{
+          contract:text(ledger.contract)||'expertise_candidate_ledger_v0_1',
+          candidate_mode:text(ledger.candidate_mode),
+          candidate_cohort:Number(ledger.candidate_cohort||1),
+          target_count:Number(ledger.target_count||4),
+          submitted_count:Number(ledger.submitted_count||0),
+          candidates:asArray(ledger.candidates).map(v=>({
+            proposal_id:v?.proposal_id||null,
+            domain:text(v?.domain)||null,
+            status:text(v?.status)||null,
+            candidate_ordinal:Number(v?.candidate_ordinal||0)||null,
+            candidate_cohort:Number(v?.candidate_cohort||ledger.candidate_cohort||1),
+            source_wake_request_id:v?.source_wake_request_id||null,
+            created_at:v?.created_at||null,
+          })),
+        },
+      },
+    };
+  }
+
   async function nodeRpc(action,args={}){
     const base={
       p_agent_id:agentId,
@@ -2065,9 +2101,11 @@ export async function runAutonomousRequirementCognition({
   }
 
   async function decide(node,{forceReconsider=false,branchDepth=0,singleChildRefinements=0}={}){
+    const canonicalCandidateLedger=await loadExpertiseCandidateLedger();
     let contextPayload={
       ...asObject(node.context_payload),
       ...lifecycleStageContractContext(packet),
+      ...expertiseCandidateLedgerContext(canonicalCandidateLedger),
     };
     let pinnedEvidence=await loadPinnedEvidence(node.node_path);
     const durableResearchCatalog=await loadDurableResearchCatalog(node.node_path);
@@ -2251,6 +2289,7 @@ export async function runAutonomousRequirementCognition({
                 'Thinking is enabled. This pass is where YOU determine what the requirement means and what action YOU intend to take.',
                 'The runtime does not choose, reinterpret, decompose, repair, or declare the requirement blocked for you.',
                 'Available decisions for this exact node: '+availableDecisions.join(', ')+'.',
+                'CANONICAL STAGE-4 LEDGER: when supplied_context.expertise_candidate_ledger is available, it is the authoritative current-cohort record of already submitted candidate domains, ordinals, and progress. Use it for distinctness/progress checks. Do not reconstruct those facts from recent_activity, historical trees, or prior invalidated cohorts.',
                 remediationAvailable
                   ? 'REMEDIATE is available because you have a prior durable cognitive state and remaining remediation budget. Choose it only if YOU detect a contradiction, stale belief, or recoverable cognitive-state failure in your own prior reasoning. The runtime will not diagnose the anomaly for you.'
                   : 'REMEDIATE is mechanically unavailable because there is no eligible prior cognitive state or the remediation budget is exhausted.',
