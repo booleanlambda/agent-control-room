@@ -733,6 +733,69 @@ function lifecycleStageContractContext(packet){
   };
 }
 
+const TERMINAL_SYNTHESIS_OWNERSHIP_VERSION='runtime_owned_terminal_synthesis_v0_2';
+
+function stageContractForRequirement(packet,requirement){
+  const resolved=lifecycleStageContract(packet);
+  if(!resolved.name||!resolved.definition)return {applies:false,name:'',definition:null};
+  const req=normalizedRequirement(requirement);
+  const name=normalizedRequirement(resolved.name);
+  return {
+    applies:Boolean(req&&name&&req.includes(name)),
+    name:resolved.name,
+    definition:resolved.definition,
+  };
+}
+
+function runtimeOwnedTerminalSynthesisChild(candidate){
+  const requirement=normalizedRequirement(candidate?.requirement);
+  if(!requirement)return false;
+  // Terminal synthesis is a runtime phase. A decomposition child may gather or
+  // validate evidence, but it must not exist solely to format/merge/submit it.
+  return /^(synthesize|synthesise|format|submit|compile|merge|reconcile|assemble|convert)\b/.test(requirement);
+}
+
+function validateStageContractArtifact(contractDefinition,artifactText){
+  const definition=asObject(contractDefinition);
+  let artifact=null;
+  try{artifact=JSON.parse(text(artifactText));}catch{return {valid:false,issues:['artifact_not_valid_json_object']};}
+  if(!artifact||typeof artifact!=='object'||Array.isArray(artifact))
+    return {valid:false,issues:['artifact_not_json_object']};
+
+  const issues=[];
+  const required=asArray(definition.required_fields).map(text).filter(Boolean);
+  const fieldContract=asObject(definition.field_contract);
+  for(const field of required){
+    const value=artifact[field];
+    if(value===undefined||value===null||value==='')
+      issues.push('missing_required_field:'+field);
+    const spec=fieldContract[field];
+    if(typeof spec==='string'){
+      const lower=spec.toLowerCase();
+      if(lower.includes('nonempty string')&&text(value).length<1)
+        issues.push('nonempty_string_required:'+field);
+      if(lower.includes('nonempty array')&&(!Array.isArray(value)||!value.length))
+        issues.push('nonempty_array_required:'+field);
+      const minMatch=lower.match(/at least\s+(\d+)\s+characters/);
+      if(minMatch&&text(value).length<Number(minMatch[1]))
+        issues.push('minimum_length_'+minMatch[1]+':'+field);
+    }else if(spec&&typeof spec==='object'){
+      if(!value||typeof value!=='object'||Array.isArray(value)){
+        issues.push('object_required:'+field);
+        continue;
+      }
+      for(const sub of asArray(spec.required).map(text).filter(Boolean)){
+        const subValue=value[sub];
+        if(subValue===undefined||subValue===null||subValue==='')
+          issues.push('missing_required_field:'+field+'.'+sub);
+        if(sub==='risks'&&(!Array.isArray(subValue)||!subValue.length))
+          issues.push('nonempty_array_required:'+field+'.'+sub);
+      }
+    }
+  }
+  return {valid:issues.length===0,issues,artifact};
+}
+
 function resolveContext(packet,requests,localContext={}){
   const out={};
   const lifecycleContract=lifecycleStageContract(packet);
@@ -3374,6 +3437,26 @@ export async function runAutonomousRequirementCognition({
                 throw new Error('autonomous_decomposition_nonconvergent_child:'+node.node_path+':'+validation.failures.join(','));
               candidate._convergence_validation=validation;
 
+              if(runtimeOwnedTerminalSynthesisChild(candidate)){
+                proposal={
+                  status:'DONE',
+                  coverage_note:'Remaining uncovered work is terminal synthesis/formatting/submission owned by the runtime under '+TERMINAL_SYNTHESIS_OWNERSHIP_VERSION+'.',
+                  _runtime_terminal_synthesis_collapsed:true,
+                };
+                proposalCheckpoint={
+                  row:await saveChildProposalCheckpoint(node,ordinal,proposal,previous),
+                  proposal,
+                };
+                console.log('AAU_AUTONOMOUS_TERMINAL_SYNTHESIS_CHILD_COLLAPSED',JSON.stringify({
+                  agent_id:agentId,
+                  intent_execution_id:intentExecutionId,
+                  node_path:node.node_path,
+                  ordinal,
+                  ownership_version:TERMINAL_SYNTHESIS_OWNERSHIP_VERSION,
+                }));
+                break;
+              }
+
               const siblingOverlap=previous
                 .map(v=>({
                   ordinal:Number(v?.ordinal||0),
@@ -4014,6 +4097,8 @@ export async function runAutonomousRequirementCognition({
       accumulator,
       proposed_final:proposedFinal,
       revision_guidance:revisionGuidance||null,
+      terminal_synthesis_ownership_version:TERMINAL_SYNTHESIS_OWNERSHIP_VERSION,
+      lifecycle_stage_contract:lifecycleStageContract(packet),
     });
     const durableProvenance=await loadJsonPhaseCheckpoint(
       node.node_path,'SYNTHESIS_PROVENANCE',provenanceSemanticIdentity
@@ -4028,6 +4113,8 @@ export async function runAutonomousRequirementCognition({
         'REVISE if the synthesis swaps values between sources, silently changes a source/value pairing, changes units or time horizons, converts a derived scenario into a sourced fact, or strengthens uncertainty beyond what the children support.',
         'Derived calculations and scenarios are allowed only when explicitly labeled as derived, their exact source inputs remain correctly paired, and the transformation/formula is stated.',
         'BLOCKED child gaps must remain visible when they are material to the parent requirement.',
+        'Terminal synthesis/formatting/submission is runtime-owned. Do NOT ACCEPT a proposed BLOCKED outcome merely because no separate synthesis child previously created the final formatted artifact.',
+        'When the parent requirement names the lifecycle stage contract, the proposed final artifact itself must satisfy that contract from the resolved evidence, while preserving unresolved evidence gaps honestly.',
         'Return JSON only: {"status":"ACCEPT|REVISE","reason":"auditable explanation","issues":["..."],"evidence_bindings":[{"claim":"...","source_path_or_id":"...","preserved":true}],"revision_guidance":"specific correction when REVISE; empty when ACCEPT"}.',
       ].join('\n')},
       {role:'user',content:safeJson({
@@ -4035,6 +4122,10 @@ export async function runAutonomousRequirementCognition({
         agent_authored_discovery_state:agentDiscoveryState(node),
         resolved_child_evidence:childEvidence,
         cumulative_synthesis:accumulator,
+        terminal_synthesis_ownership:{
+          version:TERMINAL_SYNTHESIS_OWNERSHIP_VERSION,
+          lifecycle_stage_contract:lifecycleStageContract(packet),
+        },
         proposed_final:{
           outcome:text(proposedFinal?.outcome).toUpperCase(),
           reason:proposedFinal?.reason,
@@ -4154,6 +4245,7 @@ export async function runAutonomousRequirementCognition({
       status:child.node_status||child.status||null,
       decision_type:child.decision_type||null,
     }));
+    const terminalStageContract=stageContractForRequirement(packet,node.requirement_text);
     let final=null;
     let synthesisProvenanceReview=null;
     const priorProvenanceContinuation=asObject(node?.decision_payload?.synthesis_provenance_pending);
@@ -4169,6 +4261,10 @@ export async function runAutonomousRequirementCognition({
           child_states:childStates,
           accumulator,
           provenance_revision_guidance:synthesisProvenanceGuidance||null,
+          terminal_synthesis_ownership_version:TERMINAL_SYNTHESIS_OWNERSHIP_VERSION,
+          lifecycle_stage_contract_name:terminalStageContract.name||null,
+          lifecycle_stage_contract_hash:terminalStageContract.definition
+            ?sha256(terminalStageContract.definition):null,
         });
         const durableFinal=await loadJsonPhaseCheckpoint(
           node.node_path,'FINAL_SYNTHESIS',finalSemanticIdentity
@@ -4179,9 +4275,12 @@ export async function runAutonomousRequirementCognition({
           {role:'system',content:[
             'You are the bound autonomous agent closing a parent requirement after all child requirements have resolved.',
             'Some children may be BLOCKED. Decide whether the parent can honestly be COMPLETE from the resolved evidence or must itself be BLOCKED.',
-            'The runtime does not make that semantic decision for you.',
+            'The runtime does not make the substantive COMPLETE/BLOCKED decision for you, but terminal synthesis/formatting/submission is explicitly YOUR task in this phase.',
+            'If the parent requirement names a lifecycle stage contract, construct the final contract artifact NOW from the resolved child evidence. The absence of a separate synthesis child or previously formatted proposal is NOT a blocking gap.',
+            'Choose BLOCKED only when a substantive evidence/dependency gap prevents truthful satisfaction of the parent requirement; never choose BLOCKED merely because synthesis, formatting, or submission remains to be performed in this phase.',
+            'When a lifecycle stage contract applies and outcome is COMPLETE, artifact MUST be a JSON-encoded object satisfying that contract. Preserve hypotheses as hypotheses and unresolved evidence gaps in the contract fields.',
             'If any essential child gap prevents the parent requirement from being satisfied, choose BLOCKED and preserve the unresolved gap.',
-            'Return JSON only: {"outcome":"COMPLETE|BLOCKED","reason":"auditable reason","artifact":"concise auditable parent result","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
+            'Return JSON only: {"outcome":"COMPLETE|BLOCKED","reason":"auditable reason","artifact":"concise auditable parent result or JSON-encoded stage-contract object","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
             'Do not add requirements or conclusions that are not supported by the resolved children.',
              'EPISTEMIC THRESHOLD POLICY: '+THRESHOLD_EVIDENCE_POLICY.RULE+' '+THRESHOLD_EVIDENCE_POLICY.PASS+' '+THRESHOLD_EVIDENCE_POLICY.FAIL+' '+THRESHOLD_EVIDENCE_POLICY.UNKNOWN,
              'If a child contains UNKNOWN threshold states, preserve them as UNKNOWN in the parent synthesis unless later resolved by explicit evidence.',
@@ -4191,6 +4290,12 @@ export async function runAutonomousRequirementCognition({
             agent_authored_discovery_state:agentDiscoveryState(node),
             child_states:childStates,
             cumulative_synthesis:accumulator,
+            terminal_synthesis_ownership:{
+              version:TERMINAL_SYNTHESIS_OWNERSHIP_VERSION,
+              applies_to_parent:terminalStageContract.applies,
+              stage_contract_name:terminalStageContract.name||null,
+              stage_contract_definition:terminalStageContract.definition||null,
+            },
             prior_provenance_revision_guidance:synthesisProvenanceGuidance||null,
           })},
         ],stageBudgets.synthesis_final,'req_'+node.node_path.replaceAll('.','_')+'_synthesis_final_'+attempt);
@@ -4201,6 +4306,38 @@ export async function runAutonomousRequirementCognition({
           throw new Error('autonomous_decomposition_synthesis_outcome_invalid:'+node.node_path);
         if(!text(finalCandidate.artifact))
           throw new Error('autonomous_decomposition_synthesis_empty:'+node.node_path);
+
+        if(terminalStageContract.applies){
+          const allChildrenSubstantivelyResolved=childStates.every(v=>v.status==='completed');
+          const blockText=normalizedRequirement(
+            text(finalCandidate.reason)+' '+text(finalCandidate.artifact)
+          );
+          if(candidateOutcome==='BLOCKED'
+            &&allChildrenSubstantivelyResolved
+            &&/(synthesis|synthesize|synthesise|format|submit|submission|proposal pending)/.test(blockText)){
+            synthesisProvenanceGuidance=
+              'Terminal synthesis is runtime-owned. All substantive children are complete, so do not BLOCK because the proposal has not yet been formatted/submitted. Construct the '+terminalStageContract.name+' artifact now from the resolved evidence; BLOCK only for a substantive evidence gap.';
+            const ownershipError=new Error('autonomous_decomposition_terminal_synthesis_ownership_violation:'+node.node_path);
+            ownershipError.code='COGNITION_RESPONSE_REJECTED';
+            throw ownershipError;
+          }
+          if(candidateOutcome==='COMPLETE'){
+            const contractValidation=validateStageContractArtifact(
+              terminalStageContract.definition,
+              finalCandidate.artifact
+            );
+            if(!contractValidation.valid){
+              synthesisProvenanceGuidance=
+                'The terminal artifact failed '+terminalStageContract.name+' structural validation: '
+                +contractValidation.issues.join(', ')
+                +'. Return a JSON-encoded proposal object satisfying every required field and minimum length, grounded only in resolved evidence.';
+              const contractError=new Error('autonomous_decomposition_terminal_contract_invalid:'+node.node_path);
+              contractError.code='COGNITION_RESPONSE_REJECTED';
+              throw contractError;
+            }
+          }
+        }
+
         if(!durableFinal.parsed){
           await saveJsonPhaseCheckpoint(
             node.node_path,'FINAL_SYNTHESIS',finalSemanticIdentity,finalCandidate,{
@@ -4309,6 +4446,8 @@ export async function runAutonomousRequirementCognition({
         decomposition_decision:'SPLIT',
         blocked_child_count:childStates.filter(v=>v.status==='blocked'||v.decision_type==='BLOCKED').length,
         synthesis_provenance_review:asObject(synthesisProvenanceReview),
+        terminal_synthesis_ownership_version:TERMINAL_SYNTHESIS_OWNERSHIP_VERSION,
+        terminal_stage_contract_name:terminalStageContract.applies?terminalStageContract.name:null,
       },
       contextPayload:node.context_payload||{},resultArtifact,
     });
