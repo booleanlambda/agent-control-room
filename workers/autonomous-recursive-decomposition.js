@@ -734,6 +734,7 @@ function lifecycleStageContractContext(packet){
 }
 
 const TERMINAL_SYNTHESIS_OWNERSHIP_VERSION='runtime_owned_terminal_synthesis_v0_2';
+const STAGE_CONTRACT_MATERIALIZATION_VERSION='stage_contract_materialize_v0_1';
 
 function stageContractForRequirement(packet,requirement){
   const resolved=lifecycleStageContract(packet);
@@ -4161,6 +4162,114 @@ export async function runAutonomousRequirementCognition({
     };
   }
 
+  async function materializeTerminalStageContract(
+    node,childRows,accumulator,semanticFinal,terminalStageContract
+  ){
+    const childEvidence=childRows.map(child=>{
+      const parts=resultParts(child.result_artifact);
+      return {
+        path:child.node_path,
+        status:child.node_status||child.status||null,
+        decision_type:child.decision_type||null,
+        requirement:child.requirement_text,
+        artifact:clip(parts.artifact,7000),
+        handoff:parts.handoff,
+      };
+    });
+    const materializationIdentity=sha256({
+      version:STAGE_CONTRACT_MATERIALIZATION_VERSION,
+      node_path:node.node_path,
+      parent_requirement:node.requirement_text,
+      stage_contract_name:terminalStageContract.name,
+      stage_contract_hash:sha256(terminalStageContract.definition),
+      semantic_final:{
+        outcome:text(semanticFinal?.outcome).toUpperCase(),
+        reason:text(semanticFinal?.reason),
+        artifact:text(semanticFinal?.artifact),
+        handoff:asObject(semanticFinal?.handoff),
+      },
+      accumulator,
+      child_result_hashes:childRows.map(v=>({
+        path:v.node_path,
+        result_hash:v.result_hash||sha256(v.result_artifact||''),
+      })),
+    });
+    const durable=await loadJsonPhaseCheckpoint(
+      node.node_path,'STAGE_CONTRACT_MATERIALIZE',materializationIdentity
+    );
+    if(durable.parsed){
+      const persistedProposal=asObject(durable.parsed?.proposal||durable.parsed);
+      const persistedValidation=validateStageContractArtifact(
+        terminalStageContract.definition,
+        safeJson(persistedProposal)
+      );
+      if(persistedValidation.valid)return persistedProposal;
+    }
+
+    let validationGuidance='';
+    for(let attempt=1;attempt<=3;attempt++){
+      const response=await callJson([
+        {role:'system',content:[
+          'You are the bound autonomous agent materializing YOUR already-completed semantic synthesis into the authoritative lifecycle stage contract.',
+          'This phase is contract materialization, not new research and not a new domain decision.',
+          'Use only the resolved child evidence, cumulative synthesis, and semantic final result supplied here.',
+          'Do not invent customers, revenue, employment, funding, competence, pricing, market segmentation, or source claims.',
+          'Preserve unresolved evidence gaps explicitly in confidence_and_gaps and keep unsupported demand/economic assertions labeled as hypotheses.',
+          'Return JSON only in exactly this wrapper: {"proposal":{...}} where proposal satisfies every required field in stage_contract_definition.',
+          'Do NOT JSON-encode proposal as a string. proposal must be a real nested JSON object.',
+        ].join('\n')},
+        {role:'user',content:safeJson({
+          parent_requirement:node.requirement_text,
+          stage_contract_name:terminalStageContract.name,
+          stage_contract_definition:terminalStageContract.definition,
+          cumulative_synthesis:accumulator,
+          resolved_child_evidence:childEvidence,
+          semantic_final:{
+            outcome:text(semanticFinal?.outcome).toUpperCase(),
+            reason:semanticFinal?.reason,
+            artifact:semanticFinal?.artifact,
+            handoff:asObject(semanticFinal?.handoff),
+          },
+          validation_guidance:validationGuidance||null,
+          materialization_version:STAGE_CONTRACT_MATERIALIZATION_VERSION,
+        })},
+      ],stageBudgets.synthesis_final,
+      'req_'+node.node_path.replaceAll('.','_')+'_stage_contract_materialize_'+attempt);
+
+      const proposal=asObject(response?.parsed?.proposal);
+      const validation=validateStageContractArtifact(
+        terminalStageContract.definition,
+        safeJson(proposal)
+      );
+      if(validation.valid){
+        await saveJsonPhaseCheckpoint(
+          node.node_path,'STAGE_CONTRACT_MATERIALIZE',materializationIdentity,
+          {proposal},{
+            stage_contract_name:terminalStageContract.name,
+            materialization_version:STAGE_CONTRACT_MATERIALIZATION_VERSION,
+            proposal_hash:sha256(proposal),
+          }
+        );
+        console.log('AAU_AUTONOMOUS_STAGE_CONTRACT_MATERIALIZED',JSON.stringify({
+          agent_id:agentId,
+          intent_execution_id:intentExecutionId,
+          node_path:node.node_path,
+          stage_contract_name:terminalStageContract.name,
+          materialization_version:STAGE_CONTRACT_MATERIALIZATION_VERSION,
+          attempt,
+        }));
+        return proposal;
+      }
+      validationGuidance=
+        'Previous proposal failed structural validation: '
+        +validation.issues.join(', ')
+        +'. Correct only the contract structure/content sufficiency using the same evidence.';
+    }
+    const error=new Error('autonomous_decomposition_stage_contract_materialization_invalid:'+node.node_path);
+    error.code='COGNITION_RESPONSE_REJECTED';
+    throw error;
+  }
+
   async function synthesize(node,childRows){
     let accumulator=asObject(node?.decision_payload?.synthesis_accumulator);
     let cursor=Number(node?.decision_payload?.synthesis_cursor||0);
@@ -4262,6 +4371,7 @@ export async function runAutonomousRequirementCognition({
           accumulator,
           provenance_revision_guidance:synthesisProvenanceGuidance||null,
           terminal_synthesis_ownership_version:TERMINAL_SYNTHESIS_OWNERSHIP_VERSION,
+          stage_contract_materialization_version:STAGE_CONTRACT_MATERIALIZATION_VERSION,
           lifecycle_stage_contract_name:terminalStageContract.name||null,
           lifecycle_stage_contract_hash:terminalStageContract.definition
             ?sha256(terminalStageContract.definition):null,
@@ -4276,11 +4386,11 @@ export async function runAutonomousRequirementCognition({
             'You are the bound autonomous agent closing a parent requirement after all child requirements have resolved.',
             'Some children may be BLOCKED. Decide whether the parent can honestly be COMPLETE from the resolved evidence or must itself be BLOCKED.',
             'The runtime does not make the substantive COMPLETE/BLOCKED decision for you, but terminal synthesis/formatting/submission is explicitly YOUR task in this phase.',
-            'If the parent requirement names a lifecycle stage contract, construct the final contract artifact NOW from the resolved child evidence. The absence of a separate synthesis child or previously formatted proposal is NOT a blocking gap.',
-            'Choose BLOCKED only when a substantive evidence/dependency gap prevents truthful satisfaction of the parent requirement; never choose BLOCKED merely because synthesis, formatting, or submission remains to be performed in this phase.',
-            'When a lifecycle stage contract applies and outcome is COMPLETE, artifact MUST be a JSON-encoded object satisfying that contract. Preserve hypotheses as hypotheses and unresolved evidence gaps in the contract fields.',
+            'If the parent requirement names a lifecycle stage contract, the runtime owns the exact contract materialization immediately AFTER this semantic decision. The absence of a separate synthesis child or previously formatted proposal is NOT a blocking gap.',
+            'Choose BLOCKED only when a substantive evidence/dependency gap prevents truthful satisfaction of the parent requirement; never choose BLOCKED merely because synthesis, formatting, or submission remains to be performed.',
+            'When a lifecycle stage contract applies, keep artifact as a concise semantic synthesis. Do NOT embed or stringify the contract object here; the next runtime-owned materialization phase will produce the exact JSON object.',
             'If any essential child gap prevents the parent requirement from being satisfied, choose BLOCKED and preserve the unresolved gap.',
-            'Return JSON only: {"outcome":"COMPLETE|BLOCKED","reason":"auditable reason","artifact":"concise auditable parent result or JSON-encoded stage-contract object","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
+            'Return JSON only: {"outcome":"COMPLETE|BLOCKED","reason":"auditable reason","artifact":"concise semantic parent result","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
             'Do not add requirements or conclusions that are not supported by the resolved children.',
              'EPISTEMIC THRESHOLD POLICY: '+THRESHOLD_EVIDENCE_POLICY.RULE+' '+THRESHOLD_EVIDENCE_POLICY.PASS+' '+THRESHOLD_EVIDENCE_POLICY.FAIL+' '+THRESHOLD_EVIDENCE_POLICY.UNKNOWN,
              'If a child contains UNKNOWN threshold states, preserve them as UNKNOWN in the parent synthesis unless later resolved by explicit evidence.',
@@ -4322,19 +4432,15 @@ export async function runAutonomousRequirementCognition({
             throw ownershipError;
           }
           if(candidateOutcome==='COMPLETE'){
-            const contractValidation=validateStageContractArtifact(
-              terminalStageContract.definition,
-              finalCandidate.artifact
+            const proposal=await materializeTerminalStageContract(
+              node,childRows,accumulator,finalCandidate,terminalStageContract
             );
-            if(!contractValidation.valid){
-              synthesisProvenanceGuidance=
-                'The terminal artifact failed '+terminalStageContract.name+' structural validation: '
-                +contractValidation.issues.join(', ')
-                +'. Return a JSON-encoded proposal object satisfying every required field and minimum length, grounded only in resolved evidence.';
-              const contractError=new Error('autonomous_decomposition_terminal_contract_invalid:'+node.node_path);
-              contractError.code='COGNITION_RESPONSE_REJECTED';
-              throw contractError;
-            }
+            finalCandidate.artifact=safeJson(proposal);
+            finalCandidate.terminal_stage_contract_materialized=true;
+            finalCandidate.stage_contract_name=terminalStageContract.name;
+            finalCandidate.stage_contract_materialization_version=
+              STAGE_CONTRACT_MATERIALIZATION_VERSION;
+            final={...final,parsed:finalCandidate};
           }
         }
 
@@ -4343,6 +4449,8 @@ export async function runAutonomousRequirementCognition({
             node.node_path,'FINAL_SYNTHESIS',finalSemanticIdentity,finalCandidate,{
               synthesis_outcome:candidateOutcome,
               artifact_hash:sha256(text(finalCandidate.artifact)),
+              stage_contract_materialization_version:
+                terminalStageContract.applies?STAGE_CONTRACT_MATERIALIZATION_VERSION:null,
             }
           );
         }
@@ -4448,6 +4556,8 @@ export async function runAutonomousRequirementCognition({
         synthesis_provenance_review:asObject(synthesisProvenanceReview),
         terminal_synthesis_ownership_version:TERMINAL_SYNTHESIS_OWNERSHIP_VERSION,
         terminal_stage_contract_name:terminalStageContract.applies?terminalStageContract.name:null,
+        stage_contract_materialization_version:
+          terminalStageContract.applies?STAGE_CONTRACT_MATERIALIZATION_VERSION:null,
       },
       contextPayload:node.context_payload||{},resultArtifact,
     });
