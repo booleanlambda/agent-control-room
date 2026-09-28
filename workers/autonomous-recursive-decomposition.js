@@ -131,6 +131,8 @@ function compactResearchCatalogForModel(rows,mode='full'){
       fetch_status:v.fetch_status||null,
       sha256:v.sha256||null,
       excerpt_chars_shared:Number(v.excerpt_chars_shared||0),
+      receipt_persisted:Boolean(v.receipt_persisted??v.full_receipt_persisted),
+      full_text_persisted:Boolean(v.full_text_persisted),
       full_receipt_persisted:Boolean(v.full_receipt_persisted),
     };
   });
@@ -160,6 +162,8 @@ function compactResearchRoundForModel(raw,maxTokens,contract){
       fetch_status:s.fetch_status||null,
       sha256:s.sha256||null,
       excerpt_chars_shared:Number(s.excerpt_chars_shared||0),
+      receipt_persisted:Boolean(s.receipt_persisted??s.full_receipt_persisted),
+      full_text_persisted:Boolean(s.full_text_persisted),
       full_receipt_persisted:Boolean(s.full_receipt_persisted),
     };
   });
@@ -326,6 +330,15 @@ function mergeResearchSourceCatalog(existing,incoming){
   }
   return out;
 }
+function catalogSourceIdFromRequest(raw){
+  const request=text(raw);
+  if(!request)return '';
+  if(/^src_[a-z0-9]+$/i.test(request))return request;
+  const parts=pathParts(request);
+  if(parts.length>=2&&parts[0]==='research_source_catalog'&&/^src_[a-z0-9]+$/i.test(parts[1]))
+    return parts[1];
+  return '';
+}
 function resolveCatalogSourceRequests(requests,catalog){
   const bySourceId=new Map(
     asArray(catalog)
@@ -338,10 +351,12 @@ function resolveCatalogSourceRequests(requests,catalog){
   for(const raw of asArray(requests)){
     const request=text(raw);
     if(!request)continue;
-    const source=bySourceId.get(request);
+    const sourceId=catalogSourceIdFromRequest(request);
+    const source=sourceId?bySourceId.get(sourceId):null;
     if(source&&/^https:\/\//i.test(text(source.url))){
       resolved.push({
-        source_id:request,
+        request_path:request,
+        source_id:sourceId,
         url:text(source.url),
         sha256:text(source.sha256)||null,
         audit_batch_id:text(source.audit_batch_id)||null,
@@ -1310,6 +1325,8 @@ export async function runAutonomousRequirementCognition({
           fetch_status:s.fetch_status||null,
           sha256:s.sha256||null,
           audit_batch_id:batch.batch_id||null,
+          receipt_persisted:true,
+          full_text_persisted:false,
           full_receipt_persisted:true,
         });
       }
@@ -1344,31 +1361,63 @@ export async function runAutonomousRequirementCognition({
   }
 
   async function persistExplicitResearchEvidence(nodePath,researchUrls,researchObserved){
-    if(!researchObserved||!asArray(researchUrls).length)
+    if(!researchObserved)
       return {save:{status:'ready',inserted:0,extended:0,unchanged:0,restored_or_extended:0},evidence:await loadPinnedEvidence(nodePath)};
+
     const requestedUrlKeys=new Set(asArray(researchUrls).map(normalizedUrl).filter(Boolean));
-    const pinCandidates=asArray(researchObserved.sources)
+    const fetchedSources=asArray(researchObserved.sources)
       .filter(source=>
         source?.fetch_status==='fetched_text'
         && typeof source?.excerpt==='string'
         && source.excerpt.length
-        && requestedUrlKeys.has(normalizedUrl(source?.url))
-      )
-      .slice(0,16)
-      .map(source=>({
-        source_key:source.source_id||source.url||source.sha256,
-        source_id:source.source_id||null,
-        url:source.url||null,
-        title:source.title||null,
-        publisher:source.publisher||null,
-        sha256:source.sha256||null,
-        fetch_status:source.fetch_status||null,
-        coverage:source.coverage||null,
-        excerpt:clip(source.excerpt,MAX_PINNED_EVIDENCE_EXCERPT_CHARS),
-        audit_batch_id:researchObserved.audit_batch_id||null,
-      }));
+        && /^https:\/\//i.test(text(source?.url))
+      );
+
+    // Explicit catalog/URL retrievals get first priority. Broad query research also
+    // retains a bounded, query-diverse evidence set so durable source catalogs never
+    // outlive the excerpts needed to interpret them after a restart.
+    const selected=[];
+    const selectedUrls=new Set();
+    const addSource=(source)=>{
+      const key=normalizedUrl(source?.url);
+      if(!key||selectedUrls.has(key)||selected.length>=16)return false;
+      selectedUrls.add(key);
+      selected.push(source);
+      return true;
+    };
+
+    for(const source of fetchedSources){
+      if(requestedUrlKeys.has(normalizedUrl(source?.url)))addSource(source);
+    }
+
+    const perQuery=new Map();
+    for(const source of fetchedSources){
+      if(selected.length>=16)break;
+      const query=text(source?.query)||'__unscoped__';
+      const used=Number(perQuery.get(query)||0);
+      if(used>=2)continue;
+      if(addSource(source))perQuery.set(query,used+1);
+    }
+    for(const source of fetchedSources){
+      if(selected.length>=16)break;
+      addSource(source);
+    }
+
+    const pinCandidates=selected.map(source=>({
+      source_key:source.source_id||source.url||source.sha256,
+      source_id:source.source_id||null,
+      url:source.url||null,
+      title:source.title||null,
+      publisher:source.publisher||null,
+      sha256:source.sha256||null,
+      fetch_status:source.fetch_status||null,
+      coverage:source.coverage||null,
+      excerpt:clip(source.excerpt,MAX_PINNED_EVIDENCE_EXCERPT_CHARS),
+      audit_batch_id:researchObserved.audit_batch_id||null,
+    }));
     if(!pinCandidates.length)
       return {save:{status:'ready',inserted:0,extended:0,unchanged:0,restored_or_extended:0},evidence:await loadPinnedEvidence(nodePath)};
+
     const save=await pinnedEvidenceRpc('save',nodePath,pinCandidates);
     if(save?.status!=='ready')
       throw new Error('autonomous_decomposition_pinned_evidence_save_failed:'+nodePath);
@@ -1376,11 +1425,14 @@ export async function runAutonomousRequirementCognition({
     console.log('AAU_AUTONOMOUS_PINNED_EVIDENCE',JSON.stringify({
       node_path:nodePath,
       requested_url_count:asArray(researchUrls).length,
+      fetched_source_count:fetchedSources.length,
+      durable_candidate_count:pinCandidates.length,
       inserted:Number(save.inserted||0),
       extended:Number(save.extended||0),
       unchanged:Number(save.unchanged||0),
       restored_or_extended:Number(save.restored_or_extended||0),
       pinned_items:evidence.length,
+      persistence_policy:'explicit_urls_plus_query_diverse_v0_2',
     }));
     return {save,evidence};
   }
