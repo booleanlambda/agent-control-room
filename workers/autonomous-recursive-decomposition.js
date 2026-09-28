@@ -2067,6 +2067,7 @@ export async function runAutonomousRequirementCognition({
         priorAdmission.status==='DEFERRED'
         && priorAdmission.semantic_decision===priorDecision
         && priorDiscovery.version==='agent_deep_discovery_v0_1'
+        && priorDiscovery.context_fingerprint===contextFingerprint
         && availableDecisions.includes(priorDecision)
         && !forceReconsider
         && Number(priorResource.unique_sources??-1)===Number(resourceView.unique_sources??-2)
