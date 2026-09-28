@@ -65,6 +65,44 @@ function text(v){return String(v??'').trim();}
 function bytes(v){try{return Buffer.byteLength(typeof v==='string'?v:JSON.stringify(v));}catch{return 0;}}
 function clip(s,n){const v=String(s??'');return v.length<=n?v:v.slice(0,n);}
 function safeJson(v){try{return JSON.stringify(v);}catch{return '{}';}}
+function canonicalizeHashValue(v){
+  if(Array.isArray(v))return v.map(canonicalizeHashValue);
+  if(v&&typeof v==='object'){
+    const out={};
+    for(const key of Object.keys(v).sort())out[key]=canonicalizeHashValue(v[key]);
+    return out;
+  }
+  return v;
+}
+function semanticContextIdentity(rawPayload){
+  const src=asObject(rawPayload);
+  const local={};
+  for(const key of Object.keys(src).sort()){
+    if(key==='research_source_catalog'
+      ||key==='completed_sibling_results'
+      ||key==='inherited_completed_sibling_results'
+      ||/^external_research_round_\d+$/.test(key)
+      ||key.startsWith('_model_context_')
+      ||key.startsWith('_context_'))continue;
+    local[key]=canonicalizeHashValue(src[key]);
+  }
+  const catalog=asArray(src.research_source_catalog)
+    .map(raw=>{
+      const v=asObject(raw);
+      return {
+        source_id:text(v.source_id)||null,
+        url:text(v.url)||null,
+        sha256:text(v.sha256)||null,
+        fetch_status:text(v.fetch_status)||null,
+      };
+    })
+    .sort((a,b)=>{
+      const ka=[a.url,a.source_id,a.sha256].filter(Boolean).join('|');
+      const kb=[b.url,b.source_id,b.sha256].filter(Boolean).join('|');
+      return ka.localeCompare(kb);
+    });
+  return canonicalizeHashValue({local_context:local,research_source_catalog:catalog});
+}
 function estimatedTokens(v,contract){
   const chars=typeof v==='string'?v.length:safeJson(v).length;
   const charsPerToken=Math.max(1.5,Number(contract?.estimated_chars_per_token)||3.2);
@@ -1960,31 +1998,62 @@ export async function runAutonomousRequirementCognition({
       // child capacity, wake attempt, and resource-exhaustion counters. A
       // failed attempt spending compute cannot invalidate the cognition it is
       // supposed to resume. Evidence/state changes still create a new identity.
-      const contextFingerprint=sha256({
-        contract:'semantic_discovery_fingerprint_v0_2_resource_independent',
+      const contextFingerprint=sha256(safeJson(canonicalizeHashValue({
+        contract:'semantic_discovery_fingerprint_v0_3_stable_evidence_identity',
         node_path:node.node_path,
         requirement:node.requirement_text,
-        context_payload:contextPayload,
+        context_evidence:semanticContextIdentity(contextPayload),
         pinned_evidence_index:pinnedEvidence.map(v=>({
           source_key:v.source_key,source_id:v.source_id,url:v.url,sha256:v.sha256,excerpt_bytes:v.excerpt_bytes
-        })),
+        })).sort((a,b)=>String(a.url||a.source_id||a.source_key||'').localeCompare(String(b.url||b.source_id||b.source_key||''))),
         authoritative_sibling_results:siblingEvidence.map(v=>({
-          path:v.path,status:v.status,decision_type:v.decision_type,result_hash:v.result_hash
-        })),
+          path:v.path,status:v.status,decision_type:v.decision_type,result_hash:v.result_hash,
+          evidence_scope:v.evidence_scope||null
+        })).sort((a,b)=>String(a.path||'').localeCompare(String(b.path||''))),
         remediation_history:compactRemediationEpisodes(remediationEpisodes),
         child_authoring_failure_count:Number(node?.decision_payload?.child_authoring_failure_count||0),
         child_authoring_failure:asObject(node?.decision_payload?.child_authoring_failure),
         force_reconsider:Boolean(forceReconsider),
         atomic_execution_failures:atomicExecutionFailures,
-      });
+      })));
 
       const priorPayload=asObject(node.decision_payload);
       const priorDiscovery=asObject(priorPayload.routing_discovery_checkpoint);
       const priorDecision=text(priorDiscovery.decision).toUpperCase();
+      const priorAdmission=asObject(priorPayload.routing_admission);
+      const priorResource=asObject(priorDiscovery.context_resource_state);
+      const priorDirectHashes=asArray(priorDiscovery.authoritative_sibling_result_hashes)
+        .map(v=>({path:text(v?.path),result_hash:text(v?.result_hash)}))
+        .sort((a,b)=>a.path.localeCompare(b.path));
+      const priorDependencyHashes=asArray(priorDiscovery.authoritative_dependency_result_hashes)
+        .map(v=>({path:text(v?.path),result_hash:text(v?.result_hash)}))
+        .sort((a,b)=>a.path.localeCompare(b.path));
+      const currentDirectHashes=siblingEvidence
+        .filter(v=>text(v?.evidence_scope)!=='ancestor_dependency')
+        .map(v=>({path:text(v?.path),result_hash:text(v?.result_hash)}))
+        .sort((a,b)=>a.path.localeCompare(b.path));
+      const currentDependencyHashes=siblingEvidence
+        .filter(v=>text(v?.evidence_scope)==='ancestor_dependency')
+        .map(v=>({path:text(v?.path),result_hash:text(v?.result_hash)}))
+        .sort((a,b)=>a.path.localeCompare(b.path));
+      const deferredAdmissionReplaySafe=
+        priorAdmission.status==='DEFERRED'
+        && priorAdmission.semantic_decision===priorDecision
+        && priorDiscovery.version==='agent_deep_discovery_v0_1'
+        && availableDecisions.includes(priorDecision)
+        && !forceReconsider
+        && Number(priorResource.unique_sources??-1)===Number(resourceView.unique_sources??-2)
+        && Number(priorResource.context_rounds_attempted??-1)===Number(resourceView.context_rounds_attempted??-2)
+        && Number(priorResource.active_context_elapsed_ms??-1)===Number(resourceView.active_context_elapsed_ms??-2)
+        && safeJson(priorDirectHashes)===safeJson(currentDirectHashes)
+        && safeJson(priorDependencyHashes)===safeJson(currentDependencyHashes);
       const reusableDiscovery=
-        priorDiscovery.version==='agent_deep_discovery_v0_1'
-        && priorDiscovery.context_fingerprint===contextFingerprint
-        && availableDecisions.includes(priorDecision);
+        deferredAdmissionReplaySafe
+        ||(
+          priorDiscovery.version==='agent_deep_discovery_v0_1'
+          && priorDiscovery.context_fingerprint===contextFingerprint
+          && availableDecisions.includes(priorDecision)
+        );
 
       let discovery=reusableDiscovery?priorDiscovery:null;
 
@@ -2561,6 +2630,8 @@ export async function runAutonomousRequirementCognition({
           context_resource_reasons:effectiveResourceView.reasons,
           evidence_window_renewal:evidenceRenewalAssessment,
           atomic_execution_failures:atomicExecutionFailures,
+          discovery_fingerprint:discovery.context_fingerprint,
+          resume_policy:'reuse_semantic_decision_until_evidence_mutation',
           deferred_at:new Date().toISOString(),
         };
         node=await saveNode({
@@ -2579,6 +2650,31 @@ export async function runAutonomousRequirementCognition({
           contextPayload,
           resultArtifact:node.result_artifact||null,
         });
+        if(
+          decision==='NEED_CONTEXT'
+          &&evidenceRenewalAssessment?.reason==='insufficient_semantic_budget'
+        ){
+          const economicTerminal=await closeSemanticRuntime('budget_exhausted',{
+            reason:'protected_completion_reserve_economic_exhaustion',
+            node_path:node.node_path,
+            semantic_decision:decision,
+            remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
+            required_budget_units:Number(evidenceRenewalAssessment.required_budget_units||0),
+            completion_reserve_units:Number(branchEconomics.completion_reserve_units||0),
+            evidence_window_no:Number(contextState.evidence_window_no||0),
+            evidence_window_renewals:Number(contextState.evidence_window_renewals||0),
+            semantic_state_preserved:true,
+            discovery_replay_forbidden_until_evidence_mutation:true,
+          });
+          const error=new Error(
+            'semantic_runtime_budget_exhausted:economic_admission:'+node.node_path
+            +':remaining='+String(economicTerminal?.remaining_budget_units??0)
+          );
+          error.code='SEMANTIC_BUDGET_EXHAUSTED';
+          error.semanticRuntime=economicTerminal;
+          error.admission=admission;
+          throw error;
+        }
         const error=new Error(
           'cognition_admission_deferred:'+node.node_path+':'+admissionReasons.join(',')
         );
