@@ -698,13 +698,37 @@ function contextIndex(packet){
   });
 }
 
+function lifecycleStageContract(packet){
+  const lifecycle=asObject(packet?.mandatory_lifecycle_context);
+  const name=text(lifecycle.stage_contract);
+  const definition=asObject(lifecycle.stage_contract_definition);
+  if(!name||!Object.keys(definition).length)return {name:'',definition:null};
+  return {name,definition};
+}
+
+function lifecycleStageContractContext(packet){
+  const resolved=lifecycleStageContract(packet);
+  if(!resolved.name||!resolved.definition)return {};
+  return {
+    [resolved.name]:{
+      available:true,
+      value:resolved.definition,
+      source:'mandatory_lifecycle_context.stage_contract_definition',
+    },
+  };
+}
+
 function resolveContext(packet,requests,localContext={}){
   const out={};
+  const lifecycleContract=lifecycleStageContract(packet);
   for(const raw of asArray(requests).slice(0,MAX_CONTEXT_REQUESTS_PER_ROUND)){
     const path=text(raw);
     if(!path||Object.prototype.hasOwnProperty.call(out,path))continue;
     const localHit=getPath(localContext,path);
-    const packetHit=localHit.found?localHit:getPath(packet,path);
+    let packetHit=localHit.found?localHit:getPath(packet,path);
+    if(!packetHit.found&&lifecycleContract.name===path&&lifecycleContract.definition){
+      packetHit={found:true,value:lifecycleContract.definition};
+    }
     const hit=packetHit;
     if(!hit.found){
       out[path]={available:false};
@@ -1891,7 +1915,10 @@ export async function runAutonomousRequirementCognition({
   }
 
   async function decide(node,{forceReconsider=false,branchDepth=0,singleChildRefinements=0}={}){
-    let contextPayload=asObject(node.context_payload);
+    let contextPayload={
+      ...asObject(node.context_payload),
+      ...lifecycleStageContractContext(packet),
+    };
     let pinnedEvidence=await loadPinnedEvidence(node.node_path);
     const durableResearchCatalog=await loadDurableResearchCatalog(node.node_path);
     if(durableResearchCatalog.length){
