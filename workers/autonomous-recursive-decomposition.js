@@ -742,15 +742,30 @@ function lifecycleStageContractContext(packet){
 const TERMINAL_SYNTHESIS_OWNERSHIP_VERSION='runtime_owned_terminal_synthesis_v0_2';
 const STAGE_CONTRACT_MATERIALIZATION_VERSION='stage_contract_materialize_v0_1';
 
-function stageContractForRequirement(packet,requirement){
+function stageContractForRequirement(packet,requirement,nodePath=null){
   const resolved=lifecycleStageContract(packet);
-  if(!resolved.name||!resolved.definition)return {applies:false,name:'',definition:null};
+  if(!resolved.name||!resolved.definition)
+    return {applies:false,name:'',definition:null,ownership_scope:null};
   const req=normalizedRequirement(requirement);
   const name=normalizedRequirement(resolved.name);
+  const mentions=Boolean(req&&name&&req.includes(name));
+
+  // Candidate-mode Stage 4 uses a coordinator root that references the proposal
+  // contract as protocol. Only individual top-level candidate nodes own one
+  // expertise_viability_proposal_v0_1 artifact.
+  const candidateOwned=
+    resolved.name==='expertise_viability_proposal_v0_1'
+      ? /^R[.]\d{3}$/.test(text(nodePath))
+      : true;
+
   return {
-    applies:Boolean(req&&name&&req.includes(name)),
+    applies:Boolean(mentions&&candidateOwned),
     name:resolved.name,
     definition:resolved.definition,
+    ownership_scope:
+      resolved.name==='expertise_viability_proposal_v0_1'
+        ? 'top_level_candidate_node'
+        : 'requirement_mentions_contract',
   };
 }
 
@@ -4077,7 +4092,7 @@ export async function runAutonomousRequirementCognition({
     let artifact=artifactText(reconciliation?.artifact)||proposedArtifact;
     if(!artifact)throw new Error('autonomous_decomposition_reconciliation_artifact_empty:'+node.node_path);
     const handoff=Object.keys(asObject(reconciliation?.handoff)).length?asObject(reconciliation?.handoff):proposedHandoff;
-    const atomicStageContract=stageContractForRequirement(packet,node.requirement_text);
+    const atomicStageContract=stageContractForRequirement(packet,node.requirement_text,node.node_path);
     let atomicStageProposal=null;
     let atomicStageMaterializationVersion=null;
     if(atomicStageContract.applies&&atomicStageContract.name==='expertise_viability_proposal_v0_1'){
@@ -4347,7 +4362,7 @@ export async function runAutonomousRequirementCognition({
   async function ensureCanonicalStageCandidateSubmission(node,proposalOverride=null){
     if(node?.node_status!=='completed'||!isTopLevelViabilityCandidateNode(node))
       return node;
-    const stageContract=stageContractForRequirement(packet,node.requirement_text);
+    const stageContract=stageContractForRequirement(packet,node.requirement_text,node.node_path);
     if(!stageContract.applies||stageContract.name!=='expertise_viability_proposal_v0_1')
       return node;
 
@@ -4513,7 +4528,7 @@ export async function runAutonomousRequirementCognition({
       status:child.node_status||child.status||null,
       decision_type:child.decision_type||null,
     }));
-    const terminalStageContract=stageContractForRequirement(packet,node.requirement_text);
+    const terminalStageContract=stageContractForRequirement(packet,node.requirement_text,node.node_path);
     let final=null;
     let synthesisProvenanceReview=null;
     const priorProvenanceContinuation=asObject(node?.decision_payload?.synthesis_provenance_pending);
@@ -4531,6 +4546,8 @@ export async function runAutonomousRequirementCognition({
           provenance_revision_guidance:synthesisProvenanceGuidance||null,
           terminal_synthesis_ownership_version:TERMINAL_SYNTHESIS_OWNERSHIP_VERSION,
           stage_contract_materialization_version:STAGE_CONTRACT_MATERIALIZATION_VERSION,
+          lifecycle_stage_contract_applies:Boolean(terminalStageContract.applies),
+          lifecycle_stage_contract_ownership_scope:terminalStageContract.ownership_scope||null,
           lifecycle_stage_contract_name:terminalStageContract.name||null,
           lifecycle_stage_contract_hash:terminalStageContract.definition
             ?sha256(terminalStageContract.definition):null,
@@ -4562,8 +4579,11 @@ export async function runAutonomousRequirementCognition({
             terminal_synthesis_ownership:{
               version:TERMINAL_SYNTHESIS_OWNERSHIP_VERSION,
               applies_to_parent:terminalStageContract.applies,
+              ownership_scope:terminalStageContract.ownership_scope||null,
               stage_contract_name:terminalStageContract.name||null,
-              stage_contract_definition:terminalStageContract.definition||null,
+              stage_contract_definition:terminalStageContract.applies
+                ?terminalStageContract.definition
+                :null,
             },
             prior_provenance_revision_guidance:synthesisProvenanceGuidance||null,
           })},
