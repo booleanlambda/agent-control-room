@@ -332,6 +332,17 @@ export function autonomousEvidenceWindowDecision({
   });
 }
 
+export function evidenceCeilingRequiresAgentResolution(assessment={}){
+  const a=assessment&&typeof assessment==='object'?assessment:{};
+  if(a.granted)return false;
+  return new Set([
+    'hard_context_constraint',
+    'prior_evidence_round_unproductive',
+    'evidence_window_renewal_limit',
+    'no_renewable_context_constraint',
+  ]).has(String(a.reason||'').trim());
+}
+
 export function retryableModelTransportError(error){
   const code=String(error?.code||error?.cause?.code||'').trim().toUpperCase();
   const name=String(error?.name||'').trim();
