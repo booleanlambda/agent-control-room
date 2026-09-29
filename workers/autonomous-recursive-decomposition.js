@@ -4826,14 +4826,39 @@ export async function runAutonomousRequirementCognition({
     if(!proposal){
       const parts=resultParts(node?.result_artifact);
       if(!parts.artifact)return node;
-      proposal=await materializeTerminalStageContract(
-        node,[],{},{
-          outcome:'COMPLETE',
-          reason:'Canonical completion invariant: materialize the already-completed durable candidate result under the current Stage-4 contract.',
-          artifact:parts.artifact,
-          handoff:parts.handoff,
-        },stageContract
-      );
+
+      // Mechanical serialization recovery comes before another model call.
+      // Only trailing unmatched closing braces are eligible, and the recovered
+      // object must pass the full authoritative stage contract. No semantic
+      // content is added, removed, or rewritten.
+      let serializationRecovered=false;
+      const rawArtifact=text(parts.artifact).trim();
+      for(let trimCount=1;trimCount<=3&&!proposal;trimCount++){
+        if(!rawArtifact.endsWith('}'.repeat(trimCount)))continue;
+        const candidateText=rawArtifact.slice(0,-trimCount);
+        try{
+          const candidate=JSON.parse(candidateText);
+          const check=validateStageContractArtifact(
+            stageContract.definition,
+            safeJson(candidate)
+          );
+          if(check.valid){
+            proposal=candidate;
+            serializationRecovered=true;
+          }
+        }catch{}
+      }
+
+      if(!proposal){
+        proposal=await materializeTerminalStageContract(
+          node,[],{},{
+            outcome:'COMPLETE',
+            reason:'Canonical completion invariant: materialize the already-completed durable candidate result under the current Stage-4 contract.',
+            artifact:parts.artifact,
+            handoff:parts.handoff,
+          },stageContract
+        );
+      }
 
       const repairedArtifact=JSON.stringify({
         artifact:safeJson(proposal),
@@ -4852,14 +4877,31 @@ export async function runAutonomousRequirementCognition({
           ...(node.decision_payload||{}),
           atomic_stage_contract_validated:true,
           terminal_stage_contract_name:stageContract.name,
-          stage_contract_materialization_version:STAGE_CONTRACT_MATERIALIZATION_VERSION,
+          stage_contract_materialization_version:
+            serializationRecovered
+              ?'atomic_stage_contract_trailing_brace_repair_v0_1'
+              :STAGE_CONTRACT_MATERIALIZATION_VERSION,
           canonical_completion_invariant_repaired:true,
+          canonical_completion_invariant_repair_kind:
+            serializationRecovered
+              ?'deterministic_trailing_brace_serialization_repair'
+              :'runtime_owned_stage_contract_materialization',
           canonical_completion_invariant_repaired_at:new Date().toISOString(),
         },
         contextPayload:node.context_payload||{},
         resultArtifact:repairedArtifact,
       });
       node.parent_path=node.parent_path??parentPathOf(node.node_path);
+
+      if(serializationRecovered){
+        console.log('AAU_AUTONOMOUS_STAGE_CONTRACT_SERIALIZATION_REPAIRED',JSON.stringify({
+          agent_id:agentId,
+          intent_execution_id:intentExecutionId,
+          node_path:node.node_path,
+          repair:'deterministic_trailing_brace_serialization_repair',
+          stage_contract_name:stageContract.name,
+        }));
+      }
     }
 
     const validation=validateStageContractArtifact(stageContract.definition,safeJson(proposal));
