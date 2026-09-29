@@ -26,8 +26,27 @@ const units = curriculum.modules.flatMap((module, moduleIndex) =>
   }))
 );
 
-export function qda601RequiredForAgent(agentId) {
-  return assignedIds().has(String(agentId || '').trim());
+export function qda601RequiredForAgent(agentId, packet = {}) {
+  const id = String(agentId || '').trim();
+  const lifecycle = packet?.mandatory_lifecycle_context || {};
+  const lifecycleMeta = lifecycle?.metadata || {};
+  const supplemental = lifecycle?.supplemental_training_hold || {};
+  const state = packet?.state || {};
+  const statePayload = state?.state_payload || {};
+  const durableQdaSignal =
+    String(state?.current_focus || '').trim() === 'qda_601'
+    || String(statePayload?.current_lifecycle_focus || '').trim() === 'supplemental_training_qda_601'
+    || statePayload?.qda_601_required === true
+    || String(statePayload?.qda_601_required || '').toLowerCase() === 'true'
+    || String(lifecycle?.protocol_version || lifecycleMeta?.mandatory_lifecycle_protocol || '').trim() === 'agent_development_lifecycle_v0_14'
+       && (
+         lifecycleMeta?.qda_601_required === true
+         || String(lifecycleMeta?.qda_601_required || '').toLowerCase() === 'true'
+         || String(supplemental?.program_code || '').trim().toUpperCase() === 'QDA601'
+       )
+    || String(supplemental?.program_code || '').trim().toUpperCase() === 'QDA601';
+
+  return durableQdaSignal || assignedIds().has(id);
 }
 
 function lastActionFromPacket(packet) {
@@ -63,7 +82,7 @@ function cursorFromLastAction(packet) {
 }
 
 export function buildQda601Context(agentId, packet = {}) {
-  if (!qda601RequiredForAgent(agentId)) {
+  if (!qda601RequiredForAgent(agentId, packet)) {
     return {assigned:false,program_version:'qda_601_v0_1'};
   }
 
@@ -121,7 +140,7 @@ export function buildQda601Context(agentId, packet = {}) {
 }
 
 export function augmentPacketWithQda601(packet, agentId) {
-  if (!qda601RequiredForAgent(agentId)) return packet;
+  if (!qda601RequiredForAgent(agentId, packet)) return packet;
   const ctx = buildQda601Context(agentId, packet);
   return {
     ...packet,
