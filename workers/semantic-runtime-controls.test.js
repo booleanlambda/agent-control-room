@@ -262,6 +262,24 @@ test('threshold evidence distinguishes unknown from fail',()=>{
 });
 
 
+test('closed evidence ceilings return semantic control to the agent instead of pausing lifecycle',()=>{
+  assert.equal(evidenceCeilingRequiresAgentResolution({
+    granted:false,reason:'hard_context_constraint'
+  }),true);
+  assert.equal(evidenceCeilingRequiresAgentResolution({
+    granted:false,reason:'prior_evidence_round_unproductive'
+  }),true);
+  assert.equal(evidenceCeilingRequiresAgentResolution({
+    granted:false,reason:'evidence_window_renewal_limit'
+  }),true);
+  assert.equal(evidenceCeilingRequiresAgentResolution({
+    granted:false,reason:'insufficient_semantic_budget'
+  }),false);
+  assert.equal(evidenceCeilingRequiresAgentResolution({
+    granted:true,reason:'bounded_evidence_window_economically_admissible'
+  }),false);
+});
+
 test('autonomous evidence renewal grants only renewable productive windows with protected completion reserve',()=>{
   const granted=autonomousEvidenceWindowDecision({
     resourceReasons:['evidence_window_source_ceiling','evidence_window_round_ceiling'],
