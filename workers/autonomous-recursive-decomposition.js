@@ -1003,12 +1003,52 @@ function validateStageContractArtifact(contractDefinition,artifactText){
         issues.push('object_required:'+field);
         continue;
       }
-      for(const sub of asArray(spec.required).map(text).filter(Boolean)){
+      const nestedRequired=[...new Set([
+        ...asArray(spec.required),
+        ...asArray(spec.required_fields),
+      ].map(text).filter(Boolean))];
+      for(const sub of nestedRequired){
         const subValue=value[sub];
         if(subValue===undefined||subValue===null||subValue==='')
           issues.push('missing_required_field:'+field+'.'+sub);
         if(sub==='risks'&&(!Array.isArray(subValue)||!subValue.length))
           issues.push('nonempty_array_required:'+field+'.'+sub);
+      }
+
+      if(text(spec.required_source_stage)){
+        const stages=asArray(value.source_stages).map(text).filter(Boolean);
+        if(!stages.includes(text(spec.required_source_stage)))
+          issues.push(
+            'required_source_stage:'+field+'.'+text(spec.required_source_stage)
+          );
+      }
+
+      const masteryDimensions=
+        asArray(spec.entrepreneurship_mastery_application_required_dimensions)
+          .map(text).filter(Boolean);
+      if(masteryDimensions.length){
+        const mastery=asObject(value.entrepreneurship_mastery_application);
+        for(const dimension of masteryDimensions){
+          const dimensionValue=mastery[dimension];
+          if(
+            dimensionValue===undefined
+            ||dimensionValue===null
+            ||(
+              typeof dimensionValue==='string'
+              &&text(dimensionValue).length<20
+            )
+          ) issues.push(
+            'missing_required_field:'
+            +field+'.entrepreneurship_mastery_application.'+dimension
+          );
+        }
+      }
+
+      if(field==='prior_learning_application'){
+        if(asArray(value.competencies_applied).length<6)
+          issues.push('prior_learning_application.competencies_applied:min_6_for_stage4');
+        if(asArray(value.application_map).length<6)
+          issues.push('prior_learning_application.application_map:min_6_for_stage4');
       }
     }
   }
