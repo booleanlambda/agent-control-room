@@ -3957,57 +3957,16 @@ export async function runAutonomousRequirementCognition({
           return returnChildAuthoringFailure({ordinal,phase:'deep_formulation',error:formulationError});
       }
 
+      const proposalStatus=text(proposal?.status).toUpperCase();
       let parsed=null;
-      let serializationError=null;
-      for(let attempt=1;attempt<=2;attempt++){
-        try{
-          const response=await callSerialize([
-            {role:'system',content:[
-              'You are the same bound model performing MECHANICAL SERIALIZATION of YOUR already-authored child proposal.',
-              'Do not redo decomposition reasoning. Do not alter the substantive requirement, scope removed, completion criterion, reason, or DONE decision.',
-              'Return only compact valid JSON in exactly one of these shapes:',
-              '{"status":"CHILD","requirement":"...","scope_removed":"...","completion_criterion":"...","reason":"brief"}',
-              'or {"status":"DONE","coverage_note":"brief"}.',
-            ].join('\n')},
-            {role:'user',content:safeJson({
-              durable_agent_authored_child_proposal:proposal,
-              checkpoint:{
-                step_key:childProposalStepKey(node,ordinal,previous),
-                artifact_hash:proposalCheckpoint?.row?.artifact_hash||null,
-                authored_by_bound_agent:true,
-              },
-            })},
-          ],700,'req_'+node.node_path.replaceAll('.','_')+'_author_child_serialize_'+ordinal+'_'+attempt);
-          const candidate=asObject(response?.parsed);
-          const candidateStatus=text(candidate.status).toUpperCase();
-          if(candidateStatus!==text(proposal.status).toUpperCase())
-            throw new Error('autonomous_decomposition_child_serialization_status_mismatch:'+node.node_path);
-          if(candidateStatus==='CHILD'){
-            const fields=['requirement','scope_removed','completion_criterion','reason'];
-            const mismatch=fields.some(key=>text(candidate[key])!==text(proposal[key]));
-            if(mismatch)
-              throw new Error('autonomous_decomposition_child_serialization_content_mismatch:'+node.node_path);
-            candidate._convergence_validation=proposal._convergence_validation;
-            candidate._sibling_overlap_validation=proposal._sibling_overlap_validation;
-            candidate._provenance_review=proposal._provenance_review;
-          }else if(text(candidate.coverage_note)!==text(proposal.coverage_note)){
-            throw new Error('autonomous_decomposition_child_serialization_content_mismatch:'+node.node_path);
-          }
-          parsed=candidate;
-          break;
-        }catch(error){
-          serializationError=error;
-          const recoverable=
-            error?.code==='COGNITION_RESPONSE_REJECTED'
-            || error?.code==='NVIDIA_TIMEOUT'
-            || String(error?.message||'').startsWith('autonomous_decomposition_child_serialization_');
-          if(!recoverable)throw error;
-          if(attempt===2)
-            return returnChildAuthoringFailure({ordinal,phase:'protocol_serialization',error});
-        }
+      if(proposalStatus==='CHILD'){
+        parsed={status:'CHILD',requirement:text(proposal.requirement),scope_removed:text(proposal.scope_removed),completion_criterion:text(proposal.completion_criterion),reason:text(proposal.reason),_convergence_validation:proposal._convergence_validation,_sibling_overlap_validation:proposal._sibling_overlap_validation,_provenance_review:proposal._provenance_review};
+      }else if(proposalStatus==='DONE'){
+        parsed={status:'DONE',coverage_note:text(proposal.coverage_note)};
+      }else{
+        throw new Error('autonomous_decomposition_child_checkpoint_status_invalid:'+node.node_path);
       }
-      if(!parsed&&serializationError)
-        return returnChildAuthoringFailure({ordinal,phase:'protocol_serialization',error:serializationError});
+      console.log('AAU_AUTONOMOUS_CHILD_SERIALIZED_DETERMINISTIC',JSON.stringify({agent_id:agentId,intent_execution_id:intentExecutionId,node_path:node.node_path,ordinal,status:proposalStatus,policy:'checkpoint_exact_projection_v0_1'}));
 
       const status=text(parsed?.status).toUpperCase();
       if(status==='DONE'){
