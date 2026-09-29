@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { nvidiaChatCompletion } from './providers/nvidia.js';
 import { researchWeb } from './web-research.js';
 import { runAutonomousRequirementCognition } from './autonomous-recursive-decomposition.js';
+import { augmentPacketWithQda601, qda601DecisionValidation, qda601Correction } from './qda601-runtime.js';
 
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
@@ -97,6 +98,17 @@ Mandatory Entrepreneurship Master's stage rule (AAU Stage 3):
 - If the current unit genuinely depends on current external facts that are not already evidenced, request web research in THIS cognition using web_research_request_v0_1. After research observation, return to the same current unit. Do not substitute "wait for feedback" for study or evidence acquisition.
 - Independent assessment occurs only after all required units in the current course are validly persisted. When next_kind is course_assessment_queue or course_assessment_pending, do not repeat course units; await the institutional assessment. When next_kind is course_remediation, address the persisted assessment feedback. When next_kind is final_assessments, await the independent final reviews.
 - Expertise selection remains locked until the Entrepreneurship Master's program is independently verified as passed.
+
+Mandatory QDA-601 supplemental-training rule (AAU Lifecycle v0.14):
+- When qda_601_context.assigned is true and qda_601_context.blocking_stage4 is true, QDA-601 is the authoritative current training obligation and supersedes ordinary Stage-4 expertise-viability work.
+- Do NOT submit, revise, select, or materialize an expertise candidate while the QDA hold is active.
+- If qda_601_context.status is in_progress, work on exactly qda_601_context.next_unit. Do not skip ahead.
+- A completed unit must be persisted in THIS cognition as one agent_file_output_v0_1 association whose filename exactly matches next_unit.filename. The file content must be complete valid JSON and contain: program_version, module_code, unit_code, title, inputs, assumptions, formula_or_model, calculation, units, interpretation, sanity_check, evidence, and self_audit. assumptions and evidence are arrays. self_audit is an object with pass_a, pass_b, and verdict.
+- Pass A solves the assigned problem. Pass B independently reconstructs, attacks, or cross-checks the result; merely paraphrasing Pass A is not an audit.
+- If the current unit genuinely depends on current externally checkable facts not already supported, request web_research_request_v0_1 and return to the SAME unit after research. Do not manufacture evidence.
+- If qda_601_context.status is coursework_complete_final_packaging_required, persist QDA601_FINAL_SUBMISSION.json with references to all 40 canonical unit artifacts, canonical_variable_ledger, integrated_self_audit, capstone_decision, quantitative_failure_review, hard_gate_self_check, and evidence_refs.
+- If status is coursework_complete_pending_independent_verification, do not self-certify a pass and do not return to Stage 4. Await independent verification.
+- Runtime/provider/persistence failures are not cognitive failures. Preserve correct substantive work and retry persistence rather than changing a conclusion merely to satisfy infrastructure.
 
 Mandatory expertise-and-viability-stage rule (AAU-owned academic standard v0.3):
 - The agent chooses the field, voluntarily pursues it, and authors the intended application and evidence-based economic/socioeconomic viability proposal. AAU alone authors and independently reviews all master-level academic competencies, scope, curriculum, practical evidence, examination content, and pass thresholds. You may not define or modify those requirements.
@@ -2136,14 +2148,14 @@ function buildStructuredCommitPacket(packet, modeInfo) {
   const deep = buildDeepCognitionPacket(packet, modeInfo);
   const mba = currentStage(packet) === 'mba_entrepreneurship';
   const keys = mba ? [
-    'brain_packet_version','agent','mandatory_lifecycle_context',
+    'brain_packet_version','agent','mandatory_lifecycle_context','qda_601_context',
     'academic_standard_context','entrepreneurship_remediation_context','complex_work_context','intent_execution_context',
     'next_intent_context','sleep_eligibility_context','attention_arbiter_context',
     'knowledge_pool_context','admin_chat_context','evidence_first_cognition_contract',
     'cognition_mode_context',
   ] : [
     'brain_packet_version','agent','identity_context','continuity',
-    'traits','interests','state','mandatory_lifecycle_context',
+    'traits','interests','state','mandatory_lifecycle_context','qda_601_context',
     'academic_standard_context','entrepreneurship_remediation_context','intent_execution_context','intent_trigger',
     'next_intent_context','sleep_eligibility_context','attention_arbiter_context',
     'knowledge_pool_context','admin_chat_context','evidence_provenance',
@@ -2896,6 +2908,34 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
     });
   }
 
+  // QDA-601 is a lifecycle-blocking supplemental course for assigned agents.
+  // Validate against the durable agent-file ledger before ordinary Stage-4 behavior can commit.
+  let qdaValidation = qda601DecisionValidation(packet, decision);
+  if (!qdaValidation.ok) {
+    const priorDecision = decision;
+    ai = await completeStructured(model, [
+      ...baseMessages,
+      {role:'assistant',content:String(ai.content || '').slice(0,50000)},
+      {role:'user',content:qda601Correction(packet,qdaValidation)},
+    ],{maxTokens:3000,timeoutMs:300000});
+    const repairedDecision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
+    decision = preserveRequiredAdminReply(packet, priorDecision, repairedDecision);
+    qdaValidation = qda601DecisionValidation(packet, decision);
+  }
+  if (!qdaValidation.ok) {
+    const error = new Error('qda601_unit_contract_invalid');
+    error.failureDetails = {
+      schema:'aau.qda601_unit_contract.v0_1',
+      error_code:'QDA601_UNIT_CONTRACT_INVALID',
+      status:packet?.qda_601_context?.status || null,
+      next_unit:packet?.qda_601_context?.next_unit || null,
+      failures:qdaValidation.failures || [],
+      runtime_failure:false,
+      cognitive_submission_rejected:true,
+    };
+    throw error;
+  }
+
   // Reject unsupported endpoint claims before they can be recorded as cognition or used
   // to justify further external mutations. The agent may choose a different genuine action.
   const endpointIssue = unsupportedEndpointClaimIssue(packet, decision);
@@ -2941,9 +2981,10 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       p_agent_id: requestedAgentId,
       p_worker_id: resolvedWorkerId,
     });
-    const packet = begun?.packet;
+    let packet = begun?.packet;
     const model = String(begun?.primary_model_id || '').trim();
     if (!packet || !model) throw new Error('intent_packet_or_model_missing');
+    packet = await augmentPacketWithQda601(packet, requestedAgentId);
 
     const startedAt = Date.now();
     const {
@@ -2969,6 +3010,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       model_consistency_status: 'VERIFIED_PRIMARY', authenticator_result: { status: 'not_run_in_executor' },
       experimental_provider_policy: 'nvidia_direct_all_experimental_roles',
       lifecycle_contract: 'next_intent_protocol_v0_1+adaptive_cognition_mode_v0_1+deep_reasoning_structured_commit_v0_1+identity_completion_same_intent_v0_1+embodiment_selection_same_intent_v0_1+entrepreneurship_stage3_action_alignment_v0_1+expertise_viability_unit_stage_v0_1+product_service_test_v0_1+durable_external_capability_state_v0_1+authoritative_external_state_reconciliation_v0_1+no_progress_action_alignment_v0_1+attention_arbiter_v0_1+attention_resolution_repair_v0_1+stage_action_alignment_v0_1+failure_diagnostics_v0_1+embodiment_payload_normalization_v0_1',
+      qda601_contract: packet?.qda_601_context?.assigned ? 'qda_601_runtime_course_ledger_v0_1' : null,
       intent_repair_attempted: intentRepairAttempted,
       identity_repair_attempts: identityRepairAttempts,
       embodiment_repair_attempts: embodimentRepairAttempts,
