@@ -152,7 +152,23 @@ function qdaFileAssociation(decision, expectedFilename) {
 
 function parseAssociationJson(association) {
   const f = association?.file && typeof association.file === 'object' ? association.file : association;
+  if (f?.content && typeof f.content === 'object' && !Array.isArray(f.content)) return f.content;
   try { return JSON.parse(String(f?.content || '')); } catch { return null; }
+}
+
+export function normalizeQda601FileAssociations(decision) {
+  if (!decision || typeof decision !== 'object' || !Array.isArray(decision.associations)) return decision;
+  decision.associations = decision.associations.map((association) => {
+    if (!association || typeof association !== 'object' || association.origin !== 'agent_file_output_v0_1') return association;
+    const wrapped = association.file && typeof association.file === 'object' ? association.file : association;
+    if (!wrapped.content || typeof wrapped.content !== 'object' || Array.isArray(wrapped.content)) return association;
+    const serialized = JSON.stringify(wrapped.content);
+    if (association.file && typeof association.file === 'object') {
+      return {...association,file:{...association.file,content:serialized}};
+    }
+    return {...association,content:serialized};
+  });
+  return decision;
 }
 
 function hasWebResearch(decision) {
@@ -198,8 +214,11 @@ export function qda601DecisionValidation(packet, decision) {
     const association=qdaFileAssociation(decision,ctx.next_unit.filename);
     if (!association) return {ok:false,active:true,failures:['qda_current_unit_artifact_required:'+ctx.next_unit.filename]};
     const f=association.file && typeof association.file==='object'?association.file:association;
-    if (String(f.content || '').trim().length<500) return {ok:false,active:true,failures:['qda_unit_artifact_min_500_chars']};
     const payload=parseAssociationJson(association);
+    const contentSize = typeof f.content === 'string'
+      ? f.content.trim().length
+      : (f.content && typeof f.content === 'object' ? JSON.stringify(f.content).length : 0);
+    if (contentSize<500) return {ok:false,active:true,failures:['qda_unit_artifact_min_500_chars']};
     const payloadFailures=validateUnitPayload(ctx,payload);
     return {
       ok:payloadFailures.length===0,
@@ -253,10 +272,9 @@ export function qda601Correction(packet, validation) {
   return `QDA-601 COURSE GATE: QDA-601 is an assigned lifecycle-blocking supplemental program and Stage 4 is held. Complete the exact current unit, not expertise viability. Current unit: ${JSON.stringify(next)}.
 
 PERSISTENCE SHAPE IS MANDATORY. associations[] must contain this exact outer structure:
-{"origin":"agent_file_output_v0_1","file":{"filename":"${next.filename || ''}","mime_type":"application/json","caption":"QDA-601 ${next.unit_code || ''} completed unit","content":"<ONE JSON STRING>"}}
+{"origin":"agent_file_output_v0_1","file":{"filename":"${next.filename || ''}","mime_type":"application/json","caption":"QDA-601 ${next.unit_code || ''} completed unit","content":{"program_version":"qda_601_v0_1","module_code":"${next.module_code || ''}","unit_code":"${next.unit_code || ''}","title":"...","inputs":...,"assumptions":[],"formula_or_model":...,"calculation":...,"units":...,"interpretation":...,"sanity_check":...,"evidence":[],"self_audit":{"pass_a":...,"pass_b":...,"verdict":"..."}}}}
 
-file.content MUST be a JSON-ENCODED STRING, not a nested object. When parsed, that string must yield an object with:
-{"program_version":"qda_601_v0_1","module_code":"${next.module_code || ''}","unit_code":"${next.unit_code || ''}","title":"...","inputs":...,"assumptions":[],"formula_or_model":...,"calculation":...,"units":...,"interpretation":...,"sanity_check":...,"evidence":[],"self_audit":{"pass_a":...,"pass_b":...,"verdict":"..."}}
+Author file.content as a normal JSON object. The runtime owns deterministic serialization into the database file channel; do not spend cognition escaping a JSON document into a string.
 
 The content must be at least 500 characters and substantive. For quantitative units, work multiple nontrivial examples/cases rather than a single toy calculation. Pass B must independently reconstruct, reverse-check, dimension-check, or otherwise attack Pass A; paraphrasing Pass A is not an audit. If genuinely missing current external evidence, request web_research_request_v0_1 instead and keep the same unit active. Do not submit or revise an expertise candidate. Do not omit the file association after explaining the work in prose. Validation failures: ${JSON.stringify(validation?.failures || [])}`;
 }
