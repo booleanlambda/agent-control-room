@@ -793,9 +793,14 @@ function qda601HoldRequirement(packet){
         'Current unit: '+text(next.unit_code)+' — '+text(next.title)+'.',
         text(next.learning_goal)?'Learning goal: '+text(next.learning_goal)+'.':'',
         text(next.assignment)?'Assignment: '+text(next.assignment)+'.':'',
+        text(next.exercise_pack_ref)?'Exercise pack ref: '+text(next.exercise_pack_ref)+'.':'',
+        next.exercise_pack?'AUTHORITATIVE EXERCISE PACK (solve these exact assigned problems; do not invent replacements): '+JSON.stringify(next.exercise_pack):'',
+        next.exercise_pack?.external_research===false
+          ? 'This exercise pack is self-contained AAU course data. External research is forbidden for this unit. NEED_CONTEXT is not justified by absence of outside sources or alternative problems; all required case inputs are supplied in the exercise pack.'
+          : 'If genuinely current external evidence is required by this exercise pack, request bounded research for this same unit and return to it.',
         'Persist the completed work in this cognition as agent_file_output_v0_1 using filename '+text(next.filename)+'.',
-        'The artifact must satisfy qda_601_context.required_submission_fields and include independent Pass A / Pass B self-audit.',
-        'If genuinely current external evidence is required, request bounded research for this same unit and return to it; never fall back to the suspended Stage-4 requirement.'
+        'The artifact must preserve exercise_pack_ref exactly, include problem_responses covering every assigned problem, satisfy qda_601_context.required_submission_fields, and include independent Pass A / Pass B self-audit.',
+        'Never fall back to the suspended Stage-4 requirement.'
       ].filter(Boolean).join(' ')
     };
   }
