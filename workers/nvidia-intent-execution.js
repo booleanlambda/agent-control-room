@@ -888,6 +888,16 @@ function lifecycleIssue(packet, decision) {
   if (needsIdentityCompletion(packet, decision)) return 'identity';
   if (needsEmbodimentCompletion(packet, decision)) return 'embodiment';
   if (needsEntrepreneurshipUnitSubmissionRepair(packet, decision)) return 'entrepreneurship_unit_submission';
+
+  // Lifecycle v0.14: a verified supplemental-training hold supersedes the
+  // ordinary Stage-4 expertise-artifact envelope. QDA has its own validator
+  // later in getDecision(); allowing the Stage-4 validator to run first would
+  // reject legitimate course work as "expertise_artifact_stage_contract_incomplete".
+  const qdaHold = packet?.qda_601_context?.assigned === true
+    && packet?.qda_601_context?.blocking_stage4 === true
+    && currentStage(packet) === 'expertise_artifact';
+  if (qdaHold) return null;
+
   if (needsExpertiseArtifactCompletion(packet, decision)) return 'expertise_artifact';
   return null;
 }
