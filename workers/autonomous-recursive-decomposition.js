@@ -776,11 +776,60 @@ function indexObject(root,prefix='',depth=0,out=[]){
   return out;
 }
 
+function qda601HoldRequirement(packet){
+  const qda=asObject(packet?.qda_601_context);
+  if(qda.assigned!==true || qda.blocking_stage4!==true) return null;
+
+  const status=text(qda.status);
+  const next=asObject(qda.next_unit);
+
+  if(status==='in_progress' && text(next.unit_code)){
+    return {
+      source_kind:'supplemental_training',
+      source_ref:text(next.unit_code),
+      requirement:[
+        'QDA-601 is the authoritative lifecycle obligation while Stage 4 is suspended.',
+        'Complete exactly the current QDA unit; do not perform, revise, select, or materialize Stage-4 expertise viability work.',
+        'Current unit: '+text(next.unit_code)+' — '+text(next.title)+'.',
+        text(next.learning_goal)?'Learning goal: '+text(next.learning_goal)+'.':'',
+        text(next.assignment)?'Assignment: '+text(next.assignment)+'.':'',
+        'Persist the completed work in this cognition as agent_file_output_v0_1 using filename '+text(next.filename)+'.',
+        'The artifact must satisfy qda_601_context.required_submission_fields and include independent Pass A / Pass B self-audit.',
+        'If genuinely current external evidence is required, request bounded research for this same unit and return to it; never fall back to the suspended Stage-4 requirement.'
+      ].filter(Boolean).join(' ')
+    };
+  }
+
+  if(status==='coursework_complete_final_packaging_required'){
+    return {
+      source_kind:'supplemental_training',
+      source_ref:'QDA601_FINAL_SUBMISSION',
+      requirement:'QDA-601 coursework units are complete. Package the canonical QDA601_FINAL_SUBMISSION.json required by qda_601_context. Do not return to the suspended Stage-4 expertise requirement before independent QDA verification.'
+    };
+  }
+
+  if(status==='coursework_complete_pending_independent_verification'){
+    return {
+      source_kind:'supplemental_training',
+      source_ref:'QDA601_INDEPENDENT_VERIFICATION',
+      requirement:'QDA-601 coursework is complete and awaiting independent verification. Preserve the completed artifacts and do not resume the suspended Stage-4 expertise requirement until the verifier records a pass.'
+    };
+  }
+
+  return {
+    source_kind:'supplemental_training',
+    source_ref:'QDA601',
+    requirement:'QDA-601 is the authoritative supplemental-training hold. Follow qda_601_context and do not resume the suspended Stage-4 expertise requirement.'
+  };
+}
+
 function extractTriggerRequirement(packet){
   const admin=asObject(packet?.admin_chat_context?.current_admin_message);
   if(text(admin.content)){
     return {source_kind:'admin_message',source_ref:text(admin.message_id)||null,requirement:text(admin.content)};
   }
+  const qdaRequirement=qda601HoldRequirement(packet);
+  if(qdaRequirement) return qdaRequirement;
   const item=asObject(packet?.attention_arbiter_context?.current_attention_item);
   const payload=asObject(item.payload);
   const attn=text(payload.message)||text(payload.reason)||text(item.reason);
@@ -823,6 +872,10 @@ function contextIndex(packet){
 }
 
 function lifecycleStageContract(packet){
+  const qda=asObject(packet?.qda_601_context);
+  if(qda.assigned===true && qda.blocking_stage4===true){
+    return {name:'',definition:null};
+  }
   const lifecycle=asObject(packet?.mandatory_lifecycle_context);
   const name=text(lifecycle.stage_contract);
   const definition=asObject(lifecycle.stage_contract_definition);
@@ -834,6 +887,24 @@ function lifecycleStageContractContext(packet){
   const lifecycle=asObject(packet?.mandatory_lifecycle_context);
   const resolved=lifecycleStageContract(packet);
   const out={};
+  const qda=asObject(packet?.qda_601_context);
+  if(qda.assigned===true && qda.blocking_stage4===true){
+    out.qda_601_context={
+      available:true,
+      value:qda,
+      source:'qda_601_context',
+    };
+    out.suspended_lifecycle_stage={
+      available:true,
+      value:{
+        current_stage:text(lifecycle.current_stage)||null,
+        current_stage_label:text(lifecycle.current_stage_label)||null,
+        stage_contract:text(lifecycle.stage_contract)||null,
+        suspension_reason:'qda_601_lifecycle_hold',
+      },
+      source:'mandatory_lifecycle_context',
+    };
+  }
 
   if(resolved.name&&resolved.definition){
     out[resolved.name]={
