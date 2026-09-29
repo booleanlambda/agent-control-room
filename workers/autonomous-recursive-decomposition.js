@@ -843,6 +843,15 @@ function lifecycleStageContractContext(packet){
     };
   }
 
+  const candidateMode=asObject(lifecycle.expertise_candidate_mode);
+  if(Object.keys(candidateMode).length){
+    out.expertise_candidate_mode={
+      available:true,
+      ...candidateMode,
+      source:'mandatory_lifecycle_context.expertise_candidate_mode',
+    };
+  }
+
   const inheritance=asObject(lifecycle.cumulative_competency_inheritance);
   if(Object.keys(inheritance).length){
     out.cumulative_competency_inheritance={
