@@ -860,6 +860,12 @@ function needsExpertiseArtifactCompletion(packet, decision) {
       : false;
   }
 
+  // Once the bounded four-candidate cycle reaches review_pending, Stage 4 is
+  // intentionally waiting on operator review. Recursive/generic lifecycle
+  // cognition does not own another expertise artifact here and must not turn
+  // the review gate into a semantic contract failure.
+  if (candidatePhase === 'review_pending') return false;
+
   if (status === 'pending') return !/await|pause|acknowledge|hold|review/i.test(action);
   if (status === 'approved') return !/await|acknowledge|materiali[sz]|transition/i.test(action);
   if (proposalSubmitted) return expertiseViabilityValidation(decision).failures.length>0;
