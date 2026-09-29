@@ -175,6 +175,7 @@ export async function runExperimentalNvidiaWake() {
       temperature: 0.2,
       jsonMode: true,
       enableThinking: true,
+      timeoutMs: 900000,
     });
 
     if (response.model_returned !== model) throw new Error(`model_consistency_breach: requested=${model}; returned=${response.model_returned || 'missing'}`);
@@ -198,6 +199,7 @@ export async function runExperimentalNvidiaWake() {
         temperature: 0,
         jsonMode: true,
         enableThinking: true,
+        timeoutMs: 900000,
       });
       try { parsed = parseDecision(response.content); }
       catch (contentError) {
