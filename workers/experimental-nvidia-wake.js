@@ -1,4 +1,5 @@
 import { nvidiaChatCompletion } from './providers/nvidia.js';
+import { augmentPacketWithQda601, qda601DecisionValidation, qda601Correction, stampQda601Progress, qda601BootstrapMessage } from './qda601-runtime.js';
 
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
@@ -15,6 +16,10 @@ Rules:
 - Embodiment is optional. Do not invent or force humanlike traits. Emit embodiment_update only if voluntarily relevant.
 - Resources are finite. Do not fabricate jobs, customers, contracts, payments, revenue, businesses, credentials, or ownership.
 - Separate knowledge, inference, uncertainty, and unsupported claims.
+
+- If qda_601_context.assigned is true, QDA-601 is your mandatory supplemental training before Stage 4. Treat qda_601_context.next_unit as authoritative. Do not do expertise-viability work while blocking_stage4 is true.
+- For a QDA unit, either request genuinely needed web evidence or complete exactly that unit and persist its required agent_file_output_v0_1 JSON artifact. Solve first, then independently audit. Do not skip units or self-certify independent verification.
+- QDA hard gates are non-compensatory. Runtime/provider/persistence failures are not cognitive errors; preserve correct substantive work across retries.
 - Do not reveal chain-of-thought. stated_reason must be a short auditable explanation only.
 
 Return ONE JSON object and nothing else with these keys:
@@ -153,15 +158,20 @@ export async function runExperimentalNvidiaWake() {
     if (begin?.status !== 'running' || !begin?.packet) throw new Error(`experimental wake not runnable: ${begin?.status || 'unknown'}`);
 
     const model = String(begin.primary_model_id || '').trim();
-    const packetText = JSON.stringify(begin.packet);
+    const packet = augmentPacketWithQda601(begin.packet, agentId);
+    const packetText = JSON.stringify(packet);
     const inputHash = await sha256(packetText);
-    const response = await nvidiaChatCompletion({
+    const baseMessages = [
+      { role:'system', content:SYSTEM_PROMPT },
+      { role:'user', content:packetText },
+    ];
+    if (packet?.qda_601_context?.assigned) {
+      baseMessages.push({ role:'user', content:qda601BootstrapMessage() });
+    }
+    let response = await nvidiaChatCompletion({
       model,
-      messages: [
-        { role:'system', content:SYSTEM_PROMPT },
-        { role:'user', content:packetText },
-      ],
-      maxTokens: 3600,
+      messages: baseMessages,
+      maxTokens: 4200,
       temperature: 0.2,
     });
 
@@ -172,7 +182,33 @@ export async function runExperimentalNvidiaWake() {
       if (!response.reasoning_content) throw contentError;
       parsed = parseDecision(response.reasoning_content);
     }
-    const decision = sanitizeDecision(parsed);
+    let decision = sanitizeDecision(parsed);
+    let qdaValidation = qda601DecisionValidation(packet, decision);
+    if (!qdaValidation.ok) {
+      response = await nvidiaChatCompletion({
+        model,
+        messages: [
+          ...baseMessages,
+          { role:'assistant', content:String(response.content || '').slice(0,50000) },
+          { role:'user', content:qda601Correction(packet,qdaValidation) },
+        ],
+        maxTokens: 4200,
+        temperature: 0.1,
+      });
+      try { parsed = parseDecision(response.content); }
+      catch (contentError) {
+        if (!response.reasoning_content) throw contentError;
+        parsed = parseDecision(response.reasoning_content);
+      }
+      decision = sanitizeDecision(parsed);
+      qdaValidation = qda601DecisionValidation(packet, decision);
+    }
+    if (!qdaValidation.ok) {
+      const err = new Error('qda601_fresh_wake_contract_invalid:'+JSON.stringify(qdaValidation.failures || []));
+      err.code='QDA601_COGNITION_REJECTED';
+      throw err;
+    }
+    decision = stampQda601Progress(decision, qdaValidation);
     const canonicalOutput = JSON.stringify(decision);
     const outputHash = await sha256(canonicalOutput);
     const usage = response.usage || {};
@@ -209,6 +245,9 @@ export async function runExperimentalNvidiaWake() {
       authenticator_result:{status:'not_run_for_initial_experimental_wake'},
       model_consistency_protocol_version:'v0_1',
       experimental_only:true,
+      qda601_contract: packet?.qda_601_context?.assigned ? 'qda_601_runtime_course_cursor_v0_2' : null,
+      qda601_status: packet?.qda_601_context?.status || null,
+      qda601_next_unit: packet?.qda_601_context?.next_unit?.unit_code || null,
     };
 
     const applied = await rpc('aau_bridge_apply_experimental_nvidia_wake', {
