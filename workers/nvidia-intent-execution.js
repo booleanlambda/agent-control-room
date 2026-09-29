@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { nvidiaChatCompletion } from './providers/nvidia.js';
 import { researchWeb } from './web-research.js';
 import { runAutonomousRequirementCognition } from './autonomous-recursive-decomposition.js';
-import { augmentPacketWithQda601, qda601DecisionValidation, qda601Correction } from './qda601-runtime.js';
+import { augmentPacketWithQda601, qda601DecisionValidation, qda601Correction, stampQda601Progress } from './qda601-runtime.js';
 
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
@@ -2935,6 +2935,8 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
     };
     throw error;
   }
+
+  decision = stampQda601Progress(decision, qdaValidation);
 
   // Reject unsupported endpoint claims before they can be recorded as cognition or used
   // to justify further external mutations. The agent may choose a different genuine action.
