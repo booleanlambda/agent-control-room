@@ -832,19 +832,37 @@ function expertiseViabilityValidation(decision) {
 }
 function needsExpertiseArtifactCompletion(packet, decision) {
   if (currentStage(packet) !== 'expertise_artifact') return false;
-  const gate = packet?.mandatory_lifecycle_context?.expertise_viability_gate
-    || packet?.mandatory_lifecycle_context?.expertise_economic_gate || {};
+  const lifecycle = packet?.mandatory_lifecycle_context || {};
+  const candidateMode = lifecycle?.expertise_candidate_mode || {};
+  const candidatePhase = String(candidateMode.phase || '').trim();
+  const gate = lifecycle?.expertise_viability_gate
+    || lifecycle?.expertise_economic_gate || {};
   const status = String(gate.status || 'required');
   const action = String(decision?.selected_action || '').trim();
   const focus = String(decision?.current_focus || '').trim();
   const associations = Array.isArray(decision?.associations) ? decision.associations : [];
+
   if (focus !== 'expertise_artifact') return true;
   if (associations.some(a=>a?.origin==='expertise_artifact_initiation_v0_1')) return true;
+
+  const proposalSubmitted =
+    /submit.*expertise.*viability|expertise.*viability.*proposal/i.test(action)
+    || associations.some(a=>a?.origin==='expertise_viability_proposal_v0_1');
+
+  // During a bounded four-candidate revision cycle, recursive Stage-4 cognition
+  // owns progress/completion. The generic lifecycle envelope must not demand a
+  // finished Expertise Artifact on every wake. If this envelope actually
+  // submits a proposal, validate it; otherwise allow the coordinator to keep
+  // researching/revising until the lifecycle context reports review_pending.
+  if (candidatePhase === 'revision_required') {
+    return proposalSubmitted
+      ? expertiseViabilityValidation(decision).failures.length>0
+      : false;
+  }
+
   if (status === 'pending') return !/await|pause|acknowledge|hold|review/i.test(action);
   if (status === 'approved') return !/await|acknowledge|materiali[sz]|transition/i.test(action);
-  const submitting = /submit.*expertise.*viability|expertise.*viability.*proposal/i.test(action)
-    || associations.some(a=>a?.origin==='expertise_viability_proposal_v0_1');
-  if (submitting) return expertiseViabilityValidation(decision).failures.length>0;
+  if (proposalSubmitted) return expertiseViabilityValidation(decision).failures.length>0;
   return !/research|economic|socioeconomic|source|proposal|case|review|draft|revise|evidence|viability/i.test(action);
 }
 function lifecycleIssue(packet, decision) {
