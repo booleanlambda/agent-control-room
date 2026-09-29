@@ -343,6 +343,53 @@ export function evidenceCeilingRequiresAgentResolution(assessment={}){
   ]).has(String(a.reason||'').trim());
 }
 
+export function evidenceAcquisitionBoundaryDecision({
+  renewalAssessment={},
+  resourceReasons=[],
+}={}){
+  const assessment=renewalAssessment&&typeof renewalAssessment==='object'
+    ? renewalAssessment
+    : {};
+  const reasons=(Array.isArray(resourceReasons)?resourceReasons:[])
+    .map(v=>String(v??'').trim()).filter(Boolean);
+  const reason=String(assessment.reason??'').trim();
+
+  if(assessment.granted===true)return Object.freeze({
+    action:'continue_research',
+    close_local_evidence:false,
+    reason:'renewal_granted',
+    resource_reasons:reasons,
+  });
+
+  if(reason==='insufficient_semantic_budget')return Object.freeze({
+    action:'semantic_budget_handoff',
+    close_local_evidence:false,
+    reason,
+    resource_reasons:reasons,
+  });
+
+  const closableReasons=new Set([
+    'hard_context_constraint',
+    'no_renewable_context_constraint',
+    'evidence_window_renewal_limit',
+    'prior_evidence_round_unproductive',
+  ]);
+  if(closableReasons.has(reason))return Object.freeze({
+    action:'close_local_evidence',
+    close_local_evidence:true,
+    reason,
+    resource_reasons:reasons,
+    resolution_rule:'agent_must_resolve_from_durable_evidence_or_reject_candidate',
+  });
+
+  return Object.freeze({
+    action:'defer',
+    close_local_evidence:false,
+    reason:reason||'unknown_evidence_boundary',
+    resource_reasons:reasons,
+  });
+}
+
 export function retryableModelTransportError(error){
   const code=String(error?.code||error?.cause?.code||'').trim().toUpperCase();
   const name=String(error?.name||'').trim();
