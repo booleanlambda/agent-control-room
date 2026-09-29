@@ -950,13 +950,18 @@ function stageContractForRequirement(packet,requirement,nodePath=null){
       ? /^R[.]\d{3}$/.test(text(nodePath))
       : true;
 
+  const applies=
+    resolved.name==='expertise_viability_proposal_v0_1'
+      ? candidateOwned
+      : Boolean(mentions&&candidateOwned);
+
   return {
-    applies:Boolean(mentions&&candidateOwned),
+    applies,
     name:resolved.name,
     definition:resolved.definition,
     ownership_scope:
       resolved.name==='expertise_viability_proposal_v0_1'
-        ? 'top_level_candidate_node'
+        ? 'top_level_candidate_node_by_lifecycle_position'
         : 'requirement_mentions_contract',
   };
 }
@@ -4722,11 +4727,50 @@ export async function runAutonomousRequirementCognition({
     const prior=asObject(node?.decision_payload?.canonical_stage_candidate_submission);
     if(text(prior.proposal_id)&&prior.persisted===true)return node;
 
-    const proposal=proposalOverride||materializedStageProposalFromNode(node);
-    // Legacy completed nodes that predate stage-contract materialization are not
-    // silently promoted. They must first be rematerialized under the current
-    // contract before they are eligible for canonical candidate persistence.
-    if(!proposal)return node;
+    let proposal=proposalOverride||materializedStageProposalFromNode(node);
+
+    // A completed top-level Stage-4 candidate is not canonically complete until
+    // its durable semantic result has been materialized under the current
+    // lifecycle contract. This also repairs completed nodes created by older
+    // phrase-matching ownership logic without re-running their research.
+    if(!proposal){
+      const parts=resultParts(node?.result_artifact);
+      if(!parts.artifact)return node;
+      proposal=await materializeTerminalStageContract(
+        node,[],{},{
+          outcome:'COMPLETE',
+          reason:'Canonical completion invariant: materialize the already-completed durable candidate result under the current Stage-4 contract.',
+          artifact:parts.artifact,
+          handoff:parts.handoff,
+        },stageContract
+      );
+
+      const repairedArtifact=JSON.stringify({
+        artifact:safeJson(proposal),
+        handoff:parts.handoff,
+      });
+      node=await saveNode({
+        nodePath:node.node_path,
+        parentPath:node.parent_path??parentPathOf(node.node_path),
+        ordinal:node.ordinal||0,
+        requirement:node.requirement_text,
+        sourceKind:node.source_kind,
+        sourceRef:node.source_ref,
+        status:'completed',
+        decisionType:node.decision_type||'ATOMIC',
+        decisionPayload:{
+          ...(node.decision_payload||{}),
+          atomic_stage_contract_validated:true,
+          terminal_stage_contract_name:stageContract.name,
+          stage_contract_materialization_version:STAGE_CONTRACT_MATERIALIZATION_VERSION,
+          canonical_completion_invariant_repaired:true,
+          canonical_completion_invariant_repaired_at:new Date().toISOString(),
+        },
+        contextPayload:node.context_payload||{},
+        resultArtifact:repairedArtifact,
+      });
+      node.parent_path=node.parent_path??parentPathOf(node.node_path);
+    }
 
     const validation=validateStageContractArtifact(stageContract.definition,safeJson(proposal));
     if(!validation.valid){
@@ -4760,13 +4804,35 @@ export async function runAutonomousRequirementCognition({
         domain:persisted.domain||proposal.domain||null,
         status:persisted.status||null,
         candidate_ordinal:persisted.candidate_ordinal??null,
-        candidate_count:persisted.candidate_count??null,
+        candidate_count:persisted.candidate_count??persisted.revised_count??null,
         target_count:persisted.target_count??null,
         candidate_cohort:persisted.candidate_cohort??null,
         idempotent_domain_replay:Boolean(persisted.idempotent_domain_replay),
-        persistence_contract:'canonical_stage_candidate_submission_v0_1',
+        revision_cycle_id:persisted.revision_cycle_id??null,
+        revision_number:persisted.revision_number??null,
+        revised_count:persisted.revised_count??null,
+        review_pending:Boolean(persisted.review_pending),
+        persistence_contract:
+          text(persisted.status)==='candidate_revised'
+          ||text(persisted.status)==='already_revised'
+            ?'canonical_stage_candidate_revision_v0_1'
+            :'canonical_stage_candidate_submission_v0_1',
         persisted_at:new Date().toISOString(),
       },
+      ...(persisted.revision_cycle_id?{
+        candidate_revision_submission:{
+          persisted:true,
+          proposal_id:persisted.proposal_id,
+          domain:persisted.domain||proposal.domain||null,
+          revision_cycle_id:persisted.revision_cycle_id,
+          revision_number:persisted.revision_number??null,
+          revised_count:persisted.revised_count??null,
+          target_count:persisted.target_count??null,
+          review_pending:Boolean(persisted.review_pending),
+          persistence_contract:'canonical_stage_candidate_revision_v0_1',
+          persisted_at:new Date().toISOString(),
+        },
+      }:{}),
     };
     const saved=await saveNode({
       nodePath:node.node_path,
