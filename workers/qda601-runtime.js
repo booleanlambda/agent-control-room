@@ -250,7 +250,15 @@ export function qda601Correction(packet, validation) {
   if (ctx.status==='coursework_complete_final_packaging_required') {
     return 'QDA-601 FINAL PACKAGING GATE: Coursework artifacts are complete, but the canonical final submission is missing. Do not return to Stage 4. Persist exactly one agent_file_output_v0_1 file named QDA601_FINAL_SUBMISSION.json. It must be valid JSON and include completed_unit_artifacts referencing all 40 canonical QDA unit filenames, canonical_variable_ledger, integrated_self_audit, capstone_decision, quantitative_failure_review, hard_gate_self_check, and evidence_refs. Do not self-certify independent verification. Preserve the normal next-intent contract.';
   }
-  return `QDA-601 COURSE GATE: QDA-601 is an assigned lifecycle-blocking supplemental program and Stage 4 is held. Complete the exact current unit, not expertise viability. Current unit: ${JSON.stringify(next)}. Persist ONE agent_file_output_v0_1 artifact whose filename is exactly "${next.filename || ''}". file.content must be complete valid JSON with program_version="qda_601_v0_1", module_code="${next.module_code || ''}", unit_code="${next.unit_code || ''}", title, inputs, assumptions ARRAY, formula_or_model, calculation, units, interpretation, sanity_check, evidence ARRAY, and self_audit OBJECT containing pass_a, pass_b and verdict. Pass B must independently reconstruct or attack the result. If genuinely missing current external evidence, request web_research_request_v0_1 instead and keep the same unit active. Do not submit or revise an expertise candidate. Validation failures: ${JSON.stringify(validation?.failures || [])}`;
+  return `QDA-601 COURSE GATE: QDA-601 is an assigned lifecycle-blocking supplemental program and Stage 4 is held. Complete the exact current unit, not expertise viability. Current unit: ${JSON.stringify(next)}.
+
+PERSISTENCE SHAPE IS MANDATORY. associations[] must contain this exact outer structure:
+{"origin":"agent_file_output_v0_1","file":{"filename":"${next.filename || ''}","mime_type":"application/json","caption":"QDA-601 ${next.unit_code || ''} completed unit","content":"<ONE JSON STRING>"}}
+
+file.content MUST be a JSON-ENCODED STRING, not a nested object. When parsed, that string must yield an object with:
+{"program_version":"qda_601_v0_1","module_code":"${next.module_code || ''}","unit_code":"${next.unit_code || ''}","title":"...","inputs":...,"assumptions":[],"formula_or_model":...,"calculation":...,"units":...,"interpretation":...,"sanity_check":...,"evidence":[],"self_audit":{"pass_a":...,"pass_b":...,"verdict":"..."}}
+
+The content must be at least 500 characters and substantive. For quantitative units, work multiple nontrivial examples/cases rather than a single toy calculation. Pass B must independently reconstruct, reverse-check, dimension-check, or otherwise attack Pass A; paraphrasing Pass A is not an audit. If genuinely missing current external evidence, request web_research_request_v0_1 instead and keep the same unit active. Do not submit or revise an expertise candidate. Do not omit the file association after explaining the work in prose. Validation failures: ${JSON.stringify(validation?.failures || [])}`;
 }
 
 export function qda601BootstrapMessage() {
