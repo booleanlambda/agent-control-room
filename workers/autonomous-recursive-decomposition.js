@@ -12,6 +12,7 @@ import {
   durableSiblingInspection,
   retryableModelTransportError,
   autonomousEvidenceWindowDecision,
+  evidenceCeilingRequiresAgentResolution,
   mergeInheritedDependencyResults,
   THRESHOLD_EVIDENCE_POLICY,
   MAX_MODEL_TRANSPORT_ATTEMPTS,
@@ -2299,14 +2300,20 @@ export async function runAutonomousRequirementCognition({
           || text(lastRemediation.status).toUpperCase()==='FAILED'
         );
       // Semantic routing and runtime admission are separate authorities.
-      // The agent states what the requirement semantically needs. The runtime
-      // decides whether that already-durable decision can execute with current
-      // compute/context/storage resources. Resource depletion must never force
-      // the agent to rewrite the substantive routing decision.
+      // Ordinarily the agent can still state NEED_CONTEXT even when the current
+      // evidence window is temporarily exhausted. A HARD evidence ceiling is
+      // different: the bounded acquisition strategy has converged (repeating /
+      // no new observations / renewal limit), so control returns to the agent
+      // to resolve the requirement from durable evidence rather than pausing
+      // the whole lifecycle or repeating retrieval forever.
+      const evidenceCeilingResolution=asObject(
+        node?.decision_payload?.evidence_ceiling_resolution
+      );
+      const evidenceAcquisitionClosed=evidenceCeilingResolution.status==='ACTIVE';
       const availableDecisions=[
         'ATOMIC',
         'SPLIT',
-        'NEED_CONTEXT',
+        ...(!evidenceAcquisitionClosed?['NEED_CONTEXT']:[]),
         'BLOCKED',
         ...(remediationAvailable?['REMEDIATE']:[]),
       ];
@@ -2331,6 +2338,9 @@ export async function runAutonomousRequirementCognition({
         child_authoring_failure_count:Number(node?.decision_payload?.child_authoring_failure_count||0),
         child_authoring_failure:asObject(node?.decision_payload?.child_authoring_failure),
         force_reconsider:Boolean(forceReconsider),
+        evidence_acquisition_closed:evidenceAcquisitionClosed,
+        evidence_ceiling_reason:evidenceCeilingResolution.reason||null,
+        evidence_ceiling_resource_reasons:asArray(evidenceCeilingResolution.resource_reasons),
         atomic_execution_failures:atomicExecutionFailures,
       })));
 
@@ -2403,10 +2413,14 @@ export async function runAutonomousRequirementCognition({
                 storageDepthAvailable
                   ? 'Tree depth is not the ordinary stopping rule. If SPLIT is semantically correct, choose SPLIT; runtime admission will separately determine how many children can be started now.'
                   : 'EMERGENCY STORAGE GUARD: this durable path reached '+semanticRuntime.hard_storage_path_depth+' levels. If SPLIT is still semantically correct, choose SPLIT anyway. The runtime will preserve the decision and defer execution rather than forcing a different substantive answer.',
-                resourceView.available
-                  ? 'Context/research admission is currently available. Choose NEED_CONTEXT only when another retrieval or exact context lookup can materially reduce a stated gap.'
-                  : 'CONTEXT RESOURCE CONSTRAINT: the current evidence window reports: '+resourceView.reasons.join(', ')+'. This does NOT make NEED_CONTEXT semantically false. If more evidence is genuinely required, choose NEED_CONTEXT. The runtime will autonomously test whether another bounded evidence window is economically admissible; only a true hard/economic stop is deferred.',
-                'BLOCKED BASIS CONTRACT: BLOCKED is a semantic conclusion, never a resource status. If the current evidence itself proves the requirement cannot honestly be completed, choose BLOCKED with block_basis=EVIDENCE_PROVES_BLOCKED. If completion merely requires evidence/context that is not currently available, choose NEED_CONTEXT. If you nevertheless serialize BLOCKED with block_basis=MORE_EVIDENCE_REQUIRED, the runtime will normalize it to NEED_CONTEXT without changing the stated evidence gap.',
+                evidenceAcquisitionClosed
+                  ? 'HARD EVIDENCE CEILING: bounded context acquisition for THIS node is now closed because prior retrieval converged without material new observations ('+asArray(evidenceCeilingResolution.resource_reasons).join(', ')+'). NEED_CONTEXT is mechanically unavailable in this reconsideration. You own the semantic resolution: choose ATOMIC if the requirement can be completed honestly from durable evidence while preserving unresolved criteria as UNKNOWN/hypotheses and using validation/kill criteria; choose SPLIT only when genuinely independent remaining work exists (never merely to reopen research); choose BLOCKED if you judge the requirement cannot honestly be completed under the established evidence boundary. Do not repeat retrieval requests.'
+                  : resourceView.available
+                    ? 'Context/research admission is currently available. Choose NEED_CONTEXT only when another retrieval or exact context lookup can materially reduce a stated gap.'
+                    : 'CONTEXT RESOURCE CONSTRAINT: the current evidence window reports: '+resourceView.reasons.join(', ')+'. This does NOT make NEED_CONTEXT semantically false. If more evidence is genuinely required, choose NEED_CONTEXT. The runtime will autonomously test whether another bounded evidence window is economically admissible; only a true hard/economic stop is deferred.',
+                evidenceAcquisitionClosed
+                  ? 'BLOCKED BASIS CONTRACT UNDER HARD EVIDENCE CEILING: BLOCKED remains YOUR semantic conclusion. EVIDENCE_PROVES_BLOCKED means current evidence disproves/defeats the requirement. MORE_EVIDENCE_REQUIRED is also permitted here only when YOU conclude the requirement cannot be completed honestly after the bounded evidence strategy has converged; it will remain a branch-local BLOCKED result rather than reopening context or pausing the lifecycle.'
+                  : 'BLOCKED BASIS CONTRACT: BLOCKED is a semantic conclusion, never a resource status. If the current evidence itself proves the requirement cannot honestly be completed, choose BLOCKED with block_basis=EVIDENCE_PROVES_BLOCKED. If completion merely requires evidence/context that is not currently available, choose NEED_CONTEXT. If you nevertheless serialize BLOCKED with block_basis=MORE_EVIDENCE_REQUIRED, the runtime will normalize it to NEED_CONTEXT without changing the stated evidence gap.',
                 'Before deciding, interrogate semantic equivalence, definitions, time horizons, populations/scopes, proxy metrics, evidence sufficiency, assumptions, and unresolved gaps.',
                 'REPEATED ACQUISITION RULE: if an exact context/research request has already been repeated and the required evidence remains unresolved, do not issue the same request again. Use materially different retrieval if one exists; otherwise preserve the criterion as UNKNOWN when the task can proceed, or choose BLOCKED when the unresolved evidence prevents honest completion.',
                 'AUTHORITATIVE DEPENDENCY HANDOFF: authoritative_completed_sibling_evidence contains both direct resolved siblings and inherited prerequisite results routed from ancestor branches. evidence_scope=ancestor_dependency means the result was already made available to an ancestor and must remain available down this branch. Inspect this durable evidence before deciding NEED_CONTEXT; do not research again for information already present here.',
@@ -2492,7 +2506,7 @@ export async function runAutonomousRequirementCognition({
                   throw new Error('autonomous_decomposition_block_basis_invalid:'+node.node_path);
                 continue;
               }
-              if(blockBasis==='MORE_EVIDENCE_REQUIRED'){
+              if(blockBasis==='MORE_EVIDENCE_REQUIRED'&&!evidenceAcquisitionClosed){
                 candidateDecision='NEED_CONTEXT';
                 blockNormalization={
                   contract:'resource_independent_block_normalization_v0_1',
@@ -2514,6 +2528,17 @@ export async function runAutonomousRequirementCognition({
                   context_resource_available:resourceView.available,
                   context_resource_reasons:resourceView.reasons,
                 }));
+              }else if(blockBasis==='MORE_EVIDENCE_REQUIRED'&&evidenceAcquisitionClosed){
+                blockNormalization={
+                  contract:'bounded_evidence_ceiling_branch_resolution_v0_1',
+                  raw_decision:'BLOCKED',
+                  normalized_decision:'BLOCKED',
+                  block_basis:blockBasis,
+                  reason:'bound_agent_declared_requirement_not_honestly_completable_after_bounded_evidence_convergence',
+                  context_resource_available:false,
+                  context_resource_reasons:resourceView.reasons,
+                  normalized_at:new Date().toISOString(),
+                };
               }
             }
 
@@ -2919,6 +2944,67 @@ export async function runAutonomousRequirementCognition({
               ||evidenceRenewalAssessment.reason==='evidence_window_renewal_limit',
           };
         }
+      }
+
+      if(
+        decision==='NEED_CONTEXT'
+        &&evidenceCeilingRequiresAgentResolution(evidenceRenewalAssessment)
+      ){
+        const resolutionAt=new Date().toISOString();
+        const nextDecisionPayload={
+          ...decisionPayload,
+          autonomous_evidence_window:{
+            status:'DENIED',
+            ...evidenceRenewalAssessment,
+            evaluated_at:resolutionAt,
+            operator_approval_required:false,
+          },
+          evidence_ceiling_resolution:{
+            status:'ACTIVE',
+            contract:'bounded_evidence_ceiling_agent_resolution_v0_1',
+            reason:evidenceRenewalAssessment.reason,
+            resource_reasons:effectiveResourceView.reasons,
+            hard_reasons:asArray(evidenceRenewalAssessment.hard_reasons),
+            renewable_reasons:asArray(evidenceRenewalAssessment.renewable_reasons),
+            prior_semantic_decision:'NEED_CONTEXT',
+            prior_discovery_fingerprint:discovery.context_fingerprint,
+            unresolved_gaps:asArray(discovery.unresolved_gaps),
+            activated_at:resolutionAt,
+            policy:'return_semantic_control_to_bound_agent_without_global_pause',
+          },
+        };
+        delete nextDecisionPayload.routing_admission;
+        delete nextDecisionPayload.routing_discovery_checkpoint;
+        delete nextDecisionPayload.routing_discovery_checkpointed;
+        delete nextDecisionPayload.routing_discovery_checkpointed_at;
+        delete nextDecisionPayload.context_plan;
+
+        node=await saveNode({
+          nodePath:node.node_path,
+          parentPath:node.parent_path??parentPathOf(node.node_path),
+          ordinal:node.ordinal||0,
+          requirement:node.requirement_text,
+          sourceKind:node.source_kind,
+          sourceRef:node.source_ref,
+          status:'pending',
+          decisionType:null,
+          decisionPayload:nextDecisionPayload,
+          contextPayload,
+          resultArtifact:node.result_artifact||null,
+        });
+        node.parent_path=node.parent_path??parentPathOf(node.node_path);
+        forceReconsider=true;
+
+        console.log('AAU_AUTONOMOUS_EVIDENCE_CEILING_RETURNED_TO_AGENT',JSON.stringify({
+          agent_id:agentId,
+          intent_execution_id:intentExecutionId,
+          node_path:node.node_path,
+          reason:evidenceRenewalAssessment.reason,
+          resource_reasons:effectiveResourceView.reasons,
+          remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
+          policy:'bound_agent_resolution_no_global_pause',
+        }));
+        continue;
       }
 
       const admissionReasons=[];
