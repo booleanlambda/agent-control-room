@@ -1,0 +1,889 @@
+{
+  "contract": "qda_601_runtime_owned_exercise_bank_v0_1",
+  "program_version": "qda_601_v0_1",
+  "authority": "AAU curriculum-owned assessment inputs. The agent must not invent replacement problems when an exercise pack is supplied.",
+  "evidence_rule": "Inline exercise data are training-case inputs, not claims about the external world. Cite them as CURRICULUM_CASE_DATA. External research is forbidden unless external_research=true.",
+  "pack_count": 40,
+  "packs": {
+    "QDA601-M1-U1": {
+      "title": "Ratios and Rates",
+      "external_research": false,
+      "problems": [
+        "Funnel: 1,260 leads produced 189 trials and 54 paid customers. Calculate lead→trial, trial→paid, and lead→paid rates; state units and reverse-check the implied counts.",
+        "Pricing/KPI: price rises from $80 to $92 while gross-margin rate rises from 40% to 46%. Distinguish percentage change from percentage-point change for both measures.",
+        "Defects: 36 defects occur in 120,000 transactions. Express the defect rate per 1,000 and per 10,000; at the same rate estimate defects for 185,000 transactions and reverse-check.",
+        "Growth/churn: revenue rises from $2.40m to $2.76m while monthly churn falls from 4.5% to 3.6%. Report relative percentage changes and percentage-point change where appropriate."
+      ]
+    },
+    "QDA601-M1-U2": {
+      "title": "Algebra for Decisions",
+      "external_research": false,
+      "problems": [
+        "Profit equation: monthly profit = P·Q − 18Q − 72,000. If Q=6,000 and target profit is $30,000, solve for P and verify by substitution.",
+        "Break-even: price=$65, variable cost=$29, fixed cost=$126,000. Solve break-even volume; then solve required volume for $54,000 operating profit.",
+        "LTV/CAC: LTV = monthly gross profit per customer / monthly churn. Monthly gross profit=$42 and churn=3.5%. Solve LTV, then maximum CAC for an LTV:CAC target of 3.2×."
+      ]
+    },
+    "QDA601-M1-U3": {
+      "title": "Growth and Discounting",
+      "external_research": false,
+      "problems": [
+        "Compound $2.40m revenue at 18% annually for 3 years; independently reverse using a logarithmic/ratio check.",
+        "Monthly logo retention is 96.5%. Compute 12-month retention and annualized churn implied by compounding; contrast with simply multiplying monthly churn by 12.",
+        "Discount cash receipts of $140k, $175k, and $210k at years 1–3 using an 11% annual discount rate; state PV and verify by re-compounding each PV."
+      ]
+    },
+    "QDA601-M1-U4": {
+      "title": "Dimensional Sanity",
+      "external_research": false,
+      "problems": [
+        "Audit this model: 8,500 monthly orders × $42/order × 12 = $4.284m annual revenue; marketing cost is recorded as 310 (labeled '$000 per month'); CAC is shown as $31 when 1,250 customers are acquired monthly. Identify every unit/scale inconsistency and correct it.",
+        "A plant reports energy use 2.4 kWh/unit and 180,000 units/month but multiplies by an electricity price of 14 cents/kWh as if it were $14. Recompute monthly energy cost and quantify the scale error.",
+        "Sanity-check a claim that a $6m market supports $15m annual revenue at 12% share. Identify the contradiction and the implied market size needed."
+      ]
+    },
+    "QDA601-M2-U1": {
+      "title": "Time Value of Money",
+      "external_research": false,
+      "problems": [
+        "Compute NPV of an initial $300k outflow followed by $95k, $120k, $145k, and $165k at years 1–4 using a 10% discount rate.",
+        "Compute future value of $180k invested for 30 months at 8% nominal annual interest compounded monthly.",
+        "A contract pays $24k at each year-end for 6 years. Compute PV at 9% and independently verify using explicit discounted cash flows rather than only the annuity formula."
+      ]
+    },
+    "QDA601-M2-U2": {
+      "title": "Unit Economics",
+      "external_research": false,
+      "problems": [
+        "Channel A: spend $84k, 1,200 acquired customers, monthly ARPU $48, gross margin 72%, monthly churn 4%. Compute CAC, monthly gross profit/customer, simple steady-state LTV, LTV:CAC, and CAC payback months.",
+        "Channel B: spend $60k, 600 acquired customers, ARPU $72, gross margin 78%, monthly churn 2.8%. Compute the same metrics and compare with A without treating the simple LTV formula as a cohort observation.",
+        "Stress both channels at churn +1.2 percentage points and gross margin −5 percentage points. State which conclusion changes, if any."
+      ]
+    },
+    "QDA601-M2-U3": {
+      "title": "Cash Survival",
+      "external_research": false,
+      "problems": [
+        "Opening cash=$420k; monthly fixed cash opex=$105k; sales=3,000 units/month; price=$68; variable cash cost=$31/unit; cash collections occur one month after sale. Model six months of cash assuming month 1 begins with no receivables.",
+        "Downside: volume falls 20%, variable cost rises 10%, and collections slip to two months. Recompute runway.",
+        "Find the monthly volume required for operating cash break-even under the base case and under the downside variable cost."
+      ]
+    },
+    "QDA601-M2-U4": {
+      "title": "Valuation and Thresholds",
+      "external_research": false,
+      "problems": [
+        "Project costs $500k now and produces annual cash flows of $150k, $185k, $210k, $225k for years 1–4. Compute NPV at 12%.",
+        "Holding years 1–3 fixed, solve the minimum year-4 cash flow for NPV=0.",
+        "A product has contribution margin $24/order, annual fixed incremental cost $360k, and launch cost $180k. Find first-year order volume needed to recover both fixed and launch costs."
+      ]
+    },
+    "QDA601-M3-U1": {
+      "title": "Conditional Probability",
+      "external_research": false,
+      "problems": [
+        "A fraud detector has sensitivity 92%, specificity 96%, and fraud prevalence 1.5%. For 100,000 transactions, build the confusion matrix and compute P(fraud|flagged).",
+        "Supplier A provides 60% of components with 1% defect rate; B provides 40% with 3% defect rate. Compute P(B|defective).",
+        "State which quantities are joint, marginal, and conditional; test whether supplier and defect status are independent."
+      ]
+    },
+    "QDA601-M3-U2": {
+      "title": "Expectation and Variance",
+      "external_research": false,
+      "problems": [
+        "Project A payoff: −$120k (0.20), $80k (0.50), $300k (0.30). Project B: −$20k (0.35), $110k (0.40), $210k (0.25). Compute expected payoff and variance/standard deviation.",
+        "Compare downside probability and expected shortfall below zero for both projects.",
+        "Explain why equal or similar expected values would not imply equal decisions when liquidity loss tolerance is $100k."
+      ]
+    },
+    "QDA601-M3-U3": {
+      "title": "Bayesian Updating",
+      "external_research": false,
+      "problems": [
+        "Prior probability that true high demand exists is 0.30. A positive pilot result has P(+|high)=0.80 and P(+|low)=0.25. Compute posterior after a positive pilot.",
+        "A second independent signal conditional on demand has P(+|high)=0.70 and P(+|low)=0.35. Update again after a second positive signal.",
+        "Then update the first posterior for a negative second signal and compare how strongly the evidence should change the thesis."
+      ]
+    },
+    "QDA601-M3-U4": {
+      "title": "Decision Trees",
+      "external_research": false,
+      "problems": [
+        "Launch now costs $400k. If demand is high (0.45), net payoff after cost is +$900k; if low, −$300k. Delay for a $70k test: test is positive with probability 0.55; after positive, P(high)=0.75, after negative P(high)=0.18. After testing you may launch or kill. Build the optimal decision tree.",
+        "Compute expected value of launch-now, test-then-decide, and kill-now.",
+        "State the value of the test before cost and after cost; verify no branch double-counts sunk test cost."
+      ]
+    },
+    "QDA601-M4-U1": {
+      "title": "Distributions and Descriptives",
+      "external_research": false,
+      "dataset": [
+        12,
+        13,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        21,
+        24,
+        90
+      ],
+      "problems": [
+        "For the supplied store conversion-time dataset (minutes), compute mean, median, Q1, Q3, IQR, and identify outliers using 1.5×IQR.",
+        "Compare the mean with and without the largest observation and explain aggregation risk.",
+        "Segment the first six vs last six observations and show how a single overall mean can hide heterogeneity."
+      ]
+    },
+    "QDA601-M4-U2": {
+      "title": "Sampling and Confidence",
+      "external_research": false,
+      "problems": [
+        "Campaign A converts 420 of 6,000 visitors; B converts 500 of 6,250. Compute rates and approximate 95% confidence intervals for each proportion.",
+        "Compute an approximate 95% CI for the difference B−A and state whether zero is included.",
+        "A retention sample observes 342 retained of 400 users. Estimate the proportion and 95% CI; explain what the interval does and does not claim."
+      ]
+    },
+    "QDA601-M4-U3": {
+      "title": "Regression and Association",
+      "external_research": false,
+      "dataset": {
+        "n": 120,
+        "model": "monthly_sales_k = 42 + 3.8*ad_spend_k - 1.6*price_index + 0.9*store_traffic_k",
+        "r2": 0.64,
+        "coefficients": {
+          "ad_spend_k": {
+            "estimate": 3.8,
+            "se": 0.9
+          },
+          "price_index": {
+            "estimate": -1.6,
+            "se": 0.5
+          },
+          "store_traffic_k": {
+            "estimate": 0.9,
+            "se": 0.2
+          }
+        },
+        "pairwise_corr_ad_sales": 0.58
+      },
+      "problems": [
+        "Interpret each coefficient with units and ceteris-paribus language.",
+        "Approximate t-statistics for coefficients and discuss statistical evidence without converting association into causation.",
+        "Explain why the pairwise ad-spend correlation and multivariable coefficient answer different questions; identify plausible confounders."
+      ]
+    },
+    "QDA601-M4-U4": {
+      "title": "Messy Data Lab",
+      "external_research": false,
+      "dataset": [
+        {
+          "id": "A01",
+          "date": "2026-01-05",
+          "revenue": "$1,200",
+          "units": "24",
+          "region": "East"
+        },
+        {
+          "id": "A01",
+          "date": "2026-01-05",
+          "revenue": "$1,200",
+          "units": "24",
+          "region": "East"
+        },
+        {
+          "id": "A02",
+          "date": "2026/01/06",
+          "revenue": "950",
+          "units": "19",
+          "region": "east"
+        },
+        {
+          "id": "A03",
+          "date": "2026-01-07",
+          "revenue": "€1,100",
+          "units": "22",
+          "region": "West"
+        },
+        {
+          "id": "A04",
+          "date": "2026-01-08",
+          "revenue": "",
+          "units": "18",
+          "region": "West"
+        },
+        {
+          "id": "A05",
+          "date": "2026-01-09",
+          "revenue": "125000",
+          "units": "25",
+          "region": "WEST"
+        }
+      ],
+      "problems": [
+        "Define a deterministic cleaning pipeline: types, dates, currency, duplicate handling, missing revenue, region normalization, and outlier review.",
+        "Do not silently convert EUR to USD without a supplied FX rate; classify the unresolved value and show which aggregates can/cannot be computed.",
+        "Identify likely scale errors and produce a cleaned-record ledger with every transformation documented."
+      ]
+    },
+    "QDA601-M5-U1": {
+      "title": "Causal Claims",
+      "external_research": false,
+      "case_data": {
+        "users": 20000,
+        "observed": "Users who enabled feature X had 18% higher 30-day retention.",
+        "selection": "Feature X was optional and adopters had 2.1x prior-week sessions before enabling.",
+        "campaign": "No randomized rollout."
+      },
+      "problems": [
+        "Separate the descriptive association from any causal claim.",
+        "Identify at least three alternative explanations/confounders.",
+        "State the strongest conclusion supported and design evidence that would move the claim toward causality."
+      ]
+    },
+    "QDA601-M5-U2": {
+      "title": "Bias and Confounding",
+      "external_research": false,
+      "case_data": {
+        "reported": "Premium cohort revenue +35% YoY",
+        "cohort_rule": "Only customers active at both start and end of year were included",
+        "churned_customers_excluded": 840,
+        "measurement_change": "Revenue definition began including service fees midyear"
+      },
+      "problems": [
+        "Identify survivorship, selection, and measurement biases.",
+        "Explain direction of likely bias where possible and where direction is unknown.",
+        "Specify a corrected cohort/measurement design and the minimum data needed."
+      ]
+    },
+    "QDA601-M5-U3": {
+      "title": "Evidence States",
+      "external_research": false,
+      "claims": [
+        "Q2 revenue was $4.2m according to audited ledger.",
+        "Next year's revenue will be $6.0m.",
+        "Price elasticity is −1.4 based on a fitted historical model.",
+        "We assume 3% monthly churn in the base case.",
+        "Calculated CAC is $84 from $420k spend / 5,000 new customers.",
+        "Customers value faster onboarding because interview notes repeatedly mention setup time."
+      ],
+      "problems": [
+        "Label each claim OBSERVED, CALCULATED, ESTIMATED, ASSUMED, INFERRED, or FORECAST and justify.",
+        "Identify which labels require source provenance versus formula provenance.",
+        "Rewrite the six claims into a traceable evidence-state ledger."
+      ]
+    },
+    "QDA601-M5-U4": {
+      "title": "Experiment Design",
+      "external_research": false,
+      "case_data": {
+        "baseline_conversion": 0.06,
+        "monthly_visitors": 50000,
+        "target_detectable_lift_relative": 0.15,
+        "primary_metric": "paid conversion",
+        "guardrails": [
+          "refund rate",
+          "support tickets"
+        ],
+        "max_test_weeks": 6
+      },
+      "problems": [
+        "State hypothesis, null, treatment, control, primary metric, guardrails, and stopping criteria.",
+        "Translate the 15% relative lift into an absolute conversion target.",
+        "Describe randomization and contamination risks; define a kill criterion that can falsify the demand thesis."
+      ]
+    },
+    "QDA601-M6-U1": {
+      "title": "Demand and Elasticity",
+      "external_research": false,
+      "problems": [
+        "At price $50 demand is 12,000 units; at $55 demand is 10,900. Compute midpoint price elasticity and revenue at both prices.",
+        "Using elasticities −0.6, −1.0, and −1.8 around a $60 price with 20,000 baseline units, estimate directional revenue response to a 10% price increase using the elasticity approximation.",
+        "State limitations of extrapolating constant elasticity."
+      ]
+    },
+    "QDA601-M6-U2": {
+      "title": "Marginal Economics",
+      "external_research": false,
+      "case_data": {
+        "base_capacity": 10000,
+        "options": [
+          {
+            "name": "A",
+            "incremental_capacity": 3000,
+            "monthly_fixed": 28000,
+            "variable_cost_per_unit": 12
+          },
+          {
+            "name": "B",
+            "incremental_capacity": 6000,
+            "monthly_fixed": 52000,
+            "variable_cost_per_unit": 9
+          }
+        ],
+        "price": 32,
+        "base_variable_cost": 14,
+        "expected_extra_demand": 4500
+      },
+      "problems": [
+        "Compute incremental monthly profit for each capacity option at expected extra demand, respecting capacity limits.",
+        "Find the extra-demand threshold where B becomes preferable to A.",
+        "State the opportunity cost of choosing insufficient capacity if actual extra demand is 6,000."
+      ]
+    },
+    "QDA601-M6-U3": {
+      "title": "Market Structure",
+      "external_research": false,
+      "case_data": {
+        "market_shares": [
+          35,
+          25,
+          18,
+          12,
+          10
+        ],
+        "top_supplier_input_share": 0.65,
+        "buyer_top5_share": 0.48,
+        "switching_cost": "moderate",
+        "entry_capex_m": 8,
+        "patent_barrier": "low",
+        "substitutes": 3
+      },
+      "problems": [
+        "Compute HHI from supplied shares and interpret concentration descriptively.",
+        "Assess supplier power, buyer power, entry barriers, and substitution using only supplied evidence.",
+        "Build a quantified entrant risk ledger; distinguish observed case data from inferred strategic implications."
+      ]
+    },
+    "QDA601-M6-U4": {
+      "title": "Incentives and Strategic Response",
+      "external_research": false,
+      "case_data": {
+        "our_price": 100,
+        "competitor_price": 105,
+        "our_units": 10000,
+        "scenarios": [
+          {
+            "our_change": "-10%",
+            "competitor_response": "none",
+            "our_units_change": "+18%"
+          },
+          {
+            "our_change": "-10%",
+            "competitor_response": "match",
+            "our_units_change": "+5%"
+          },
+          {
+            "our_change": "+8%",
+            "competitor_response": "none",
+            "our_units_change": "-12%"
+          }
+        ],
+        "unit_cost": 55
+      },
+      "problems": [
+        "Compute contribution profit for each supplied scenario.",
+        "Explain how competitor response changes the optimal pricing conclusion.",
+        "Identify incentive compatibility concerns for a reseller paid 12% of revenue versus 20% of gross profit."
+      ]
+    },
+    "QDA601-M7-U1": {
+      "title": "Sensitivity Analysis",
+      "external_research": false,
+      "case_data": {
+        "price": 80,
+        "volume": 10000,
+        "variable_cost": 38,
+        "fixed_cost": 250000,
+        "cac": 70,
+        "new_customers": 2200
+      },
+      "problems": [
+        "Compute base contribution after fixed cost and acquisition spend.",
+        "One-at-a-time sensitivities: price ±10%, volume ±20%, variable cost ±15%, CAC ±25%. Quantify output change and rank variables by absolute effect.",
+        "Explain why one-at-a-time sensitivity can miss interactions."
+      ]
+    },
+    "QDA601-M7-U2": {
+      "title": "Scenario Modeling",
+      "external_research": false,
+      "scenarios": {
+        "base": {
+          "volume": 12000,
+          "price": 75,
+          "variable_cost": 34,
+          "churn": 0.035,
+          "fixed_cost": 280000
+        },
+        "upside": {
+          "volume": 15000,
+          "price": 78,
+          "variable_cost": 32,
+          "churn": 0.028,
+          "fixed_cost": 300000
+        },
+        "downside": {
+          "volume": 8500,
+          "price": 70,
+          "variable_cost": 39,
+          "churn": 0.052,
+          "fixed_cost": 265000
+        }
+      },
+      "problems": [
+        "Compute monthly operating contribution for each linked scenario.",
+        "Explain why scenario variables should be coherent rather than independently cherry-picked.",
+        "Add cash runway using opening cash $900k and treat negative contribution as burn; state limitations if working capital is omitted."
+      ]
+    },
+    "QDA601-M7-U3": {
+      "title": "Threshold and Reversal Analysis",
+      "external_research": false,
+      "case_data": {
+        "price": 90,
+        "variable_cost": 42,
+        "fixed_cost": 360000,
+        "volume": 11000,
+        "cac": 110,
+        "new_customers": 1800,
+        "monthly_churn": 0.04
+      },
+      "problems": [
+        "Solve break-even volume before acquisition spend and after acquisition spend.",
+        "Holding other inputs fixed, solve maximum CAC for monthly operating contribution >= $100k.",
+        "Using simple LTV=(price−variable_cost)/churn, solve the churn rate at which LTV:CAC falls below 3×."
+      ]
+    },
+    "QDA601-M7-U4": {
+      "title": "Value of Information",
+      "external_research": false,
+      "case_data": {
+        "decision_payoffs": {
+          "launch_high": 800000,
+          "launch_low": -350000,
+          "kill": 0
+        },
+        "prior_high": 0.4,
+        "tests": [
+          {
+            "name": "Interview study",
+            "cost": 20000,
+            "sensitivity": 0.65,
+            "specificity": 0.7
+          },
+          {
+            "name": "Paid pilot",
+            "cost": 85000,
+            "sensitivity": 0.85,
+            "specificity": 0.88
+          }
+        ]
+      },
+      "problems": [
+        "Compute expected value without additional information.",
+        "For each test, use Bayes to determine posterior after positive/negative outcomes and optimal follow-up decision.",
+        "Compute expected value of sample information net of test cost and choose the next experiment based on decision value."
+      ]
+    },
+    "QDA601-M8-U1": {
+      "title": "Canonical Variable Ledger",
+      "external_research": false,
+      "reports": [
+        {
+          "source": "Finance",
+          "CAC": 92,
+          "ACV": 1200,
+          "churn_monthly": 0.032,
+          "gross_margin": 0.74,
+          "as_of": "2026-Q2"
+        },
+        {
+          "source": "Growth",
+          "CAC": 78,
+          "ACV": null,
+          "churn_monthly": 0.041,
+          "gross_margin": null,
+          "as_of": "2026-Q2"
+        },
+        {
+          "source": "Board deck",
+          "CAC": 85,
+          "ACV": 1440,
+          "churn_monthly": 0.03,
+          "gross_margin": 0.78,
+          "as_of": "2026-Q1"
+        },
+        {
+          "source": "Billing export",
+          "CAC": null,
+          "ACV": 1260,
+          "churn_monthly": null,
+          "gross_margin": 0.735,
+          "as_of": "2026-Q2"
+        }
+      ],
+      "problems": [
+        "Create a canonical ledger with variable, value, unit, period, evidence state, source, and confidence.",
+        "Do not average contradictions. State the authority/reconciliation rule used for each canonical value or leave unresolved.",
+        "List every unresolved definition needed before downstream modeling."
+      ]
+    },
+    "QDA601-M8-U2": {
+      "title": "Contradiction Detection",
+      "external_research": false,
+      "statements": [
+        "Marketing: CAC=$80 = spend/new logos.",
+        "Finance: CAC=$112 including sales payroll.",
+        "Sales: ACV=$18k annual contracted value.",
+        "Billing: average recognized revenue/customer=$1.3k monthly.",
+        "Board: monthly churn=2.5%.",
+        "CS dashboard: quarterly churn=8.0%.",
+        "Finance: gross margin=76% excluding support payroll.",
+        "Ops: gross margin=68% including support payroll."
+      ],
+      "problems": [
+        "Identify value conflicts versus definition/period conflicts.",
+        "Normalize periods where mathematically valid without pretending definitions are equivalent.",
+        "Produce a contradiction ledger and name the controlling definition required for each downstream decision."
+      ]
+    },
+    "QDA601-M8-U3": {
+      "title": "Dependency Propagation",
+      "external_research": false,
+      "case_data": {
+        "customers": 1000,
+        "monthly_arpu": 120,
+        "gross_margin": 0.75,
+        "monthly_churn": 0.03,
+        "cac": 600,
+        "cash": 1000000,
+        "fixed_monthly_opex": 180000
+      },
+      "problems": [
+        "Compute monthly gross profit, simple LTV, LTV:CAC, and CAC payback months.",
+        "Change canonical churn from 3% to 4.5%. Recompute every dependent output and enumerate dependencies changed.",
+        "Change gross margin from 75% to 68% as a second perturbation and reconcile all downstream metrics."
+      ]
+    },
+    "QDA601-M8-U4": {
+      "title": "Reconciliation Defense",
+      "external_research": false,
+      "source_hierarchy": [
+        "audited ledger",
+        "transaction/billing export",
+        "signed contract",
+        "operational system",
+        "management deck",
+        "interview estimate"
+      ],
+      "conflicts": [
+        {
+          "variable": "monthly revenue",
+          "values": [
+            {
+              "source": "audited ledger",
+              "value": 410000
+            },
+            {
+              "source": "management deck",
+              "value": 455000
+            }
+          ]
+        },
+        {
+          "variable": "active customers",
+          "values": [
+            {
+              "source": "billing export",
+              "value": 3280
+            },
+            {
+              "source": "operational system",
+              "value": 3410
+            }
+          ]
+        },
+        {
+          "variable": "expected renewal rate",
+          "values": [
+            {
+              "source": "signed contract",
+              "value": null
+            },
+            {
+              "source": "interview estimate",
+              "value": 0.82
+            }
+          ]
+        }
+      ],
+      "problems": [
+        "Choose or leave unresolved each canonical value using source authority and definitions, never averaging.",
+        "Defend each choice against an adversarial challenge that the higher/lower number is more favorable.",
+        "State how unresolved variables should propagate as ranges/UNKNOWN rather than false precision."
+      ]
+    },
+    "QDA601-M9-U1": {
+      "title": "Reproducible Calculations",
+      "external_research": false,
+      "case_data": {
+        "price": 64,
+        "variable_cost": 27,
+        "monthly_customers": 2400,
+        "monthly_churn": 0.038,
+        "acquisition_spend": 150000,
+        "new_customers": 1250
+      },
+      "problems": [
+        "State formulas independently, then compute contribution/customer, CAC, simple LTV, LTV:CAC, and payback.",
+        "Provide deterministic pseudocode or code-like steps that reproduce the values from named inputs.",
+        "Independently hand-reconstruct at least two outputs and compare with the computational result."
+      ]
+    },
+    "QDA601-M9-U2": {
+      "title": "Data Pipeline",
+      "external_research": false,
+      "raw_rows": [
+        {
+          "customer": " c01 ",
+          "date": "2026-01-03",
+          "amount": "$120.00",
+          "status": "Paid"
+        },
+        {
+          "customer": "C02",
+          "date": "03/01/2026",
+          "amount": "85",
+          "status": "paid"
+        },
+        {
+          "customer": "C01",
+          "date": "2026-01-03",
+          "amount": "$120.00",
+          "status": "Paid"
+        },
+        {
+          "customer": "C03",
+          "date": "2026-01-04",
+          "amount": "NULL",
+          "status": "refunded"
+        },
+        {
+          "customer": "C04",
+          "date": "2026-01-05",
+          "amount": "1,050",
+          "status": "PAID"
+        }
+      ],
+      "problems": [
+        "Specify an idempotent cleaning pipeline with schema, parsing, canonical IDs, date policy, duplicate rule, missing-value rule, and status normalization.",
+        "Produce expected cleaned rows under an explicitly stated date-format assumption; flag any ambiguous date rather than silently guessing.",
+        "Define aggregation checks that would catch duplicate revenue and invalid null/refund treatment."
+      ]
+    },
+    "QDA601-M9-U3": {
+      "title": "Simulation and Uncertainty",
+      "external_research": false,
+      "distributions": {
+        "monthly_volume": {
+          "type": "triangular",
+          "min": 7000,
+          "mode": 10000,
+          "max": 14000
+        },
+        "price": {
+          "type": "triangular",
+          "min": 65,
+          "mode": 72,
+          "max": 78
+        },
+        "variable_cost": {
+          "type": "triangular",
+          "min": 29,
+          "mode": 34,
+          "max": 41
+        },
+        "fixed_cost": {
+          "type": "fixed",
+          "value": 310000
+        }
+      },
+      "problems": [
+        "Define monthly profit = volume*(price−variable_cost)−fixed_cost and a reproducible Monte Carlo procedure with a fixed seed and at least 10,000 draws.",
+        "Report which statistics must be produced: mean, median, P10, P90, probability(profit<0). If computation tooling is unavailable, do not invent simulated numbers; provide exact deterministic setup and bounded analytical checks instead.",
+        "Perform best/mode/worst corner sanity checks and explain why corners are not probability quantiles."
+      ]
+    },
+    "QDA601-M9-U4": {
+      "title": "Consistency Testing",
+      "external_research": false,
+      "invariants": [
+        "revenue = price * volume",
+        "gross_profit = revenue - variable_cost_per_unit * volume",
+        "cash_end = cash_start + cash_inflows - cash_outflows",
+        "ltv_cac = ltv / cac",
+        "monthly_churn must be between 0 and 1"
+      ],
+      "test_cases": [
+        {
+          "price": 50,
+          "volume": 100,
+          "revenue": 5000,
+          "variable_cost_per_unit": 20,
+          "gross_profit": 3000,
+          "cash_start": 10000,
+          "cash_inflows": 5000,
+          "cash_outflows": 4000,
+          "cash_end": 11000,
+          "ltv": 600,
+          "cac": 200,
+          "ltv_cac": 3,
+          "monthly_churn": 0.04
+        },
+        {
+          "price": 50,
+          "volume": 100,
+          "revenue": 5500,
+          "variable_cost_per_unit": 20,
+          "gross_profit": 3500,
+          "cash_start": 10000,
+          "cash_inflows": 5000,
+          "cash_outflows": 4000,
+          "cash_end": 9000,
+          "ltv": 600,
+          "cac": 200,
+          "ltv_cac": 2.5,
+          "monthly_churn": 1.2
+        }
+      ],
+      "problems": [
+        "Design deterministic invariant tests and evaluate both supplied cases.",
+        "For every failure, identify the exact violated invariant and expected value/range.",
+        "Separate arithmetic consistency failures from plausible-but-unverified business assumptions."
+      ]
+    },
+    "QDA601-M10-U1": {
+      "title": "Raw Evidence Intake",
+      "external_research": false,
+      "sources": [
+        {
+          "id": "A",
+          "type": "audited_ledger",
+          "claim": "Q2 revenue $4.8m",
+          "period": "2026-Q2",
+          "authority": "high"
+        },
+        {
+          "id": "B",
+          "type": "billing_export",
+          "claim": "6,200 active paying accounts at Q2 end; ARPA $255/month",
+          "period": "2026-Q2",
+          "authority": "high"
+        },
+        {
+          "id": "C",
+          "type": "customer_interviews",
+          "claim": "14 of 20 interviewees cite onboarding time as top pain",
+          "period": "2026-Q2",
+          "authority": "medium"
+        },
+        {
+          "id": "D",
+          "type": "management_forecast",
+          "claim": "2027 revenue $8.5m",
+          "period": "2027",
+          "authority": "forecast"
+        }
+      ],
+      "problems": [
+        "Build an evidence ledger with state labels, scope, period, authority, and limitations.",
+        "Check whether billing snapshot metrics reconcile approximately with quarterly revenue; explain timing/recognition limitations rather than forcing equality.",
+        "Identify which claims can enter an integrated model as observations versus assumptions/forecasts."
+      ]
+    },
+    "QDA601-M10-U2": {
+      "title": "Integrated Model",
+      "external_research": false,
+      "case_data": {
+        "paying_accounts": 6200,
+        "monthly_arpa": 255,
+        "gross_margin": 0.72,
+        "monthly_churn": 0.035,
+        "cac": 950,
+        "new_accounts_per_month": 420,
+        "fixed_opex_monthly": 820000,
+        "opening_cash": 5200000,
+        "annual_growth_assumption": 0.28
+      },
+      "problems": [
+        "Build one canonical monthly model covering revenue, gross profit, simple LTV, LTV:CAC, acquisition spend, operating contribution, and runway direction.",
+        "Distinguish observed starting inputs from forecast assumptions and calculate a 12-month base case with clearly stated simplifying assumptions.",
+        "Run downside: growth/new accounts −25%, churn +1.5pp, gross margin −6pp, CAC +20%; identify decision-critical changes."
+      ]
+    },
+    "QDA601-M10-U3": {
+      "title": "Adversarial Audit",
+      "external_research": false,
+      "first_solution": {
+        "claimed_ltv": 5246,
+        "claimed_cac": 950,
+        "claimed_ltv_cac": 5.52,
+        "claimed_monthly_revenue": 1581000,
+        "claimed_monthly_gross_profit": 1138320
+      },
+      "authoritative_inputs": {
+        "paying_accounts": 6200,
+        "monthly_arpa": 255,
+        "gross_margin": 0.72,
+        "monthly_churn": 0.035,
+        "cac": 950
+      },
+      "problems": [
+        "Without trusting the first solution, reconstruct monthly revenue, gross profit, simple LTV=(ARPA*GM)/churn, and LTV:CAC from authoritative inputs.",
+        "Compare each reconstructed value to the frozen first solution; quantify any discrepancy and classify arithmetic vs definition issues.",
+        "Attack at least three assumptions behind simple LTV and state what evidence would be needed for a stronger cohort model."
+      ]
+    },
+    "QDA601-M10-U4": {
+      "title": "Decision and Perturbation Defense",
+      "external_research": false,
+      "base_case": {
+        "initial_investment": 1200000,
+        "annual_cash_flows": [
+          350000,
+          500000,
+          650000,
+          700000
+        ],
+        "discount_rate": 0.12,
+        "strategic_threshold_npv": 250000
+      },
+      "perturbations": [
+        {
+          "name": "Demand shock",
+          "annual_cash_flows": [
+            260000,
+            360000,
+            450000,
+            500000
+          ]
+        },
+        {
+          "name": "Cost shock",
+          "initial_investment": 1550000
+        },
+        {
+          "name": "Capital shock",
+          "discount_rate": 0.18
+        }
+      ],
+      "problems": [
+        "Compute base NPV and make BUILD/REVISE/KILL using the supplied $250k strategic NPV threshold; state that the threshold is a course rule, not universal truth.",
+        "Apply each perturbation independently and recompute the decision.",
+        "Apply all three perturbations jointly, identify the reversal driver(s), and defend the recommendation with explicit UNKNOWNs and kill/revisit criteria."
+      ]
+    }
+  }
+}
