@@ -534,6 +534,72 @@ function explicitRepeatedInstancesDisjoint(a,b){
   const bb=explicitRepeatedInstanceId(b);
   return Number.isInteger(aa)&&Number.isInteger(bb)&&aa!==bb;
 }
+
+function candidateLedgerRows(suppliedContext){
+  const wrapped=asObject(asObject(suppliedContext)?.expertise_candidate_ledger);
+  const ledger=asObject(wrapped.value||wrapped);
+  return asArray(ledger.candidates);
+}
+
+function canonicalCandidateIdentity(v,suppliedContext){
+  const raw=[
+    v?.proposal_id,
+    v?.requirement,
+    v?.requirement_text,
+    v?.scope_removed,
+    v?.completion_criterion,
+    v?.reason,
+  ].filter(Boolean).join(' ');
+  const rawLower=String(raw).toLowerCase();
+  const normalized=normalizedRequirement(raw);
+
+  for(const row of candidateLedgerRows(suppliedContext)){
+    const proposalId=text(row?.proposal_id).trim();
+    const domain=text(row?.domain).trim();
+    const domainNorm=normalizedRequirement(domain);
+    if(proposalId&&rawLower.includes(proposalId.toLowerCase())){
+      return {
+        kind:'canonical_candidate',
+        key:'proposal:'+proposalId.toLowerCase(),
+        proposal_id:proposalId,
+        domain:domain||null,
+        candidate_ordinal:Number(row?.candidate_ordinal||0)||null,
+        match_basis:'proposal_id',
+      };
+    }
+    if(domainNorm&&normalized.includes(domainNorm)){
+      return {
+        kind:'canonical_candidate',
+        key:proposalId
+          ?'proposal:'+proposalId.toLowerCase()
+          :'domain:'+domainNorm,
+        proposal_id:proposalId||null,
+        domain:domain||null,
+        candidate_ordinal:Number(row?.candidate_ordinal||0)||null,
+        match_basis:'exact_normalized_domain',
+      };
+    }
+  }
+
+  const explicitId=explicitRepeatedInstanceId(v);
+  if(Number.isInteger(explicitId)){
+    return {
+      kind:'explicit_ordinal',
+      key:'ordinal:'+explicitId,
+      proposal_id:null,
+      domain:null,
+      candidate_ordinal:explicitId,
+      match_basis:'explicit_repeated_instance',
+    };
+  }
+  return null;
+}
+
+function canonicalRepeatedInstancesDisjoint(a,b,suppliedContext){
+  const aa=canonicalCandidateIdentity(a,suppliedContext);
+  const bb=canonicalCandidateIdentity(b,suppliedContext);
+  return Boolean(aa?.key&&bb?.key&&aa.key!==bb.key);
+}
 function childConvergenceValidation(parentRequirement,childRequirement,scopeRemoved,completionCriterion){
   const failures=[];
   const scope=text(scopeRemoved);
@@ -3486,6 +3552,7 @@ export async function runAutonomousRequirementCognition({
                 'You own the child requirement. The runtime will not invent, narrow, or repair it for you.',
                 'Author exactly ONE next child requirement, or declare DONE when the children already authored adequately cover the parent.',
                 'previously_authored_children are durable, accepted, and authoritative. Do NOT restate, paraphrase, re-research, or recreate work already assigned to any previous child.',
+                'When supplied_context.expertise_candidate_ledger is available and the parent asks for repeated candidate/proposal work, bind each child to exactly ONE canonical ledger candidate. Preserve that candidate domain verbatim in the child requirement; include its proposal_id when useful. Different canonical proposal_ids/domains are distinct work instances even when they share the same analytical framework.',
                 'Derive the NEXT child only from the parent scope that remains uncovered after subtracting previously_authored_children. If no independently executable scope remains, return DONE.',
                 'The runtime performs terminal parent synthesis automatically after all children resolve. Do NOT create a child whose sole purpose is to merge, format, summarize, reconcile, or submit the other children; return DONE instead when only terminal synthesis remains.',
                 'A CHILD must be independently completable, materially narrower than the parent, non-overlapping with accepted children, and include explicit scope removed plus a concrete completion criterion.',
@@ -3554,6 +3621,9 @@ export async function runAutonomousRequirementCognition({
                 break;
               }
 
+              const candidateCanonicalIdentity=canonicalCandidateIdentity(
+                candidate,childContextView.suppliedContext
+              );
               const siblingOverlap=previous
                 .map(v=>({
                   ordinal:Number(v?.ordinal||0),
@@ -3561,6 +3631,12 @@ export async function runAutonomousRequirementCognition({
                   similarity:requirementSimilarity(candidate.requirement,v?.requirement),
                   explicit_instance_id:explicitRepeatedInstanceId(v),
                   explicit_instance_disjoint:explicitRepeatedInstancesDisjoint(candidate,v),
+                  canonical_identity:canonicalCandidateIdentity(
+                    v,childContextView.suppliedContext
+                  ),
+                  canonical_instance_disjoint:canonicalRepeatedInstancesDisjoint(
+                    candidate,v,childContextView.suppliedContext
+                  ),
                 }))
                 .sort((a,b)=>b.similarity-a.similarity)[0]||null;
               const candidateInstanceId=explicitRepeatedInstanceId(candidate);
@@ -3568,6 +3644,7 @@ export async function runAutonomousRequirementCognition({
                 siblingOverlap
                 &&siblingOverlap.similarity>=0.78
                 &&!siblingOverlap.explicit_instance_disjoint
+                &&!siblingOverlap.canonical_instance_disjoint
               ){
                 provenanceRevisionGuidance=
                   'The proposed child overlaps accepted child ordinal '
@@ -3583,10 +3660,21 @@ export async function runAutonomousRequirementCognition({
                 max_similarity:Number(siblingOverlap?.similarity||0),
                 compared_children:previous.length,
                 explicit_instance_id:candidateInstanceId,
+                canonical_candidate_identity:candidateCanonicalIdentity,
+                compared_sibling_canonical_identity:siblingOverlap?.canonical_identity||null,
                 disjoint_repeated_instance_override:Boolean(
                   siblingOverlap?.similarity>=0.78
-                  &&siblingOverlap?.explicit_instance_disjoint
+                  &&(
+                    siblingOverlap?.explicit_instance_disjoint
+                    ||siblingOverlap?.canonical_instance_disjoint
+                  )
                 ),
+                override_basis:
+                  siblingOverlap?.canonical_instance_disjoint
+                    ?'canonical_candidate_identity'
+                    :siblingOverlap?.explicit_instance_disjoint
+                      ?'explicit_repeated_instance'
+                      :null,
               };
 
               const provenanceReview=await reviewChildProposalProvenance(
@@ -3670,6 +3758,7 @@ export async function runAutonomousRequirementCognition({
             if(mismatch)
               throw new Error('autonomous_decomposition_child_serialization_content_mismatch:'+node.node_path);
             candidate._convergence_validation=proposal._convergence_validation;
+            candidate._sibling_overlap_validation=proposal._sibling_overlap_validation;
             candidate._provenance_review=proposal._provenance_review;
           }else if(text(candidate.coverage_note)!==text(proposal.coverage_note)){
             throw new Error('autonomous_decomposition_child_serialization_content_mismatch:'+node.node_path);
@@ -3756,6 +3845,7 @@ export async function runAutonomousRequirementCognition({
           scope_removed:clip(parsed?.scope_removed,1600),
           completion_criterion:clip(parsed?.completion_criterion,1600),
           convergence_similarity:Number(parsed?._convergence_validation?.similarity||0),
+          sibling_overlap_validation:asObject(parsed?._sibling_overlap_validation),
           provenance_review:asObject(parsed?._provenance_review),
           child_proposal_checkpoint_step_key:childProposalStepKey(node,ordinal),
           child_authoring_protocol:'deep_formulation_checkpoint_then_nonthinking_serialization_v0_1',
