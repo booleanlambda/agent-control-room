@@ -204,6 +204,22 @@ export async function runExperimentalNvidiaWake() {
       qdaValidation = qda601DecisionValidation(packet, decision);
     }
     if (!qdaValidation.ok) {
+      console.error('AAU_QDA601_FRESH_WAKE_REJECTED', JSON.stringify({
+        agent_id:agentId,
+        failures:qdaValidation.failures || [],
+        selected_action:decision?.selected_action || null,
+        current_focus:decision?.current_focus || null,
+        associations:(Array.isArray(decision?.associations) ? decision.associations : []).map((a)=>({
+          origin:a?.origin || null,
+          filename:a?.file?.filename || a?.filename || null,
+          mime_type:a?.file?.mime_type || a?.mime_type || null,
+          content_type:typeof (a?.file?.content ?? a?.content),
+          content_chars:String(a?.file?.content ?? a?.content ?? '').length,
+          top_keys:a && typeof a==='object' ? Object.keys(a).slice(0,20) : [],
+          file_keys:a?.file && typeof a.file==='object' ? Object.keys(a.file).slice(0,20) : [],
+        })).slice(0,12),
+        raw_output_excerpt:String(response?.content || response?.reasoning_content || '').slice(0,12000),
+      }));
       const err = new Error('qda601_fresh_wake_contract_invalid:'+JSON.stringify(qdaValidation.failures || []));
       err.code='QDA601_COGNITION_REJECTED';
       throw err;
