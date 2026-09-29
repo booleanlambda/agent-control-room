@@ -9,6 +9,7 @@ import {
   durableSiblingInspection,
   retryableModelTransportError,
   autonomousEvidenceWindowDecision,
+  evidenceCeilingRequiresAgentResolution,
   mergeInheritedDependencyResults,
   classifyThresholdEvidence,
   pathDepth,
@@ -234,6 +235,24 @@ test('bounded ancestor dependency promotion retains both old prerequisites and r
   assert.ok(promoted.some(v=>v.path==='R.030'));
 });
 
+
+test('hard evidence ceilings return semantic control to the agent instead of pausing lifecycle',()=>{
+  assert.equal(evidenceCeilingRequiresAgentResolution({
+    granted:false,reason:'hard_context_constraint'
+  }),true);
+  assert.equal(evidenceCeilingRequiresAgentResolution({
+    granted:false,reason:'prior_evidence_round_unproductive'
+  }),true);
+  assert.equal(evidenceCeilingRequiresAgentResolution({
+    granted:false,reason:'evidence_window_renewal_limit'
+  }),true);
+  assert.equal(evidenceCeilingRequiresAgentResolution({
+    granted:false,reason:'insufficient_semantic_budget'
+  }),false);
+  assert.equal(evidenceCeilingRequiresAgentResolution({
+    granted:true,reason:'bounded_evidence_window_economically_admissible'
+  }),false);
+});
 
 test('threshold evidence distinguishes unknown from fail',()=>{
   assert.equal(classifyThresholdEvidence({hasComparableEvidence:false,thresholdSatisfied:false}),'UNKNOWN');
