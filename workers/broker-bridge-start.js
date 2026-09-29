@@ -211,6 +211,19 @@ if (manualWakeConfigured) {
   }
 }
 
+if (isEnabled('AAU_QDA601_BOOTSTRAP_ON_START')) {
+  try {
+    const { runConfiguredQda601Bootstrap } = await import('./qda601-bootstrap.js');
+    const result = await runConfiguredQda601Bootstrap();
+    console.log('AAU_QDA601_BOOTSTRAP_RESULT', JSON.stringify(result));
+  } catch (error) {
+    console.error('AAU_QDA601_BOOTSTRAP_FAILED', JSON.stringify({
+      error_name:error?.name || null,
+      message:String(error?.message || error).slice(0,2000),
+    }));
+  }
+}
+
 if (isEnabled('AAU_AUTONOMOUS_LIFECYCLE_ENABLED')) {
   try {
     const { startNvidiaAutonomousLifecycle } = await import('./nvidia-autonomous-lifecycle.js');
