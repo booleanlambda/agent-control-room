@@ -1,5 +1,5 @@
 import { nvidiaChatCompletion } from './providers/nvidia.js';
-import { augmentPacketWithQda601, qda601DecisionValidation, qda601Correction, stampQda601Progress, qda601BootstrapMessage } from './qda601-runtime.js';
+import { augmentPacketWithQda601, qda601DecisionValidation, qda601Correction, stampQda601Progress, normalizeQda601FileAssociations, qda601BootstrapMessage } from './qda601-runtime.js';
 
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
@@ -171,8 +171,10 @@ export async function runExperimentalNvidiaWake() {
     let response = await nvidiaChatCompletion({
       model,
       messages: baseMessages,
-      maxTokens: 4200,
+      maxTokens: 6000,
       temperature: 0.2,
+      jsonMode: true,
+      enableThinking: true,
     });
 
     if (response.model_returned !== model) throw new Error(`model_consistency_breach: requested=${model}; returned=${response.model_returned || 'missing'}`);
@@ -192,8 +194,10 @@ export async function runExperimentalNvidiaWake() {
           { role:'assistant', content:String(response.content || '').slice(0,50000) },
           { role:'user', content:qda601Correction(packet,qdaValidation) },
         ],
-        maxTokens: 4200,
-        temperature: 0.1,
+        maxTokens: 6000,
+        temperature: 0,
+        jsonMode: true,
+        enableThinking: true,
       });
       try { parsed = parseDecision(response.content); }
       catch (contentError) {
@@ -224,6 +228,7 @@ export async function runExperimentalNvidiaWake() {
       err.code='QDA601_COGNITION_REJECTED';
       throw err;
     }
+    decision = normalizeQda601FileAssociations(decision);
     decision = stampQda601Progress(decision, qdaValidation);
     const canonicalOutput = JSON.stringify(decision);
     const outputHash = await sha256(canonicalOutput);
