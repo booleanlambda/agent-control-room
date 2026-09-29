@@ -179,6 +179,9 @@ if (isEnabled('AAU_AGENT_FILE_VISION_ENABLED')) {
   }
 }
 
+// Open the health endpoint before any optional startup cognition can block on a model/provider.
+await import('./broker-bridge-envcheck.js');
+
 const nvidiaWakeEnabled = isEnabled('AAU_NVIDIA_WAKE_ON_START');
 if (nvidiaWakeEnabled) {
   try {
