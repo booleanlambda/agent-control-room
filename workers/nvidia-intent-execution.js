@@ -1579,7 +1579,7 @@ function buildDeepCognitionPacket(packet, modeInfo = null) {
   const stage = currentStage(packet);
   const commonKeys = [
     'brain_packet_version','generated_at','agent','identity_context','continuity','traits','interests',
-    'state','mandatory_lifecycle_context','evidence_first_cognition_contract','evidence_provenance',
+    'state','mandatory_lifecycle_context','qda_601_context','evidence_first_cognition_contract','evidence_provenance',
     'intent_execution_context','intent_trigger','next_intent_context','sleep_eligibility_context',
     'attention_arbiter_context','recent_capability_results',
   ];
