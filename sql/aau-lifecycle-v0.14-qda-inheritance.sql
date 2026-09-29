@@ -26,6 +26,10 @@ create table if not exists agent_lab.supplemental_training_requirements (
     check (status in ('assigned','in_progress','assessment_pending','verified_pass','verified_fail'))
 );
 
+alter table agent_lab.supplemental_training_requirements enable row level security;
+revoke all on table agent_lab.supplemental_training_requirements from public,anon,authenticated;
+grant select,insert,update,delete on table agent_lab.supplemental_training_requirements to service_role;
+
 create or replace function agent_lab.qda_601_contract_v0_1()
 returns jsonb
 language sql
@@ -244,5 +248,10 @@ $function$;
 
 comment on table agent_lab.supplemental_training_requirements is
   'AAU v0.14 durable conditional training assignments. Verified programs join cumulative competency inheritance; assigned but unpassed programs block their declared lifecycle boundary.';
+
+revoke all on function agent_lab.assign_qda_601_v0_1(uuid,text,text) from public,anon,authenticated;
+revoke all on function agent_lab.record_qda_601_verification_v0_1(uuid,numeric,numeric,numeric,numeric,numeric,integer,boolean,jsonb,jsonb) from public,anon,authenticated;
+grant execute on function agent_lab.assign_qda_601_v0_1(uuid,text,text) to service_role;
+grant execute on function agent_lab.record_qda_601_verification_v0_1(uuid,numeric,numeric,numeric,numeric,numeric,integer,boolean,jsonb,jsonb) to service_role;
 
 commit;
