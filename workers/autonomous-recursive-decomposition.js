@@ -831,15 +831,104 @@ function lifecycleStageContract(packet){
 }
 
 function lifecycleStageContractContext(packet){
+  const lifecycle=asObject(packet?.mandatory_lifecycle_context);
   const resolved=lifecycleStageContract(packet);
-  if(!resolved.name||!resolved.definition)return {};
-  return {
-    [resolved.name]:{
+  const out={};
+
+  if(resolved.name&&resolved.definition){
+    out[resolved.name]={
       available:true,
       value:resolved.definition,
       source:'mandatory_lifecycle_context.stage_contract_definition',
-    },
-  };
+    };
+  }
+
+  const inheritance=asObject(lifecycle.cumulative_competency_inheritance);
+  if(Object.keys(inheritance).length){
+    out.cumulative_competency_inheritance={
+      available:true,
+      value:inheritance,
+      source:'mandatory_lifecycle_context.cumulative_competency_inheritance',
+    };
+
+    const verifiedPrior=asObject(inheritance.verified_prior_learning);
+    const masters=asObject(verifiedPrior.entrepreneurship_masters);
+    if(Object.keys(masters).length){
+      const courses=asArray(masters.courses).map(raw=>{
+        const course=asObject(raw);
+        return {
+          course_code:text(course.course_code)||null,
+          title:text(course.title)||null,
+          category:text(course.category)||null,
+          learning_objectives:asArray(course.learning_objectives).map(text).filter(Boolean),
+        };
+      });
+      const verifiedCompetencies=courses.flatMap(course=>
+        course.learning_objectives.map(objective=>({
+          source_stage:'entrepreneurship_masters',
+          course_code:course.course_code,
+          course_title:course.title,
+          category:course.category,
+          competency:objective,
+        }))
+      );
+      const capstone=asObject(masters.capstone);
+      const verificationReport=asObject(masters.verification_report);
+      const competencyLedger={
+        contract:'verified_prior_learning_competency_ledger_v0_1',
+        source_stage:'entrepreneurship_masters',
+        status:text(masters.status)||null,
+        course_count:courses.length,
+        courses,
+        verified_competencies:verifiedCompetencies,
+        capstone:{
+          status:text(capstone.status)||null,
+          capstone_id:capstone.capstone_id||null,
+          verified_transfer_principles:asArray(capstone.verified_transfer_principles).map(text).filter(Boolean),
+        },
+        verification:{
+          certification_kind:verificationReport.certification_kind||null,
+          operator_certification_override:Boolean(verificationReport.operator_certification_override),
+          overall_score:Number(verificationReport.overall_score||0)||null,
+          core_curriculum_passed:Boolean(verificationReport.core_curriculum_passed),
+          capstone_passed:Boolean(verificationReport.capstone_passed),
+          entrepreneurship_specialization_passed:Boolean(
+            verificationReport.entrepreneurship_specialization_passed
+          ),
+          historical_integrity_status:verificationReport.historical_integrity_status||null,
+          historical_integrity_hold_preserved:Boolean(
+            verificationReport.historical_integrity_hold_preserved
+          ),
+        },
+      };
+
+      // Stable aliases make the verified prior-learning record directly
+      // addressable by cognition/context requests. These are views of the
+      // authoritative lifecycle packet, not synthetic competencies.
+      out.entrepreneurship_masters={
+        available:text(masters.status)==='verified_pass',
+        status:text(masters.status)||null,
+        verified_competencies_ledger:competencyLedger,
+        courses,
+        capstone:competencyLedger.capstone,
+        verification:competencyLedger.verification,
+        source:'mandatory_lifecycle_context.cumulative_competency_inheritance.verified_prior_learning.entrepreneurship_masters',
+      };
+      out.agent={
+        competency_verification_records:{
+          available:text(masters.status)==='verified_pass',
+          source_stage:'entrepreneurship_masters',
+          status:text(masters.status)||null,
+          verified_competencies:verifiedCompetencies,
+          capstone_transfer_principles:competencyLedger.capstone.verified_transfer_principles,
+          verification:competencyLedger.verification,
+          source:'mandatory_lifecycle_context.cumulative_competency_inheritance.verified_prior_learning.entrepreneurship_masters',
+        },
+      };
+    }
+  }
+
+  return out;
 }
 
 const TERMINAL_SYNTHESIS_OWNERSHIP_VERSION='runtime_owned_terminal_synthesis_v0_2';
@@ -2402,6 +2491,7 @@ export async function runAutonomousRequirementCognition({
                 'The runtime does not choose, reinterpret, decompose, repair, or declare the requirement blocked for you.',
                 'Available decisions for this exact node: '+availableDecisions.join(', ')+'.',
                 'CANONICAL STAGE-4 LEDGER: when supplied_context.expertise_candidate_ledger is available, it is the authoritative current-cohort record of already submitted candidate domains, ordinals, and progress. Use it for distinctness/progress checks. Do not reconstruct those facts from recent_activity, historical trees, or prior invalidated cohorts.',
+                'CANONICAL PRIOR-LEARNING LEDGER: when supplied_context.entrepreneurship_masters or supplied_context.agent.competency_verification_records is available, it is the authoritative verified competency record for cumulative transfer. Use those records directly for prior_learning_application; do not ask for a separate competency ledger that already exists in supplied context.',
                 remediationAvailable
                   ? 'REMEDIATE is available because you have a prior durable cognitive state and remaining remediation budget. Choose it only if YOU detect a contradiction, stale belief, or recoverable cognitive-state failure in your own prior reasoning. The runtime will not diagnose the anomaly for you.'
                   : 'REMEDIATE is mechanically unavailable because there is no eligible prior cognitive state or the remediation budget is exhausted.',
