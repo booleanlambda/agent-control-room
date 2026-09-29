@@ -498,6 +498,42 @@ function requirementSimilarity(a,b){
   for(const token of aset)if(bset.has(token))overlap++;
   return overlap/Math.max(1,new Set([...aset,...bset]).size);
 }
+
+function explicitRepeatedInstanceId(v){
+  const source=normalizedRequirement([
+    v?.requirement,
+    v?.requirement_text,
+    v?.completion_criterion,
+    v?.scope_removed,
+  ].filter(Boolean).join(' '));
+  if(!source)return null;
+
+  const numericPatterns=[
+    /\bcandidate\s+(\d+)(?:\s+of\s+\d+)?\b/,
+    /\bproposal\s+(\d+)(?:\s+of\s+\d+)?\b/,
+    /\bordinal\s+(\d+)\b/,
+    /\binstance\s+(\d+)(?:\s+of\s+\d+)?\b/,
+    /\bitem\s+(\d+)(?:\s+of\s+\d+)?\b/,
+  ];
+  for(const pattern of numericPatterns){
+    const match=source.match(pattern);
+    if(match)return Number(match[1]);
+  }
+
+  const ordinalWords={
+    first:1,second:2,third:3,fourth:4,fifth:5,sixth:6,seventh:7,eighth:8,ninth:9,tenth:10,
+  };
+  const wordMatch=source.match(
+    /\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\s+(candidate|proposal|instance|item)\b/
+  );
+  return wordMatch?ordinalWords[wordMatch[1]]||null:null;
+}
+
+function explicitRepeatedInstancesDisjoint(a,b){
+  const aa=explicitRepeatedInstanceId(a);
+  const bb=explicitRepeatedInstanceId(b);
+  return Number.isInteger(aa)&&Number.isInteger(bb)&&aa!==bb;
+}
 function childConvergenceValidation(parentRequirement,childRequirement,scopeRemoved,completionCriterion){
   const failures=[];
   const scope=text(scopeRemoved);
@@ -3523,9 +3559,16 @@ export async function runAutonomousRequirementCognition({
                   ordinal:Number(v?.ordinal||0),
                   requirement:text(v?.requirement),
                   similarity:requirementSimilarity(candidate.requirement,v?.requirement),
+                  explicit_instance_id:explicitRepeatedInstanceId(v),
+                  explicit_instance_disjoint:explicitRepeatedInstancesDisjoint(candidate,v),
                 }))
                 .sort((a,b)=>b.similarity-a.similarity)[0]||null;
-              if(siblingOverlap&&siblingOverlap.similarity>=0.78){
+              const candidateInstanceId=explicitRepeatedInstanceId(candidate);
+              if(
+                siblingOverlap
+                &&siblingOverlap.similarity>=0.78
+                &&!siblingOverlap.explicit_instance_disjoint
+              ){
                 provenanceRevisionGuidance=
                   'The proposed child overlaps accepted child ordinal '
                   +siblingOverlap.ordinal
@@ -3539,6 +3582,11 @@ export async function runAutonomousRequirementCognition({
                 valid:true,
                 max_similarity:Number(siblingOverlap?.similarity||0),
                 compared_children:previous.length,
+                explicit_instance_id:candidateInstanceId,
+                disjoint_repeated_instance_override:Boolean(
+                  siblingOverlap?.similarity>=0.78
+                  &&siblingOverlap?.explicit_instance_disjoint
+                ),
               };
 
               const provenanceReview=await reviewChildProposalProvenance(
