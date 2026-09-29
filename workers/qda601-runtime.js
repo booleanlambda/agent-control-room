@@ -1,8 +1,5 @@
 import fs from 'node:fs';
 
-const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
-const serviceRole = String(process.env.AAU_SUPABASE_SERVICE_ROLE_KEY || '').trim();
-
 const curriculum = JSON.parse(
   fs.readFileSync(new URL('../curriculum/quantitative-decision-analysis-v0.1.json', import.meta.url), 'utf8')
 );
@@ -29,76 +26,60 @@ const units = curriculum.modules.flatMap((module, moduleIndex) =>
   }))
 );
 
-async function serviceRpc(name, args = {}) {
-  if (!serviceRole) throw new Error('qda601_service_role_missing');
-  const response = await fetch(`${SB}/rest/v1/rpc/${name}`, {
-    method:'POST',
-    headers:{
-      apikey:serviceRole,
-      authorization:`Bearer ${serviceRole}`,
-      'content-type':'application/json',
-    },
-    body:JSON.stringify(args),
-  });
-  const text = await response.text();
-  let body = null;
-  try { body = text ? JSON.parse(text) : null; } catch { body = text; }
-  if (!response.ok) throw new Error(`${name}:${response.status}:${typeof body==='string'?body.slice(0,800):JSON.stringify(body).slice(0,800)}`);
-  return body;
-}
-
-function validCourseFile(file) {
-  return file
-    && file.direction === 'outbound'
-    && file.purpose === 'agent_output'
-    && Number(file.file_size_bytes || 0) >= 500
-    && /^QDA601_M\d{2}_U\d{2}\.json$/i.test(String(file.filename || ''));
-}
-
 export function qda601RequiredForAgent(agentId) {
   return assignedIds().has(String(agentId || '').trim());
 }
 
-export async function buildQda601Context(agentId) {
+function lastActionFromPacket(packet) {
+  return String(
+    packet?.state?.state_payload?.last_action
+    ?? packet?.state?.last_action
+    ?? packet?.continuity?.last_action
+    ?? ''
+  ).trim();
+}
+
+function cursorFromLastAction(packet) {
+  const action = lastActionFromPacket(packet).toLowerCase();
+  if (!action.startsWith('qda601_')) return {completedIndex:-1,researchIndex:null,final:false};
+
+  if (action.startsWith('qda601_final_submission')) {
+    return {completedIndex:units.length-1,researchIndex:null,final:true};
+  }
+
+  const completeMatch = action.match(/^qda601_complete_(qda601-m\d+-u\d+)/i);
+  if (completeMatch) {
+    const idx = units.findIndex(u => u.unit_code.toLowerCase() === completeMatch[1].toLowerCase());
+    return {completedIndex:idx,researchIndex:null,final:false};
+  }
+
+  const researchMatch = action.match(/^qda601_research_(qda601-m\d+-u\d+)/i);
+  if (researchMatch) {
+    const idx = units.findIndex(u => u.unit_code.toLowerCase() === researchMatch[1].toLowerCase());
+    return {completedIndex:Math.max(-1,idx-1),researchIndex:idx,final:false};
+  }
+
+  return {completedIndex:-1,researchIndex:null,final:false};
+}
+
+export function buildQda601Context(agentId, packet = {}) {
   if (!qda601RequiredForAgent(agentId)) {
     return {assigned:false,program_version:'qda_601_v0_1'};
   }
 
-  let fileResponse = {files:[]};
-  try {
-    fileResponse = await serviceRpc('aau_control_room_agent_files', {
-      p_agent_id:String(agentId),
-      p_limit:200,
-    }) || {files:[]};
-  } catch (error) {
-    console.error('AAU_QDA601_FILE_LEDGER_UNAVAILABLE', JSON.stringify({
-      agent_id:agentId,error:String(error?.message || error).slice(0,900)
-    }));
-  }
-
-  const files = Array.isArray(fileResponse?.files) ? fileResponse.files : [];
-  const completedByName = new Map();
-  for (const file of files) {
-    if (!validCourseFile(file)) continue;
-    const name = String(file.filename || '').toUpperCase();
-    if (!completedByName.has(name)) completedByName.set(name,file);
-  }
-
-  const completed = units.filter(unit => completedByName.has(unit.filename.toUpperCase()));
-  const nextUnit = units.find(unit => !completedByName.has(unit.filename.toUpperCase())) || null;
-  const finalSubmission = files.find(file =>
-    file?.direction === 'outbound'
-    && file?.purpose === 'agent_output'
-    && String(file?.filename || '').toUpperCase() === 'QDA601_FINAL_SUBMISSION.JSON'
-    && Number(file?.file_size_bytes || 0) >= 800
-  ) || null;
+  const cursor = cursorFromLastAction(packet);
+  const completedCount = Math.max(0, Math.min(units.length, cursor.completedIndex + 1));
+  const nextIndex = cursor.researchIndex !== null
+    ? cursor.researchIndex
+    : Math.min(units.length, completedCount);
+  const nextUnit = nextIndex < units.length ? units[nextIndex] : null;
 
   let status = 'in_progress';
-  if (!nextUnit && !finalSubmission) status = 'coursework_complete_final_packaging_required';
-  if (!nextUnit && finalSubmission) status = 'coursework_complete_pending_independent_verification';
+  if (!nextUnit && !cursor.final) status = 'coursework_complete_final_packaging_required';
+  if (cursor.final) status = 'coursework_complete_pending_independent_verification';
 
   return {
-    contract:'qda_601_runtime_course_ledger_v0_1',
+    contract:'qda_601_runtime_course_cursor_v0_2',
     assigned:true,
     program_code:'QDA601',
     program_version:'qda_601_v0_1',
@@ -108,15 +89,13 @@ export async function buildQda601Context(agentId) {
     source_artifact:'curriculum/quantitative-decision-analysis-v0.1.json',
     lifecycle_artifact:'docs/AAU_AGENT_DEVELOPMENT_LIFECYCLE_v0.14.md',
     total_units:units.length,
-    completed_units:completed.length,
-    remaining_units:units.length-completed.length,
-    completed_filenames:completed.map(v=>v.filename),
+    completed_units:completedCount,
+    remaining_units:Math.max(0,units.length-completedCount),
     next_unit:nextUnit,
     final_submission:{
       required:!nextUnit,
       filename:'QDA601_FINAL_SUBMISSION.json',
-      exists:Boolean(finalSubmission),
-      file_id:finalSubmission?.file_id || null,
+      exists:cursor.final,
     },
     hard_gates:curriculum.requirements.hard_gates,
     overall_pass_floor:curriculum.requirements.overall_pass_floor,
@@ -124,6 +103,12 @@ export async function buildQda601Context(agentId) {
     evidence_state_labels:curriculum.evidence_state_labels,
     required_submission_fields:curriculum.default_submission_contract.required_fields,
     governing_loop:curriculum.governing_loop,
+    progression_cursor:{
+      source:'authoritative_last_committed_action',
+      last_action:lastActionFromPacket(packet) || null,
+      completed_index:cursor.completedIndex,
+      research_index:cursor.researchIndex,
+    },
     operating_rules:[
       'Complete the exact next_unit before later QDA units.',
       'Persist completed unit work as one agent_file_output_v0_1 JSON artifact using next_unit.filename exactly.',
@@ -135,9 +120,9 @@ export async function buildQda601Context(agentId) {
   };
 }
 
-export async function augmentPacketWithQda601(packet, agentId) {
+export function augmentPacketWithQda601(packet, agentId) {
   if (!qda601RequiredForAgent(agentId)) return packet;
-  const ctx = await buildQda601Context(agentId);
+  const ctx = buildQda601Context(agentId, packet);
   return {
     ...packet,
     qda_601_context:ctx,
@@ -209,14 +194,20 @@ export function qda601DecisionValidation(packet, decision) {
   if (expertiseAttempt) return {ok:false,active:true,failures:['qda601_blocks_stage4_until_independent_verification']};
 
   if (ctx.status==='in_progress' && ctx.next_unit) {
-    if (hasWebResearch(decision)) return {ok:true,active:true,research:true,failures:[]};
+    if (hasWebResearch(decision)) return {ok:true,active:true,research:true,unit_code:ctx.next_unit.unit_code,failures:[]};
     const association=qdaFileAssociation(decision,ctx.next_unit.filename);
     if (!association) return {ok:false,active:true,failures:['qda_current_unit_artifact_required:'+ctx.next_unit.filename]};
     const f=association.file && typeof association.file==='object'?association.file:association;
     if (String(f.content || '').trim().length<500) return {ok:false,active:true,failures:['qda_unit_artifact_min_500_chars']};
     const payload=parseAssociationJson(association);
     const payloadFailures=validateUnitPayload(ctx,payload);
-    return {ok:payloadFailures.length===0,active:true,failures:payloadFailures};
+    return {
+      ok:payloadFailures.length===0,
+      active:true,
+      completed:payloadFailures.length===0,
+      unit_code:ctx.next_unit.unit_code,
+      failures:payloadFailures
+    };
   }
 
   if (ctx.status==='coursework_complete_final_packaging_required') {
@@ -228,7 +219,7 @@ export function qda601DecisionValidation(packet, decision) {
     if (refs.length<ctx.total_units) return {ok:false,active:true,failures:['qda_final_submission_must_reference_all_units']};
     if (!payload.canonical_variable_ledger || !payload.integrated_self_audit || !payload.capstone_decision)
       return {ok:false,active:true,failures:['qda_final_submission_missing_integrated_requirements']};
-    return {ok:true,active:true,failures:[]};
+    return {ok:true,active:true,finalSubmitted:true,failures:[]};
   }
 
   if (ctx.status==='coursework_complete_pending_independent_verification') {
@@ -238,24 +229,38 @@ export function qda601DecisionValidation(packet, decision) {
   return {ok:true,active:true,failures:[]};
 }
 
+export function stampQda601Progress(decision, validation) {
+  if (!validation?.active || !decision || typeof decision !== 'object') return decision;
+  if (validation.completed && validation.unit_code) {
+    decision.selected_action=`qda601_complete_${validation.unit_code}`;
+    decision.current_focus=`QDA-601 ${validation.unit_code} completed and persisted; next cognition advances to the next canonical unit.`;
+  } else if (validation.research && validation.unit_code) {
+    decision.selected_action=`qda601_research_${validation.unit_code}`;
+    decision.current_focus=`QDA-601 ${validation.unit_code} evidence acquisition; the unit remains active until its canonical artifact is persisted.`;
+  } else if (validation.finalSubmitted) {
+    decision.selected_action='qda601_final_submission';
+    decision.current_focus='QDA-601 coursework packaged; awaiting independent verification.';
+  }
+  return decision;
+}
+
 export function qda601Correction(packet, validation) {
   const ctx=packet?.qda_601_context || {};
   const next=ctx.next_unit || {};
   if (ctx.status==='coursework_complete_final_packaging_required') {
-    return 'QDA-601 FINAL PACKAGING GATE: Coursework artifacts are complete, but the canonical final submission is missing. Do not return to Stage 4. Persist exactly one agent_file_output_v0_1 file named QDA601_FINAL_SUBMISSION.json. It must be valid JSON and include completed_unit_artifacts referencing all 40 canonical QDA unit filenames, canonical_variable_ledger, integrated_self_audit, capstone_decision, quantitative_failure_review, hard_gate_self_check, and evidence_refs. Do not self-certify independent verification. Preserve any admin reply and the five-minute next intent.';
+    return 'QDA-601 FINAL PACKAGING GATE: Coursework artifacts are complete, but the canonical final submission is missing. Do not return to Stage 4. Persist exactly one agent_file_output_v0_1 file named QDA601_FINAL_SUBMISSION.json. It must be valid JSON and include completed_unit_artifacts referencing all 40 canonical QDA unit filenames, canonical_variable_ledger, integrated_self_audit, capstone_decision, quantitative_failure_review, hard_gate_self_check, and evidence_refs. Do not self-certify independent verification. Preserve the normal next-intent contract.';
   }
   return `QDA-601 COURSE GATE: QDA-601 is an assigned lifecycle-blocking supplemental program and Stage 4 is held. Complete the exact current unit, not expertise viability. Current unit: ${JSON.stringify(next)}. Persist ONE agent_file_output_v0_1 artifact whose filename is exactly "${next.filename || ''}". file.content must be complete valid JSON with program_version="qda_601_v0_1", module_code="${next.module_code || ''}", unit_code="${next.unit_code || ''}", title, inputs, assumptions ARRAY, formula_or_model, calculation, units, interpretation, sanity_check, evidence ARRAY, and self_audit OBJECT containing pass_a, pass_b and verdict. Pass B must independently reconstruct or attack the result. If genuinely missing current external evidence, request web_research_request_v0_1 instead and keep the same unit active. Do not submit or revise an expertise candidate. Validation failures: ${JSON.stringify(validation?.failures || [])}`;
 }
 
 export function qda601BootstrapMessage() {
   return [
-    'AAU lifecycle update: QDA-601 Quantitative Decision Analysis is now assigned to you as mandatory supplemental training before final Stage-4 expertise viability.',
-    'Your earlier Stage-4 research and durable checkpoints are preserved as pre-QDA evidence; they are not erased and runtime/materialization failures are not cognitive failures.',
-    'The runtime now supplies qda_601_context on each cognition and treats its next_unit as the authoritative current training unit until the course is complete.',
+    'AAU lifecycle update: QDA-601 Quantitative Decision Analysis is assigned as mandatory supplemental training before final Stage-4 expertise viability.',
+    'Earlier Stage-4 research and durable checkpoints remain preserved as pre-QDA evidence; they are not erased, and runtime/materialization failures are not cognitive failures.',
+    'The runtime supplies qda_601_context on every cognition and the exact next_unit is authoritative until coursework and independent verification are complete.',
     'Course scope: 10 modules / 40 units covering quantitative foundations, financial mathematics, probability, statistics/data analysis, causal/evidential reasoning, applied microeconomics, scenario analysis, model reconciliation, computational analysis, and an integrated decision laboratory.',
     'Hard gates are non-compensatory: arithmetic accuracy >=95%, financial-model integrity >=90%, reconciliation consistency >=90%, material-claim provenance 100%, zero material numerical contradictions, required independent self-audit, and overall >=90%.',
-    'For each unit, solve first and then independently audit it. Persist the exact QDA unit JSON artifact requested by qda_601_context. Do not skip ahead and do not return to Stage 4 while the QDA hold is active.',
-    'After all 40 unit artifacts, package QDA601_FINAL_SUBMISSION.json. Independent verification remains external; do not self-certify a pass.',
-    'Begin with the exact next_unit supplied by the runtime.'
+    'For each unit, solve first and independently audit second. Persist the exact QDA unit JSON artifact requested by qda_601_context. Do not skip ahead and do not return to Stage 4 while the QDA hold is active.',
+    'After all 40 unit artifacts, package QDA601_FINAL_SUBMISSION.json. Independent verification remains external; do not self-certify a pass.'
   ].join(' ');
 }
