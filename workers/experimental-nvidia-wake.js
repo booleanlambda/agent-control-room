@@ -298,10 +298,39 @@ export async function runExperimentalNvidiaWake() {
     };
   } catch (error) {
     if (wakeId) {
-      await rpc('aau_bridge_fail_experimental_nvidia_wake', {
-        p_wake_request_id:wakeId,
-        p_error:String(error?.message || error).slice(0,3500),
-      }).catch(() => {});
+      const message=String(error?.message || error).slice(0,3500);
+      const status=Number(error?.status ?? error?.providerStatusCode ?? 0);
+      const providerTransient=
+        status===408 || status===429 || (status>=500 && status<=599)
+        || /^nvidia_timeout_after_[0-9]+ms$/i.test(message)
+        || /network|socket|connection reset|fetch failed|upstream timeout/i.test(message);
+
+      let recovery=null;
+      if (providerTransient) {
+        recovery=await rpc('aau_bridge_fail_nvidia_provider_transient_v0_1', {
+          p_intent_execution_id:wakeId,
+          p_error:message,
+        }).catch((recoveryError)=>({
+          status:'recovery_rpc_failed',
+          error:String(recoveryError?.message || recoveryError).slice(0,1200),
+        }));
+      } else {
+        recovery=await rpc('aau_bridge_fail_experimental_nvidia_wake', {
+          p_wake_request_id:wakeId,
+          p_error:message,
+        }).catch((recoveryError)=>({
+          status:'failure_rpc_failed',
+          error:String(recoveryError?.message || recoveryError).slice(0,1200),
+        }));
+      }
+
+      console.error('AAU_NVIDIA_EXPERIMENTAL_WAKE_RECOVERY',JSON.stringify({
+        wake_request_id:wakeId,
+        provider_transient:providerTransient,
+        provider_status:Number.isFinite(status) && status>0 ? status : null,
+        error:message,
+        recovery,
+      }));
     }
     throw error;
   }
