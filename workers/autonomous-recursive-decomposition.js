@@ -4149,7 +4149,99 @@ export async function runAutonomousRequirementCognition({
     }
     }
 
-    const status=text(parsed?.status).toUpperCase();
+    const atomicStageContractForProtocol=
+      stageContractForRequirement(packet,node.requirement_text,node.node_path);
+    let status=text(parsed?.status).toUpperCase();
+
+    // Structured lifecycle contracts are allowed to arrive as the contract
+    // object itself instead of the generic atomic wrapper. Treat that as a
+    // mechanical protocol variant only when the object actually validates
+    // against the authoritative current stage contract.
+    if(!['SPLIT','NEED_CONTEXT','COMPLETE'].includes(status)
+       &&atomicStageContractForProtocol.applies){
+      const directCandidates=[
+        asObject(parsed?.proposal),
+        (parsed?.artifact&&typeof parsed.artifact==='object'&&!Array.isArray(parsed.artifact))
+          ?asObject(parsed.artifact):{},
+        asObject(parsed),
+      ].filter(v=>Object.keys(v).length);
+      const directProposal=directCandidates.find(candidate=>
+        validateStageContractArtifact(
+          atomicStageContractForProtocol.definition,
+          safeJson(candidate)
+        ).valid
+      );
+      if(directProposal){
+        parsed={
+          status:'COMPLETE',
+          artifact:directProposal,
+          handoff:asObject(parsed?.handoff),
+          _atomic_protocol_normalization:{
+            version:'structured_stage_contract_direct_atomic_v0_1',
+            original_status:text(parsed?.status)||null,
+            original_outcome:text(parsed?.outcome)||null,
+            normalized_status:'COMPLETE',
+            stage_contract_name:atomicStageContractForProtocol.name,
+          },
+        };
+        status='COMPLETE';
+        console.log('AAU_AUTONOMOUS_ATOMIC_PROTOCOL_NORMALIZED',JSON.stringify({
+          agent_id:agentId,
+          intent_execution_id:intentExecutionId,
+          node_path:node.node_path,
+          normalization:'structured_stage_contract_direct_atomic_v0_1',
+          stage_contract_name:atomicStageContractForProtocol.name,
+        }));
+      }
+    }
+
+    // Also accept the generic outcome label as a mechanical alias when the
+    // model otherwise followed the atomic response contract.
+    if(!['SPLIT','NEED_CONTEXT','COMPLETE'].includes(status)){
+      const outcomeAlias=text(parsed?.outcome).toUpperCase();
+      if(['SPLIT','NEED_CONTEXT','COMPLETE'].includes(outcomeAlias)){
+        parsed={...parsed,status:outcomeAlias};
+        status=outcomeAlias;
+      }
+    }
+
+    if(!['SPLIT','NEED_CONTEXT','COMPLETE'].includes(status)){
+      if(!durableAtomic.parsed){
+        await saveJsonPhaseCheckpoint(
+          node.node_path,'ATOMIC_PROTOCOL_REJECTED',atomicSemanticIdentity,
+          asObject(parsed),{
+            atomic_status:text(parsed?.status)||null,
+            atomic_outcome:text(parsed?.outcome)||null,
+            rejection_reason:'atomic_status_invalid_after_protocol_normalization',
+          }
+        );
+      }
+      const atomicExecutionFailures=
+        Math.max(0,Number(node?.decision_payload?.atomic_execution_failures||0))+1;
+      const reset=await saveNode({
+        nodePath:node.node_path,
+        parentPath:node.parent_path??parentPathOf(node.node_path),
+        ordinal:node.ordinal||0,
+        requirement:node.requirement_text,
+        sourceKind:node.source_kind,
+        sourceRef:node.source_ref,
+        status:'pending',
+        decisionType:null,
+        decisionPayload:{
+          ...(node.decision_payload||{}),
+          prior_atomic_rejection:'atomic_status_invalid_after_protocol_normalization',
+          reconsider_decomposition:true,
+          atomic_execution_failures:atomicExecutionFailures,
+          atomic_unavailable:atomicExecutionFailures>=MAX_ATOMIC_EXECUTION_FAILURES,
+          atomic_protocol_recovery_version:'structured_stage_contract_direct_atomic_v0_1',
+        },
+        contextPayload:node.context_payload||{},
+        resultArtifact:null,
+      });
+      reset.parent_path=node.parent_path??parentPathOf(node.node_path);
+      return {reconsider:true,node:reset};
+    }
+
     if(status==='SPLIT'){
       if(!durableAtomic.parsed){
         await saveJsonPhaseCheckpoint(
@@ -4239,8 +4331,6 @@ export async function runAutonomousRequirementCognition({
       reset.parent_path=node.parent_path??parentPathOf(node.node_path);
       return {reconsider:true,node:reset};
     }
-    if(status!=='COMPLETE')throw new Error('autonomous_decomposition_atomic_status_invalid:'+node.node_path);
-
     const proposedArtifact=artifactText(parsed?.artifact);
     if(!proposedArtifact)throw new Error('autonomous_decomposition_atomic_artifact_empty:'+node.node_path);
     const proposedHandoff=asObject(parsed?.handoff);
