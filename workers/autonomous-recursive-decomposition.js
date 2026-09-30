@@ -130,6 +130,20 @@ function artifactText(v){
   if(typeof v==='object')return safeJson(v);
   return String(v).trim();
 }
+
+function companionNormalizedArtifact(payload){
+  const src=asObject(payload);
+  const raw=src?.artifact;
+  if(!raw||typeof raw!=='object'||Array.isArray(raw))return raw;
+  const normalized={...raw};
+  for(const key of ['python_checks','python_analyses']){
+    if((!Array.isArray(normalized[key])||normalized[key].length===0)
+       &&Array.isArray(src[key])&&src[key].length){
+      normalized[key]=src[key];
+    }
+  }
+  return normalized;
+}
 function canonicalizeHashValue(v){
   if(Array.isArray(v))return v.map(canonicalizeHashValue);
   if(v&&typeof v==='object'){
@@ -4264,12 +4278,12 @@ export async function runAutonomousRequirementCognition({
               'Never stringify an object as "[object Object]". If the work product is structured, place the actual JSON object in artifact.',
               'Keep the artifact bounded. Preserve uncertainty and do not claim external facts without supplied evidence.',
               ...(qdaQuantitativeAtomicRequirement(packet,node)?[
-                'DETERMINISTIC MATH COMPANION: this is a quantitative QDA requirement. Return artifact as a real JSON object and include python_checks. Each material numerical result must have a check object with label, numeric expression, and claimed_result. The expression may use numeric constants, + - * / ** %, parentheses, and safe functions such as sqrt/log/log10/exp/abs/round. Python verifies arithmetic only; you remain responsible for selecting the correct formula, units, assumptions, and interpretation.',
+                'DETERMINISTIC MATH COMPANION: this is a quantitative QDA requirement. Return artifact as a real JSON object and put python_checks INSIDE that artifact object, not beside the wrapper. Each material numerical result must have a check object with label, expression, and claimed_result. The expression may use numeric constants, + - * / ** %, parentheses, and safe functions such as sqrt/log/log10/exp/abs/round. Python verifies arithmetic only; you remain responsible for selecting the correct formula, units, assumptions, and interpretation.',
                 'Do your reasoning first. Treat a later Python disagreement as evidence that your numerical execution must be reconciled; never change the formula merely to force a match.',
                 'If deterministic_math_feedback is present, this is a fresh correction attempt. Inspect that feedback explicitly and return NEW python_checks; do not repeat or reuse an earlier artifact.'
               ]:[]),
               ...(qdaStatisticalAtomicRequirement(packet,node)?[
-                'QUANTITATIVE PYTHON STATISTICS COMPANION: choose the statistical method yourself, state why it is appropriate, state assumptions/limitations, then return artifact as a real JSON object containing python_analyses.',
+                'QUANTITATIVE PYTHON STATISTICS COMPANION: choose the statistical method yourself, state why it is appropriate, state assumptions/limitations, then return artifact as a real JSON object containing python_analyses INSIDE that artifact object, not beside the wrapper.',
                 'Each python_analyses item must contain id, analysis, spec, and claims. claims are YOUR numerical/statistical conclusions keyed to result fields (for example mean, median, r, ci_low, ci_high, t, p_two_sided). Python recomputes them independently.',
                 'Allowed analyses include describe, pearson_correlation, simple_linear_regression, proportion_ci, difference_proportions_ci, mean_ci, one_sample_t, welch_t, coefficient_t, bootstrap_ci, and monte_carlo_expression.',
                 'Python owns numerical execution only. You own method selection, assumptions, causal limits, interpretation, and decision relevance. A p-value or correlation is not a causal conclusion.',
@@ -4503,7 +4517,7 @@ export async function runAutonomousRequirementCognition({
       reset.parent_path=node.parent_path??parentPathOf(node.node_path);
       return {reconsider:true,node:reset};
     }
-    const proposedArtifact=artifactText(parsed?.artifact);
+    const proposedArtifact=artifactText(companionNormalizedArtifact(parsed));
     if(!proposedArtifact)throw new Error('autonomous_decomposition_atomic_artifact_empty:'+node.node_path);
     const proposedHandoff=asObject(parsed?.handoff);
     const proposedMathVerification=deterministicMathVerification(packet,node,proposedArtifact);
@@ -4814,7 +4828,7 @@ export async function runAutonomousRequirementCognition({
     if(reconciliationStatus!=='COMPLETE')
       throw new Error('autonomous_decomposition_reconciliation_status_invalid:'+node.node_path);
 
-    let artifact=artifactText(reconciliation?.artifact)||proposedArtifact;
+    let artifact=artifactText(companionNormalizedArtifact(reconciliation))||proposedArtifact;
     if(!artifact)throw new Error('autonomous_decomposition_reconciliation_artifact_empty:'+node.node_path);
     const handoff=Object.keys(asObject(reconciliation?.handoff)).length?asObject(reconciliation?.handoff):proposedHandoff;
     const finalMathVerification=deterministicMathVerification(packet,node,artifact);
