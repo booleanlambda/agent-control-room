@@ -5795,7 +5795,9 @@ export async function runAutonomousRequirementCognition({
             'Choose BLOCKED only when a substantive evidence/dependency gap prevents truthful satisfaction of the parent requirement; never choose BLOCKED merely because synthesis, formatting, or submission remains to be performed.',
             'When a lifecycle stage contract applies, keep artifact as a concise semantic synthesis. Do NOT embed or stringify the contract object here; the next runtime-owned materialization phase will produce the exact JSON object.',
             'If any essential child gap prevents the parent requirement from being satisfied, choose BLOCKED and preserve the unresolved gap.',
-            'Return JSON only: {"outcome":"COMPLETE|BLOCKED","reason":"auditable reason","artifact":"concise semantic parent result","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
+            'Return JSON only: {"outcome":"COMPLETE|BLOCKED","reason":"auditable reason","artifact":"concise semantic parent result OR a real nested JSON object when the parent requirement or prior provenance guidance requires structured fields","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
+            'STRUCTURED ARTIFACT RULE: when the parent requirement or prior_provenance_revision_guidance names required fields/schema, artifact MUST be the actual nested JSON object with those fields. Do not encode that object as a string, prose blob, markdown, or JSON-inside-a-string.',
+            'When prior provenance guidance requests a shape correction, the corrected shape is authoritative for this synthesis attempt and must be reflected directly in artifact.',
             'Do not add requirements or conclusions that are not supported by the resolved children.',
              'EPISTEMIC THRESHOLD POLICY: '+THRESHOLD_EVIDENCE_POLICY.RULE+' '+THRESHOLD_EVIDENCE_POLICY.PASS+' '+THRESHOLD_EVIDENCE_POLICY.FAIL+' '+THRESHOLD_EVIDENCE_POLICY.UNKNOWN,
              'If a child contains UNKNOWN threshold states, preserve them as UNKNOWN in the parent synthesis unless later resolved by explicit evidence.',
@@ -5822,7 +5824,7 @@ export async function runAutonomousRequirementCognition({
         const candidateOutcome=text(finalCandidate.outcome).toUpperCase();
         if(!['COMPLETE','BLOCKED'].includes(candidateOutcome))
           throw new Error('autonomous_decomposition_synthesis_outcome_invalid:'+node.node_path);
-        if(!text(finalCandidate.artifact))
+        if(!artifactText(finalCandidate.artifact))
           throw new Error('autonomous_decomposition_synthesis_empty:'+node.node_path);
 
         if(terminalStageContract.applies){
@@ -5856,7 +5858,7 @@ export async function runAutonomousRequirementCognition({
           await saveJsonPhaseCheckpoint(
             node.node_path,'FINAL_SYNTHESIS',finalSemanticIdentity,finalCandidate,{
               synthesis_outcome:candidateOutcome,
-              artifact_hash:sha256(text(finalCandidate.artifact)),
+              artifact_hash:sha256(artifactText(finalCandidate.artifact)),
               stage_contract_materialization_version:
                 terminalStageContract.applies?STAGE_CONTRACT_MATERIALIZATION_VERSION:null,
             }
@@ -5943,8 +5945,11 @@ export async function runAutonomousRequirementCognition({
     const outcome=text(final?.parsed?.outcome).toUpperCase();
     if(!['COMPLETE','BLOCKED'].includes(outcome))
       throw new Error('autonomous_decomposition_synthesis_outcome_invalid:'+node.node_path);
-    const artifact=artifactText(final?.parsed?.artifact);
-    if(!artifact)throw new Error('autonomous_decomposition_synthesis_empty:'+node.node_path);
+    const rawFinalArtifact=final?.parsed?.artifact;
+    const artifact=(rawFinalArtifact&&typeof rawFinalArtifact==='object'&&!Array.isArray(rawFinalArtifact))
+      ? rawFinalArtifact
+      : artifactText(rawFinalArtifact);
+    if(!artifactText(artifact))throw new Error('autonomous_decomposition_synthesis_empty:'+node.node_path);
     const resultArtifact=JSON.stringify({status:outcome,artifact,handoff:asObject(final?.parsed?.handoff)});
     const completedDecisionPayload={...(node.decision_payload||{})};
     delete completedDecisionPayload.synthesis_provenance_pending;
@@ -5975,7 +5980,11 @@ export async function runAutonomousRequirementCognition({
       return ensureCanonicalStageCandidateSubmission(
         done,
         terminalStageContract.applies
-          ? JSON.parse(text(final?.parsed?.artifact))
+          ? (
+              final?.parsed?.artifact&&typeof final.parsed.artifact==='object'&&!Array.isArray(final.parsed.artifact)
+                ? final.parsed.artifact
+                : JSON.parse(artifactText(final?.parsed?.artifact))
+            )
           : null
       );
     return done;
