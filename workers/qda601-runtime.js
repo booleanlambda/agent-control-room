@@ -267,7 +267,7 @@ function validateUnitPayload(ctx, payload) {
     if (checks.length < expectedProblems.length) {
       failures.push('qda_python_checks_min_one_per_problem_required');
     } else {
-      const pythonVerification = verifyPythonMathChecks(checks);
+      const pythonVerification = verifyPythonMathChecks(checks,{absoluteTolerance:0.005,relativeTolerance:1e-9});
       if (!pythonVerification.ok) failures.push('qda_python_runtime_unavailable_or_invalid');
       else if (!pythonVerification.all_match) failures.push('qda_python_arithmetic_disagreement');
     }
