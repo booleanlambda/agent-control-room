@@ -5827,13 +5827,20 @@ export async function runAutonomousRequirementCognition({
           reason:atomicRevalidation.verification?.error||'deterministic_verification_not_satisfied',
         }));
       }else if(text(node.decision_type).toUpperCase()==='SPLIT'){
-        const existingChildren=(await children(node.node_path))
-          .filter(child=>String(child?.status||'')!=='cancelled');
+        const existingChildRefs=(await children(node.node_path))
+          .filter(child=>String(child?.status||child?.node_status||'')!=='cancelled');
+        const existingChildren=[];
+        for(const childRef of existingChildRefs){
+          const hydrated=await getNode(childRef.node_path);
+          if(hydrated?.status==='ready'){
+            existingChildren.push({
+              ...hydrated,
+              parent_path:node.node_path,
+            });
+          }
+        }
         const legacyChild=existingChildren.find(child=>
-          completedAtomicDeterministicRevalidation(packet,{
-            ...child,
-            node_status:child.node_status||child.status,
-          }).required
+          completedAtomicDeterministicRevalidation(packet,child).required
         );
         if(!legacyChild)return ensureCanonicalStageCandidateSubmission(node);
         const nextPayload={...(node.decision_payload||{})};
@@ -6038,12 +6045,16 @@ export async function runAutonomousRequirementCognition({
   }
   const parts=resultParts(completedRoot.result_artifact);
   if(!parts.artifact)throw new Error('autonomous_decomposition_root_artifact_empty');
-  const authoritativeRootChildren=(await children('R'))
+  const authoritativeRootChildRefs=(await children('R'))
     .filter(child=>String(child?.status||child?.node_status||'')!=='cancelled')
-    .sort((a,b)=>Number(a?.ordinal||0)-Number(b?.ordinal||0))
-    .map(child=>({
+    .sort((a,b)=>Number(a?.ordinal||0)-Number(b?.ordinal||0));
+  const authoritativeRootChildren=[];
+  for(const childRef of authoritativeRootChildRefs){
+    const child=await getNode(childRef.node_path);
+    if(child?.status!=='ready')continue;
+    authoritativeRootChildren.push({
       node_path:child.node_path,
-      status:child.node_status||child.status||null,
+      status:child.node_status||null,
       decision_type:child.decision_type||null,
       requirement_text:child.requirement_text||null,
       result_hash:child.result_hash||null,
@@ -6051,7 +6062,8 @@ export async function runAutonomousRequirementCognition({
       deterministic_math_verified:child?.decision_payload?.deterministic_math_verified===true
         ||String(child?.decision_payload?.deterministic_math_verified||'').toLowerCase()==='true',
       deterministic_math_check_count:Number(child?.decision_payload?.deterministic_math_check_count||0),
-    }));
+    });
+  }
 
   return {
     artifact:parts.artifact,
