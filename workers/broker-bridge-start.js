@@ -149,6 +149,7 @@ try {
     node_path:path,
     status:'completed',
     decision_type:'ATOMIC',
+    requirement_text:'Solve p'+n,
     result_hash:'probe_'+n,
     deterministic_math_verified:true,
     deterministic_math_check_count:1,
