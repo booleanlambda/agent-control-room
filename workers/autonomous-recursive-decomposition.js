@@ -1017,12 +1017,15 @@ function qda601HoldRequirement(packet){
 }
 
 function extractTriggerRequirement(packet){
+  // A blocking supplemental-training contract is a lifecycle boundary, not an
+  // ordinary stimulus. It must remain authoritative even when an older admin
+  // or automatic-intervention message is still present in the packet.
+  const qdaRequirement=qda601HoldRequirement(packet);
+  if(qdaRequirement) return qdaRequirement;
   const admin=asObject(packet?.admin_chat_context?.current_admin_message);
   if(text(admin.content)){
     return {source_kind:'admin_message',source_ref:text(admin.message_id)||null,requirement:text(admin.content)};
   }
-  const qdaRequirement=qda601HoldRequirement(packet);
-  if(qdaRequirement) return qdaRequirement;
   const item=asObject(packet?.attention_arbiter_context?.current_attention_item);
   const payload=asObject(item.payload);
   const attn=text(payload.message)||text(payload.reason)||text(item.reason);
@@ -1522,11 +1525,25 @@ export async function runAutonomousRequirementCognition({
     synthesis_provenance_review:stageOutputTokens(SYNTHESIS_PROVENANCE_REVIEW_DEEP_TOKENS),
   });
   const rootReq=extractTriggerRequirement(packet);
+  const qda=asObject(packet?.qda_601_context);
+  const statePayload=asObject(packet?.state?.state_payload);
   const assignmentKey='req:'+sha256({
     agent_id:agentId,
     source_kind:rootReq.source_kind,
     source_ref:rootReq.source_ref,
     requirement:rootReq.requirement,
+    // Remediation is a material change of assignment identity. This prevents
+    // a previously completed later-unit tree from being reused after an
+    // independent verifier rolls the authoritative cursor back.
+    qda_context:qda.assigned===true?{
+      status:text(qda.status)||null,
+      next_unit:text(qda?.next_unit?.unit_code)||null,
+      exercise_pack_ref:text(qda?.next_unit?.exercise_pack_ref)||null,
+      remediation_required:statePayload.qda_601_remediation_required===true
+        ||text(statePayload.qda_601_remediation_required).toLowerCase()==='true',
+      remediation_unit:text(statePayload.qda_601_remediation_unit)||null,
+      remediation_review_id:text(statePayload.qda_601_last_authenticator_review_id)||null,
+    }:null,
   }).slice(0,48);
   const idx=contextIndex(packet);
   const counters={nodes:0,model_calls:0,context_requests:0};
@@ -6402,6 +6419,26 @@ export async function runAutonomousRequirementCognition({
     });
   }else if(root?.status!=='ready'){
     throw new Error('autonomous_decomposition_root_lookup_failed');
+  }else{
+    const currentRequirementHash=sha256(rootReq.requirement);
+    const rootSourceKind=text(root?.source_kind);
+    const rootSourceRef=text(root?.source_ref);
+    if(root.requirement_hash!==currentRequirementHash
+       || rootSourceKind!==text(rootReq.source_kind)
+       || rootSourceRef!==text(rootReq.source_ref)){
+      const error=new Error('autonomous_decomposition_root_assignment_drift');
+      error.code='COGNITION_ASSIGNMENT_DRIFT';
+      error.assignmentDrift={
+        assignment_key:assignmentKey,
+        expected_requirement_hash:currentRequirementHash,
+        observed_requirement_hash:root.requirement_hash||null,
+        expected_source_kind:rootReq.source_kind||null,
+        observed_source_kind:rootSourceKind||null,
+        expected_source_ref:rootReq.source_ref||null,
+        observed_source_ref:rootSourceRef||null,
+      };
+      throw error;
+    }
   }
 
   if(String(semanticRuntimeSnapshot?.runtime_status||'')==='blocked'
