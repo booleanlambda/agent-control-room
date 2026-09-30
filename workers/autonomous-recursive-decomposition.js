@@ -51,7 +51,7 @@ const MAX_PINNED_EVIDENCE_EXCERPT_CHARS=12000;
 const MAX_SELF_REMEDIATION_ATTEMPTS=2;
 const CHILD_FORMULATION_DEEP_TOKENS=7000;
 const ATOMIC_EXECUTION_DEEP_TOKENS=7000;
-const ATOMIC_RECONCILIATION_DEEP_TOKENS=5000;
+const ATOMIC_RECONCILIATION_DEEP_TOKENS=9000;
 const SYNTHESIS_MERGE_DEEP_TOKENS=6000;
 const SYNTHESIS_FINAL_DEEP_TOKENS=7000;
 const CHILD_PROVENANCE_REVIEW_DEEP_TOKENS=8000;
@@ -166,6 +166,24 @@ function artifactText(v){
   if(typeof v==='string')return v.trim();
   if(typeof v==='object')return safeJson(v);
   return String(v).trim();
+}
+function reconciliationReplacementQuality(proposedArtifact,candidateArtifact){
+  const proposed=artifactText(proposedArtifact);
+  const candidate=artifactText(candidateArtifact);
+  const proposedBytes=bytes(proposed);
+  const candidateBytes=bytes(candidate);
+  if(!candidate)return {
+    acceptable:false,reason:'empty_reconciliation_artifact',proposed_bytes:proposedBytes,candidate_bytes:0
+  };
+  if(proposedBytes<1600)return {
+    acceptable:true,reason:'small_proposed_artifact',proposed_bytes:proposedBytes,candidate_bytes:candidateBytes
+  };
+  const minimumBytes=Math.max(900,Math.floor(proposedBytes*0.55));
+  return {
+    acceptable:candidateBytes>=minimumBytes,
+    reason:candidateBytes>=minimumBytes?'complete_replacement_size_ok':'materially_abbreviated_replacement',
+    proposed_bytes:proposedBytes,candidate_bytes:candidateBytes,minimum_bytes:minimumBytes,
+  };
 }
 
 function companionNormalizedArtifact(payload){
@@ -4730,6 +4748,7 @@ export async function runAutonomousRequirementCognition({
               'Decide whether YOU consider your own completion criterion actually satisfied.',
               'Return one status only:',
               'COMPLETE = you judge the requirement and your own completion criterion genuinely satisfied by the evidence. You may correct wording/calculation in artifact and handoff before finalizing.',
+              'When COMPLETE, artifact is a COMPLETE REPLACEMENT work product, not a critique summary. Preserve every material derivation, assumption, unit, evidence distinction, unresolved limitation, and substantive section from the proposed artifact unless you explicitly correct or retire it. Do not shorten a multi-part artifact into a fragment.',
               'NEED_CONTEXT = evidence or stored context is still missing. Supply at least one exact context_request and/or research_query/research_url you choose.',
               'A formatting/serialization defect is NOT missing context. If the proposed completion already contains the underlying structured work product, choose COMPLETE and correct the artifact representation.',
               'SPLIT = you now judge the requirement is not actually bounded and should be decomposed by you.',
@@ -4777,6 +4796,42 @@ export async function runAutonomousRequirementCognition({
               throw validationError;
             }
           }
+          if(candidateStatus==='COMPLETE'){
+            const candidateArtifact=artifactText(companionNormalizedArtifact(candidate));
+            const replacementQuality=reconciliationReplacementQuality(
+              proposedArtifact,candidateArtifact
+            );
+            if(!replacementQuality.acceptable){
+              console.warn('AAU_RECONCILIATION_REPLACEMENT_REJECTED',JSON.stringify({
+                agent_id:agentId,intent_execution_id:intentExecutionId,
+                node_path:node.node_path,attempt,
+                ...replacementQuality,
+                policy:'complete_replacement_or_preserve_proposed_v0_1',
+              }));
+              if(attempt<2){
+                const validationError=new Error(
+                  'reconciliation_complete_artifact_abbreviated:'+node.node_path
+                );
+                validationError.code='COGNITION_RESPONSE_REJECTED';
+                validationError.rejectionReason='RECONCILIATION_ARTIFACT_ABBREVIATED';
+                throw validationError;
+              }
+              reconciliation={
+                ...candidate,
+                status:'COMPLETE',
+                artifact:proposedArtifact,
+                handoff:proposedHandoff,
+                _runtime_reconciliation_fallback:{
+                  version:'preserve_proposed_when_critic_replacement_abbreviated_v0_1',
+                  reason:replacementQuality.reason,
+                  proposed_bytes:replacementQuality.proposed_bytes,
+                  rejected_candidate_bytes:replacementQuality.candidate_bytes,
+                  minimum_replacement_bytes:replacementQuality.minimum_bytes||null,
+                },
+              };
+              break;
+            }
+          }
           reconciliation=candidate;
           break;
         }catch(error){
@@ -4805,6 +4860,8 @@ export async function runAutonomousRequirementCognition({
       reconciliation_criterion_assessment:clip(reconciliation?.criterion_assessment,2200),
       reconciliation_gaps:asArray(reconciliation?.gaps).map(v=>clip(text(v),700)).filter(Boolean).slice(0,12),
       cognitive_continuity_policy:'agent_discovery_restore_and_reconcile_v0_1',
+      reconciliation_replacement_fallback:
+        asObject(reconciliation?._runtime_reconciliation_fallback),
     };
 
     if(reconciliationStatus==='SPLIT'){
