@@ -19,6 +19,29 @@ try {
   }));
 }
 
+try {
+  const { runPythonStatisticalAnalyses } = await import('./python-quant.js');
+  const probe = runPythonStatisticalAnalyses([
+    {
+      id:'startup_describe_probe',
+      analysis:'describe',
+      spec:{values:[1,2,3,4]},
+      claims:{mean:2.5,median:2.5,q1:1.75,q3:3.25}
+    }
+  ]);
+  console.log('AAU_PYTHON_STATISTICS_RUNTIME_PROBE', JSON.stringify({
+    ok:probe.ok === true && probe.all_claims_match === true,
+    analysis_count:probe.analysis_count,
+    engine:probe.engine || null,
+    error:probe.error || null,
+  }));
+} catch (error) {
+  console.error('AAU_PYTHON_STATISTICS_RUNTIME_PROBE', JSON.stringify({
+    ok:false,
+    error:String(error?.message || error).slice(0,500),
+  }));
+}
+
 if (isEnabled('AAU_EXPERTISE_NVIDIA_MIGRATION')) {
   try {
     const { migrateExpertiseVerificationToNvidia } = await import('./migrate-expertise-nvidia.js');
