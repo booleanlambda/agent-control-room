@@ -43,6 +43,18 @@ try {
 }
 
 try {
+  const { runPrecisionEngineerSmoke } = await import('./precision-engineer-smoke.js');
+  const probe = runPrecisionEngineerSmoke();
+  console.log('AAU_PRECISION_ENGINEER_PROBE', JSON.stringify(probe));
+} catch (error) {
+  console.error('AAU_PRECISION_ENGINEER_PROBE', JSON.stringify({
+    ok:false,
+    engine:'aau_precision_engineer_v0_1',
+    error:String(error?.message || error).slice(0,500),
+  }));
+}
+
+try {
   const { canonicalizeQda601UnitPayload } = await import('./qda601-runtime.js');
   const probe = canonicalizeQda601UnitPayload({
     program_version:'qda_601_v0_1',
