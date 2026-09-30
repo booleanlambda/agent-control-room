@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { nvidiaChatCompletion } from './providers/nvidia.js';
 import { researchWeb } from './web-research.js';
 import { runAutonomousRequirementCognition } from './autonomous-recursive-decomposition.js';
-import { augmentPacketWithQda601, qda601DecisionValidation, qda601Correction, stampQda601Progress, normalizeQda601FileAssociations } from './qda601-runtime.js';
+import { augmentPacketWithQda601, qda601DecisionValidation, qda601Correction, stampQda601Progress, normalizeQda601FileAssociations, applyAuthoritativeQda601DeepArtifact } from './qda601-runtime.js';
 
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
@@ -2001,6 +2001,8 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
   }));
   return {
     artifact:result.artifact,
+    authoritativeChildren:Array.isArray(result?.authoritative_children)
+      ?result.authoritative_children:[],
     meta:{
       ...(result.meta||{}),
       latency_ms:Date.now()-started,
@@ -2919,7 +2921,30 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
   }
 
   // QDA-601 is a lifecycle-blocking supplemental course for assigned agents.
-  // Validate against the durable agent-file ledger before ordinary Stage-4 behavior can commit.
+  // For deep recursive quantitative work, materialize the canonical file directly
+  // from the verified child artifacts. The structured-commit model may package
+  // the AAU envelope but may not recompute or mutate verified numerical work.
+  const qdaAuthoritativeMaterialization=applyAuthoritativeQda601DeepArtifact(
+    packet,decision,deepCognition
+  );
+  if(qdaAuthoritativeMaterialization.failures?.length){
+    const error=new Error('qda601_verified_child_materialization_blocked');
+    error.failureDetails={
+      schema:'aau.qda601_verified_child_materialization.v0_1',
+      error_code:'QDA601_VERIFIED_CHILD_MATERIALIZATION_BLOCKED',
+      status:packet?.qda_601_context?.status||null,
+      next_unit:packet?.qda_601_context?.next_unit||null,
+      failures:qdaAuthoritativeMaterialization.failures,
+      runtime_failure:false,
+      cognitive_submission_rejected:false,
+      instruction:'Resolve or deterministically verify the incomplete child artifact before final QDA persistence.',
+    };
+    throw error;
+  }
+  decision=qdaAuthoritativeMaterialization.decision;
+
+  // Validate against the canonicalized durable-file contract before ordinary
+  // Stage-4 behavior can commit.
   let qdaValidation = qda601DecisionValidation(packet, decision);
   if (!qdaValidation.ok) {
     const priorDecision = decision;
