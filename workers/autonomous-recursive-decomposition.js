@@ -4878,11 +4878,25 @@ export async function runAutonomousRequirementCognition({
         path:v.path,status:v.status,decision_type:v.decision_type,result_hash:v.result_hash
       })),
       supplied_context:atomicCognitionContext(),
+      verified_results_synthesis_bypass:verifiedResultsSynthesis,
     });
     const durableReconciliation=await loadJsonPhaseCheckpoint(
       node.node_path,'RECONCILIATION',reconciliationSemanticIdentity
     );
-    let reconciliation=durableReconciliation.parsed;
+    let reconciliation=verifiedResultsSynthesis
+      ? {
+          status:'COMPLETE',
+          reason:'Verified-results synthesis uses already reconciled authoritative sibling calculations; no duplicate model reconciliation is required.',
+          criterion_assessment:'The requested synthesis fields were authored from authoritative completed sibling evidence.',
+          gaps:[],
+          artifact:proposedArtifact,
+          handoff:proposedHandoff,
+          _runtime_reconciliation_bypass:{
+            version:'verified_results_synthesis_reconciliation_bypass_v0_1',
+            sibling_result_hashes:siblingEvidence.map(v=>({path:v.path,result_hash:v.result_hash||null})),
+          },
+        }
+      : durableReconciliation.parsed;
     if(!reconciliation){
     try{
       for(let attempt=1;attempt<=2;attempt++){
@@ -5003,7 +5017,11 @@ export async function runAutonomousRequirementCognition({
 
     const reconciliationStatus=text(reconciliation?.status).toUpperCase();
     const reconciliationMeta={
-      reconciliation_performed:true,
+      reconciliation_performed:!verifiedResultsSynthesis,
+      reconciliation_bypassed:verifiedResultsSynthesis,
+      reconciliation_bypass_version:verifiedResultsSynthesis
+        ?'verified_results_synthesis_reconciliation_bypass_v0_1'
+        :null,
       reconciliation_reason:clip(reconciliation?.reason,1600),
       reconciliation_criterion_assessment:clip(reconciliation?.criterion_assessment,2200),
       reconciliation_gaps:asArray(reconciliation?.gaps).map(v=>clip(text(v),700)).filter(Boolean).slice(0,12),
@@ -5210,12 +5228,30 @@ export async function runAutonomousRequirementCognition({
       );
     }
     const resultArtifact=JSON.stringify({artifact,handoff});
+    const completionDecisionPayload={...(node.decision_payload||{})};
+    const completionContextPayload={...(node.context_payload||{})};
+    if(!finalMathVerification.required){
+      for(const key of [
+        'deterministic_math_reconciliation_required','deterministic_math_attempts',
+        'deterministic_math_verification','deterministic_math_gate','deterministic_math_retry_nonce'
+      ])delete completionDecisionPayload[key];
+      delete completionContextPayload.deterministic_math_feedback;
+      delete completionContextPayload.deterministic_math_verification;
+    }
+    if(!finalStatisticsVerification.required){
+      for(const key of [
+        'deterministic_statistics_reconciliation_required','deterministic_statistics_attempts',
+        'deterministic_statistics_verification','deterministic_statistics_gate','deterministic_statistics_retry_nonce'
+      ])delete completionDecisionPayload[key];
+      delete completionContextPayload.deterministic_statistics_feedback;
+      delete completionContextPayload.deterministic_statistics_verification;
+    }
     const done=await saveNode({
       nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
       requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
       status:'completed',decisionType:'ATOMIC',
       decisionPayload:{
-        ...(node.decision_payload||{}),
+        ...completionDecisionPayload,
         ...reconciliationMeta,
         completed_as_atomic:true,
         ...(finalMathVerification.required?{
@@ -5234,7 +5270,7 @@ export async function runAutonomousRequirementCognition({
           stage_contract_materialization_version:atomicStageMaterializationVersion,
         }:{}),
       },
-      contextPayload:node.context_payload||{},resultArtifact,
+      contextPayload:completionContextPayload,resultArtifact,
     });
     done.parent_path=node.parent_path??parentPathOf(node.node_path);
     const persistedDone=atomicStageProposal
