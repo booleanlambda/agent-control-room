@@ -441,9 +441,21 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
           childChecks,{absoluteTolerance:0.005,relativeTolerance:1e-9}
         );
         if(!verification.ok){
-          failures.push('qda_verified_child_python_runtime_invalid:'+String(child?.node_path||index+1));
+          failures.push(
+            (verification.failure_class==='input_contract'
+              ?'qda_verified_child_python_contract_invalid:'
+              :'qda_verified_child_python_runtime_invalid:')
+            +String(child?.node_path||index+1)
+          );
         }else if(!verification.all_match){
-          failures.push('qda_verified_child_python_disagreement:'+String(child?.node_path||index+1));
+          const invalid=Array.isArray(verification.results)
+            &&verification.results.some(row=>row?.valid===false);
+          failures.push(
+            (invalid
+              ?'qda_verified_child_python_expression_or_type_invalid:'
+              :'qda_verified_child_python_disagreement:')
+            +String(child?.node_path||index+1)
+          );
         }
       }
     }
@@ -620,15 +632,55 @@ function statisticalUnit(ctx){
   return QDA_STATISTICAL_UNIT_CODES.has(String(ctx?.next_unit?.unit_code || '').toUpperCase());
 }
 
-function materialCalculationCount(response){
-  const calculation=response?.calculation;
-  if(calculation && typeof calculation==='object' && !Array.isArray(calculation)) {
-    const count=Object.values(calculation).filter(value=>
-      value!==null && value!==undefined && (typeof value!=='string' || value.trim().length>0)
-    ).length;
-    return Math.max(1,count);
+const NON_MATERIAL_CALCULATION_KEYS=/^(method|expression|formula|formula_or_model|unit|units|label|description|note|notes|explanation)$/i;
+function materialCalculationLeafCount(value,key=''){
+  if(value===null||value===undefined)return 0;
+  if(NON_MATERIAL_CALCULATION_KEYS.test(String(key)))return 0;
+  if(typeof value==='number')return Number.isFinite(value)?1:0;
+  if(typeof value==='string')return value.trim()?1:0;
+  if(typeof value==='boolean')return 0;
+  if(Array.isArray(value)){
+    return value.reduce((sum,item,index)=>sum+materialCalculationLeafCount(item,String(index)),0);
   }
-  return 1;
+  if(typeof value==='object'){
+    return Object.entries(value).reduce(
+      (sum,[childKey,child])=>sum+materialCalculationLeafCount(child,childKey),0
+    );
+  }
+  return 0;
+}
+function materialCalculationCount(response){
+  return Math.max(1,materialCalculationLeafCount(response?.calculation,'calculation'));
+}
+function plainObject(value){
+  return Boolean(value && typeof value==='object' && !Array.isArray(value));
+}
+function validateProblemResponseTypes(response,index,quantitative,statistical){
+  const failures=[];
+  const prefix='qda_problem_'+String(index+1)+'_';
+  if(!plainObject(response))return [prefix+'object_required'];
+  if(!plainObject(response.inputs))failures.push(prefix+'inputs_object_required');
+  if(!Array.isArray(response.assumptions))failures.push(prefix+'assumptions_array_required');
+  if(response.formula_or_model===null||response.formula_or_model===undefined
+     ||!['string','object'].includes(typeof response.formula_or_model)
+     ||Array.isArray(response.formula_or_model))failures.push(prefix+'formula_or_model_string_or_object_required');
+  if(response.calculation===null||response.calculation===undefined
+     ||!['string','object'].includes(typeof response.calculation)
+     ||Array.isArray(response.calculation))failures.push(prefix+'calculation_string_or_object_required');
+  if(response.units===null||response.units===undefined
+     ||!['string','object'].includes(typeof response.units)
+     ||Array.isArray(response.units))failures.push(prefix+'units_string_or_object_required');
+  if(typeof response.interpretation!=='string'||response.interpretation.trim().length<2)
+    failures.push(prefix+'interpretation_string_required');
+  if(typeof response.sanity_check!=='string'||response.sanity_check.trim().length<2)
+    failures.push(prefix+'sanity_check_string_required');
+  if(!Array.isArray(response.evidence))failures.push(prefix+'evidence_array_required');
+  if(!plainObject(response.self_audit))failures.push(prefix+'self_audit_object_required');
+  if(quantitative && !Array.isArray(response.python_checks))
+    failures.push(prefix+'python_checks_array_required');
+  if(statistical && !Array.isArray(response.python_analyses))
+    failures.push(prefix+'python_analyses_array_required');
+  return failures;
 }
 
 function validateUnitPayload(ctx, payload) {
@@ -644,6 +696,11 @@ function validateUnitPayload(ctx, payload) {
   const required=['inputs','assumptions','formula_or_model','calculation','units','interpretation','sanity_check','evidence','self_audit'];
   const statistical = statisticalUnit(ctx);
   const quantitative = String(ctx?.next_unit?.type || '').toLowerCase() === 'quantitative' && !statistical;
+  if(Array.isArray(payload.problem_responses)){
+    payload.problem_responses.slice(0,expectedProblems.length).forEach((response,index)=>{
+      failures.push(...validateProblemResponseTypes(response,index,quantitative,statistical));
+    });
+  }
   for (const key of required) {
     const value=payload[key];
     if (value===null || value===undefined) failures.push('qda_missing_'+key);
@@ -673,6 +730,9 @@ function validateUnitPayload(ctx, payload) {
       }
     }
 
+    if(!Array.isArray(payload.python_checks)){
+      failures.push('qda_python_checks_array_required');
+    }
     const checks = Array.isArray(payload.python_checks) ? payload.python_checks : [];
     const minimumCoverage=responses
       .slice(0,expectedProblems.length)
@@ -684,8 +744,17 @@ function validateUnitPayload(ctx, payload) {
       );
     } else {
       const pythonVerification = verifyPythonMathChecks(checks,{absoluteTolerance:0.005,relativeTolerance:1e-9});
-      if (!pythonVerification.ok) failures.push('qda_python_runtime_unavailable_or_invalid');
-      else if (!pythonVerification.all_match) failures.push('qda_python_arithmetic_disagreement');
+      if (!pythonVerification.ok) {
+        if(pythonVerification.failure_class==='input_contract'){
+          failures.push('qda_python_check_contract_invalid:'+String(pythonVerification.error||'invalid'));
+        }else{
+          failures.push('qda_python_runtime_unavailable_or_invalid');
+        }
+      } else if (!pythonVerification.all_match) {
+        const invalid=Array.isArray(pythonVerification.results)
+          &&pythonVerification.results.some(row=>row?.valid===false);
+        failures.push(invalid?'qda_python_check_expression_or_type_invalid':'qda_python_arithmetic_disagreement');
+      }
     }
   }
 
@@ -788,7 +857,7 @@ PERSISTENCE SHAPE IS MANDATORY. associations[] must contain this exact outer str
 
 Author file.content as a normal JSON object. The runtime owns deterministic serialization into the database file channel; do not spend cognition escaping a JSON document into a string.
 
-The content must be at least 500 characters and substantive. Answer every assigned problem in next_unit.exercise_pack and preserve the exact exercise_pack_ref. Do not substitute invented questions. If next_unit.exercise_pack.external_research is false, do not request web research: all required training-case inputs are already authoritative in the exercise pack. For ordinary quantitative units, work multiple nontrivial examples/cases rather than a single toy calculation. EACH problem_response must contain its own python_checks. Every distinct material result in a calculation object requires its own check; for example, four PV outputs require four checks, not one check of only their total. Each check must provide a numeric expression and claimed_result. The runtime aggregates these checks at unit level and executes them independently in sandboxed Python. For statistical units (QDA601-M4-U1/U2/U3 and QDA601-M9-U3), use python_analyses instead: choose the method yourself, provide its spec, and state your own numerical claims. Python recomputes descriptive statistics, confidence intervals, correlation/regression, t-tests, bootstrap intervals, or fixed-seed Monte Carlo as requested. Python does not choose the method, validate causality, or write the interpretation. Pass B must independently reconstruct, reverse-check, assumption-check, dimension-check, or otherwise attack Pass A; paraphrasing Pass A is not an audit. If genuinely missing current external evidence, request web_research_request_v0_1 instead and keep the same unit active. Do not submit or revise an expertise candidate. Do not omit the file association after explaining the work in prose. Validation failures: ${JSON.stringify(validation?.failures || [])}`;
+The content must be at least 500 characters and substantive. Answer every assigned problem in next_unit.exercise_pack and preserve the exact exercise_pack_ref. Do not substitute invented questions. If next_unit.exercise_pack.external_research is false, do not request web research: all required training-case inputs are already authoritative in the exercise pack. For ordinary quantitative units, work multiple nontrivial examples/cases rather than a single toy calculation. EACH problem_response must contain its own python_checks. Every distinct material result in a calculation object requires its own check; for example, four PV outputs require four checks, not one check of only their total. Each check must be a JSON object with a nonempty string label, a nonempty string expression, and a finite JSON-number claimed_result (never quoted, boolean, null, array, or object). Expressions may use only numeric constants, + - * / ** %, parentheses, pi/e, and sqrt/log/log10/exp/abs/round. Do not use variables, assignments, sum(), range(), list/dict/tuple literals, comprehensions, lambdas, indexing, attributes, imports, or other Python syntax; expand finite sums explicitly with + terms. The runtime recursively counts material calculation leaves, aggregates the checks at unit level, and executes them independently in sandboxed Python. For statistical units (QDA601-M4-U1/U2/U3 and QDA601-M9-U3), use python_analyses instead: choose the method yourself, provide its spec, and state your own numerical claims. Python recomputes descriptive statistics, confidence intervals, correlation/regression, t-tests, bootstrap intervals, or fixed-seed Monte Carlo as requested. Python does not choose the method, validate causality, or write the interpretation. Pass B must independently reconstruct, reverse-check, assumption-check, dimension-check, or otherwise attack Pass A; paraphrasing Pass A is not an audit. If genuinely missing current external evidence, request web_research_request_v0_1 instead and keep the same unit active. Do not submit or revise an expertise candidate. Do not omit the file association after explaining the work in prose. Validation failures: ${JSON.stringify(validation?.failures || [])}`;
 }
 
 export function qda601BootstrapMessage() {
