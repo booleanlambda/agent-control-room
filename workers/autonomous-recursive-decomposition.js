@@ -96,11 +96,36 @@ function pythonChecksFromArtifact(artifact){
   const obj=asObject(parsed);
   return asArray(obj.python_checks).filter(v=>v&&typeof v==='object'&&!Array.isArray(v));
 }
+function atomicMaterialCalculationCount(artifact){
+  let parsed=artifact;
+  if(typeof artifact==='string'){
+    try{parsed=JSON.parse(artifact);}catch{return 1;}
+  }
+  const calculation=asObject(parsed)?.calculation;
+  if(calculation&&typeof calculation==='object'&&!Array.isArray(calculation)){
+    const count=Object.values(calculation).filter(value=>value!==null&&value!==undefined&&text(value)!=='').length;
+    return Math.max(1,count);
+  }
+  return 1;
+}
 function deterministicMathVerification(packet,node,artifact){
   if(!qdaQuantitativeAtomicRequirement(packet,node))return {required:false,ok:true,all_match:true,check_count:0,results:[]};
   const checks=pythonChecksFromArtifact(artifact);
-  if(!checks.length)return {required:true,ok:false,all_match:false,check_count:0,results:[],error:'python_checks_required'};
-  return {required:true,...verifyPythonMathChecks(checks,{absoluteTolerance:0.005,relativeTolerance:1e-9})};
+  const requiredChecks=atomicMaterialCalculationCount(artifact);
+  if(!checks.length)return {
+    required:true,ok:false,all_match:false,check_count:0,results:[],
+    required_check_count:requiredChecks,error:'python_checks_required'
+  };
+  if(checks.length<requiredChecks)return {
+    required:true,ok:false,all_match:false,check_count:checks.length,results:[],
+    required_check_count:requiredChecks,
+    error:'python_checks_insufficient_material_coverage:required='+requiredChecks+';received='+checks.length
+  };
+  return {
+    required:true,
+    required_check_count:requiredChecks,
+    ...verifyPythonMathChecks(checks,{absoluteTolerance:0.005,relativeTolerance:1e-9})
+  };
 }
 
 function completedAtomicDeterministicRevalidation(packet,node){
