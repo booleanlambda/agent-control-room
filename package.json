@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "broker-bridge": "node workers/broker-bridge-start.js"
+    "broker-bridge": "node workers/broker-bridge-start.js",
+    "test:precision": "node --test tests/precision-engineer.test.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "latest",
