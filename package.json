@@ -5,8 +5,7 @@
   "scripts": {
     "broker-bridge": "node workers/broker-bridge-start.js",
     "test:precision": "node --test tests/precision-engineer.test.js",
-    "precision:serve": "node workers/precision-engineer-server.js",
-    "benchmark:precision-model": "node benchmarks/run-precision-model.mjs"
+    "precision:serve": "node workers/precision-engineer-server.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "latest",
