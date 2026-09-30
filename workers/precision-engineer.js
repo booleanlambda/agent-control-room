@@ -6,6 +6,27 @@ export const PRECISION_ENGINEER_VERSION='aau_precision_engineer_v0_1';
 export const PRECISION_SPEC_SCHEMA='aau.precision_spec.v0_1';
 export const PRECISION_RESULT_SCHEMA='aau.precision_result.v0_1';
 
+
+export function getPrecisionCapabilities(){
+  return {
+    engine:PRECISION_ENGINEER_VERSION,
+    architecture:'deterministic_precision_substrate',
+    spec_author:'originating_agent',
+    secondary_model_required:false,
+    offline_capable:true,
+    arithmetic:{
+      engine:'python3_safe_math_v0_1',
+      operators:['+','-','*','/','%','**'],
+      functions:['abs','round','sqrt','log','log10','exp'],
+    },
+    statistical:{
+      engine:'aau_quantitative_python_v0_1',
+      analyses:[...PYTHON_STATISTICAL_ANALYSES],
+    },
+    result_states:['VERIFIED','RECONCILE','NEED_CONTEXT','ESCALATE'],
+  };
+}
+
 const text=value=>String(value??'').trim();
 const asArray=value=>Array.isArray(value)?value:[];
 const asObject=value=>(value && typeof value==='object' && !Array.isArray(value))?value:{};
