@@ -483,6 +483,24 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
       continue;
     }
 
+    // Provenance is not only "which child" but "child of which exact assigned
+    // problem". A verified child from a later/earlier QDA unit must never be
+    // relabeled into the current exercise pack by ordinal position.
+    const childRequirement=String(child?.requirement_text||'').replace(/\s+/g,' ').trim();
+    const expectedProblem=String(expectedProblems[index]||'').replace(/\s+/g,' ').trim();
+    const artifactProblem=String(artifact?.problem||artifact?.problem_text||'').replace(/\s+/g,' ').trim();
+    const requirementMatches=Boolean(expectedProblem)
+      && (childRequirement.includes(expectedProblem)
+          || artifactProblem===expectedProblem
+          || artifactProblem.includes(expectedProblem));
+    if(!requirementMatches){
+      failures.push(
+        'qda_verified_child_requirement_mismatch:'+String(child?.node_path||index+1)
+        +':expected_problem_sha256='+qdaSha256(expectedProblems[index])
+      );
+      continue;
+    }
+
     const sourceBinding=qdaProblemSourceBinding(ctx,index,expectedProblems[index],child);
     const response={
       problem_id:index+1,
