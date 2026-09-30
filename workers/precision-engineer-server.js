@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import http from 'node:http';
-import { executePrecisionSpec, PRECISION_ENGINEER_VERSION } from './precision-engineer.js';
-import { planPrecisionSpecLocal, validateLocalPrecisionEndpoint } from './precision-local-model.js';
+import {
+  executePrecisionSpec,
+  getPrecisionCapabilities,
+  PRECISION_ENGINEER_VERSION,
+} from './precision-engineer.js';
 
 const MAX_BODY_BYTES=1024*1024;
 const host=String(process.env.PRECISION_ENGINEER_HOST||'127.0.0.1').trim();
@@ -38,8 +41,14 @@ const server=http.createServer(async(req,res)=>{
         ok:true,
         service:'AAU Precision Engineer',
         engine:PRECISION_ENGINEER_VERSION,
+        architecture:'agent_to_deterministic_substrate_to_agent',
+        secondary_model_required:false,
         offline_boundary:'loopback_only',
       });
+    }
+
+    if(req.method==='GET' && req.url==='/v1/capabilities'){
+      return send(res,200,getPrecisionCapabilities());
     }
 
     if(req.method==='POST' && req.url==='/v1/execute'){
@@ -48,34 +57,12 @@ const server=http.createServer(async(req,res)=>{
       return send(res,result.status==='VERIFIED'?200:result.status==='RECONCILE'?409:422,result);
     }
 
-    if(req.method==='POST' && req.url==='/v1/plan-execute'){
-      const body=await readJson(req);
-      const endpoint=String(body.endpoint||process.env.PRECISION_LOCAL_MODEL_ENDPOINT||'http://127.0.0.1:11434/api/generate');
-      validateLocalPrecisionEndpoint(endpoint);
-      const planned=await planPrecisionSpecLocal({
-        endpoint,
-        model:String(body.model||process.env.PRECISION_LOCAL_MODEL||'').trim(),
-        protocol:String(body.protocol||process.env.PRECISION_LOCAL_MODEL_PROTOCOL||'ollama').trim(),
-        request:String(body.request||''),
-        timeoutMs:Number(body.timeout_ms||process.env.PRECISION_LOCAL_MODEL_TIMEOUT_MS||60000),
-      });
-      const result=executePrecisionSpec(planned.spec);
-      return send(res,result.status==='VERIFIED'?200:result.status==='RECONCILE'?409:422,{
-        ...result,
-        planner:{
-          protocol:planned.protocol,
-          model:planned.model,
-        },
-      });
-    }
-
     return send(res,404,{ok:false,error:'precision_route_not_found'});
   }catch(error){
     return send(res,500,{
       ok:false,
       engine:PRECISION_ENGINEER_VERSION,
       error:String(error?.message||error).slice(0,500),
-      validation_failures:Array.isArray(error?.validation_failures)?error.validation_failures:undefined,
     });
   }
 });
@@ -86,6 +73,8 @@ server.listen(port,host,()=>{
     host,
     port,
     engine:PRECISION_ENGINEER_VERSION,
+    architecture:'agent_to_deterministic_substrate_to_agent',
+    secondary_model_required:false,
     offline_boundary:'loopback_only',
   }));
 });
