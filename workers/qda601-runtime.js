@@ -412,13 +412,13 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
       problem_id:index+1,
       problem:expectedProblems[index],
       inputs:artifact.inputs,
-      assumptions:artifact.assumptions,
+      assumptions:arrayifyArtifactField(artifact.assumptions),
       formula_or_model:artifact.formula_or_model,
       calculation:artifact.calculation,
       units:artifact.units,
       interpretation:artifact.interpretation,
       sanity_check:artifact.sanity_check,
-      evidence:artifact.evidence,
+      evidence:arrayifyArtifactField(artifact.evidence),
       self_audit:artifact.self_audit,
     };
 
