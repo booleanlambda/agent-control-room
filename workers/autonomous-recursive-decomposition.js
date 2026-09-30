@@ -3481,6 +3481,30 @@ export async function runAutonomousRequirementCognition({
           resultArtifact:node.result_artifact||null,
         });
         if(
+          decision==='SPLIT'
+          &&admissionReasons.includes('insufficient_branch_lifecycle_budget')
+        ){
+          const economicTerminal=await closeSemanticRuntime('budget_exhausted',{
+            reason:'split_branch_lifecycle_budget_exhausted',
+            node_path:node.node_path,
+            semantic_decision:decision,
+            remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
+            expected_child_lifecycle_units:Number(branchEconomics.expected_child_lifecycle_units||0),
+            completion_reserve_units:Number(branchEconomics.completion_reserve_units||0),
+            semantic_child_capacity:availableChildCapacity,
+            semantic_state_preserved:true,
+            discovery_replay_forbidden_until_evidence_mutation:true,
+          });
+          const error=new Error(
+            'semantic_runtime_budget_exhausted:split_admission:'+node.node_path
+            +':remaining='+String(economicTerminal?.remaining_budget_units??0)
+          );
+          error.code='SEMANTIC_BUDGET_EXHAUSTED';
+          error.semanticRuntime=economicTerminal;
+          error.admission=admission;
+          throw error;
+        }
+        if(
           decision==='NEED_CONTEXT'
           &&evidenceRenewalAssessment?.reason==='insufficient_semantic_budget'
         ){
