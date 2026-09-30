@@ -2,6 +2,23 @@ const isEnabled = (name) => ['1', 'true', 'yes', 'on'].includes(
   String(process.env[name] || '').trim().toLowerCase(),
 );
 
+try {
+  const { verifyPythonMathChecks } = await import('./python-math.js');
+  const probe = verifyPythonMathChecks([
+    {label:'startup_probe',expression:'(175000 / (1.11 ** 2)) * (1.11 ** 2)',claimed_result:175000}
+  ]);
+  console.log('AAU_PYTHON_MATH_RUNTIME_PROBE', JSON.stringify({
+    ok:probe.ok === true && probe.all_match === true,
+    check_count:probe.check_count,
+    error:probe.error || null,
+  }));
+} catch (error) {
+  console.error('AAU_PYTHON_MATH_RUNTIME_PROBE', JSON.stringify({
+    ok:false,
+    error:String(error?.message || error).slice(0,500),
+  }));
+}
+
 if (isEnabled('AAU_EXPERTISE_NVIDIA_MIGRATION')) {
   try {
     const { migrateExpertiseVerificationToNvidia } = await import('./migrate-expertise-nvidia.js');
