@@ -93,39 +93,77 @@ function quantitativeArtifactBody(artifact){
   if(typeof artifact==='string'){
     try{parsed=JSON.parse(artifact);}catch{return {};}
   }
-  const obj=asObject(parsed);
-  // QDA atomic completions may legitimately wrap the structured answer in a
-  // problem_response envelope. Verification must inspect the answer body, not
-  // mistake envelope shape for missing Python evidence.
-  for(const key of ['problem_response','response']){
-    const nested=asObject(obj[key]);
-    if(Object.keys(nested).length)return nested;
+  let obj=asObject(parsed);
+  // Only unwrap documented QDA response envelopes. Keep all other object
+  // shapes intact so type errors are surfaced rather than silently normalized.
+  for(let depth=0;depth<3;depth++){
+    let next=null;
+    for(const key of ['problem_response','response']){
+      const nested=obj[key];
+      if(nested&&typeof nested==='object'&&!Array.isArray(nested)){
+        next=nested;
+        break;
+      }
+    }
+    if(!next)break;
+    obj=next;
   }
   return obj;
 }
+function typedArrayField(obj,key){
+  if(!Object.prototype.hasOwnProperty.call(obj,key)){
+    return {present:false,type_ok:true,value:[]};
+  }
+  if(!Array.isArray(obj[key])){
+    return {
+      present:true,type_ok:false,value:[],
+      error:key+'_must_be_array',
+      actual_type:obj[key]===null?'null':Array.isArray(obj[key])?'array':typeof obj[key],
+    };
+  }
+  return {present:true,type_ok:true,value:obj[key]};
+}
+const NON_MATERIAL_CALCULATION_KEYS=/^(method|expression|formula|formula_or_model|unit|units|label|description|note|notes|explanation)$/i;
+function materialCalculationLeafCount(value,key=''){
+  if(value===null||value===undefined)return 0;
+  if(NON_MATERIAL_CALCULATION_KEYS.test(String(key)))return 0;
+  if(typeof value==='number')return Number.isFinite(value)?1:0;
+  if(typeof value==='string')return value.trim()?1:0;
+  if(typeof value==='boolean')return 0;
+  if(Array.isArray(value)){
+    return value.reduce((sum,item,index)=>sum+materialCalculationLeafCount(item,String(index)),0);
+  }
+  if(typeof value==='object'){
+    return Object.entries(value).reduce(
+      (sum,[childKey,child])=>sum+materialCalculationLeafCount(child,childKey),0
+    );
+  }
+  return 0;
+}
 function pythonChecksFromArtifact(artifact){
   const obj=quantitativeArtifactBody(artifact);
-  return asArray(obj.python_checks).filter(v=>v&&typeof v==='object'&&!Array.isArray(v));
+  return typedArrayField(obj,'python_checks');
 }
 function atomicMaterialCalculationCount(artifact){
   const obj=quantitativeArtifactBody(artifact);
-  const calculation=asObject(obj.calculation);
-  if(calculation&&typeof calculation==='object'&&!Array.isArray(calculation)){
-    const count=Object.values(calculation).filter(value=>value!==null&&value!==undefined&&text(value)!=='').length;
-    return Math.max(1,count);
-  }
-  return 1;
+  return Math.max(1,materialCalculationLeafCount(obj.calculation,'calculation'));
 }
 function deterministicMathVerification(packet,node,artifact){
   if(!qdaQuantitativeAtomicRequirement(packet,node))return {required:false,ok:true,all_match:true,check_count:0,results:[]};
-  const checks=pythonChecksFromArtifact(artifact);
+  const checkField=pythonChecksFromArtifact(artifact);
   const requiredChecks=atomicMaterialCalculationCount(artifact);
+  if(!checkField.type_ok)return {
+    required:true,ok:false,failure_class:'input_contract',all_match:false,
+    check_count:0,results:[],required_check_count:requiredChecks,
+    error:checkField.error,actual_type:checkField.actual_type
+  };
+  const checks=checkField.value;
   if(!checks.length)return {
-    required:true,ok:false,all_match:false,check_count:0,results:[],
+    required:true,ok:false,failure_class:'input_contract',all_match:false,check_count:0,results:[],
     required_check_count:requiredChecks,error:'python_checks_required'
   };
   if(checks.length<requiredChecks)return {
-    required:true,ok:false,all_match:false,check_count:checks.length,results:[],
+    required:true,ok:false,failure_class:'input_contract',all_match:false,check_count:checks.length,results:[],
     required_check_count:requiredChecks,
     error:'python_checks_insufficient_material_coverage:required='+requiredChecks+';received='+checks.length
   };
@@ -150,16 +188,25 @@ function completedAtomicDeterministicRevalidation(packet,node){
 
 function pythonAnalysesFromArtifact(artifact){
   const obj=quantitativeArtifactBody(artifact);
-  return asArray(obj.python_analyses).filter(v=>v&&typeof v==='object'&&!Array.isArray(v));
+  return typedArrayField(obj,'python_analyses');
 }
 function deterministicStatisticalVerification(packet,node,artifact){
   if(!qdaStatisticalAtomicRequirement(packet,node)){
     return {required:false,ok:true,all_claims_match:true,analysis_count:0,analyses:[]};
   }
-  const analyses=pythonAnalysesFromArtifact(artifact);
+  const field=pythonAnalysesFromArtifact(artifact);
+  if(!field.type_ok){
+    return {
+      required:true,ok:false,failure_class:'input_contract',
+      all_claims_match:false,analysis_count:0,analyses:[],
+      error:field.error,actual_type:field.actual_type
+    };
+  }
+  const analyses=field.value;
   if(!analyses.length){
     return {
-      required:true,ok:false,all_claims_match:false,analysis_count:0,analyses:[],
+      required:true,ok:false,failure_class:'input_contract',
+      all_claims_match:false,analysis_count:0,analyses:[],
       error:'python_statistical_analyses_required'
     };
   }
@@ -4364,7 +4411,9 @@ export async function runAutonomousRequirementCognition({
               'Never stringify an object as "[object Object]". If the work product is structured, place the actual JSON object in artifact.',
               'Keep the artifact bounded. Preserve uncertainty and do not claim external facts without supplied evidence.',
               ...(qdaQuantitativeAtomicRequirement(packet,node)?[
-                'DETERMINISTIC MATH COMPANION: this is a quantitative QDA requirement. Return artifact as a real JSON object and put python_checks INSIDE that artifact object, not beside the wrapper. Each material numerical result must have a check object with label, expression, and claimed_result. The expression may use numeric constants, + - * / ** %, parentheses, and safe functions such as sqrt/log/log10/exp/abs/round. Python verifies arithmetic only; you remain responsible for selecting the correct formula, units, assumptions, and interpretation.',
+                'DETERMINISTIC MATH COMPANION: this is a quantitative QDA requirement. Return artifact as a real JSON object and put python_checks INSIDE that artifact object, not beside the wrapper. python_checks MUST be an array. Every check MUST be an object with label as a nonempty string, expression as a nonempty string, and claimed_result as a finite JSON number (never a quoted number, boolean, null, array, or object). Each material numerical result must have its own check.',
+                'SAFE MATH EXPRESSION CONTRACT: expressions may contain numeric constants, + - * / ** %, parentheses, pi/e, and safe functions sqrt/log/log10/exp/abs/round only. Do NOT use variables, assignments, sum(), range(), list/dict/tuple literals, comprehensions, lambdas, indexing, attributes, imports, or other Python syntax. Expand a finite sum explicitly with + terms.',
+                'Python verifies arithmetic only; you remain responsible for selecting the correct formula, units, assumptions, and interpretation.',
                 'Do your reasoning first. Treat a later Python disagreement as evidence that your numerical execution must be reconciled; never change the formula merely to force a match.',
                 'If deterministic_math_feedback is present, this is a fresh correction attempt. Inspect that feedback explicitly and return NEW python_checks; do not repeat or reuse an earlier artifact.'
               ]:[]),
@@ -4698,7 +4747,7 @@ export async function runAutonomousRequirementCognition({
             attempt:mathAttempt,
             verifier:'python3_safe_math_v0_1',
             verification:proposedMathVerification,
-            instruction:'Correct the numerical work and python_checks from first principles. Preserve the correct formula, units, and assumptions; do not force a match by changing the model.'
+            instruction:'Correct the numerical work and python_checks from first principles. First inspect failure_class, validation_failures, per-check valid/error_code fields, required_check_count, and mismatched actual values. Fix shape/type/safe-expression errors without changing a correct model. Use only explicit constant arithmetic and approved safe functions; expand finite sums with + terms. Preserve the correct formula, units, and assumptions; do not force a match by changing the model.'
           },
         },
         resultArtifact:null,
@@ -4786,7 +4835,7 @@ export async function runAutonomousRequirementCognition({
               'Do not treat a nearby metric, label, time horizon, population, market definition, or proxy as equivalent unless you can justify that equivalence from the supplied evidence.',
               'Preserve uncertainty. A retrieved source is evidence only for what it actually supports.',
               ...(qdaQuantitativeAtomicRequirement(packet,node)?[
-                'DETERMINISTIC MATH COMPANION is authoritative for arithmetic execution only. Inspect deterministic_math_verification below. If any check is missing, invalid, or mismatched, correct your numerical work and python_checks before choosing COMPLETE. Do not defer arithmetic disagreement as NEED_CONTEXT.',
+                'DETERMINISTIC MATH COMPANION is authoritative for arithmetic execution only. Inspect deterministic_math_verification below, including failure_class, validation_failures, valid/error_code for each check, required_check_count, and actual values. If any check is missing, wrong-typed, unsafe-syntax, invalid, or mismatched, correct your numerical work and python_checks before choosing COMPLETE. Use explicit constant arithmetic rather than sum/range/comprehensions. Do not defer arithmetic disagreement as NEED_CONTEXT.',
                 'When you return COMPLETE for a quantitative QDA requirement, artifact must remain a JSON object containing python_checks for every material numerical result.'
               ]:[]),
               ...(qdaStatisticalAtomicRequirement(packet,node)?[
