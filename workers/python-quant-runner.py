@@ -20,18 +20,26 @@ class QuantError(Exception):
     pass
 
 def finite_float(value, name="value"):
-    try:
-        out = float(value)
-    except Exception as exc:
-        raise QuantError(f"{name}_not_numeric") from exc
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise QuantError(f"{name}_must_be_json_number")
+    out = float(value)
     if not math.isfinite(out):
         raise QuantError(f"{name}_non_finite")
     return out
 
+def strict_int(value, name="value", minimum=None, maximum=None):
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise QuantError(f"{name}_must_be_integer")
+    if minimum is not None and value < minimum:
+        raise QuantError(f"{name}_below_minimum")
+    if maximum is not None and value > maximum:
+        raise QuantError(f"{name}_above_maximum")
+    return value
+
 def numeric_list(values, name="values", min_len=1):
     if not isinstance(values, list) or len(values) < min_len or len(values) > MAX_VALUES:
         raise QuantError(f"{name}_invalid_length")
-    return [finite_float(v, name) for v in values]
+    return [finite_float(v, f"{name}[{index}]") for index, v in enumerate(values)]
 
 def canonical_hash(value):
     raw = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -331,12 +339,12 @@ def coefficient_t(spec):
 
 def bootstrap_ci(spec):
     values = numeric_list(spec.get("values"), "values", 2)
-    draws = int(spec.get("draws", 10000))
-    seed = int(spec.get("seed", 0))
+    draws = strict_int(spec.get("draws", 10000), "draws", 100, MAX_DRAWS)
+    seed = strict_int(spec.get("seed", 0), "seed")
     confidence = finite_float(spec.get("confidence", 0.95), "confidence")
     statistic_name = str(spec.get("statistic", "mean")).strip().lower()
-    if draws < 100 or draws > MAX_DRAWS:
-        raise QuantError("bootstrap_draws_out_of_range")
+    if not isinstance(spec.get("statistic", "mean"), str):
+        raise QuantError("bootstrap_statistic_must_be_string")
     if statistic_name not in ("mean", "median"):
         raise QuantError("bootstrap_statistic_not_allowed")
     rng = random.Random(seed)
@@ -395,15 +403,23 @@ def eval_expr_node(node, variables):
     raise QuantError("expression_syntax_not_allowed")
 
 def compile_expression(expr):
-    expr = str(expr or "").strip()
+    if not isinstance(expr, str):
+        raise QuantError("expression_must_be_string")
+    expr = expr.strip()
     if not expr or len(expr) > MAX_EXPR_CHARS:
         raise QuantError("expression_invalid_length")
-    return ast.parse(expr, mode="eval")
+    try:
+        return ast.parse(expr, mode="eval")
+    except SyntaxError as exc:
+        raise QuantError("expression_syntax_invalid") from exc
 
 def draw_distribution(rng, spec):
     if not isinstance(spec, dict):
         raise QuantError("distribution_spec_invalid")
-    kind = str(spec.get("type", "")).strip().lower()
+    raw_kind = spec.get("type", "")
+    if not isinstance(raw_kind, str):
+        raise QuantError("distribution_type_must_be_string")
+    kind = raw_kind.strip().lower()
     if kind == "fixed":
         return finite_float(spec.get("value"), "fixed_value")
     if kind == "triangular":
@@ -430,10 +446,8 @@ def monte_carlo_expression(spec):
     distributions = spec.get("distributions")
     if not isinstance(distributions, dict) or not distributions:
         raise QuantError("distributions_required")
-    draws = int(spec.get("draws", 10000))
-    seed = int(spec.get("seed", 0))
-    if draws < 100 or draws > MAX_DRAWS:
-        raise QuantError("monte_carlo_draws_out_of_range")
+    draws = strict_int(spec.get("draws", 10000), "draws", 100, MAX_DRAWS)
+    seed = strict_int(spec.get("seed", 0), "seed")
     rng = random.Random(seed)
     outputs = []
     for _ in range(draws):
@@ -504,9 +518,15 @@ def main():
     for index, raw in enumerate(analyses):
         if not isinstance(raw, dict):
             raise QuantError("analysis_invalid")
-        op = str(raw.get("analysis") or raw.get("operation") or "").strip()
+        raw_op = raw.get("analysis") if "analysis" in raw else raw.get("operation")
+        if not isinstance(raw_op, str) or not raw_op.strip():
+            raise QuantError("analysis_must_be_nonempty_string")
+        op = raw_op.strip()
         if op not in OPS:
             raise QuantError(f"analysis_not_allowed:{op}")
+        raw_id = raw.get("id")
+        if not isinstance(raw_id, str) or not raw_id.strip():
+            raise QuantError("analysis_id_must_be_nonempty_string")
         spec = raw.get("spec")
         if not isinstance(spec, dict):
             raise QuantError("analysis_spec_required")
@@ -520,7 +540,7 @@ def main():
         all_claims_match = all_claims_match and comparison.get("all_match") is True
         rows.append({
             "index": index,
-            "id": str(raw.get("id") or f"analysis_{index+1}")[:120],
+            "id": raw_id[:120],
             "analysis": op,
             "input_hash": canonical_hash(spec),
             "result": result,
@@ -541,6 +561,7 @@ if __name__ == "__main__":
         sys.stdout.write(json.dumps({
             "ok": False,
             "engine": "aau_quantitative_python_v0_1",
+            "failure_class": "input_contract" if isinstance(exc, QuantError) else "runtime",
             "error": f"{type(exc).__name__}:{str(exc)}"[:500],
         }, separators=(",", ":")))
         sys.exit(2)
