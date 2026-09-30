@@ -5677,6 +5677,96 @@ export async function runAutonomousRequirementCognition({
     return saved;
   }
 
+  async function materializeQdaProblemFromVerifiedDescendants(node,artifact){
+    if(!/QDA601/i.test(text(node?.requirement_text)) || pathDepth(node?.node_path)!==1){
+      return {artifact,materialized:false,check_count:0};
+    }
+    const parsed=typeof artifact==='string'
+      ? (()=>{try{return JSON.parse(artifact);}catch{return null;}})()
+      : artifact;
+    if(!parsed || typeof parsed!=='object' || Array.isArray(parsed)){
+      return {artifact,materialized:false,check_count:0};
+    }
+
+    const checks=[];
+    const sources=[];
+    const visited=new Set();
+    const walk=async(parentPath)=>{
+      if(visited.has(parentPath))return;
+      visited.add(parentPath);
+      const refs=(await children(parentPath))
+        .filter(child=>String(child?.status||child?.node_status||'')!=='cancelled')
+        .sort((a,b)=>Number(a?.ordinal||0)-Number(b?.ordinal||0));
+      for(const ref of refs){
+        const child=await getNode(ref.node_path);
+        if(child?.status!=='ready')continue;
+        const status=String(child?.node_status||'').toLowerCase();
+        if(status!=='completed')continue;
+        const decision=String(child?.decision_type||'').toUpperCase();
+        if(decision==='ATOMIC'){
+          const parts=resultParts(child.result_artifact);
+          const field=pythonChecksFromArtifact(parts.artifact);
+          const childChecks=field?.type_ok===true?field.value:[];
+          if(childChecks.length){
+            const verification=verifyPythonMathChecks(
+              childChecks,{absoluteTolerance:0.005,relativeTolerance:1e-9}
+            );
+            if(verification.ok===true&&verification.all_match===true){
+              childChecks.forEach(check=>checks.push({
+                ...check,
+                label:String(child.node_path)+':'+String(check?.label||'check'),
+              }));
+              sources.push({
+                node_path:child.node_path,
+                result_hash:child.result_hash||null,
+                check_count:childChecks.length,
+              });
+            }
+          }
+          continue;
+        }
+        if(decision==='SPLIT')await walk(child.node_path);
+      }
+    };
+    await walk(node.node_path);
+    if(!checks.length)return {artifact:parsed,materialized:false,check_count:0};
+
+    const normalized={
+      ...parsed,
+      assumptions:Array.isArray(parsed.assumptions)
+        ?parsed.assumptions
+        :parsed.assumptions===null||parsed.assumptions===undefined
+          ?[]
+          :[parsed.assumptions],
+      evidence:Array.isArray(parsed.evidence)
+        ?parsed.evidence
+        :parsed.evidence===null||parsed.evidence===undefined
+          ?[]
+          :[parsed.evidence],
+      python_checks:checks,
+      runtime_verified_descendant_materialization:{
+        contract:'qda_problem_verified_descendant_materialization_v0_1',
+        arithmetic_recomputation_forbidden:true,
+        source:'completed_atomic_descendants',
+        descendants:sources,
+      },
+    };
+    const verification=deterministicMathVerification(packet,node,normalized);
+    if(verification.required===true && (verification.ok!==true||verification.all_match!==true)){
+      throw new Error(
+        'qda_problem_verified_descendant_materialization_invalid:'
+        +node.node_path+':'+String(verification.error||'verification_failed')
+      );
+    }
+    return {
+      artifact:normalized,
+      materialized:true,
+      check_count:checks.length,
+      sources,
+      verification,
+    };
+  }
+
   async function synthesize(node,childRows){
     const currentChildResultHashes=childRows.map(child=>({
       path:child.node_path,
@@ -6008,10 +6098,14 @@ export async function runAutonomousRequirementCognition({
     if(!['COMPLETE','BLOCKED'].includes(outcome))
       throw new Error('autonomous_decomposition_synthesis_outcome_invalid:'+node.node_path);
     const rawFinalArtifact=final?.parsed?.artifact;
-    const artifact=(rawFinalArtifact&&typeof rawFinalArtifact==='object'&&!Array.isArray(rawFinalArtifact))
+    let artifact=(rawFinalArtifact&&typeof rawFinalArtifact==='object'&&!Array.isArray(rawFinalArtifact))
       ? rawFinalArtifact
       : artifactText(rawFinalArtifact);
     if(!artifactText(artifact))throw new Error('autonomous_decomposition_synthesis_empty:'+node.node_path);
+    const qdaProblemMaterialization=outcome==='COMPLETE'
+      ?await materializeQdaProblemFromVerifiedDescendants(node,artifact)
+      :{artifact,materialized:false,check_count:0};
+    artifact=qdaProblemMaterialization.artifact;
     const resultArtifact=JSON.stringify({status:outcome,artifact,handoff:asObject(final?.parsed?.handoff)});
     const completedDecisionPayload={...(node.decision_payload||{})};
     delete completedDecisionPayload.synthesis_provenance_pending;
@@ -6034,6 +6128,9 @@ export async function runAutonomousRequirementCognition({
         terminal_stage_contract_name:terminalStageContract.applies?terminalStageContract.name:null,
         stage_contract_materialization_version:
           terminalStageContract.applies?STAGE_CONTRACT_MATERIALIZATION_VERSION:null,
+        qda_verified_descendant_materialized:qdaProblemMaterialization.materialized===true,
+        qda_verified_descendant_check_count:Number(qdaProblemMaterialization.check_count||0),
+        qda_verified_descendant_sources:asArray(qdaProblemMaterialization.sources),
       },
       contextPayload:node.context_payload||{},resultArtifact,
     });
