@@ -375,8 +375,8 @@ SAFE_EXPR_FUNCS = {
 def eval_expr_node(node, variables):
     if isinstance(node, ast.Expression):
         return eval_expr_node(node.body, variables)
-    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
-        return float(node.value)
+    if isinstance(node, ast.Constant) and not isinstance(node.value, bool) and isinstance(node.value, (int, float)):
+        return finite_float(node.value, "constant")
     if isinstance(node, ast.Name) and node.id in variables:
         return finite_float(variables[node.id], node.id)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
