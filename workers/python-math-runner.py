@@ -20,11 +20,25 @@ SAFE_CONSTS = {"pi": math.pi, "e": math.e}
 class SafeMathError(Exception):
     pass
 
+def strict_number(value, name):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise SafeMathError(f"{name}_must_be_json_number")
+    out = float(value)
+    if not math.isfinite(out):
+        raise SafeMathError(f"{name}_non_finite")
+    return out
+
+def strict_nonnegative_number(value, name):
+    out = strict_number(value, name)
+    if out < 0:
+        raise SafeMathError(f"{name}_negative")
+    return out
+
 def eval_node(node):
     if isinstance(node, ast.Expression):
         return eval_node(node.body)
-    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
-        return float(node.value)
+    if isinstance(node, ast.Constant) and not isinstance(node.value, bool) and isinstance(node.value, (int, float)):
+        return strict_number(node.value, "constant")
     if isinstance(node, ast.Name) and node.id in SAFE_CONSTS:
         return float(SAFE_CONSTS[node.id])
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
@@ -56,18 +70,43 @@ def eval_node(node):
         if node.keywords:
             raise SafeMathError("keyword_arguments_not_allowed")
         args = [eval_node(arg) for arg in node.args]
-        value = SAFE_FUNCS[node.func.id](*args)
-        if not isinstance(value, (int, float)) or not math.isfinite(value):
-            raise SafeMathError("non_finite_result")
-        return float(value)
+        try:
+            value = SAFE_FUNCS[node.func.id](*args)
+        except Exception as exc:
+            raise SafeMathError(f"function_argument_invalid:{node.func.id}") from exc
+        return strict_number(value, "function_result")
     raise SafeMathError("syntax_not_allowed")
 
 def safe_eval(expression):
-    expr = str(expression or "").strip()
+    if not isinstance(expression, str):
+        raise SafeMathError("expression_must_be_string")
+    expr = expression.strip()
     if not expr or len(expr) > MAX_EXPR_CHARS:
         raise SafeMathError("expression_invalid_length")
-    tree = ast.parse(expr, mode="eval")
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError as exc:
+        raise SafeMathError("expression_syntax_invalid") from exc
     return eval_node(tree)
+
+def check_label(item, index):
+    label = item.get("label")
+    if not isinstance(label, str) or not label.strip():
+        raise SafeMathError("label_must_be_nonempty_string")
+    if len(label) > 120:
+        raise SafeMathError("label_too_long")
+    return label
+
+def error_code(exc):
+    if isinstance(exc, SafeMathError):
+        return str(exc)[:180]
+    if isinstance(exc, ZeroDivisionError):
+        return "division_by_zero"
+    if isinstance(exc, OverflowError):
+        return "numeric_overflow"
+    if isinstance(exc, ValueError):
+        return "numeric_domain_error"
+    return f"{type(exc).__name__}:{str(exc)}"[:180]
 
 def main():
     raw = sys.stdin.read()
@@ -76,35 +115,56 @@ def main():
     if not isinstance(checks, list) or not checks or len(checks) > MAX_CHECKS:
         raise SafeMathError("checks_invalid")
 
-    abs_tol = float(payload.get("absolute_tolerance", 1e-9))
-    rel_tol = float(payload.get("relative_tolerance", 1e-9))
+    abs_tol = strict_nonnegative_number(payload.get("absolute_tolerance", 1e-9), "absolute_tolerance")
+    rel_tol = strict_nonnegative_number(payload.get("relative_tolerance", 1e-9), "relative_tolerance")
     results = []
     all_match = True
+    all_valid = True
+    validation_error_count = 0
 
     for index, item in enumerate(checks):
-        if not isinstance(item, dict):
-            raise SafeMathError("check_invalid")
-        expression = item.get("expression")
-        claimed = float(item.get("claimed_result"))
-        if not math.isfinite(claimed):
-            raise SafeMathError("claimed_result_non_finite")
-        actual = safe_eval(expression)
-        matched = math.isclose(actual, claimed, rel_tol=rel_tol, abs_tol=abs_tol)
-        all_match = all_match and matched
-        results.append({
-            "index": index,
-            "label": str(item.get("label") or f"check_{index+1}")[:120],
-            "matched": matched,
-            "actual": actual,
-            "claimed_result": claimed,
-        })
+        label = f"check_{index+1}"
+        claimed = None
+        try:
+            if not isinstance(item, dict):
+                raise SafeMathError("check_must_be_object")
+            label = check_label(item, index)
+            expression = item.get("expression")
+            claimed = strict_number(item.get("claimed_result"), "claimed_result")
+            actual = safe_eval(expression)
+            matched = math.isclose(actual, claimed, rel_tol=rel_tol, abs_tol=abs_tol)
+            all_match = all_match and matched
+            results.append({
+                "index": index,
+                "label": label,
+                "valid": True,
+                "matched": matched,
+                "actual": actual,
+                "claimed_result": claimed,
+                "error_code": None,
+            })
+        except Exception as exc:
+            all_valid = False
+            all_match = False
+            validation_error_count += 1
+            results.append({
+                "index": index,
+                "label": label,
+                "valid": False,
+                "matched": False,
+                "actual": None,
+                "claimed_result": claimed,
+                "error_code": error_code(exc),
+            })
 
     sys.stdout.write(json.dumps({
         "ok": True,
+        "all_valid": all_valid,
         "all_match": all_match,
+        "validation_error_count": validation_error_count,
         "check_count": len(results),
         "results": results,
-    }, separators=(",", ":")))
+    }, separators=(",", ":"), allow_nan=False))
 
 if __name__ == "__main__":
     try:
@@ -112,6 +172,7 @@ if __name__ == "__main__":
     except Exception as exc:
         sys.stdout.write(json.dumps({
             "ok": False,
+            "failure_class": "runtime_contract" if isinstance(exc, SafeMathError) else "runtime",
             "error": f"{type(exc).__name__}:{str(exc)}"[:300],
         }, separators=(",", ":")))
         sys.exit(2)
