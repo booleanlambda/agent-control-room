@@ -1765,6 +1765,28 @@ async function completeDeepJson(model, messages, maxTokens, audit) {
     model,messages,maxTokens,temperature:0.1,jsonMode:true,enableThinking:true,timeoutMs:900000,runtimeRole:'agent',
     usageContext:audit,
   }), audit);
+  const explicitReasoningTokens=result?.usage?.completion_tokens_details?.reasoning_tokens;
+  if(explicitReasoningTokens!==undefined&&explicitReasoningTokens!==null
+     &&Number.isFinite(Number(explicitReasoningTokens))
+     &&Number(explicitReasoningTokens)<=0){
+    await recordRejectedCognition(audit,{
+      rejectionReason:'THINKING_NOT_EXECUTED',
+      finishReason:result.finish_reason||null,
+      outputChars:String(result.content||'').length,
+      outputSha256:String(result.content||'')?sha256(String(result.content)):null,
+      usage:result.usage||{},
+    });
+    const error=new Error('cognition_response_rejected:THINKING_NOT_EXECUTED');
+    error.code='COGNITION_RESPONSE_REJECTED';
+    error.rejectionReason='THINKING_NOT_EXECUTED';
+    error.finishReason=result.finish_reason||null;
+    error.providerStatusCode=200;
+    error.providerUsage=result?.usage||null;
+    error.providerTotalTokens=Number.isFinite(Number(result?.usage?.total_tokens))
+      ?Math.max(0,Math.floor(Number(result.usage.total_tokens))):null;
+    error.providerUsageKnown=Boolean(result?.usage&&typeof result.usage==='object');
+    throw error;
+  }
   let parsed = null;
   try { parsed = JSON.parse(String(result.content || '')); }
   catch {
