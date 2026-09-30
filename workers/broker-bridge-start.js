@@ -92,6 +92,62 @@ try {
   }));
 }
 
+try {
+  const { materializeQda601UnitFromVerifiedChildren } = await import('./qda601-runtime.js');
+  const makeChild=(path,n)=>({
+    node_path:path,
+    status:'completed',
+    decision_type:'ATOMIC',
+    result_hash:'probe_'+n,
+    deterministic_math_verified:true,
+    deterministic_math_check_count:1,
+    result_artifact:JSON.stringify({
+      artifact:JSON.stringify({
+        inputs:{n},
+        assumptions:['probe assumption '+n],
+        formula_or_model:String(n)+' + 0',
+        calculation:'verified calculation '+n,
+        units:'count',
+        interpretation:'probe interpretation '+n,
+        sanity_check:'probe sanity check '+n,
+        evidence:{provenance:'probe'},
+        self_audit:{pass_a:'pass a '+n,pass_b:'pass b '+n,verdict:'PASS'},
+        python_checks:[{label:'probe_'+n,expression:String(n)+' + 0',claimed_result:n}],
+      }),
+      handoff:{conclusions:[],facts:[],unresolved:[]},
+    }),
+  });
+  const probe=materializeQda601UnitFromVerifiedChildren({
+    qda_601_context:{
+      assigned:true,
+      status:'in_progress',
+      next_unit:{
+        type:'quantitative',
+        title:'Probe unit',
+        module_code:'QDA601-M1',
+        unit_code:'QDA601-M1-U3',
+        exercise_pack_ref:'probe',
+        exercise_pack:{problems:['p1','p2','p3']},
+      },
+    },
+  },{
+    authoritativeChildren:[makeChild('R.001',1),makeChild('R.002',2),makeChild('R.003',3)],
+  });
+  console.log('AAU_QDA601_VERIFIED_CHILD_MATERIALIZER_PROBE', JSON.stringify({
+    ok:probe.applies===true && Boolean(probe.payload) && probe.failures.length===0
+      && probe.payload.python_checks.length===3
+      && probe.payload.problem_responses.length===3,
+    problem_count:probe.payload?.problem_responses?.length||0,
+    python_check_count:probe.payload?.python_checks?.length||0,
+    failures:probe.failures||[],
+  }));
+} catch (error) {
+  console.error('AAU_QDA601_VERIFIED_CHILD_MATERIALIZER_PROBE', JSON.stringify({
+    ok:false,
+    error:String(error?.message || error).slice(0,500),
+  }));
+}
+
 if (isEnabled('AAU_EXPERTISE_NVIDIA_MIGRATION')) {
   try {
     const { migrateExpertiseVerificationToNvidia } = await import('./migrate-expertise-nvidia.js');
