@@ -64,6 +64,15 @@ test('material arithmetic requires explicit units',()=>{
 });
 
 
+test('raw natural-language requests are not planned inside the precision layer',()=>{
+  const result=executePrecisionSpec({
+    request:'Calculate 2 + 2 for me.'
+  });
+  assert.equal(result.status,'ESCALATE');
+  assert.equal(result.reason,'invalid_precision_spec');
+  assert.ok(result.details.validation_failures.includes('precision_schema_invalid'));
+});
+
 test('precision core requires no secondary model',()=>{
   const capabilities=getPrecisionCapabilities();
   assert.equal(capabilities.secondary_model_required,false);
