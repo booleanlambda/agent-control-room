@@ -19,6 +19,7 @@ import {
   pathDepth,
 } from './semantic-runtime-controls.js';
 import { verifyPythonMathChecks } from './python-math.js';
+import { runPythonStatisticalAnalyses } from './python-quant.js';
 
 // AAU autonomous recursive decomposition v0.1
 // The bound agent authors decomposition. Runtime only persists/routes/checkpoints.
@@ -68,10 +69,24 @@ function bytes(v){try{return Buffer.byteLength(typeof v==='string'?v:JSON.string
 function clip(s,n){const v=String(s??'');return v.length<=n?v:v.slice(0,n);}
 function safeJson(v){try{return JSON.stringify(v);}catch{return '{}';}}
 
+const QDA_STATISTICAL_UNIT_CODES=new Set([
+  'QDA601-M4-U1',
+  'QDA601-M4-U2',
+  'QDA601-M4-U3',
+  'QDA601-M9-U3',
+]);
+function qdaStatisticalAtomicRequirement(packet,node){
+  const requirement=text(node?.requirement_text);
+  const unitCode=text(packet?.qda_601_context?.next_unit?.unit_code).toUpperCase();
+  if(QDA_STATISTICAL_UNIT_CODES.has(unitCode))return true;
+  if(!/QDA601/i.test(requirement))return false;
+  return /(descriptive statistic|distribution|confidence interval|sampling|regression|correlation|association|bootstrap|monte carlo|simulation|p-value|t-statistic|variance|standard deviation)/i.test(requirement);
+}
 function qdaQuantitativeAtomicRequirement(packet,node){
+  if(qdaStatisticalAtomicRequirement(packet,node))return false;
   const requirement=text(node?.requirement_text);
   if(!/QDA601/i.test(requirement))return false;
-  return /(calculate|compute|compound|discount|retention|churn|present value|future value|\bPV\b|\bFV\b|\bNPV\b|rate|ratio|revenue|cost|margin|probab|statistic|regression|scenario|optimization)/i.test(requirement);
+  return /(calculate|compute|compound|discount|retention|churn|present value|future value|\bPV\b|\bFV\b|\bNPV\b|rate|ratio|revenue|cost|margin|probab|scenario|optimization)/i.test(requirement);
 }
 function pythonChecksFromArtifact(artifact){
   let parsed=artifact;
@@ -86,6 +101,28 @@ function deterministicMathVerification(packet,node,artifact){
   const checks=pythonChecksFromArtifact(artifact);
   if(!checks.length)return {required:true,ok:false,all_match:false,check_count:0,results:[],error:'python_checks_required'};
   return {required:true,...verifyPythonMathChecks(checks,{absoluteTolerance:0.005,relativeTolerance:1e-9})};
+}
+
+function pythonAnalysesFromArtifact(artifact){
+  let parsed=artifact;
+  if(typeof artifact==='string'){
+    try{parsed=JSON.parse(artifact);}catch{return [];}
+  }
+  const obj=asObject(parsed);
+  return asArray(obj.python_analyses).filter(v=>v&&typeof v==='object'&&!Array.isArray(v));
+}
+function deterministicStatisticalVerification(packet,node,artifact){
+  if(!qdaStatisticalAtomicRequirement(packet,node)){
+    return {required:false,ok:true,all_claims_match:true,analysis_count:0,analyses:[]};
+  }
+  const analyses=pythonAnalysesFromArtifact(artifact);
+  if(!analyses.length){
+    return {
+      required:true,ok:false,all_claims_match:false,analysis_count:0,analyses:[],
+      error:'python_statistical_analyses_required'
+    };
+  }
+  return {required:true,...runPythonStatisticalAnalyses(analyses,{timeoutMs:12000})};
 }
 function artifactText(v){
   if(v===null||v===undefined)return '';
@@ -4188,11 +4225,18 @@ export async function runAutonomousRequirementCognition({
       gate:text(node?.decision_payload?.deterministic_math_gate)||null,
       feedback:asObject(node?.context_payload?.deterministic_math_feedback),
     }:null;
+    const statisticsRetryState=qdaStatisticalAtomicRequirement(packet,node)?{
+      required:Boolean(node?.decision_payload?.deterministic_statistics_reconciliation_required),
+      attempt:Math.max(0,Number(node?.decision_payload?.deterministic_statistics_attempts||0)),
+      gate:text(node?.decision_payload?.deterministic_statistics_gate)||null,
+      feedback:asObject(node?.context_payload?.deterministic_statistics_feedback),
+    }:null;
     const atomicSemanticIdentity=sha256({
       node_path:node.node_path,
       requirement:node.requirement_text,
       discovery_fingerprint:text(node?.decision_payload?.routing_discovery_checkpoint?.context_fingerprint)||null,
       deterministic_math_retry:mathRetryState,
+      deterministic_statistics_retry:statisticsRetryState,
       authoritative_sibling_results:siblingEvidence.map(v=>({
         path:v.path,status:v.status,decision_type:v.decision_type,result_hash:v.result_hash
       })),
@@ -4224,6 +4268,13 @@ export async function runAutonomousRequirementCognition({
                 'Do your reasoning first. Treat a later Python disagreement as evidence that your numerical execution must be reconciled; never change the formula merely to force a match.',
                 'If deterministic_math_feedback is present, this is a fresh correction attempt. Inspect that feedback explicitly and return NEW python_checks; do not repeat or reuse an earlier artifact.'
               ]:[]),
+              ...(qdaStatisticalAtomicRequirement(packet,node)?[
+                'QUANTITATIVE PYTHON STATISTICS COMPANION: choose the statistical method yourself, state why it is appropriate, state assumptions/limitations, then return artifact as a real JSON object containing python_analyses.',
+                'Each python_analyses item must contain id, analysis, spec, and claims. claims are YOUR numerical/statistical conclusions keyed to result fields (for example mean, median, r, ci_low, ci_high, t, p_two_sided). Python recomputes them independently.',
+                'Allowed analyses include describe, pearson_correlation, simple_linear_regression, proportion_ci, difference_proportions_ci, mean_ci, one_sample_t, welch_t, coefficient_t, bootstrap_ci, and monte_carlo_expression.',
+                'Python owns numerical execution only. You own method selection, assumptions, causal limits, interpretation, and decision relevance. A p-value or correlation is not a causal conclusion.',
+                'If deterministic_statistics_feedback is present, this is a fresh correction attempt. Inspect the returned calculations/diagnostics explicitly and return NEW python_analyses and revised interpretation; do not reuse the rejected artifact.'
+              ]:[]),
                'EPISTEMIC THRESHOLD POLICY: '+THRESHOLD_EVIDENCE_POLICY.RULE+' '+THRESHOLD_EVIDENCE_POLICY.PASS+' '+THRESHOLD_EVIDENCE_POLICY.FAIL+' '+THRESHOLD_EVIDENCE_POLICY.UNKNOWN,
             ].join('\n')},
             {role:'user',content:safeJson({
@@ -4233,6 +4284,8 @@ export async function runAutonomousRequirementCognition({
               supplied_context:atomicCognitionContext(),
               deterministic_math_feedback:mathRetryState?.feedback||null,
               deterministic_math_retry_attempt:mathRetryState?.attempt||0,
+              deterministic_statistics_feedback:statisticsRetryState?.feedback||null,
+              deterministic_statistics_retry_attempt:statisticsRetryState?.attempt||0,
               available_context_index:idx,
               available_supplied_context_index:indexObject(atomicCognitionContext()),
             })},
@@ -4454,6 +4507,7 @@ export async function runAutonomousRequirementCognition({
     if(!proposedArtifact)throw new Error('autonomous_decomposition_atomic_artifact_empty:'+node.node_path);
     const proposedHandoff=asObject(parsed?.handoff);
     const proposedMathVerification=deterministicMathVerification(packet,node,proposedArtifact);
+    const proposedStatisticsVerification=deterministicStatisticalVerification(packet,node,proposedArtifact);
     if(!durableAtomic.parsed){
       await saveJsonPhaseCheckpoint(
         node.node_path,'ATOMIC_EXECUTION',atomicSemanticIdentity,parsed,{
@@ -4511,6 +4565,50 @@ export async function runAutonomousRequirementCognition({
       return {reconsider:true,node:reset};
     }
 
+    if(proposedStatisticsVerification.required
+       &&(!proposedStatisticsVerification.ok||!proposedStatisticsVerification.all_claims_match)){
+      const priorStatisticsAttempts=Math.max(
+        0,
+        Number(node?.decision_payload?.deterministic_statistics_attempts||0)
+      );
+      const statisticsAttempt=priorStatisticsAttempts+1;
+      const reset=await saveNode({
+        nodePath:node.node_path,
+        parentPath:node.parent_path??parentPathOf(node.node_path),
+        ordinal:node.ordinal||0,
+        requirement:node.requirement_text,
+        sourceKind:node.source_kind,
+        sourceRef:node.source_ref,
+        status:'pending',
+        decisionType:'ATOMIC',
+        decisionPayload:{
+          ...(node.decision_payload||{}),
+          deterministic_statistics_reconciliation_required:true,
+          deterministic_statistics_attempts:statisticsAttempt,
+          deterministic_statistics_verification:proposedStatisticsVerification,
+          deterministic_statistics_gate:'pre_reconciliation_python_statistics_v0_1',
+          deterministic_statistics_retry_nonce:sha256({
+            node_path:node.node_path,
+            attempt:statisticsAttempt,
+            verification:proposedStatisticsVerification,
+          }).slice(0,24),
+          reconsider_decomposition:false,
+        },
+        contextPayload:{
+          ...(node.context_payload||{}),
+          deterministic_statistics_feedback:{
+            attempt:statisticsAttempt,
+            verifier:'aau_quantitative_python_v0_1',
+            verification:proposedStatisticsVerification,
+            instruction:'Reassess method, inputs, claims, and interpretation. Correct the statistical claims from first principles. Python executes the selected analysis; it does not choose the method or causal conclusion for you.'
+          },
+        },
+        resultArtifact:null,
+      });
+      reset.parent_path=node.parent_path??parentPathOf(node.node_path);
+      return {reconsider:true,node:reset};
+    }
+
     // Cognitive continuity: before runtime may persist completion, the same bound
     // agent reconciles its proposed result against its own discovery state.
     const reconciliationSemanticIdentity=sha256({
@@ -4548,6 +4646,11 @@ export async function runAutonomousRequirementCognition({
                 'DETERMINISTIC MATH COMPANION is authoritative for arithmetic execution only. Inspect deterministic_math_verification below. If any check is missing, invalid, or mismatched, correct your numerical work and python_checks before choosing COMPLETE. Do not defer arithmetic disagreement as NEED_CONTEXT.',
                 'When you return COMPLETE for a quantitative QDA requirement, artifact must remain a JSON object containing python_checks for every material numerical result.'
               ]:[]),
+              ...(qdaStatisticalAtomicRequirement(packet,node)?[
+                'QUANTITATIVE PYTHON STATISTICS COMPANION is authoritative for statistical computation only. Inspect deterministic_statistics_verification below.',
+                'Do not convert statistical significance, correlation, model fit, or simulation output into causal certainty. Re-check assumptions, sample size, design, and alternative explanations before COMPLETE.',
+                'When you return COMPLETE for a statistical QDA requirement, artifact must remain a JSON object containing python_analyses with explicit claims.'
+              ]:[]),
                'EPISTEMIC THRESHOLD POLICY: '+THRESHOLD_EVIDENCE_POLICY.RULE+' '+THRESHOLD_EVIDENCE_POLICY.PASS+' '+THRESHOLD_EVIDENCE_POLICY.FAIL+' '+THRESHOLD_EVIDENCE_POLICY.UNKNOWN,
                'If a scoring framework is binary but evidence for a criterion is insufficient, preserve UNKNOWN explicitly rather than coercing UNKNOWN to FAIL. Do not compute a fully-known score by silently counting UNKNOWN as zero unless the framework itself explicitly defines that treatment.',
               'Return JSON only: {"status":"COMPLETE|NEED_CONTEXT|SPLIT","reason":"brief auditable reason","criterion_assessment":"brief comparison to your own criterion","gaps":["..."],"artifact":"required when COMPLETE","handoff":{"conclusions":[],"facts":[],"unresolved":[]},"context_requests":[],"research_queries":[],"research_urls":[]}.',
@@ -4557,6 +4660,7 @@ export async function runAutonomousRequirementCognition({
               agent_authored_discovery_state:agentDiscoveryState(node),
               proposed_completion:{artifact:proposedArtifact,handoff:proposedHandoff},
               deterministic_math_verification:proposedMathVerification,
+              deterministic_statistics_verification:proposedStatisticsVerification,
               authoritative_completed_sibling_evidence:siblingEvidence,
               supplied_context:atomicCognitionContext(),
               available_context_index:idx,
@@ -4714,6 +4818,7 @@ export async function runAutonomousRequirementCognition({
     if(!artifact)throw new Error('autonomous_decomposition_reconciliation_artifact_empty:'+node.node_path);
     const handoff=Object.keys(asObject(reconciliation?.handoff)).length?asObject(reconciliation?.handoff):proposedHandoff;
     const finalMathVerification=deterministicMathVerification(packet,node,artifact);
+    const finalStatisticsVerification=deterministicStatisticalVerification(packet,node,artifact);
     if(finalMathVerification.required && (!finalMathVerification.ok || !finalMathVerification.all_match)){
       const reset=await saveNode({
         nodePath:node.node_path,
@@ -4734,6 +4839,39 @@ export async function runAutonomousRequirementCognition({
         contextPayload:{
           ...(node.context_payload||{}),
           deterministic_math_verification:finalMathVerification,
+        },
+        resultArtifact:null,
+      });
+      reset.parent_path=node.parent_path??parentPathOf(node.node_path);
+      return {reconsider:true,node:reset};
+    }
+
+    if(finalStatisticsVerification.required
+       &&(!finalStatisticsVerification.ok||!finalStatisticsVerification.all_claims_match)){
+      const reset=await saveNode({
+        nodePath:node.node_path,
+        parentPath:node.parent_path??parentPathOf(node.node_path),
+        ordinal:node.ordinal||0,
+        requirement:node.requirement_text,
+        sourceKind:node.source_kind,
+        sourceRef:node.source_ref,
+        status:'pending',
+        decisionType:'ATOMIC',
+        decisionPayload:{
+          ...(node.decision_payload||{}),
+          deterministic_statistics_reconciliation_required:true,
+          deterministic_statistics_verification:finalStatisticsVerification,
+          deterministic_statistics_gate:'post_reconciliation_python_statistics_v0_1',
+          reconsider_decomposition:false,
+        },
+        contextPayload:{
+          ...(node.context_payload||{}),
+          deterministic_statistics_feedback:{
+            attempt:Math.max(1,Number(node?.decision_payload?.deterministic_statistics_attempts||0)+1),
+            verifier:'aau_quantitative_python_v0_1',
+            verification:finalStatisticsVerification,
+            instruction:'Your reconciled artifact still disagrees with deterministic statistical computation. Correct the claims and interpretation before completion.'
+          },
         },
         resultArtifact:null,
       });
@@ -4786,6 +4924,11 @@ export async function runAutonomousRequirementCognition({
           deterministic_math_verified:true,
           deterministic_math_check_count:finalMathVerification.check_count,
           deterministic_math_verification:finalMathVerification,
+        }:{}),
+        ...(finalStatisticsVerification.required?{
+          deterministic_statistics_verified:true,
+          deterministic_statistics_analysis_count:finalStatisticsVerification.analysis_count,
+          deterministic_statistics_verification:finalStatisticsVerification,
         }:{}),
         ...(atomicStageProposal?{
           atomic_stage_contract_validated:true,
