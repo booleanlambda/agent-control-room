@@ -75,7 +75,16 @@ const QDA_STATISTICAL_UNIT_CODES=new Set([
   'QDA601-M4-U3',
   'QDA601-M9-U3',
 ]);
+function qdaVerifiedResultsSynthesisRequirement(node){
+  const requirement=text(node?.requirement_text);
+  if(!/QDA601/i.test(requirement))return false;
+  const interpretiveScope=/(formal synthesis|interpretation|sanity[_ ]check|self[_ ]audit|audit fields?|decision relevance)/i.test(requirement);
+  const upstreamVerifiedResults=/(using\s+(?:the\s+)?(?:quantitative|verified|numerical|statistical)\s+results?\s+from\s+R\.\d|using\s+.*?results?\s+from\s+R\.\d)/i.test(requirement);
+  const explicitRecalculationContract=/(provide|include|derive|recompute|recalculate|calculate|compute)[^\n]{0,140}(?:`?calculation`?|python_checks?|python_analyses)/i.test(requirement);
+  return interpretiveScope&&upstreamVerifiedResults&&!explicitRecalculationContract;
+}
 function qdaStatisticalAtomicRequirement(packet,node){
+  if(qdaVerifiedResultsSynthesisRequirement(node))return false;
   const requirement=text(node?.requirement_text);
   const unitCode=text(packet?.qda_601_context?.next_unit?.unit_code).toUpperCase();
   if(QDA_STATISTICAL_UNIT_CODES.has(unitCode))return true;
@@ -83,6 +92,7 @@ function qdaStatisticalAtomicRequirement(packet,node){
   return /(descriptive statistic|distribution|confidence interval|sampling|regression|correlation|association|bootstrap|monte carlo|simulation|p-value|t-statistic|variance|standard deviation)/i.test(requirement);
 }
 function qdaQuantitativeAtomicRequirement(packet,node){
+  if(qdaVerifiedResultsSynthesisRequirement(node))return false;
   if(qdaStatisticalAtomicRequirement(packet,node))return false;
   const requirement=text(node?.requirement_text);
   if(!/QDA601/i.test(requirement))return false;
@@ -4423,6 +4433,8 @@ export async function runAutonomousRequirementCognition({
     const atomicSemanticIdentity=sha256({
       node_path:node.node_path,
       requirement:node.requirement_text,
+      qda_execution_scope_version:'verified_results_synthesis_v0_1',
+      qda_verified_results_synthesis:qdaVerifiedResultsSynthesisRequirement(node),
       discovery_fingerprint:text(node?.decision_payload?.routing_discovery_checkpoint?.context_fingerprint)||null,
       deterministic_math_retry:mathRetryState,
       deterministic_statistics_retry:statisticsRetryState,
@@ -4452,6 +4464,10 @@ export async function runAutonomousRequirementCognition({
               'Otherwise return JSON only: {"status":"COMPLETE","artifact":"concise auditable work product OR a real nested JSON object when the requirement names a structured lifecycle contract","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
               'Never stringify an object as "[object Object]". If the work product is structured, place the actual JSON object in artifact.',
               'Keep the artifact bounded. Preserve uncertainty and do not claim external facts without supplied evidence.',
+              ...(qdaVerifiedResultsSynthesisRequirement(node)?[
+                'VERIFIED-RESULTS SYNTHESIS SCOPE: the quantitative/statistical execution is already complete in authoritative_completed_sibling_evidence. Do not recompute it, do not recreate its full calculation tree, and do not invent replacement python_checks/python_analyses.',
+                'Use the verified sibling result as evidence. Produce only the interpretation, sanity check, evidence linkage, self-audit, decision relevance, or other synthesis fields explicitly requested by this requirement. You may quote the verified final result and key inputs needed to explain the conclusion.'
+              ]:[]),
               ...(qdaQuantitativeAtomicRequirement(packet,node)?[
                 'DETERMINISTIC MATH COMPANION: this is a quantitative QDA requirement. Return artifact as a real JSON object and put python_checks INSIDE that artifact object, not beside the wrapper. python_checks MUST be an array. Every check MUST be an object with label as a nonempty string, expression as a nonempty string, and claimed_result as a finite JSON number (never a quoted number, boolean, null, array, or object). Each material numerical result must have its own check.',
                 'SAFE MATH EXPRESSION CONTRACT: expressions may contain numeric constants, + - * / ** %, parentheses, pi/e, and safe functions sqrt/log/log10/exp/abs/round only. Do NOT use variables, assignments, sum(), range(), list/dict/tuple literals, comprehensions, lambdas, indexing, attributes, imports, or other Python syntax. Expand a finite sum explicitly with + terms.',
