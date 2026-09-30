@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import { verifyPythonMathChecks } from './python-math.js';
 import { runPythonStatisticalAnalyses } from './python-quant.js';
 
@@ -74,25 +75,38 @@ function lastActionFromPacket(packet) {
 
 function cursorFromLastAction(packet) {
   const action = lastActionFromPacket(packet).toLowerCase();
-  if (!action.startsWith('qda601_')) return {completedIndex:-1,researchIndex:null,final:false};
+  if (!action.startsWith('qda601_')) return {completedIndex:-1,researchIndex:null,pendingIndex:null,final:false};
 
   if (action.startsWith('qda601_final_submission')) {
-    return {completedIndex:units.length-1,researchIndex:null,final:true};
+    return {completedIndex:units.length-1,researchIndex:null,pendingIndex:null,final:true};
   }
 
   const completeMatch = action.match(/^qda601_complete_(qda601-m\d+-u\d+)/i);
   if (completeMatch) {
     const idx = units.findIndex(u => u.unit_code.toLowerCase() === completeMatch[1].toLowerCase());
-    return {completedIndex:idx,researchIndex:null,final:false};
+    return {completedIndex:idx,researchIndex:null,pendingIndex:null,final:false};
+  }
+
+  const submitMatch = action.match(/^qda601_submit_(qda601-m\d+-u\d+)/i);
+  if (submitMatch) {
+    const idx = units.findIndex(u => u.unit_code.toLowerCase() === submitMatch[1].toLowerCase());
+    return {completedIndex:Math.max(-1,idx-1),researchIndex:null,pendingIndex:idx,final:false};
   }
 
   const researchMatch = action.match(/^qda601_research_(qda601-m\d+-u\d+)/i);
   if (researchMatch) {
     const idx = units.findIndex(u => u.unit_code.toLowerCase() === researchMatch[1].toLowerCase());
-    return {completedIndex:Math.max(-1,idx-1),researchIndex:idx,final:false};
+    return {completedIndex:Math.max(-1,idx-1),researchIndex:idx,pendingIndex:null,final:false};
   }
 
-  return {completedIndex:-1,researchIndex:null,final:false};
+  return {completedIndex:-1,researchIndex:null,pendingIndex:null,final:false};
+}
+
+function remediationUnitCodeFromPacket(packet) {
+  const statePayload=packet?.state?.state_payload || {};
+  if(statePayload?.qda_601_remediation_required!==true
+     && String(statePayload?.qda_601_remediation_required||'').toLowerCase()!=='true') return '';
+  return String(statePayload?.qda_601_remediation_unit || '').trim().toUpperCase();
 }
 
 function preservedValidUnitCodesFromPacket(packet) {
@@ -120,16 +134,30 @@ export function buildQda601Context(agentId, packet = {}) {
   }
   for (const code of preservedValidUnitCodes) completedUnitCodes.add(code);
 
+  const remediationUnitCode=remediationUnitCodeFromPacket(packet);
+  const remediationIndex=remediationUnitCode
+    ? units.findIndex(unit=>unit.unit_code.toUpperCase()===remediationUnitCode)
+    : -1;
+  if(remediationIndex>=0){
+    for(let i=remediationIndex;i<units.length;i+=1) completedUnitCodes.delete(units[i].unit_code.toUpperCase());
+  }
+
   const completedCount = completedUnitCodes.size;
   const firstMissingIndex = units.findIndex(
     unit => !completedUnitCodes.has(unit.unit_code.toUpperCase())
   );
-  const nextIndex = cursor.researchIndex !== null
-    ? cursor.researchIndex
-    : (firstMissingIndex >= 0 ? firstMissingIndex : units.length);
+  const nextIndex = remediationIndex>=0
+    ? remediationIndex
+    : cursor.pendingIndex !== null
+      ? cursor.pendingIndex
+      : cursor.researchIndex !== null
+        ? cursor.researchIndex
+        : (firstMissingIndex >= 0 ? firstMissingIndex : units.length);
   const nextUnit = nextIndex < units.length ? units[nextIndex] : null;
 
-  let status = 'in_progress';
+  let status = cursor.pendingIndex !== null && remediationIndex<0
+    ? 'unit_pending_independent_verification'
+    : 'in_progress';
   if (!nextUnit && !cursor.final) status = 'coursework_complete_final_packaging_required';
   if (cursor.final) status = 'coursework_complete_pending_independent_verification';
 
@@ -164,6 +192,9 @@ export function buildQda601Context(agentId, packet = {}) {
       last_action:lastActionFromPacket(packet) || null,
       completed_index:cursor.completedIndex,
       research_index:cursor.researchIndex,
+      pending_index:cursor.pendingIndex,
+      remediation_index:remediationIndex>=0?remediationIndex:null,
+      remediation_unit:remediationIndex>=0?units[remediationIndex].unit_code:null,
       preserved_valid_units:[...preservedValidUnitCodes],
       effective_completed_units:[...completedUnitCodes],
     },
@@ -367,6 +398,50 @@ function arrayifyArtifactField(value){
   return [value];
 }
 
+function qdaSha256(value){
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+function qdaProblemSourceBinding(ctx,index,problem,child=null){
+  return {
+    contract:'qda601_material_claim_provenance_v0_2',
+    kind:'authoritative_exercise_pack_problem',
+    exercise_pack_ref:String(ctx?.next_unit?.exercise_pack_ref||''),
+    json_path:'$.packs["'+String(ctx?.next_unit?.unit_code||'')+'"].problems['+String(index)+']',
+    problem_index:index,
+    source_problem_sha256:qdaSha256(problem),
+    ...(child?{
+      child_node_path:child?.node_path||null,
+      child_result_hash:child?.result_hash||null,
+      deterministic_math_verified:child?.deterministic_math_verified===true,
+      deterministic_math_check_count:Number(child?.deterministic_math_check_count||0),
+    }:{})
+  };
+}
+
+function bindQda601ProblemProvenance(ctx,payload){
+  if(!payload || typeof payload!=='object' || Array.isArray(payload)) return payload;
+  const expectedProblems=Array.isArray(ctx?.next_unit?.exercise_pack?.problems)
+    ?ctx.next_unit.exercise_pack.problems:[];
+  const responses=Array.isArray(payload.problem_responses)?payload.problem_responses:[];
+  const nextResponses=responses.map((response,index)=>{
+    if(!response || typeof response!=='object' || Array.isArray(response) || index>=expectedProblems.length) return response;
+    const binding=qdaProblemSourceBinding(ctx,index,expectedProblems[index]);
+    const evidence=Array.isArray(response.evidence)?response.evidence:[];
+    const withoutRuntimeBinding=evidence.filter(item=>
+      !(item && typeof item==='object' && item.contract==='qda601_material_claim_provenance_v0_2')
+    );
+    return {...response,evidence:[binding,...withoutRuntimeBinding]};
+  });
+  const bound={...payload,problem_responses:nextResponses};
+  bound.evidence=nextResponses.flatMap((response,index)=>
+    Array.isArray(response?.evidence)
+      ?response.evidence.map(value=>({problem:responseLabel(response,index),value}))
+      :[]
+  );
+  return bound;
+}
+
 export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
   const ctx=packet?.qda_601_context;
   if(!ctx?.assigned || ctx?.status!=='in_progress' || !ctx?.next_unit) {
@@ -408,6 +483,7 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
       continue;
     }
 
+    const sourceBinding=qdaProblemSourceBinding(ctx,index,expectedProblems[index],child);
     const response={
       problem_id:index+1,
       problem:expectedProblems[index],
@@ -418,7 +494,7 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
       units:artifact.units,
       interpretation:artifact.interpretation,
       sanity_check:artifact.sanity_check,
-      evidence:arrayifyArtifactField(artifact.evidence),
+      evidence:[sourceBinding,...arrayifyArtifactField(artifact.evidence)],
       self_audit:artifact.self_audit,
     };
 
@@ -430,6 +506,9 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
     const quantitative=String(ctx?.next_unit?.type||'').toLowerCase()==='quantitative'
       && !statisticalUnit(ctx);
     if(quantitative){
+      if(child?.deterministic_math_verified!==true){
+        failures.push('qda_verified_child_deterministic_math_not_verified:'+String(child?.node_path||index+1));
+      }
       const requiredChecks=materialCalculationCount(response);
       if(childChecks.length<requiredChecks){
         failures.push(
@@ -799,7 +878,8 @@ export function qda601DecisionValidation(packet, decision) {
     const association=qdaFileAssociation(decision,ctx.next_unit.filename);
     if (!association) return {ok:false,active:true,failures:['qda_current_unit_artifact_required:'+ctx.next_unit.filename]};
     const parsedPayload=parseAssociationJson(association);
-    const payload=canonicalizeQda601UnitPayload(parsedPayload);
+    let payload=canonicalizeQda601UnitPayload(parsedPayload);
+    payload=bindQda601ProblemProvenance(ctx,payload);
     if(payload && typeof payload==='object' && !Array.isArray(payload)) {
       writeAssociationPayload(association,payload);
     }
@@ -815,6 +895,11 @@ export function qda601DecisionValidation(packet, decision) {
       unit_code:ctx.next_unit.unit_code,
       failures:payloadFailures
     };
+  }
+
+  if (ctx.status==='unit_pending_independent_verification') {
+    return {ok:true,active:true,pendingUnitVerification:true,
+      unit_code:ctx.next_unit?.unit_code||null,failures:[]};
   }
 
   if (ctx.status==='coursework_complete_final_packaging_required') {
@@ -839,11 +924,14 @@ export function qda601DecisionValidation(packet, decision) {
 export function stampQda601Progress(decision, validation) {
   if (!validation?.active || !decision || typeof decision !== 'object') return decision;
   if (validation.completed && validation.unit_code) {
-    decision.selected_action=`qda601_complete_${validation.unit_code}`;
-    decision.current_focus=`QDA-601 ${validation.unit_code} completed and persisted; next cognition advances to the next canonical unit.`;
+    decision.selected_action=`qda601_submit_${validation.unit_code}`;
+    decision.current_focus=`QDA-601 ${validation.unit_code} submitted and frozen; awaiting independent authenticator verification before progression.`;
   } else if (validation.research && validation.unit_code) {
     decision.selected_action=`qda601_research_${validation.unit_code}`;
     decision.current_focus=`QDA-601 ${validation.unit_code} evidence acquisition; the unit remains active until its canonical artifact is persisted.`;
+  } else if (validation.pendingUnitVerification && validation.unit_code) {
+    decision.selected_action=`qda601_submit_${validation.unit_code}`;
+    decision.current_focus=`QDA-601 ${validation.unit_code} remains frozen pending independent authenticator verification.`;
   } else if (validation.finalSubmitted) {
     decision.selected_action='qda601_final_submission';
     decision.current_focus='QDA-601 coursework packaged; awaiting independent verification.';
