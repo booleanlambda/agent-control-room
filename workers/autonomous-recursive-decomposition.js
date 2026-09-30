@@ -69,9 +69,8 @@ function clip(s,n){const v=String(s??'');return v.length<=n?v:v.slice(0,n);}
 function safeJson(v){try{return JSON.stringify(v);}catch{return '{}';}}
 
 function qdaQuantitativeAtomicRequirement(packet,node){
-  const qda=asObject(packet?.qda_601_context);
   const requirement=text(node?.requirement_text);
-  if(qda.assigned!==true || !/QDA601/i.test(requirement))return false;
+  if(!/QDA601/i.test(requirement))return false;
   return /(calculate|compute|compound|discount|retention|churn|present value|future value|\bPV\b|\bFV\b|\bNPV\b|rate|ratio|revenue|cost|margin|probab|statistic|regression|scenario|optimization)/i.test(requirement);
 }
 function pythonChecksFromArtifact(artifact){
