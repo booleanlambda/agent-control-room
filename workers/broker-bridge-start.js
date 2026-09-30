@@ -20,6 +20,36 @@ try {
 }
 
 try {
+  const { verifyPythonMathChecks } = await import('./python-math.js');
+  const quoted=verifyPythonMathChecks([
+    {label:'quoted_number',expression:'1 + 1',claimed_result:'2'}
+  ]);
+  const boolean=verifyPythonMathChecks([
+    {label:'boolean_number',expression:'1 + 1',claimed_result:true}
+  ]);
+  const unsafe=verifyPythonMathChecks([
+    {label:'unsafe_syntax',expression:'sum([1,2,3])',claimed_result:6}
+  ]);
+  console.log('AAU_PYTHON_MATH_TYPE_CONTRACT_PROBE', JSON.stringify({
+    ok:quoted.ok===false
+      &&quoted.failure_class==='input_contract'
+      &&boolean.ok===false
+      &&boolean.failure_class==='input_contract'
+      &&unsafe.ok===true
+      &&unsafe.all_match===false
+      &&unsafe.results?.[0]?.valid===false
+      &&String(unsafe.results?.[0]?.error_code||'').includes('syntax_not_allowed'),
+    quoted_error:quoted.error||null,
+    boolean_error:boolean.error||null,
+    unsafe_error:unsafe.results?.[0]?.error_code||null,
+  }));
+} catch (error) {
+  console.error('AAU_PYTHON_MATH_TYPE_CONTRACT_PROBE', JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
   const { runPythonStatisticalAnalyses } = await import('./python-quant.js');
   const probe = runPythonStatisticalAnalyses([
     {
@@ -39,6 +69,27 @@ try {
   console.error('AAU_PYTHON_STATISTICS_RUNTIME_PROBE', JSON.stringify({
     ok:false,
     error:String(error?.message || error).slice(0,500),
+  }));
+}
+
+try {
+  const { runPythonStatisticalAnalyses } = await import('./python-quant.js');
+  const probe=runPythonStatisticalAnalyses([
+    {
+      id:'strict_type_probe',
+      analysis:'describe',
+      spec:{values:[1,'2',3]},
+      claims:{mean:2}
+    }
+  ]);
+  console.log('AAU_PYTHON_STATISTICS_TYPE_CONTRACT_PROBE', JSON.stringify({
+    ok:probe.ok===false && probe.failure_class==='input_contract',
+    failure_class:probe.failure_class||null,
+    error:probe.error||null,
+  }));
+} catch (error) {
+  console.error('AAU_PYTHON_STATISTICS_TYPE_CONTRACT_PROBE', JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
   }));
 }
 
