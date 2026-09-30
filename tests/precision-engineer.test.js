@@ -72,6 +72,29 @@ test('offline model endpoint is loopback only',()=>{
   );
 });
 
+
+test('statistical disagreement is surfaced for reconciliation',()=>{
+  const result=executePrecisionSpec({
+    schema:'aau.precision_spec.v0.1',
+    job_id:'t_stats',
+    intent:'verify descriptive mean',
+    assumptions:[{statement:'Dataset values are observed inputs.'}],
+    missing_information:[],
+    arithmetic_checks:[],
+    statistical_analyses:[
+      {
+        id:'describe_fixture',
+        analysis:'describe',
+        spec:{values:[1,2,3,4]},
+        claims:{mean:3}
+      }
+    ],
+  });
+  assert.equal(result.status,'RECONCILE');
+  assert.equal(result.statistical.all_claims_match,false);
+  assert.equal(result.mismatches[0].type,'statistical');
+});
+
 test('full smoke suite passes',()=>{
   assert.equal(runPrecisionEngineerSmoke().ok,true);
 });
