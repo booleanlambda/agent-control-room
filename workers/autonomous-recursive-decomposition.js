@@ -88,20 +88,28 @@ function qdaQuantitativeAtomicRequirement(packet,node){
   if(!/QDA601/i.test(requirement))return false;
   return /(calculate|compute|compound|discount|retention|churn|present value|future value|\bPV\b|\bFV\b|\bNPV\b|rate|ratio|revenue|cost|margin|probab|scenario|optimization)/i.test(requirement);
 }
-function pythonChecksFromArtifact(artifact){
+function quantitativeArtifactBody(artifact){
   let parsed=artifact;
   if(typeof artifact==='string'){
-    try{parsed=JSON.parse(artifact);}catch{return [];}
+    try{parsed=JSON.parse(artifact);}catch{return {};}
   }
   const obj=asObject(parsed);
+  // QDA atomic completions may legitimately wrap the structured answer in a
+  // problem_response envelope. Verification must inspect the answer body, not
+  // mistake envelope shape for missing Python evidence.
+  for(const key of ['problem_response','response']){
+    const nested=asObject(obj[key]);
+    if(Object.keys(nested).length)return nested;
+  }
+  return obj;
+}
+function pythonChecksFromArtifact(artifact){
+  const obj=quantitativeArtifactBody(artifact);
   return asArray(obj.python_checks).filter(v=>v&&typeof v==='object'&&!Array.isArray(v));
 }
 function atomicMaterialCalculationCount(artifact){
-  let parsed=artifact;
-  if(typeof artifact==='string'){
-    try{parsed=JSON.parse(artifact);}catch{return 1;}
-  }
-  const calculation=asObject(parsed)?.calculation;
+  const obj=quantitativeArtifactBody(artifact);
+  const calculation=asObject(obj.calculation);
   if(calculation&&typeof calculation==='object'&&!Array.isArray(calculation)){
     const count=Object.values(calculation).filter(value=>value!==null&&value!==undefined&&text(value)!=='').length;
     return Math.max(1,count);
@@ -141,11 +149,7 @@ function completedAtomicDeterministicRevalidation(packet,node){
 }
 
 function pythonAnalysesFromArtifact(artifact){
-  let parsed=artifact;
-  if(typeof artifact==='string'){
-    try{parsed=JSON.parse(artifact);}catch{return [];}
-  }
-  const obj=asObject(parsed);
+  const obj=quantitativeArtifactBody(artifact);
   return asArray(obj.python_analyses).filter(v=>v&&typeof v==='object'&&!Array.isArray(v));
 }
 function deterministicStatisticalVerification(packet,node,artifact){
