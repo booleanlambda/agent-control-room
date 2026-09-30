@@ -4182,10 +4182,17 @@ export async function runAutonomousRequirementCognition({
     );
     const siblingEvidence=atomicContextView().siblingEvidence;
     const atomicCognitionContext=()=>atomicContextView().suppliedContext;
+    const mathRetryState=qdaQuantitativeAtomicRequirement(packet,node)?{
+      required:Boolean(node?.decision_payload?.deterministic_math_reconciliation_required),
+      attempt:Math.max(0,Number(node?.decision_payload?.deterministic_math_attempts||0)),
+      gate:text(node?.decision_payload?.deterministic_math_gate)||null,
+      feedback:asObject(node?.context_payload?.deterministic_math_feedback),
+    }:null;
     const atomicSemanticIdentity=sha256({
       node_path:node.node_path,
       requirement:node.requirement_text,
       discovery_fingerprint:text(node?.decision_payload?.routing_discovery_checkpoint?.context_fingerprint)||null,
+      deterministic_math_retry:mathRetryState,
       authoritative_sibling_results:siblingEvidence.map(v=>({
         path:v.path,status:v.status,decision_type:v.decision_type,result_hash:v.result_hash
       })),
@@ -4214,7 +4221,8 @@ export async function runAutonomousRequirementCognition({
               'Keep the artifact bounded. Preserve uncertainty and do not claim external facts without supplied evidence.',
               ...(qdaQuantitativeAtomicRequirement(packet,node)?[
                 'DETERMINISTIC MATH COMPANION: this is a quantitative QDA requirement. Return artifact as a real JSON object and include python_checks. Each material numerical result must have a check object with label, numeric expression, and claimed_result. The expression may use numeric constants, + - * / ** %, parentheses, and safe functions such as sqrt/log/log10/exp/abs/round. Python verifies arithmetic only; you remain responsible for selecting the correct formula, units, assumptions, and interpretation.',
-                'Do your reasoning first. Treat a later Python disagreement as evidence that your numerical execution must be reconciled; never change the formula merely to force a match.'
+                'Do your reasoning first. Treat a later Python disagreement as evidence that your numerical execution must be reconciled; never change the formula merely to force a match.',
+                'If deterministic_math_feedback is present, this is a fresh correction attempt. Inspect that feedback explicitly and return NEW python_checks; do not repeat or reuse an earlier artifact.'
               ]:[]),
                'EPISTEMIC THRESHOLD POLICY: '+THRESHOLD_EVIDENCE_POLICY.RULE+' '+THRESHOLD_EVIDENCE_POLICY.PASS+' '+THRESHOLD_EVIDENCE_POLICY.FAIL+' '+THRESHOLD_EVIDENCE_POLICY.UNKNOWN,
             ].join('\n')},
@@ -4223,6 +4231,8 @@ export async function runAutonomousRequirementCognition({
               agent_authored_discovery_state:agentDiscoveryState(node),
               authoritative_completed_sibling_evidence:siblingEvidence,
               supplied_context:atomicCognitionContext(),
+              deterministic_math_feedback:mathRetryState?.feedback||null,
+              deterministic_math_retry_attempt:mathRetryState?.attempt||0,
               available_context_index:idx,
               available_supplied_context_index:indexObject(atomicCognitionContext()),
             })},
@@ -4478,7 +4488,12 @@ export async function runAutonomousRequirementCognition({
           deterministic_math_reconciliation_required:true,
           deterministic_math_attempts:mathAttempt,
           deterministic_math_verification:proposedMathVerification,
-          deterministic_math_gate:'pre_reconciliation_python_v0_2',
+          deterministic_math_gate:'pre_reconciliation_python_v0_3_checkpoint_identity',
+          deterministic_math_retry_nonce:sha256({
+            node_path:node.node_path,
+            attempt:mathAttempt,
+            verification:proposedMathVerification,
+          }).slice(0,24),
           reconsider_decomposition:false,
         },
         contextPayload:{
