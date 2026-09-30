@@ -764,8 +764,15 @@ function validateUnitPayload(ctx, payload) {
       failures.push('qda_python_statistical_analyses_required');
     } else {
       const statisticalVerification = runPythonStatisticalAnalyses(analyses,{timeoutMs:12000});
-      if (!statisticalVerification.ok) failures.push('qda_python_statistics_runtime_unavailable_or_invalid');
-      else if (!statisticalVerification.all_claims_match) failures.push('qda_python_statistics_claim_disagreement');
+      if (!statisticalVerification.ok) {
+        failures.push(
+          statisticalVerification.failure_class==='input_contract'
+            ?'qda_python_statistics_contract_invalid:'+String(statisticalVerification.error||'invalid')
+            :'qda_python_statistics_runtime_unavailable_or_invalid'
+        );
+      } else if (!statisticalVerification.all_claims_match) {
+        failures.push('qda_python_statistics_claim_disagreement');
+      }
     }
   }
 
