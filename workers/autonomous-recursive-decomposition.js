@@ -85,7 +85,7 @@ function deterministicMathVerification(packet,node,artifact){
   if(!qdaQuantitativeAtomicRequirement(packet,node))return {required:false,ok:true,all_match:true,check_count:0,results:[]};
   const checks=pythonChecksFromArtifact(artifact);
   if(!checks.length)return {required:true,ok:false,all_match:false,check_count:0,results:[],error:'python_checks_required'};
-  return {required:true,...verifyPythonMathChecks(checks)};
+  return {required:true,...verifyPythonMathChecks(checks,{absoluteTolerance:0.005,relativeTolerance:1e-9})};
 }
 function artifactText(v){
   if(v===null||v===undefined)return '';
@@ -4451,6 +4451,49 @@ export async function runAutonomousRequirementCognition({
           artifact_hash:sha256(proposedArtifact),
         }
       );
+    }
+
+    // Deterministic arithmetic is checked BEFORE model reconciliation. A known
+    // arithmetic mismatch is not a reason to spend another long reasoning call.
+    // Return the exact Python observations to the same bound agent on the next
+    // atomic attempt; the changed context invalidates reuse of the bad checkpoint.
+    if(proposedMathVerification.required
+       &&(!proposedMathVerification.ok||!proposedMathVerification.all_match)){
+      const priorMathAttempts=Math.max(
+        0,
+        Number(node?.decision_payload?.deterministic_math_attempts||0)
+      );
+      const mathAttempt=priorMathAttempts+1;
+      const reset=await saveNode({
+        nodePath:node.node_path,
+        parentPath:node.parent_path??parentPathOf(node.node_path),
+        ordinal:node.ordinal||0,
+        requirement:node.requirement_text,
+        sourceKind:node.source_kind,
+        sourceRef:node.source_ref,
+        status:'pending',
+        decisionType:'ATOMIC',
+        decisionPayload:{
+          ...(node.decision_payload||{}),
+          deterministic_math_reconciliation_required:true,
+          deterministic_math_attempts:mathAttempt,
+          deterministic_math_verification:proposedMathVerification,
+          deterministic_math_gate:'pre_reconciliation_python_v0_2',
+          reconsider_decomposition:false,
+        },
+        contextPayload:{
+          ...(node.context_payload||{}),
+          deterministic_math_feedback:{
+            attempt:mathAttempt,
+            verifier:'python3_safe_math_v0_1',
+            verification:proposedMathVerification,
+            instruction:'Correct the numerical work and python_checks from first principles. Preserve the correct formula, units, and assumptions; do not force a match by changing the model.'
+          },
+        },
+        resultArtifact:null,
+      });
+      reset.parent_path=node.parent_path??parentPathOf(node.node_path);
+      return {reconsider:true,node:reset};
     }
 
     // Cognitive continuity: before runtime may persist completion, the same bound
