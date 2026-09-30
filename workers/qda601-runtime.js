@@ -217,13 +217,143 @@ function parseAssociationJson(association) {
   try { return JSON.parse(String(f?.content || '')); } catch { return null; }
 }
 
+function hasOwn(obj,key){
+  return Boolean(obj && typeof obj==='object' && !Array.isArray(obj)
+    && Object.prototype.hasOwnProperty.call(obj,key));
+}
+
+function responseLabel(response,index){
+  return String(
+    response?.problem_id
+    ?? response?.id
+    ?? response?.problem
+    ?? response?.label
+    ?? `problem_${index+1}`
+  ).trim() || `problem_${index+1}`;
+}
+
+function liftProblemField(responses,key){
+  if(!Array.isArray(responses) || !responses.length) return undefined;
+  if(!responses.every(response=>hasOwn(response,key))) return undefined;
+  return {
+    source:'problem_responses',
+    by_problem:responses.map((response,index)=>({
+      problem:responseLabel(response,index),
+      value:response[key],
+    })),
+  };
+}
+
+function flattenProblemArrays(responses,key){
+  if(!Array.isArray(responses) || !responses.length) return undefined;
+  if(!responses.every(response=>Array.isArray(response?.[key]))) return undefined;
+  return responses.flatMap((response,index)=>
+    response[key].map(item=>(
+      item && typeof item==='object' && !Array.isArray(item)
+        ? {problem:responseLabel(response,index),...item}
+        : {problem:responseLabel(response,index),value:item}
+    ))
+  );
+}
+
+function aggregateProblemSelfAudit(responses){
+  if(!Array.isArray(responses) || !responses.length) return undefined;
+  const audits=responses.map(response=>response?.self_audit);
+  if(!audits.every(audit=>audit && typeof audit==='object' && !Array.isArray(audit)
+      && audit.pass_a && audit.pass_b && String(audit.verdict || '').trim().length>=3)) {
+    return undefined;
+  }
+  return {
+    source:'problem_responses',
+    pass_a:audits.map((audit,index)=>({
+      problem:responseLabel(responses[index],index),
+      value:audit.pass_a,
+    })),
+    pass_b:audits.map((audit,index)=>({
+      problem:responseLabel(responses[index],index),
+      value:audit.pass_b,
+    })),
+    verdict:audits.map((audit,index)=>
+      `${responseLabel(responses[index],index)}: ${String(audit.verdict).trim()}`
+    ).join(' | '),
+  };
+}
+
+export function canonicalizeQda601UnitPayload(rawPayload){
+  if(!rawPayload || typeof rawPayload!=='object' || Array.isArray(rawPayload)) return rawPayload;
+
+  let payload={...rawPayload};
+
+  // Some deep-cognition paths return {artifact:{...}, python_checks:[...]}.
+  // Unwrap only when the outer object is clearly an envelope rather than a QDA unit.
+  if(!payload.program_version
+     && payload.artifact
+     && typeof payload.artifact==='object'
+     && !Array.isArray(payload.artifact)) {
+    const artifact={...payload.artifact};
+    if(!Array.isArray(artifact.python_checks) && Array.isArray(payload.python_checks)) {
+      artifact.python_checks=payload.python_checks;
+    }
+    if(!Array.isArray(artifact.python_analyses) && Array.isArray(payload.python_analyses)) {
+      artifact.python_analyses=payload.python_analyses;
+    }
+    payload=artifact;
+  }
+
+  const responses=Array.isArray(payload.problem_responses)?payload.problem_responses:[];
+
+  for(const key of ['inputs','formula_or_model','calculation','units','interpretation','sanity_check']) {
+    if(payload[key]===null || payload[key]===undefined) {
+      const lifted=liftProblemField(responses,key);
+      if(lifted!==undefined) payload[key]=lifted;
+    }
+  }
+
+  if(!Array.isArray(payload.assumptions)) {
+    const lifted=flattenProblemArrays(responses,'assumptions');
+    if(lifted!==undefined) payload.assumptions=lifted;
+  }
+
+  if(!Array.isArray(payload.evidence)) {
+    const lifted=flattenProblemArrays(responses,'evidence');
+    if(lifted!==undefined) payload.evidence=lifted;
+  }
+
+  if(!payload.self_audit || typeof payload.self_audit!=='object' || Array.isArray(payload.self_audit)) {
+    const lifted=aggregateProblemSelfAudit(responses);
+    if(lifted!==undefined) payload.self_audit=lifted;
+  }
+
+  if(!Array.isArray(payload.python_checks)) {
+    const lifted=flattenProblemArrays(responses,'python_checks');
+    if(lifted!==undefined) payload.python_checks=lifted;
+  }
+
+  if(!Array.isArray(payload.python_analyses)) {
+    const lifted=flattenProblemArrays(responses,'python_analyses');
+    if(lifted!==undefined) payload.python_analyses=lifted;
+  }
+
+  return payload;
+}
+
+function writeAssociationPayload(association,payload){
+  if(!association || typeof association!=='object') return;
+  if(association.file && typeof association.file==='object') {
+    association.file={...association.file,content:payload};
+    return;
+  }
+  association.content=payload;
+}
+
 export function normalizeQda601FileAssociations(decision) {
   if (!decision || typeof decision !== 'object' || !Array.isArray(decision.associations)) return decision;
   decision.associations = decision.associations.map((association) => {
     if (!association || typeof association !== 'object' || association.origin !== 'agent_file_output_v0_1') return association;
     const wrapped = association.file && typeof association.file === 'object' ? association.file : association;
     if (!wrapped.content || typeof wrapped.content !== 'object' || Array.isArray(wrapped.content)) return association;
-    const serialized = JSON.stringify(wrapped.content);
+    const normalizedContent=canonicalizeQda601UnitPayload(wrapped.content);
+    const serialized = JSON.stringify(normalizedContent);
     if (association.file && typeof association.file === 'object') {
       return {...association,file:{...association.file,content:serialized}};
     }
@@ -319,11 +449,14 @@ export function qda601DecisionValidation(packet, decision) {
     }
     const association=qdaFileAssociation(decision,ctx.next_unit.filename);
     if (!association) return {ok:false,active:true,failures:['qda_current_unit_artifact_required:'+ctx.next_unit.filename]};
-    const f=association.file && typeof association.file==='object'?association.file:association;
-    const payload=parseAssociationJson(association);
-    const contentSize = typeof f.content === 'string'
-      ? f.content.trim().length
-      : (f.content && typeof f.content === 'object' ? JSON.stringify(f.content).length : 0);
+    const parsedPayload=parseAssociationJson(association);
+    const payload=canonicalizeQda601UnitPayload(parsedPayload);
+    if(payload && typeof payload==='object' && !Array.isArray(payload)) {
+      writeAssociationPayload(association,payload);
+    }
+    const contentSize = payload && typeof payload==='object'
+      ? JSON.stringify(payload).length
+      : 0;
     if (contentSize<500) return {ok:false,active:true,failures:['qda_unit_artifact_min_500_chars']};
     const payloadFailures=validateUnitPayload(ctx,payload);
     return {
