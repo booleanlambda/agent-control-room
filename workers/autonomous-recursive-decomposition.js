@@ -5687,6 +5687,22 @@ export async function runAutonomousRequirementCognition({
     if(!parsed || typeof parsed!=='object' || Array.isArray(parsed)){
       return {artifact,materialized:false,check_count:0};
     }
+    if(parsed?.runtime_verified_descendant_materialization?.contract
+       ==='qda_problem_verified_descendant_materialization_v0_1'
+       &&Array.isArray(parsed.python_checks)
+       &&parsed.python_checks.length){
+      const verification=verifyPythonMathChecks(
+        parsed.python_checks,{absoluteTolerance:0.005,relativeTolerance:1e-9}
+      );
+      if(verification.ok===true&&verification.all_match===true){
+        return {
+          artifact:parsed,materialized:false,already_materialized:true,
+          check_count:parsed.python_checks.length,
+          sources:asArray(parsed.runtime_verified_descendant_materialization.descendants),
+          verification,
+        };
+      }
+    }
 
     const checks=[];
     const sources=[];
@@ -6214,7 +6230,48 @@ export async function runAutonomousRequirementCognition({
         const legacyChild=existingChildren.find(child=>
           completedAtomicDeterministicRevalidation(packet,child).required
         );
-        if(!legacyChild)return ensureCanonicalStageCandidateSubmission(node);
+        if(!legacyChild){
+          const parts=resultParts(node.result_artifact);
+          const qdaMaterialization=await materializeQdaProblemFromVerifiedDescendants(
+            node,parts.artifact
+          );
+          if(qdaMaterialization.materialized===true){
+            const repaired=await saveNode({
+              nodePath:node.node_path,
+              parentPath:node.parent_path??parentPathOf(node.node_path),
+              ordinal:node.ordinal||0,
+              requirement:node.requirement_text,
+              sourceKind:node.source_kind,
+              sourceRef:node.source_ref,
+              status:'completed',
+              decisionType:'SPLIT',
+              decisionPayload:{
+                ...(node.decision_payload||{}),
+                qda_verified_descendant_materialized:true,
+                qda_verified_descendant_check_count:Number(qdaMaterialization.check_count||0),
+                qda_verified_descendant_sources:asArray(qdaMaterialization.sources),
+                qda_verified_descendant_materialized_at:new Date().toISOString(),
+              },
+              contextPayload:node.context_payload||{},
+              resultArtifact:JSON.stringify({
+                status:'COMPLETE',
+                artifact:qdaMaterialization.artifact,
+                handoff:parts.handoff,
+              }),
+            });
+            repaired.parent_path=node.parent_path??parentPathOf(node.node_path);
+            node=repaired;
+            console.log('AAU_QDA_PROBLEM_VERIFIED_DESCENDANTS_MATERIALIZED',JSON.stringify({
+              agent_id:agentId,
+              intent_execution_id:intentExecutionId,
+              node_path:node.node_path,
+              check_count:Number(qdaMaterialization.check_count||0),
+              source_count:asArray(qdaMaterialization.sources).length,
+              retroactive_completed_split:true,
+            }));
+          }
+          return ensureCanonicalStageCandidateSubmission(node);
+        }
         const nextPayload={...(node.decision_payload||{})};
         delete nextPayload.synthesis_complete;
         delete nextPayload.synthesis_outcome;
