@@ -120,3 +120,26 @@ v0.2 candidates:
 ## Product thesis
 
 > A local quantitative reasoning and verification layer that gives AI agents deterministic mathematical precision without cloud dependence.
+
+
+## Local service
+
+Run:
+
+```
+npm run precision:serve
+```
+
+Defaults:
+
+- host: `127.0.0.1`
+- port: `47821`
+- model endpoint: `http://127.0.0.1:11434/api/generate`
+
+Routes:
+
+- `GET /health` — local health/status.
+- `POST /v1/execute` — execute and verify an already-formed `aau.precision_spec.v0.1`.
+- `POST /v1/plan-execute` — ask a loopback-only local model to formalize the request, then execute deterministic verification.
+
+The server itself refuses non-loopback bind addresses, and the model adapter refuses non-loopback model endpoints. This preserves the offline/local trust boundary on both sides.
