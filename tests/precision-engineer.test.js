@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { executePrecisionSpec, validatePrecisionSpec } from '../workers/precision-engineer.js';
-import { validateLocalPrecisionEndpoint } from '../workers/precision-local-model.js';
+import { executePrecisionSpec, getPrecisionCapabilities, validatePrecisionSpec } from '../workers/precision-engineer.js';
 import { runPrecisionEngineerSmoke } from '../workers/precision-engineer-smoke.js';
 
 test('verified arithmetic job passes deterministic engine',()=>{
@@ -64,14 +63,13 @@ test('material arithmetic requires explicit units',()=>{
   assert.ok(validation.failures.includes('precision_arithmetic_1_unit_required'));
 });
 
-test('offline model endpoint is loopback only',()=>{
-  assert.equal(validateLocalPrecisionEndpoint('http://localhost:11434/api/generate').ok,true);
-  assert.throws(
-    ()=>validateLocalPrecisionEndpoint('https://api.example.com/v1/chat/completions'),
-    /precision_local_model_endpoint_must_be_loopback/
-  );
-});
 
+test('precision core requires no secondary model',()=>{
+  const capabilities=getPrecisionCapabilities();
+  assert.equal(capabilities.secondary_model_required,false);
+  assert.equal(capabilities.spec_author,'originating_agent');
+  assert.equal(capabilities.architecture,'deterministic_precision_substrate');
+});
 
 test('statistical disagreement is surfaced for reconciliation',()=>{
   const result=executePrecisionSpec({
