@@ -33,7 +33,7 @@ export function validatePrecisionSpec(spec){
   arithmetic.forEach((check,index)=>{
     if(!text(check?.id||check?.label)) failures.push(`precision_arithmetic_${index+1}_id_required`);
     if(!text(check?.expression)) failures.push(`precision_arithmetic_${index+1}_expression_required`);
-    if(!Number.isFinite(Number(check?.claimed_result))) failures.push(`precision_arithmetic_${index+1}_numeric_claim_required`);
+    if(check?.claimed_result===null || check?.claimed_result===undefined || text(check.claimed_result)==='' || !Number.isFinite(Number(check.claimed_result))) failures.push(`precision_arithmetic_${index+1}_numeric_claim_required`);
     if(!text(check?.unit)) failures.push(`precision_arithmetic_${index+1}_unit_required`);
   });
 
@@ -139,7 +139,7 @@ export function executePrecisionSpec(spec,options={}){
       deterministic_result:result.deterministic_result,
       unit:result.unit,
     })),
-    ...asArray(statistical.analyses).filter(result=>result?.all_claims_match===false).map(result=>({
+    ...asArray(statistical.analyses).filter(result=>result?.claim_verification?.all_match===false).map(result=>({
       type:'statistical',
       id:result?.id||null,
       analysis:result?.analysis||null,
