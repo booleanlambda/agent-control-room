@@ -18,6 +18,7 @@ import {
   MAX_MODEL_TRANSPORT_ATTEMPTS,
   pathDepth,
 } from './semantic-runtime-controls.js';
+import { verifyPythonMathChecks } from './python-math.js';
 
 // AAU autonomous recursive decomposition v0.1
 // The bound agent authors decomposition. Runtime only persists/routes/checkpoints.
@@ -66,6 +67,27 @@ function text(v){return String(v??'').trim();}
 function bytes(v){try{return Buffer.byteLength(typeof v==='string'?v:JSON.stringify(v));}catch{return 0;}}
 function clip(s,n){const v=String(s??'');return v.length<=n?v:v.slice(0,n);}
 function safeJson(v){try{return JSON.stringify(v);}catch{return '{}';}}
+
+function qdaQuantitativeAtomicRequirement(packet,node){
+  const qda=asObject(packet?.qda_601_context);
+  const requirement=text(node?.requirement_text);
+  if(qda.assigned!==true || !/QDA601/i.test(requirement))return false;
+  return /(calculate|compute|compound|discount|retention|churn|present value|future value|\bPV\b|\bFV\b|\bNPV\b|rate|ratio|revenue|cost|margin|probab|statistic|regression|scenario|optimization)/i.test(requirement);
+}
+function pythonChecksFromArtifact(artifact){
+  let parsed=artifact;
+  if(typeof artifact==='string'){
+    try{parsed=JSON.parse(artifact);}catch{return [];}
+  }
+  const obj=asObject(parsed);
+  return asArray(obj.python_checks).filter(v=>v&&typeof v==='object'&&!Array.isArray(v));
+}
+function deterministicMathVerification(packet,node,artifact){
+  if(!qdaQuantitativeAtomicRequirement(packet,node))return {required:false,ok:true,all_match:true,check_count:0,results:[]};
+  const checks=pythonChecksFromArtifact(artifact);
+  if(!checks.length)return {required:true,ok:false,all_match:false,check_count:0,results:[],error:'python_checks_required'};
+  return {required:true,...verifyPythonMathChecks(checks)};
+}
 function artifactText(v){
   if(v===null||v===undefined)return '';
   if(typeof v==='string')return v.trim();
@@ -4191,6 +4213,10 @@ export async function runAutonomousRequirementCognition({
               'Otherwise return JSON only: {"status":"COMPLETE","artifact":"concise auditable work product OR a real nested JSON object when the requirement names a structured lifecycle contract","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
               'Never stringify an object as "[object Object]". If the work product is structured, place the actual JSON object in artifact.',
               'Keep the artifact bounded. Preserve uncertainty and do not claim external facts without supplied evidence.',
+              ...(qdaQuantitativeAtomicRequirement(packet,node)?[
+                'DETERMINISTIC MATH COMPANION: this is a quantitative QDA requirement. Return artifact as a real JSON object and include python_checks. Each material numerical result must have a check object with label, numeric expression, and claimed_result. The expression may use numeric constants, + - * / ** %, parentheses, and safe functions such as sqrt/log/log10/exp/abs/round. Python verifies arithmetic only; you remain responsible for selecting the correct formula, units, assumptions, and interpretation.',
+                'Do your reasoning first. Treat a later Python disagreement as evidence that your numerical execution must be reconciled; never change the formula merely to force a match.'
+              ]:[]),
                'EPISTEMIC THRESHOLD POLICY: '+THRESHOLD_EVIDENCE_POLICY.RULE+' '+THRESHOLD_EVIDENCE_POLICY.PASS+' '+THRESHOLD_EVIDENCE_POLICY.FAIL+' '+THRESHOLD_EVIDENCE_POLICY.UNKNOWN,
             ].join('\n')},
             {role:'user',content:safeJson({
@@ -4418,6 +4444,7 @@ export async function runAutonomousRequirementCognition({
     const proposedArtifact=artifactText(parsed?.artifact);
     if(!proposedArtifact)throw new Error('autonomous_decomposition_atomic_artifact_empty:'+node.node_path);
     const proposedHandoff=asObject(parsed?.handoff);
+    const proposedMathVerification=deterministicMathVerification(packet,node,proposedArtifact);
     if(!durableAtomic.parsed){
       await saveJsonPhaseCheckpoint(
         node.node_path,'ATOMIC_EXECUTION',atomicSemanticIdentity,parsed,{
@@ -4460,6 +4487,10 @@ export async function runAutonomousRequirementCognition({
               'SPLIT = you now judge the requirement is not actually bounded and should be decomposed by you.',
               'Do not treat a nearby metric, label, time horizon, population, market definition, or proxy as equivalent unless you can justify that equivalence from the supplied evidence.',
               'Preserve uncertainty. A retrieved source is evidence only for what it actually supports.',
+              ...(qdaQuantitativeAtomicRequirement(packet,node)?[
+                'DETERMINISTIC MATH COMPANION is authoritative for arithmetic execution only. Inspect deterministic_math_verification below. If any check is missing, invalid, or mismatched, correct your numerical work and python_checks before choosing COMPLETE. Do not defer arithmetic disagreement as NEED_CONTEXT.',
+                'When you return COMPLETE for a quantitative QDA requirement, artifact must remain a JSON object containing python_checks for every material numerical result.'
+              ]:[]),
                'EPISTEMIC THRESHOLD POLICY: '+THRESHOLD_EVIDENCE_POLICY.RULE+' '+THRESHOLD_EVIDENCE_POLICY.PASS+' '+THRESHOLD_EVIDENCE_POLICY.FAIL+' '+THRESHOLD_EVIDENCE_POLICY.UNKNOWN,
                'If a scoring framework is binary but evidence for a criterion is insufficient, preserve UNKNOWN explicitly rather than coercing UNKNOWN to FAIL. Do not compute a fully-known score by silently counting UNKNOWN as zero unless the framework itself explicitly defines that treatment.',
               'Return JSON only: {"status":"COMPLETE|NEED_CONTEXT|SPLIT","reason":"brief auditable reason","criterion_assessment":"brief comparison to your own criterion","gaps":["..."],"artifact":"required when COMPLETE","handoff":{"conclusions":[],"facts":[],"unresolved":[]},"context_requests":[],"research_queries":[],"research_urls":[]}.',
@@ -4468,6 +4499,7 @@ export async function runAutonomousRequirementCognition({
               requirement:node.requirement_text,
               agent_authored_discovery_state:agentDiscoveryState(node),
               proposed_completion:{artifact:proposedArtifact,handoff:proposedHandoff},
+              deterministic_math_verification:proposedMathVerification,
               authoritative_completed_sibling_evidence:siblingEvidence,
               supplied_context:atomicCognitionContext(),
               available_context_index:idx,
@@ -4624,6 +4656,33 @@ export async function runAutonomousRequirementCognition({
     let artifact=artifactText(reconciliation?.artifact)||proposedArtifact;
     if(!artifact)throw new Error('autonomous_decomposition_reconciliation_artifact_empty:'+node.node_path);
     const handoff=Object.keys(asObject(reconciliation?.handoff)).length?asObject(reconciliation?.handoff):proposedHandoff;
+    const finalMathVerification=deterministicMathVerification(packet,node,artifact);
+    if(finalMathVerification.required && (!finalMathVerification.ok || !finalMathVerification.all_match)){
+      const reset=await saveNode({
+        nodePath:node.node_path,
+        parentPath:node.parent_path??parentPathOf(node.node_path),
+        ordinal:node.ordinal||0,
+        requirement:node.requirement_text,
+        sourceKind:node.source_kind,
+        sourceRef:node.source_ref,
+        status:'pending',
+        decisionType:'ATOMIC',
+        decisionPayload:{
+          ...(node.decision_payload||{}),
+          ...reconciliationMeta,
+          deterministic_math_reconciliation_required:true,
+          deterministic_math_verification:finalMathVerification,
+          reconsider_decomposition:false,
+        },
+        contextPayload:{
+          ...(node.context_payload||{}),
+          deterministic_math_verification:finalMathVerification,
+        },
+        resultArtifact:null,
+      });
+      reset.parent_path=node.parent_path??parentPathOf(node.node_path);
+      return {reconsider:true,node:reset};
+    }
     const atomicStageContract=stageContractForRequirement(packet,node.requirement_text,node.node_path);
     let atomicStageProposal=null;
     let atomicStageMaterializationVersion=null;
@@ -4666,6 +4725,11 @@ export async function runAutonomousRequirementCognition({
         ...(node.decision_payload||{}),
         ...reconciliationMeta,
         completed_as_atomic:true,
+        ...(finalMathVerification.required?{
+          deterministic_math_verified:true,
+          deterministic_math_check_count:finalMathVerification.check_count,
+          deterministic_math_verification:finalMathVerification,
+        }:{}),
         ...(atomicStageProposal?{
           atomic_stage_contract_validated:true,
           terminal_stage_contract_name:atomicStageContract.name,
