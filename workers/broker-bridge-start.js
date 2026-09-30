@@ -344,6 +344,13 @@ if (isEnabled('AAU_EXPERTISE_VERIFIER_ENABLED')) {
   } catch (error) {
     console.error('AAU_EXPERTISE_VERIFIER_START_FAILED', JSON.stringify({ error_name: error?.name || null, message: String(error?.message || error).slice(0, 1600) }));
   }
+  try {
+    const { startQda601AuthenticatorWorker } = await import('./qda601-authenticator-worker.js');
+    const result = startQda601AuthenticatorWorker();
+    console.log('AAU_QDA601_AUTHENTICATOR_STARTED', JSON.stringify(result));
+  } catch (error) {
+    console.error('AAU_QDA601_AUTHENTICATOR_START_FAILED', JSON.stringify({ error_name: error?.name || null, message: String(error?.message || error).slice(0, 1600) }));
+  }
 }
 
 if (isEnabled('AAU_ENTREPRENEURSHIP_ASSESSOR_ENABLED')) {
