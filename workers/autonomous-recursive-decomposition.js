@@ -4527,6 +4527,14 @@ export async function runAutonomousRequirementCognition({
           parsed=response?.parsed;
           break;
         }catch(error){
+          // Bounded continuation invariant: a length-truncated candidate is
+          // durable rejected-attempt evidence, never a cue to replay the same
+          // oversized atomic request. Return semantic control immediately so
+          // the bound agent must narrow/decompose before another attempt.
+          if(error?.code==='COGNITION_RESPONSE_REJECTED'
+             &&String(error?.rejectionReason||'').toUpperCase()==='TRUNCATED_RESPONSE'){
+            throw error;
+          }
           if(attempt===2)throw error;
           if(error?.code!=='COGNITION_RESPONSE_REJECTED'&&error?.code!=='NVIDIA_TIMEOUT')throw error;
         }
