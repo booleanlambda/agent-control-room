@@ -174,7 +174,7 @@ export function buildQda601Context(agentId, packet = {}) {
       'Persist completed unit work as one agent_file_output_v0_1 JSON artifact using next_unit.filename exactly.',
       'A unit artifact must expose inputs, assumptions, formal model/formula, calculation or structured derivation, units where applicable, interpretation, sanity check, evidence, and an independent self-audit.',
       'Pass A solves the task. Pass B independently reconstructs or attacks the result; do not merely reread Pass A.',
-      'For ordinary quantitative units, include python_checks with at least one deterministic arithmetic check per assigned problem. For designated statistics/simulation units, include python_analyses with explicit method specs and your own claims. Python verifies computation only; you remain responsible for choosing the method, assumptions, causal limits, interpretation, and reconciling disagreement.',
+      'For ordinary quantitative units, every problem_response must include python_checks covering every distinct material calculation result, not only a final aggregate. For designated statistics/simulation units, include python_analyses with explicit method specs and your own claims. Python verifies computation only; you remain responsible for choosing the method, assumptions, causal limits, interpretation, and reconciling disagreement.',
       'Do not return to Stage 4 expertise viability while blocking_stage4 is true.',
       'Runtime/provider/persistence failures are not cognitive failures; preserve the unit and retry persistence rather than changing a correct conclusion merely to satisfy infrastructure.'
     ],
@@ -378,6 +378,17 @@ function statisticalUnit(ctx){
   return QDA_STATISTICAL_UNIT_CODES.has(String(ctx?.next_unit?.unit_code || '').toUpperCase());
 }
 
+function materialCalculationCount(response){
+  const calculation=response?.calculation;
+  if(calculation && typeof calculation==='object' && !Array.isArray(calculation)) {
+    const count=Object.values(calculation).filter(value=>
+      value!==null && value!==undefined && (typeof value!=='string' || value.trim().length>0)
+    ).length;
+    return Math.max(1,count);
+  }
+  return 1;
+}
+
 function validateUnitPayload(ctx, payload) {
   const failures=[];
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return ['qda_unit_content_must_be_json_object'];
@@ -406,9 +417,29 @@ function validateUnitPayload(ctx, payload) {
   }
 
   if (quantitative) {
+    const responses=Array.isArray(payload.problem_responses)?payload.problem_responses:[];
+    for(let index=0;index<Math.min(responses.length,expectedProblems.length);index+=1){
+      const responseChecks=Array.isArray(responses[index]?.python_checks)
+        ? responses[index].python_checks : [];
+      const requiredChecks=materialCalculationCount(responses[index]);
+      if(responseChecks.length<requiredChecks){
+        failures.push(
+          'qda_python_checks_problem_'+String(index+1)
+          +'_insufficient_material_coverage:required='+requiredChecks
+          +';received='+responseChecks.length
+        );
+      }
+    }
+
     const checks = Array.isArray(payload.python_checks) ? payload.python_checks : [];
-    if (checks.length < expectedProblems.length) {
-      failures.push('qda_python_checks_min_one_per_problem_required');
+    const minimumCoverage=responses
+      .slice(0,expectedProblems.length)
+      .reduce((sum,response)=>sum+materialCalculationCount(response),0);
+    if (checks.length < minimumCoverage) {
+      failures.push(
+        'qda_python_checks_material_coverage_required:required='+minimumCoverage
+        +';received='+checks.length
+      );
     } else {
       const pythonVerification = verifyPythonMathChecks(checks,{absoluteTolerance:0.005,relativeTolerance:1e-9});
       if (!pythonVerification.ok) failures.push('qda_python_runtime_unavailable_or_invalid');
@@ -515,7 +546,7 @@ PERSISTENCE SHAPE IS MANDATORY. associations[] must contain this exact outer str
 
 Author file.content as a normal JSON object. The runtime owns deterministic serialization into the database file channel; do not spend cognition escaping a JSON document into a string.
 
-The content must be at least 500 characters and substantive. Answer every assigned problem in next_unit.exercise_pack and preserve the exact exercise_pack_ref. Do not substitute invented questions. If next_unit.exercise_pack.external_research is false, do not request web research: all required training-case inputs are already authoritative in the exercise pack. For ordinary quantitative units, work multiple nontrivial examples/cases rather than a single toy calculation. Include python_checks with at least one check per assigned problem; each check must provide a numeric expression and the claimed_result. The runtime executes those expressions independently in a sandboxed Python arithmetic verifier. For statistical units (QDA601-M4-U1/U2/U3 and QDA601-M9-U3), use python_analyses instead: choose the method yourself, provide its spec, and state your own numerical claims. Python recomputes descriptive statistics, confidence intervals, correlation/regression, t-tests, bootstrap intervals, or fixed-seed Monte Carlo as requested. Python does not choose the method, validate causality, or write the interpretation. Pass B must independently reconstruct, reverse-check, assumption-check, dimension-check, or otherwise attack Pass A; paraphrasing Pass A is not an audit. If genuinely missing current external evidence, request web_research_request_v0_1 instead and keep the same unit active. Do not submit or revise an expertise candidate. Do not omit the file association after explaining the work in prose. Validation failures: ${JSON.stringify(validation?.failures || [])}`;
+The content must be at least 500 characters and substantive. Answer every assigned problem in next_unit.exercise_pack and preserve the exact exercise_pack_ref. Do not substitute invented questions. If next_unit.exercise_pack.external_research is false, do not request web research: all required training-case inputs are already authoritative in the exercise pack. For ordinary quantitative units, work multiple nontrivial examples/cases rather than a single toy calculation. EACH problem_response must contain its own python_checks. Every distinct material result in a calculation object requires its own check; for example, four PV outputs require four checks, not one check of only their total. Each check must provide a numeric expression and claimed_result. The runtime aggregates these checks at unit level and executes them independently in sandboxed Python. For statistical units (QDA601-M4-U1/U2/U3 and QDA601-M9-U3), use python_analyses instead: choose the method yourself, provide its spec, and state your own numerical claims. Python recomputes descriptive statistics, confidence intervals, correlation/regression, t-tests, bootstrap intervals, or fixed-seed Monte Carlo as requested. Python does not choose the method, validate causality, or write the interpretation. Pass B must independently reconstruct, reverse-check, assumption-check, dimension-check, or otherwise attack Pass A; paraphrasing Pass A is not an audit. If genuinely missing current external evidence, request web_research_request_v0_1 instead and keep the same unit active. Do not submit or revise an expertise candidate. Do not omit the file association after explaining the work in prose. Validation failures: ${JSON.stringify(validation?.failures || [])}`;
 }
 
 export function qda601BootstrapMessage() {
