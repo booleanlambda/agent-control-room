@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { verifyPythonMathChecks } from './python-math.js';
 
 const curriculum = JSON.parse(
   fs.readFileSync(new URL('../curriculum/quantitative-decision-analysis-v0.1.json', import.meta.url), 'utf8')
@@ -172,6 +173,7 @@ export function buildQda601Context(agentId, packet = {}) {
       'Persist completed unit work as one agent_file_output_v0_1 JSON artifact using next_unit.filename exactly.',
       'A unit artifact must expose inputs, assumptions, formal model/formula, calculation or structured derivation, units where applicable, interpretation, sanity check, evidence, and an independent self-audit.',
       'Pass A solves the task. Pass B independently reconstructs or attacks the result; do not merely reread Pass A.',
+      'For quantitative units, include python_checks with at least one deterministic arithmetic check per assigned problem. Python verifies execution only; you remain responsible for selecting the correct model/formula and reconciling any disagreement.',
       'Do not return to Stage 4 expertise viability while blocking_stage4 is true.',
       'Runtime/provider/persistence failures are not cognitive failures; preserve the unit and retry persistence rather than changing a correct conclusion merely to satisfy infrastructure.'
     ],
@@ -245,6 +247,7 @@ function validateUnitPayload(ctx, payload) {
   if (!Array.isArray(payload.problem_responses)) failures.push('qda_problem_responses_array_required');
   else if (payload.problem_responses.length < expectedProblems.length) failures.push('qda_all_assigned_problems_required');
   const required=['inputs','assumptions','formula_or_model','calculation','units','interpretation','sanity_check','evidence','self_audit'];
+  const quantitative = String(ctx?.next_unit?.type || '').toLowerCase() === 'quantitative';
   for (const key of required) {
     const value=payload[key];
     if (value===null || value===undefined) failures.push('qda_missing_'+key);
@@ -258,6 +261,18 @@ function validateUnitPayload(ctx, payload) {
     if (!payload.self_audit.pass_b) failures.push('qda_self_audit_pass_b_required');
     if (String(payload.self_audit.verdict || '').trim().length<3) failures.push('qda_self_audit_verdict_required');
   }
+
+  if (quantitative) {
+    const checks = Array.isArray(payload.python_checks) ? payload.python_checks : [];
+    if (checks.length < expectedProblems.length) {
+      failures.push('qda_python_checks_min_one_per_problem_required');
+    } else {
+      const pythonVerification = verifyPythonMathChecks(checks);
+      if (!pythonVerification.ok) failures.push('qda_python_runtime_unavailable_or_invalid');
+      else if (!pythonVerification.all_match) failures.push('qda_python_arithmetic_disagreement');
+    }
+  }
+
   return failures;
 }
 
@@ -339,11 +354,11 @@ export function qda601Correction(packet, validation) {
   return `QDA-601 COURSE GATE: QDA-601 is an assigned lifecycle-blocking supplemental program and Stage 4 is held. Complete the exact current unit, not expertise viability. Current unit: ${JSON.stringify(next)}.
 
 PERSISTENCE SHAPE IS MANDATORY. associations[] must contain this exact outer structure:
-{"origin":"agent_file_output_v0_1","file":{"filename":"${next.filename || ''}","mime_type":"application/json","caption":"QDA-601 ${next.unit_code || ''} completed unit","content":{"program_version":"qda_601_v0_1","module_code":"${next.module_code || ''}","unit_code":"${next.unit_code || ''}","exercise_pack_ref":"${next.exercise_pack_ref || ''}","title":"...","problem_responses":[...],"inputs":...,"assumptions":[],"formula_or_model":...,"calculation":...,"units":...,"interpretation":...,"sanity_check":...,"evidence":[],"self_audit":{"pass_a":...,"pass_b":...,"verdict":"..."}}}}
+{"origin":"agent_file_output_v0_1","file":{"filename":"${next.filename || ''}","mime_type":"application/json","caption":"QDA-601 ${next.unit_code || ''} completed unit","content":{"program_version":"qda_601_v0_1","module_code":"${next.module_code || ''}","unit_code":"${next.unit_code || ''}","exercise_pack_ref":"${next.exercise_pack_ref || ''}","title":"...","problem_responses":[...],"inputs":...,"assumptions":[],"formula_or_model":...,"calculation":...,"units":...,"interpretation":...,"sanity_check":...,"evidence":[],"python_checks":[{"label":"problem_1_material_result","expression":"numeric expression using only constants and + - * / ** % plus safe functions such as sqrt/log/exp","claimed_result":0}],"self_audit":{"pass_a":...,"pass_b":...,"verdict":"..."}}}}
 
 Author file.content as a normal JSON object. The runtime owns deterministic serialization into the database file channel; do not spend cognition escaping a JSON document into a string.
 
-The content must be at least 500 characters and substantive. Answer every assigned problem in next_unit.exercise_pack and preserve the exact exercise_pack_ref. Do not substitute invented questions. If next_unit.exercise_pack.external_research is false, do not request web research: all required training-case inputs are already authoritative in the exercise pack. For quantitative units, work multiple nontrivial examples/cases rather than a single toy calculation. Pass B must independently reconstruct, reverse-check, dimension-check, or otherwise attack Pass A; paraphrasing Pass A is not an audit. If genuinely missing current external evidence, request web_research_request_v0_1 instead and keep the same unit active. Do not submit or revise an expertise candidate. Do not omit the file association after explaining the work in prose. Validation failures: ${JSON.stringify(validation?.failures || [])}`;
+The content must be at least 500 characters and substantive. Answer every assigned problem in next_unit.exercise_pack and preserve the exact exercise_pack_ref. Do not substitute invented questions. If next_unit.exercise_pack.external_research is false, do not request web research: all required training-case inputs are already authoritative in the exercise pack. For quantitative units, work multiple nontrivial examples/cases rather than a single toy calculation. Include python_checks with at least one check per assigned problem; each check must provide a numeric expression and the claimed_result. The runtime executes those expressions independently in a sandboxed Python arithmetic verifier. Python is an execution check, not a substitute for choosing the correct formula. Pass B must independently reconstruct, reverse-check, dimension-check, or otherwise attack Pass A; paraphrasing Pass A is not an audit. If genuinely missing current external evidence, request web_research_request_v0_1 instead and keep the same unit active. Do not submit or revise an expertise candidate. Do not omit the file association after explaining the work in prose. Validation failures: ${JSON.stringify(validation?.failures || [])}`;
 }
 
 export function qda601BootstrapMessage() {
