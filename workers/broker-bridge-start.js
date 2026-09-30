@@ -42,6 +42,44 @@ try {
   }));
 }
 
+try {
+  const { canonicalizeQda601UnitPayload } = await import('./qda601-runtime.js');
+  const probe = canonicalizeQda601UnitPayload({
+    program_version:'qda_601_v0_1',
+    module_code:'QDA601-M1',
+    unit_code:'QDA601-M1-U3',
+    exercise_pack_ref:'probe',
+    problem_responses:[1,2,3].map((n)=>({
+      problem_id:'problem_'+n,
+      inputs:{n},
+      assumptions:[],
+      formula_or_model:'formula_'+n,
+      calculation:'calculation_'+n,
+      units:'unit_'+n,
+      interpretation:'interpretation_'+n,
+      sanity_check:'sanity_'+n,
+      evidence:[],
+      python_checks:[{label:'check_'+n,expression:String(n)+' + 0',claimed_result:n}],
+      self_audit:{pass_a:'pass_a_'+n,pass_b:'pass_b_'+n,verdict:'verified_'+n},
+    })),
+  });
+  const required=['inputs','assumptions','formula_or_model','calculation','units','interpretation','sanity_check','evidence','self_audit'];
+  const ok=required.every(key=>probe?.[key]!==undefined)
+    && Array.isArray(probe?.python_checks)
+    && probe.python_checks.length===3;
+  console.log('AAU_QDA601_CANONICALIZER_PROBE', JSON.stringify({
+    ok,
+    python_check_count:Array.isArray(probe?.python_checks)?probe.python_checks.length:0,
+    has_self_audit:Boolean(probe?.self_audit),
+    error:null,
+  }));
+} catch (error) {
+  console.error('AAU_QDA601_CANONICALIZER_PROBE', JSON.stringify({
+    ok:false,
+    error:String(error?.message || error).slice(0,500),
+  }));
+}
+
 if (isEnabled('AAU_EXPERTISE_NVIDIA_MIGRATION')) {
   try {
     const { migrateExpertiseVerificationToNvidia } = await import('./migrate-expertise-nvidia.js');
