@@ -69,8 +69,10 @@ end $$;
 create or replace function public.aau_bridge_complete_qda601_authenticator_review(
  p_bridge_token text,p_review_id uuid,p_executor_id text,p_model_returned text,p_score numeric,p_verdict text,p_report jsonb
 ) returns jsonb language plpgsql security definer
-set search_path to 'pg_catalog','public','agent_lab' as $$
-declare v agent_lab.qda601_authenticator_reviews%rowtype;
+set search_path to 'pg_catalog','public','agent_lab' as $
+declare
+ v agent_lab.qda601_authenticator_reviews%rowtype;
+ v_action_unit text;
 begin
  perform agent_lab.assert_broker_bridge_token(p_bridge_token);
  select * into v from agent_lab.qda601_authenticator_reviews where review_id=p_review_id for update;
@@ -79,17 +81,59 @@ begin
  if v.claimed_by is distinct from p_executor_id then raise exception 'qda_authenticator_claim_owner_mismatch'; end if;
  if p_verdict not in ('verified_pass','verified_fail') then raise exception 'qda_authenticator_verdict_invalid'; end if;
  if p_score is null or p_score<0 or p_score>1 then raise exception 'qda_authenticator_score_invalid'; end if;
+
+ v_action_unit:=regexp_replace(
+   regexp_replace(upper(v.unit_code),'-M0*([0-9]+)','-M\1'),
+   '-U0*([0-9]+)','-U\1'
+ );
+
  update agent_lab.qda601_authenticator_reviews set status='completed',authenticator_model_returned=p_model_returned,
    score=p_score,verdict=p_verdict,report=coalesce(p_report,'{}'::jsonb),completed_at=now(),updated_at=now(),last_error=null
  where review_id=p_review_id returning * into v;
+
  update agent_lab.agent_files set metadata=coalesce(metadata,'{}'::jsonb)||jsonb_build_object(
    'qda601_authenticator_review_id',v.review_id,'qda601_authenticator_status',v.verdict,
    'qda601_authenticator_score',v.score,'qda601_authenticator_model',v.authenticator_model_returned,
    'qda601_authenticator_artifact_sha256',v.artifact_sha256),updated_at=now()
  where file_id=v.file_id;
- return jsonb_build_object('ok',true,'review_id',v.review_id,'unit_code',v.unit_code,'verdict',v.verdict,
-   'score',v.score,'authenticator_model',v.authenticator_model_returned,'artifact_sha256',v.artifact_sha256);
-end $$;
+
+ if p_verdict='verified_pass' then
+   update agent_lab.state
+   set state_payload=(
+       coalesce(state_payload,'{}'::jsonb)
+       - 'qda_601_remediation_required'
+       - 'qda_601_remediation_unit'
+       - 'qda_601_remediation_reason'
+       - 'qda_601_authenticator_failure_report'
+     ) || jsonb_build_object(
+       'last_action','qda601_complete_'||v_action_unit,
+       'qda_601_last_verified_unit',v_action_unit,
+       'qda_601_last_verified_review_id',v.review_id,
+       'qda_601_last_verified_artifact_sha256',v.artifact_sha256
+     ),
+     current_focus='QDA-601 '||v_action_unit||' independently verified; progression may advance to the next canonical unit.',
+     updated_at=now()
+   where agent_id=v.agent_id;
+ else
+   update agent_lab.state
+   set state_payload=coalesce(state_payload,'{}'::jsonb)||jsonb_build_object(
+       'last_action','qda601_submit_'||v_action_unit,
+       'qda_601_remediation_required',true,
+       'qda_601_remediation_unit',v_action_unit,
+       'qda_601_remediation_reason','independent_authenticator_verified_fail',
+       'qda_601_last_rejected_file_id',v.file_id,
+       'qda_601_last_authenticator_review_id',v.review_id,
+       'qda_601_authenticator_failure_report',coalesce(p_report,'{}'::jsonb)
+     ),
+     current_focus='QDA-601 '||v_action_unit||' failed independent verification; remediate this exact unit before progression.',
+     updated_at=now()
+   where agent_id=v.agent_id;
+ end if;
+
+ return jsonb_build_object('ok',true,'review_id',v.review_id,'unit_code',v.unit_code,'action_unit',v_action_unit,
+   'verdict',v.verdict,'score',v.score,'authenticator_model',v.authenticator_model_returned,
+   'artifact_sha256',v.artifact_sha256);
+end $;
 
 create or replace function public.aau_bridge_release_qda601_authenticator_review(
  p_bridge_token text,p_review_id uuid,p_executor_id text,p_error text
