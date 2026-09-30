@@ -103,6 +103,18 @@ function deterministicMathVerification(packet,node,artifact){
   return {required:true,...verifyPythonMathChecks(checks,{absoluteTolerance:0.005,relativeTolerance:1e-9})};
 }
 
+function completedAtomicDeterministicRevalidation(packet,node){
+  if(text(node?.decision_type).toUpperCase()!=='ATOMIC' || text(node?.node_status||node?.status).toLowerCase()!=='completed'){
+    return {required:false,verification:null};
+  }
+  const parts=resultParts(node?.result_artifact);
+  const verification=deterministicMathVerification(packet,node,parts.artifact);
+  return {
+    required:verification.required===true && (verification.ok!==true || verification.all_match!==true),
+    verification,
+  };
+}
+
 function pythonAnalysesFromArtifact(artifact){
   let parsed=artifact;
   if(typeof artifact==='string'){
@@ -5774,8 +5786,91 @@ export async function runAutonomousRequirementCognition({
     node.parent_path=parentPath;
     counters.nodes++;
 
-    if(node.node_status==='completed')
-      return ensureCanonicalStageCandidateSubmission(node);
+    if(node.node_status==='completed'){
+      const atomicRevalidation=completedAtomicDeterministicRevalidation(packet,node);
+      if(atomicRevalidation.required){
+        node=await saveNode({
+          nodePath:node.node_path,
+          parentPath:node.parent_path??parentPathOf(node.node_path),
+          ordinal:node.ordinal||0,
+          requirement:node.requirement_text,
+          sourceKind:node.source_kind,
+          sourceRef:node.source_ref,
+          status:'pending',
+          decisionType:'ATOMIC',
+          decisionPayload:{
+            ...(node.decision_payload||{}),
+            deterministic_math_reconciliation_required:true,
+            deterministic_math_attempts:Math.max(0,Number(node?.decision_payload?.deterministic_math_attempts||0)),
+            deterministic_math_verification:atomicRevalidation.verification,
+            deterministic_math_gate:'legacy_completed_atomic_revalidation_v0_1',
+            legacy_completed_atomic_reopened:true,
+            legacy_completed_atomic_prior_result_hash:node.result_hash||null,
+            reconsider_decomposition:false,
+          },
+          contextPayload:{
+            ...(node.context_payload||{}),
+            deterministic_math_feedback:{
+              attempt:Math.max(0,Number(node?.decision_payload?.deterministic_math_attempts||0)),
+              verifier:'python3_safe_math_v0_1',
+              verification:atomicRevalidation.verification,
+              instruction:'This completed quantitative node predates deterministic verification. Re-author the same requirement with explicit Python checks for every material result, preserving correct reasoning and correcting any disagreement.'
+            },
+          },
+          resultArtifact:null,
+        });
+        node.parent_path=parentPath;
+        console.log('AAU_AUTONOMOUS_LEGACY_ATOMIC_REOPENED',JSON.stringify({
+          agent_id:agentId,
+          intent_execution_id:intentExecutionId,
+          node_path:node.node_path,
+          reason:atomicRevalidation.verification?.error||'deterministic_verification_not_satisfied',
+        }));
+      }else if(text(node.decision_type).toUpperCase()==='SPLIT'){
+        const existingChildren=(await children(node.node_path))
+          .filter(child=>String(child?.status||'')!=='cancelled');
+        const legacyChild=existingChildren.find(child=>
+          completedAtomicDeterministicRevalidation(packet,{
+            ...child,
+            node_status:child.node_status||child.status,
+          }).required
+        );
+        if(!legacyChild)return ensureCanonicalStageCandidateSubmission(node);
+        const nextPayload={...(node.decision_payload||{})};
+        delete nextPayload.synthesis_complete;
+        delete nextPayload.synthesis_outcome;
+        delete nextPayload.synthesis_reason;
+        delete nextPayload.synthesis_provenance_review;
+        node=await saveNode({
+          nodePath:node.node_path,
+          parentPath:node.parent_path??parentPathOf(node.node_path),
+          ordinal:node.ordinal||0,
+          requirement:node.requirement_text,
+          sourceKind:node.source_kind,
+          sourceRef:node.source_ref,
+          status:'split',
+          decisionType:'SPLIT',
+          decisionPayload:{
+            ...nextPayload,
+            synthesis_cursor:0,
+            synthesis_accumulator:{},
+            synthesis_rebuild_reason:'legacy_child_requires_deterministic_revalidation',
+            synthesis_rebuild_at:new Date().toISOString(),
+          },
+          contextPayload:node.context_payload||{},
+          resultArtifact:null,
+        });
+        node.parent_path=parentPath;
+        console.log('AAU_AUTONOMOUS_PARENT_REOPENED_FOR_LEGACY_CHILD_VERIFICATION',JSON.stringify({
+          agent_id:agentId,
+          intent_execution_id:intentExecutionId,
+          node_path:node.node_path,
+          child_path:legacyChild.node_path,
+        }));
+      }else{
+        return ensureCanonicalStageCandidateSubmission(node);
+      }
+    }
     if(node.node_status==='blocked')return node;
 
     for(let transitions=0;transitions<8;transitions++){
@@ -5943,9 +6038,24 @@ export async function runAutonomousRequirementCognition({
   }
   const parts=resultParts(completedRoot.result_artifact);
   if(!parts.artifact)throw new Error('autonomous_decomposition_root_artifact_empty');
+  const authoritativeRootChildren=(await children('R'))
+    .filter(child=>String(child?.status||child?.node_status||'')!=='cancelled')
+    .sort((a,b)=>Number(a?.ordinal||0)-Number(b?.ordinal||0))
+    .map(child=>({
+      node_path:child.node_path,
+      status:child.node_status||child.status||null,
+      decision_type:child.decision_type||null,
+      requirement_text:child.requirement_text||null,
+      result_hash:child.result_hash||null,
+      result_artifact:child.result_artifact||null,
+      deterministic_math_verified:child?.decision_payload?.deterministic_math_verified===true
+        ||String(child?.decision_payload?.deterministic_math_verified||'').toLowerCase()==='true',
+      deterministic_math_check_count:Number(child?.decision_payload?.deterministic_math_check_count||0),
+    }));
 
   return {
     artifact:parts.artifact,
+    authoritative_children:authoritativeRootChildren,
     meta:{
       contract:'autonomous_recursive_decomposition_v0_2',
       assignment_key:assignmentKey,
