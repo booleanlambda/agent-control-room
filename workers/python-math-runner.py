@@ -38,6 +38,11 @@ def eval_node(node):
     if isinstance(node, ast.Expression):
         return eval_node(node.body)
     if isinstance(node, ast.Constant) and not isinstance(node.value, bool) and isinstance(node.value, (int, float)):
+        # Preserve integer literals as integers. Most arithmetic operators will
+        # naturally promote them as needed, while functions such as round(x, ndigits)
+        # require ndigits to remain an int rather than being coerced to float.
+        if isinstance(node.value, int):
+            return node.value
         return strict_number(node.value, "constant")
     if isinstance(node, ast.Name) and node.id in SAFE_CONSTS:
         return float(SAFE_CONSTS[node.id])
@@ -70,6 +75,13 @@ def eval_node(node):
         if node.keywords:
             raise SafeMathError("keyword_arguments_not_allowed")
         args = [eval_node(arg) for arg in node.args]
+        if node.func.id == "round":
+            if len(args) not in (1, 2):
+                raise SafeMathError("function_argument_invalid:round")
+            if len(args) == 2:
+                ndigits = args[1]
+                if isinstance(ndigits, bool) or not isinstance(ndigits, int):
+                    raise SafeMathError("round_ndigits_must_be_integer")
         try:
             value = SAFE_FUNCS[node.func.id](*args)
         except Exception as exc:
