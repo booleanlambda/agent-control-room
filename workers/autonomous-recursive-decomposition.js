@@ -2570,6 +2570,9 @@ export async function runAutonomousRequirementCognition({
     contextPayload=boundInMemoryContext(contextPayload,pinnedEvidence,10000);
     const atomicExecutionFailures=Math.max(0,Number(node?.decision_payload?.atomic_execution_failures||0));
     const atomicUnavailable=atomicExecutionFailures>=MAX_ATOMIC_EXECUTION_FAILURES;
+    const priorAtomicRejection=text(node?.decision_payload?.prior_atomic_rejection).toUpperCase();
+    const atomicOverflowRecovery=
+      atomicUnavailable && priorAtomicRejection==='TRUNCATED_RESPONSE';
     const normalizedBranchDepth=pathDepth(node.node_path);
     const storageDepthAvailable=Number.isFinite(normalizedBranchDepth)
       &&normalizedBranchDepth<semanticRuntime.hard_storage_path_depth;
@@ -2656,13 +2659,29 @@ export async function runAutonomousRequirementCognition({
         node?.decision_payload?.evidence_ceiling_resolution
       );
       const evidenceAcquisitionClosed=evidenceCeilingResolution.status==='ACTIVE';
-      const availableDecisions=[
-        'ATOMIC',
-        'SPLIT',
-        ...(!evidenceAcquisitionClosed?['NEED_CONTEXT']:[]),
-        'BLOCKED',
-        ...(remediationAvailable?['REMEDIATE']:[]),
-      ];
+      // A response that exhausts the atomic output bound twice is mechanical
+      // evidence that the current execution unit is too large for bounded
+      // completion. Do not dead-end on ATOMIC admission. Return semantic control
+      // to the bound agent for agent-authored narrowing via SPLIT.
+      const availableDecisions=atomicOverflowRecovery
+        ? ['SPLIT']
+        : [
+            'ATOMIC',
+            'SPLIT',
+            ...(!evidenceAcquisitionClosed?['NEED_CONTEXT']:[]),
+            'BLOCKED',
+            ...(remediationAvailable?['REMEDIATE']:[]),
+          ];
+      if(atomicOverflowRecovery){
+        console.warn('AAU_ATOMIC_TRUNCATION_DECOMPOSITION_REQUIRED',JSON.stringify({
+          agent_id:agentId,
+          intent_execution_id:intentExecutionId,
+          node_path:node.node_path,
+          atomic_execution_failures:atomicExecutionFailures,
+          prior_atomic_rejection:priorAtomicRejection,
+          policy:'bounded_overflow_requires_agent_authored_split_v0_1',
+        }));
+      }
 
       // Semantic checkpoint identity deliberately excludes remaining budget,
       // child capacity, wake attempt, and resource-exhaustion counters. A
@@ -2688,6 +2707,8 @@ export async function runAutonomousRequirementCognition({
         evidence_ceiling_reason:evidenceCeilingResolution.reason||null,
         evidence_ceiling_resource_reasons:asArray(evidenceCeilingResolution.resource_reasons),
         atomic_execution_failures:atomicExecutionFailures,
+        atomic_overflow_recovery:atomicOverflowRecovery,
+        prior_atomic_rejection:priorAtomicRejection||null,
       })));
 
       const priorPayload=asObject(node.decision_payload);
@@ -2753,9 +2774,11 @@ export async function runAutonomousRequirementCognition({
                   ? 'REMEDIATE is available because you have a prior durable cognitive state and remaining remediation budget. Choose it only if YOU detect a contradiction, stale belief, or recoverable cognitive-state failure in your own prior reasoning. The runtime will not diagnose the anomaly for you.'
                   : 'REMEDIATE is mechanically unavailable because there is no eligible prior cognitive state or the remediation budget is exhausted.',
                 'If you choose REMEDIATE, YOU must supply observed_anomaly, prior_belief, contradicting_evidence, diagnosis, repair_type, repair_payload, and verification_criterion. Allowed repair types are '+SELF_REMEDIATION_REPAIR_TYPES.join(', ')+'. INVALIDATE_DISCOVERY_CHECKPOINT supersedes your current discovery checkpoint and makes you reconsider. REFRESH_SIBLING_EVIDENCE mechanically reloads resolved siblings and also supersedes your current discovery checkpoint. Neither repair changes facts, conclusions, atomic-failure counts, or hard resource ceilings.',
-                atomicUnavailable
-                  ? 'If you still judge the requirement ATOMIC, say ATOMIC. The runtime will preserve that semantic decision but defer another atomic execution because this node exhausted its current bounded execution admission.'
-                  : 'ATOMIC is semantically available if you judge the requirement genuinely bounded.',
+                atomicOverflowRecovery
+                  ? 'BOUNDED ATOMIC OVERFLOW RECOVERY: your prior bounded atomic execution exhausted the output limit twice and both partial responses were rejected. ATOMIC is mechanically unavailable for this node. Choose SPLIT and author one or more genuinely narrower child requirements that can each finish independently within the existing output bound. Preserve the original requirement; do not solve it by deleting scope, inflating token limits, or continuing truncated text.'
+                  : atomicUnavailable
+                    ? 'ATOMIC execution admission is mechanically unavailable for this node after a prior rejected bounded execution. Choose another available semantic action; do not repeat the rejected execution unchanged.'
+                    : 'ATOMIC is semantically available if you judge the requirement genuinely bounded.',
                 'RESOURCE ADVISORY ONLY: '+Number(runtimeView?.remaining_budget_units||0)+' units remain. Current execution admission can support '+availableChildCapacity+' child branch(es), priced at approximately '+branchEconomics.expected_child_lifecycle_units+' units each while protecting '+branchEconomics.completion_reserve_units+' units for completion. Do not change your semantic routing judgment merely to fit this resource snapshot; the runtime handles admission separately.',
                 storageDepthAvailable
                   ? 'Tree depth is not the ordinary stopping rule. If SPLIT is semantically correct, choose SPLIT; runtime admission will separately determine how many children can be started now.'
@@ -3041,6 +3064,8 @@ export async function runAutonomousRequirementCognition({
               force_reconsider:Boolean(forceReconsider),
               atomic_unavailable:atomicUnavailable,
               atomic_execution_failures:atomicExecutionFailures,
+              atomic_overflow_recovery:atomicOverflowRecovery,
+              prior_atomic_rejection:priorAtomicRejection||null,
               semantic_runtime_contract:SEMANTIC_RUNTIME_CONTRACT,
               remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
               semantic_child_capacity:availableChildCapacity,
@@ -3157,6 +3182,8 @@ export async function runAutonomousRequirementCognition({
         force_reconsider:Boolean(forceReconsider),
         atomic_execution_failures:atomicExecutionFailures,
         atomic_unavailable:atomicUnavailable,
+        atomic_overflow_recovery:atomicOverflowRecovery,
+        prior_atomic_rejection:priorAtomicRejection||null,
         routing_discovery_checkpoint:discovery,
         routing_discovery_reused:Boolean(reusableDiscovery),
         routing_commit_serialized:true,
