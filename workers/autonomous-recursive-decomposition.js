@@ -4404,14 +4404,24 @@ export async function runAutonomousRequirementCognition({
   async function executeAtomic(node){
     let pinnedEvidence=await loadPinnedEvidence(node.node_path);
     const atomicDurableCatalog=await loadDurableResearchCatalog(node.node_path);
+    const verifiedResultsSynthesis=qdaVerifiedResultsSynthesisRequirement(node);
+    const nodeContext=asObject(node.context_payload);
+    const atomicScopeContext=verifiedResultsSynthesis
+      ? {
+          qda_601_context:nodeContext.qda_601_context,
+          dependency_context_contract:nodeContext.dependency_context_contract,
+          completed_sibling_results:nodeContext.completed_sibling_results,
+          inherited_completed_sibling_results:nodeContext.inherited_completed_sibling_results,
+        }
+      : nodeContext;
     const atomicBaseContext={
-      ...(node.context_payload||{}),
-      ...(atomicDurableCatalog.length?{
+      ...atomicScopeContext,
+      ...(!verifiedResultsSynthesis&&atomicDurableCatalog.length?{
         research_source_catalog:mergeResearchSourceCatalog(
-          node.context_payload?.research_source_catalog,
+          nodeContext.research_source_catalog,
           atomicDurableCatalog
         )
-      }:{}),
+      }:{})
     };
     const atomicContextView=()=>agentModelContextView(
       atomicBaseContext,pinnedEvidence,stageBudgets.atomic_execution
@@ -4433,8 +4443,8 @@ export async function runAutonomousRequirementCognition({
     const atomicSemanticIdentity=sha256({
       node_path:node.node_path,
       requirement:node.requirement_text,
-      qda_execution_scope_version:'verified_results_synthesis_v0_1',
-      qda_verified_results_synthesis:qdaVerifiedResultsSynthesisRequirement(node),
+      qda_execution_scope_version:'verified_results_synthesis_v0_2_lean_context',
+      qda_verified_results_synthesis:verifiedResultsSynthesis,
       discovery_fingerprint:text(node?.decision_payload?.routing_discovery_checkpoint?.context_fingerprint)||null,
       deterministic_math_retry:mathRetryState,
       deterministic_statistics_retry:statisticsRetryState,
@@ -4464,7 +4474,7 @@ export async function runAutonomousRequirementCognition({
               'Otherwise return JSON only: {"status":"COMPLETE","artifact":"concise auditable work product OR a real nested JSON object when the requirement names a structured lifecycle contract","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
               'Never stringify an object as "[object Object]". If the work product is structured, place the actual JSON object in artifact.',
               'Keep the artifact bounded. Preserve uncertainty and do not claim external facts without supplied evidence.',
-              ...(qdaVerifiedResultsSynthesisRequirement(node)?[
+              ...(verifiedResultsSynthesis?[
                 'VERIFIED-RESULTS SYNTHESIS SCOPE: the quantitative/statistical execution is already complete in authoritative_completed_sibling_evidence. Do not recompute it, do not recreate its full calculation tree, and do not invent replacement python_checks/python_analyses.',
                 'Use the verified sibling result as evidence. Produce only the interpretation, sanity check, evidence linkage, self-audit, decision relevance, or other synthesis fields explicitly requested by this requirement. You may quote the verified final result and key inputs needed to explain the conclusion.'
               ]:[]),
