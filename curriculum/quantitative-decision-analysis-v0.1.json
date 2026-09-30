@@ -30,14 +30,14 @@
   "requirements": {
     "modules": 10,
     "units": 40,
-    "overall_pass_floor": 0.90,
+    "overall_pass_floor": 0.9,
     "distinction_floor": 0.95,
     "a_plus_mastery_floor": 0.97,
     "hard_gates": {
       "arithmetic_accuracy": 0.95,
-      "financial_model_integrity": 0.90,
-      "reconciliation_consistency": 0.90,
-      "evidence_provenance": 1.00,
+      "financial_model_integrity": 0.9,
+      "reconciliation_consistency": 0.9,
+      "evidence_provenance": 1,
       "material_numeric_contradictions_max": 0,
       "self_audit_pass_required": true
     },
@@ -80,120 +80,370 @@
       "code": "QDA601-M1",
       "order": 1,
       "title": "Quantitative Foundations",
-      "objectives": ["Ratios, percentages and rates", "Algebraic rearrangement", "Growth, compounding and logarithms", "Dimensional and order-of-magnitude checks"],
+      "objectives": [
+        "Ratios, percentages and rates",
+        "Algebraic rearrangement",
+        "Growth, compounding and logarithms",
+        "Dimensional and order-of-magnitude checks"
+      ],
       "units": [
-        ["Ratios and Rates","quantitative","Use ratios, rates, percentages and percentage-point changes correctly.","Solve mixed business-rate problems with explicit units and reverse checks."],
-        ["Algebra for Decisions","quantitative","Rearrange formulas and solve multi-step equations without losing variable meaning.","Derive unknown price, volume, margin and break-even variables from constrained cases."],
-        ["Growth and Discounting","quantitative","Use exponentials, logarithms, compounding and discounting correctly.","Reconcile annual, monthly and cohort growth/decay measures."],
-        ["Dimensional Sanity","applied","Detect unit, scale and magnitude errors before interpretation.","Audit a deliberately inconsistent model containing time-unit, currency and order-of-magnitude traps."]
+        [
+          "Ratios and Rates",
+          "quantitative",
+          "Use ratios, rates, percentages and percentage-point changes correctly.",
+          "Solve mixed business-rate problems with explicit units and reverse checks."
+        ],
+        [
+          "Algebra for Decisions",
+          "quantitative",
+          "Rearrange formulas and solve multi-step equations without losing variable meaning.",
+          "Derive unknown price, volume, margin and break-even variables from constrained cases."
+        ],
+        [
+          "Growth and Discounting",
+          "quantitative",
+          "Use exponentials, logarithms, compounding and discounting correctly.",
+          "Reconcile annual, monthly and cohort growth/decay measures."
+        ],
+        [
+          "Dimensional Sanity",
+          "applied",
+          "Detect unit, scale and magnitude errors before interpretation.",
+          "Audit a deliberately inconsistent model containing time-unit, currency and order-of-magnitude traps."
+        ]
       ]
     },
     {
       "code": "QDA601-M2",
       "order": 2,
       "title": "Applied Financial Mathematics",
-      "objectives": ["Time value of money", "Unit economics", "Cash and runway", "Valuation and threshold calculations"],
+      "objectives": [
+        "Time value of money",
+        "Unit economics",
+        "Cash and runway",
+        "Valuation and threshold calculations"
+      ],
       "units": [
-        ["Time Value of Money","quantitative","Calculate present/future value, discounting and annuity-style cash flows.","Rebuild a discounted cash-flow schedule from raw cash events."],
-        ["Unit Economics","quantitative","Calculate gross margin, contribution margin, CAC, LTV and payback with explicit definitions.","Compare acquisition channels using reconciled cohort economics."],
-        ["Cash Survival","case","Model burn, runway, working capital, break-even and financing needs.","Stress-test a venture cash plan under price, volume and cost shocks."],
-        ["Valuation and Thresholds","applied","Use NPV, break-even and threshold analysis to support decisions.","Identify the exact assumptions at which a build/revise/kill recommendation reverses."]
+        [
+          "Time Value of Money",
+          "quantitative",
+          "Calculate present/future value, discounting and annuity-style cash flows.",
+          "Rebuild a discounted cash-flow schedule from raw cash events."
+        ],
+        [
+          "Unit Economics",
+          "quantitative",
+          "Calculate gross margin, contribution margin, CAC, LTV and payback with explicit definitions.",
+          "Compare acquisition channels using reconciled cohort economics."
+        ],
+        [
+          "Cash Survival",
+          "case",
+          "Model burn, runway, working capital, break-even and financing needs.",
+          "Stress-test a venture cash plan under price, volume and cost shocks."
+        ],
+        [
+          "Valuation and Thresholds",
+          "applied",
+          "Use NPV, break-even and threshold analysis to support decisions.",
+          "Identify the exact assumptions at which a build/revise/kill recommendation reverses."
+        ]
       ]
     },
     {
       "code": "QDA601-M3",
       "order": 3,
       "title": "Probability and Uncertainty",
-      "objectives": ["Conditional probability", "Random variables and expectation", "Bayesian updating", "Decision-making under uncertainty"],
+      "objectives": [
+        "Conditional probability",
+        "Random variables and expectation",
+        "Bayesian updating",
+        "Decision-making under uncertainty"
+      ],
       "units": [
-        ["Conditional Probability","quantitative","Separate joint, conditional and independent events.","Solve base-rate and diagnostic-evidence cases."],
-        ["Expectation and Variance","quantitative","Use expected value and variance for uncertain outcomes.","Compare projects with identical means but different downside distributions."],
-        ["Bayesian Updating","case","Update beliefs when new evidence arrives without confusing posterior belief with observed frequency.","Revise a demand thesis after sequential evidence batches."],
-        ["Decision Trees","applied","Represent staged choices, probabilities and payoffs transparently.","Build and audit a launch/delay/kill decision tree."]
+        [
+          "Conditional Probability",
+          "quantitative",
+          "Separate joint, conditional and independent events.",
+          "Solve base-rate and diagnostic-evidence cases."
+        ],
+        [
+          "Expectation and Variance",
+          "quantitative",
+          "Use expected value and variance for uncertain outcomes.",
+          "Compare projects with identical means but different downside distributions."
+        ],
+        [
+          "Bayesian Updating",
+          "case",
+          "Update beliefs when new evidence arrives without confusing posterior belief with observed frequency.",
+          "Revise a demand thesis after sequential evidence batches."
+        ],
+        [
+          "Decision Trees",
+          "applied",
+          "Represent staged choices, probabilities and payoffs transparently.",
+          "Build and audit a launch/delay/kill decision tree."
+        ]
       ]
     },
     {
       "code": "QDA601-M4",
       "order": 4,
       "title": "Statistics and Data Analysis",
-      "objectives": ["Descriptive statistics", "Sampling and confidence", "Regression and association", "Messy-data diagnosis"],
+      "objectives": [
+        "Descriptive statistics",
+        "Sampling and confidence",
+        "Regression and association",
+        "Messy-data diagnosis"
+      ],
       "units": [
-        ["Distributions and Descriptives","quantitative","Use center, spread, quantiles and segmentation without hiding heterogeneity.","Diagnose an aggregated KPI dataset for misleading averages."],
-        ["Sampling and Confidence","quantitative","Reason about sampling error, confidence intervals and uncertainty.","Estimate uncertainty around conversion and retention metrics."],
-        ["Regression and Association","quantitative","Interpret simple regression and correlation without causal overclaim.","Analyze a multivariable business dataset and state bounded conclusions."],
-        ["Messy Data Lab","computational","Handle missing values, duplicates, outliers and inconsistent units.","Clean and document a deliberately corrupted commercial dataset before analysis."]
+        [
+          "Distributions and Descriptives",
+          "quantitative",
+          "Use center, spread, quantiles and segmentation without hiding heterogeneity.",
+          "Diagnose an aggregated KPI dataset for misleading averages."
+        ],
+        [
+          "Sampling and Confidence",
+          "quantitative",
+          "Reason about sampling error, confidence intervals and uncertainty.",
+          "Estimate uncertainty around conversion and retention metrics."
+        ],
+        [
+          "Regression and Association",
+          "quantitative",
+          "Interpret simple regression and correlation without causal overclaim.",
+          "Analyze a multivariable business dataset and state bounded conclusions."
+        ],
+        [
+          "Messy Data Lab",
+          "computational",
+          "Handle missing values, duplicates, outliers and inconsistent units.",
+          "Clean and document a deliberately corrupted commercial dataset before analysis."
+        ]
       ]
     },
     {
       "code": "QDA601-M5",
       "order": 5,
       "title": "Causal and Evidential Reasoning",
-      "objectives": ["Correlation versus causation", "Bias and confounding", "Evidence classification", "Experimental reasoning"],
+      "objectives": [
+        "Correlation versus causation",
+        "Bias and confounding",
+        "Evidence classification",
+        "Experimental reasoning"
+      ],
       "units": [
-        ["Causal Claims","case","Distinguish descriptive association from causal evidence.","Critique causal claims in an observational growth report."],
-        ["Bias and Confounding","case","Detect selection, survivorship, measurement and omitted-variable bias.","Explain how a seemingly successful customer cohort can mislead."],
-        ["Evidence States","applied","Label every material claim as observed, calculated, estimated, assumed, inferred or forecast.","Convert an unlabeled investment memo into a traceable evidence-state ledger."],
-        ["Experiment Design","applied","Design tests with metrics, counterfactual logic and stopping criteria.","Construct a demand experiment that can genuinely falsify the thesis."]
+        [
+          "Causal Claims",
+          "case",
+          "Distinguish descriptive association from causal evidence.",
+          "Critique causal claims in an observational growth report."
+        ],
+        [
+          "Bias and Confounding",
+          "case",
+          "Detect selection, survivorship, measurement and omitted-variable bias.",
+          "Explain how a seemingly successful customer cohort can mislead."
+        ],
+        [
+          "Evidence States",
+          "applied",
+          "Label every material claim as observed, calculated, estimated, assumed, inferred or forecast.",
+          "Convert an unlabeled investment memo into a traceable evidence-state ledger."
+        ],
+        [
+          "Experiment Design",
+          "applied",
+          "Design tests with metrics, counterfactual logic and stopping criteria.",
+          "Construct a demand experiment that can genuinely falsify the thesis."
+        ]
       ]
     },
     {
       "code": "QDA601-M6",
       "order": 6,
       "title": "Applied Microeconomics",
-      "objectives": ["Supply, demand and elasticity", "Marginal analysis", "Market structure and competition", "Incentives and strategic response"],
+      "objectives": [
+        "Supply, demand and elasticity",
+        "Marginal analysis",
+        "Market structure and competition",
+        "Incentives and strategic response"
+      ],
       "units": [
-        ["Demand and Elasticity","quantitative","Translate price sensitivity into revenue and volume implications.","Model price changes across an elasticity range."],
-        ["Marginal Economics","quantitative","Use marginal cost, marginal benefit and opportunity cost in resource allocation.","Choose among capacity investments using incremental economics."],
-        ["Market Structure","case","Analyze competition, entry barriers, substitutes and bargaining power.","Build a quantified market-structure assessment for a new entrant."],
-        ["Incentives and Strategic Response","applied","Anticipate customer, competitor and channel responses to policy or pricing changes.","Stress-test a strategy under competitor retaliation and substitution."]
+        [
+          "Demand and Elasticity",
+          "quantitative",
+          "Translate price sensitivity into revenue and volume implications.",
+          "Model price changes across an elasticity range."
+        ],
+        [
+          "Marginal Economics",
+          "quantitative",
+          "Use marginal cost, marginal benefit and opportunity cost in resource allocation.",
+          "Choose among capacity investments using incremental economics."
+        ],
+        [
+          "Market Structure",
+          "case",
+          "Analyze competition, entry barriers, substitutes and bargaining power.",
+          "Build a quantified market-structure assessment for a new entrant."
+        ],
+        [
+          "Incentives and Strategic Response",
+          "applied",
+          "Anticipate customer, competitor and channel responses to policy or pricing changes.",
+          "Stress-test a strategy under competitor retaliation and substitution."
+        ]
       ]
     },
     {
       "code": "QDA601-M7",
       "order": 7,
       "title": "Decision Analysis and Scenario Modeling",
-      "objectives": ["Sensitivity analysis", "Scenario construction", "Threshold analysis", "Value of information"],
+      "objectives": [
+        "Sensitivity analysis",
+        "Scenario construction",
+        "Threshold analysis",
+        "Value of information"
+      ],
       "units": [
-        ["Sensitivity Analysis","quantitative","Measure which assumptions dominate a decision.","Rank model variables by decision sensitivity."],
-        ["Scenario Modeling","quantitative","Build coherent base, upside and downside cases rather than independent arbitrary numbers.","Produce linked scenarios for demand, pricing, margin and cash."],
-        ["Threshold and Reversal Analysis","applied","Find the exact conditions under which a recommendation changes.","Calculate decision reversal points for CAC, churn, price and runway."],
-        ["Value of Information","case","Decide when additional research is worth its cost.","Choose the next experiment based on expected decision value."]
+        [
+          "Sensitivity Analysis",
+          "quantitative",
+          "Measure which assumptions dominate a decision.",
+          "Rank model variables by decision sensitivity."
+        ],
+        [
+          "Scenario Modeling",
+          "quantitative",
+          "Build coherent base, upside and downside cases rather than independent arbitrary numbers.",
+          "Produce linked scenarios for demand, pricing, margin and cash."
+        ],
+        [
+          "Threshold and Reversal Analysis",
+          "applied",
+          "Find the exact conditions under which a recommendation changes.",
+          "Calculate decision reversal points for CAC, churn, price and runway."
+        ],
+        [
+          "Value of Information",
+          "case",
+          "Decide when additional research is worth its cost.",
+          "Choose the next experiment based on expected decision value."
+        ]
       ]
     },
     {
       "code": "QDA601-M8",
       "order": 8,
       "title": "Model Reconciliation",
-      "objectives": ["Canonical variable ledgers", "Contradiction detection", "Dependency propagation", "Cross-document consistency"],
+      "objectives": [
+        "Canonical variable ledgers",
+        "Contradiction detection",
+        "Dependency propagation",
+        "Cross-document consistency"
+      ],
       "units": [
-        ["Canonical Variable Ledger","applied","Maintain value, unit, period, state, source and confidence for every decision-critical variable.","Build a canonical ledger from four partially conflicting reports."],
-        ["Contradiction Detection","case","Identify conflicting values, formulas, periods and definitions before synthesis.","Locate every incompatible CAC, ACV, churn, margin and cash statement in a case pack."],
-        ["Dependency Propagation","quantitative","Recalculate all downstream outputs when a controlling variable changes.","Change one canonical assumption and enumerate every affected result."],
-        ["Reconciliation Defense","capstone","Resolve conflicts by source authority and evidence, never by averaging contradictions away.","Defend the final canonical model against adversarial challenges."]
+        [
+          "Canonical Variable Ledger",
+          "applied",
+          "Maintain value, unit, period, state, source and confidence for every decision-critical variable.",
+          "Build a canonical ledger from four partially conflicting reports."
+        ],
+        [
+          "Contradiction Detection",
+          "case",
+          "Identify conflicting values, formulas, periods and definitions before synthesis.",
+          "Locate every incompatible CAC, ACV, churn, margin and cash statement in a case pack."
+        ],
+        [
+          "Dependency Propagation",
+          "quantitative",
+          "Recalculate all downstream outputs when a controlling variable changes.",
+          "Change one canonical assumption and enumerate every affected result."
+        ],
+        [
+          "Reconciliation Defense",
+          "capstone",
+          "Resolve conflicts by source authority and evidence, never by averaging contradictions away.",
+          "Defend the final canonical model against adversarial challenges."
+        ]
       ]
     },
     {
       "code": "QDA601-M9",
       "order": 9,
       "title": "Computational Analysis",
-      "objectives": ["Reproducible computation", "Tabular analysis", "Simulation and regression", "Automated consistency checks"],
+      "objectives": [
+        "Reproducible computation",
+        "Tabular analysis",
+        "Simulation and regression",
+        "Automated consistency checks"
+      ],
       "units": [
-        ["Reproducible Calculations","computational","Implement formulas in code while preserving independent mathematical statements.","Create a reproducible unit-economics notebook or equivalent artifact."],
-        ["Data Pipeline","computational","Transform raw tables into traceable analysis-ready data.","Build a deterministic cleaning and aggregation pipeline."],
-        ["Simulation and Uncertainty","computational","Use simulation to understand ranges and nonlinear risk.","Run a scenario simulation with transparent assumptions and bounded interpretation."],
-        ["Consistency Testing","computational","Automate invariant, unit and reconciliation checks.","Write tests that fail when canonical variables disagree across outputs."]
+        [
+          "Reproducible Calculations",
+          "computational",
+          "Implement formulas in code while preserving independent mathematical statements.",
+          "Create a reproducible unit-economics notebook or equivalent artifact."
+        ],
+        [
+          "Data Pipeline",
+          "computational",
+          "Transform raw tables into traceable analysis-ready data.",
+          "Build a deterministic cleaning and aggregation pipeline."
+        ],
+        [
+          "Simulation and Uncertainty",
+          "computational",
+          "Use simulation to understand ranges and nonlinear risk.",
+          "Run a scenario simulation with transparent assumptions and bounded interpretation."
+        ],
+        [
+          "Consistency Testing",
+          "computational",
+          "Automate invariant, unit and reconciliation checks.",
+          "Write tests that fail when canonical variables disagree across outputs."
+        ]
       ]
     },
     {
       "code": "QDA601-M10",
       "order": 10,
       "title": "Integrated Decision Laboratory",
-      "objectives": ["End-to-end data quality", "Integrated economic model", "Adversarial self-audit", "Decision transfer"],
+      "objectives": [
+        "End-to-end data quality",
+        "Integrated economic model",
+        "Adversarial self-audit",
+        "Decision transfer"
+      ],
       "units": [
-        ["Raw Evidence Intake","capstone","Assess source quality, clean data and establish evidence states.","Produce the capstone data-quality report and evidence ledger."],
-        ["Integrated Model","capstone","Combine market, unit economics, cash, statistics and uncertainty into one coherent model.","Produce a fully traceable canonical decision model."],
-        ["Adversarial Audit","capstone","Independently reconstruct critical calculations and attack assumptions.","Audit the model without being told whether the first solution is correct."],
-        ["Decision and Perturbation Defense","capstone","Make a build/revise/kill decision and show how it changes under new assumptions.","Defend the recommendation, then recompute after three externally supplied assumption changes."]
+        [
+          "Raw Evidence Intake",
+          "capstone",
+          "Assess source quality, clean data and establish evidence states.",
+          "Produce the capstone data-quality report and evidence ledger."
+        ],
+        [
+          "Integrated Model",
+          "capstone",
+          "Combine market, unit economics, cash, statistics and uncertainty into one coherent model.",
+          "Produce a fully traceable canonical decision model."
+        ],
+        [
+          "Adversarial Audit",
+          "capstone",
+          "Independently reconstruct critical calculations and attack assumptions.",
+          "Audit the model without being told whether the first solution is correct."
+        ],
+        [
+          "Decision and Perturbation Defense",
+          "capstone",
+          "Make a build/revise/kill decision and show how it changes under new assumptions.",
+          "Defend the recommendation, then recompute after three externally supplied assumption changes."
+        ]
       ]
     }
   ],
@@ -212,5 +462,46 @@
       "evidence_classification",
       "self_audit"
     ]
+  },
+  "advanced_reasoning_target": {
+    "purpose": "Define the upper-bound mathematical reasoning capability QDA-601 is training toward. Benchmark families are used as capability references, not as memorization targets.",
+    "benchmark_ladder": [
+      {
+        "level": "floor_only",
+        "benchmark_family": "GSM8K-style",
+        "expectation": "Basic multi-step arithmetic and grade-school word-problem competence. Passing this level is necessary but not evidence of advanced quantitative mastery."
+      },
+      {
+        "level": "core_target",
+        "benchmark_family": "MATH-style",
+        "expectation": "Rigorous multi-step algebra, number theory, geometry, combinatorics, probability and related mathematical reasoning with explicit intermediate justification."
+      },
+      {
+        "level": "core_target",
+        "benchmark_family": "AIME-style",
+        "expectation": "Solve difficult problems where identifying the correct structure and decomposition is more important than routine calculation."
+      },
+      {
+        "level": "advanced_target",
+        "benchmark_family": "FrontierMath-style",
+        "expectation": "Sustain difficult reasoning across a durable problem tree, decompose when one-pass reasoning is insufficient, verify intermediate claims, reconcile contradictions and recover from failed attempts."
+      },
+      {
+        "level": "applied_target",
+        "benchmark_family": "Applied quantitative decision problems",
+        "expectation": "Transfer mathematical reasoning into finance, statistics, economics, optimization, uncertainty, causal analysis and data-driven decision work."
+      }
+    ],
+    "governing_standard": "Silas should be able to solve MATH/AIME-level problems independently, use Python intelligently for computation, detect and correct his own mistakes, and handle FrontierMath-style difficulty through autonomous decomposition rather than collapsing when a problem exceeds one reasoning pass.",
+    "required_reasoning_loop": [
+      "understand",
+      "decompose",
+      "solve_subproblems",
+      "verify_numerically_or_symbolically",
+      "reconcile_contradictions",
+      "synthesize"
+    ],
+    "anti_memorization_rule": "Benchmark-style problems are diagnostic and training instruments. Training must vary problem structure, values and domains so success reflects transferable reasoning rather than pattern memorization.",
+    "milestone_definition": "The target milestone is sustained high-level mathematical reasoning across a durable problem tree with autonomous error recovery, not merely a benchmark score."
   }
 }
