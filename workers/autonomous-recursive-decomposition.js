@@ -5400,8 +5400,61 @@ export async function runAutonomousRequirementCognition({
   }
 
   async function synthesize(node,childRows){
-    let accumulator=asObject(node?.decision_payload?.synthesis_accumulator);
-    let cursor=Number(node?.decision_payload?.synthesis_cursor||0);
+    const currentChildResultHashes=childRows.map(child=>({
+      path:child.node_path,
+      result_hash:child.result_hash||sha256(child.result_artifact||''),
+      status:child.node_status||child.status||null,
+      decision_type:child.decision_type||null,
+    }));
+    const priorChildResultHashes=asArray(node?.decision_payload?.synthesis_child_result_hashes);
+    const synthesisInputsChanged=
+      priorChildResultHashes.length!==currentChildResultHashes.length
+      ||priorChildResultHashes.some((prior,index)=>{
+        const current=currentChildResultHashes[index];
+        return !current
+          ||text(prior?.path)!==text(current.path)
+          ||text(prior?.result_hash)!==text(current.result_hash)
+          ||text(prior?.status)!==text(current.status)
+          ||text(prior?.decision_type)!==text(current.decision_type);
+      });
+
+    let accumulator=synthesisInputsChanged
+      ?{}
+      :asObject(node?.decision_payload?.synthesis_accumulator);
+    let cursor=synthesisInputsChanged
+      ?0
+      :Number(node?.decision_payload?.synthesis_cursor||0);
+
+    if(synthesisInputsChanged){
+      const nextPayload={...(node.decision_payload||{})};
+      delete nextPayload.synthesis_accumulator;
+      delete nextPayload.synthesis_provenance_pending;
+      delete nextPayload.synthesis_complete;
+      delete nextPayload.synthesis_outcome;
+      delete nextPayload.synthesis_reason;
+      delete nextPayload.synthesis_provenance_review;
+      node=await saveNode({
+        nodePath:node.node_path,
+        parentPath:node.parent_path??parentPathOf(node.node_path),
+        ordinal:node.ordinal||0,
+        requirement:node.requirement_text,
+        sourceKind:node.source_kind,
+        sourceRef:node.source_ref,
+        status:'split',
+        decisionType:'SPLIT',
+        decisionPayload:{
+          ...nextPayload,
+          synthesis_cursor:0,
+          synthesis_child_result_hashes:currentChildResultHashes,
+          synthesis_rebuild_reason:'child_result_hash_changed',
+          synthesis_rebuild_at:new Date().toISOString(),
+        },
+        contextPayload:node.context_payload||{},
+        resultArtifact:null,
+      });
+      node.parent_path=node.parent_path??parentPathOf(node.node_path);
+    }
+
     for(let i=cursor;i<childRows.length;i++){
       const child=childRows[i];
       const parts=resultParts(child.result_artifact);
@@ -5472,7 +5525,12 @@ export async function runAutonomousRequirementCognition({
         nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
         requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
         status:'split',decisionType:'SPLIT',
-        decisionPayload:{...(node.decision_payload||{}),synthesis_cursor:cursor,synthesis_accumulator:accumulator},
+        decisionPayload:{
+          ...(node.decision_payload||{}),
+          synthesis_cursor:cursor,
+          synthesis_accumulator:accumulator,
+          synthesis_child_result_hashes:currentChildResultHashes,
+        },
         contextPayload:node.context_payload||{},resultArtifact:null,
       });
       node.parent_path=node.parent_path??parentPathOf(node.node_path);
@@ -5682,6 +5740,7 @@ export async function runAutonomousRequirementCognition({
       decisionPayload:{
         ...completedDecisionPayload,
         synthesis_cursor:childRows.length,
+        synthesis_child_result_hashes:currentChildResultHashes,
         synthesis_complete:true,
         synthesis_outcome:outcome,
         synthesis_reason:clip(final?.parsed?.reason,2200),
