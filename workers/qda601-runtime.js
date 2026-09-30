@@ -93,16 +93,38 @@ function cursorFromLastAction(packet) {
   return {completedIndex:-1,researchIndex:null,final:false};
 }
 
+function preservedValidUnitCodesFromPacket(packet) {
+  const raw = packet?.state?.state_payload?.qda_601_preserved_valid_units;
+  if (!Array.isArray(raw)) return new Set();
+  const known = new Set(units.map(u => u.unit_code.toUpperCase()));
+  return new Set(
+    raw
+      .map(v => String(v || '').trim().toUpperCase())
+      .filter(v => known.has(v))
+  );
+}
+
 export function buildQda601Context(agentId, packet = {}) {
   if (!qda601RequiredForAgent(agentId, packet)) {
     return {assigned:false,program_version:'qda_601_v0_1'};
   }
 
   const cursor = cursorFromLastAction(packet);
-  const completedCount = Math.max(0, Math.min(units.length, cursor.completedIndex + 1));
+  const preservedValidUnitCodes = preservedValidUnitCodesFromPacket(packet);
+  const completedUnitCodes = new Set();
+
+  for (let i = 0; i <= cursor.completedIndex && i < units.length; i += 1) {
+    completedUnitCodes.add(units[i].unit_code.toUpperCase());
+  }
+  for (const code of preservedValidUnitCodes) completedUnitCodes.add(code);
+
+  const completedCount = completedUnitCodes.size;
+  const firstMissingIndex = units.findIndex(
+    unit => !completedUnitCodes.has(unit.unit_code.toUpperCase())
+  );
   const nextIndex = cursor.researchIndex !== null
     ? cursor.researchIndex
-    : Math.min(units.length, completedCount);
+    : (firstMissingIndex >= 0 ? firstMissingIndex : units.length);
   const nextUnit = nextIndex < units.length ? units[nextIndex] : null;
 
   let status = 'in_progress';
@@ -136,10 +158,12 @@ export function buildQda601Context(agentId, packet = {}) {
     required_submission_fields:curriculum.default_submission_contract.required_fields,
     governing_loop:curriculum.governing_loop,
     progression_cursor:{
-      source:'authoritative_last_committed_action',
+      source:'authoritative_last_committed_action_plus_preserved_external_audit_units',
       last_action:lastActionFromPacket(packet) || null,
       completed_index:cursor.completedIndex,
       research_index:cursor.researchIndex,
+      preserved_valid_units:[...preservedValidUnitCodes],
+      effective_completed_units:[...completedUnitCodes],
     },
     operating_rules:[
       'Complete the exact next_unit before later QDA units.',
