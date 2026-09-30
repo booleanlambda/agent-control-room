@@ -4062,8 +4062,26 @@ export async function runAutonomousRequirementCognition({
       const structuralBranchingAvailable=currentChildCapacity>=2;
       const singleRefinementAvailable=currentChildCapacity>=1;
       if(currentChildCapacity<1){
-        if(authored.length<1)
-          throw new Error('autonomous_decomposition_split_mode_unavailable:'+node.node_path);
+        if(authored.length<1){
+          const economicTerminal=await closeSemanticRuntime('budget_exhausted',{
+            reason:'split_child_authoring_budget_exhausted',
+            node_path:node.node_path,
+            semantic_decision:'SPLIT',
+            remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
+            expected_child_lifecycle_units:Number(branchEconomics.expected_child_lifecycle_units||0),
+            completion_reserve_units:Number(branchEconomics.completion_reserve_units||0),
+            semantic_child_capacity:currentChildCapacity,
+            semantic_state_preserved:true,
+            discovery_replay_forbidden_until_evidence_mutation:true,
+          });
+          const error=new Error(
+            'semantic_runtime_budget_exhausted:split_child_authoring:'+node.node_path
+            +':remaining='+String(economicTerminal?.remaining_budget_units??0)
+          );
+          error.code='SEMANTIC_BUDGET_EXHAUSTED';
+          error.semanticRuntime=economicTerminal;
+          throw error;
+        }
         return finalizeBudgetConstrainedSplit({
           runtimeView,branchEconomics,availableChildCapacity:currentChildCapacity,
         });
