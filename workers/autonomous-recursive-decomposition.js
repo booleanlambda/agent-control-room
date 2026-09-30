@@ -4391,6 +4391,48 @@ export async function runAutonomousRequirementCognition({
       }
     }
 
+    // QDA quantitative/statistical atomic work sometimes arrives as the
+    // artifact object itself rather than the generic {status,artifact} wrapper.
+    // This is a protocol-shape normalization only. It does NOT certify the
+    // computation: deterministic Python verification still runs immediately
+    // afterward and blocks any numerical/statistical disagreement.
+    if(!['SPLIT','NEED_CONTEXT','COMPLETE'].includes(status)
+       &&(qdaQuantitativeAtomicRequirement(packet,node)
+          ||qdaStatisticalAtomicRequirement(packet,node))){
+      const directQdaArtifact=companionNormalizedArtifact(parsed);
+      const directQdaObject=asObject(directQdaArtifact);
+      const hasQdaBody=
+        Object.keys(directQdaObject).length>0
+        &&(
+          directQdaObject.calculation!==undefined
+          ||directQdaObject.formula_or_model!==undefined
+          ||Array.isArray(directQdaObject.python_checks)
+          ||Array.isArray(directQdaObject.python_analyses)
+        );
+      if(hasQdaBody){
+        parsed={
+          status:'COMPLETE',
+          artifact:directQdaObject,
+          handoff:asObject(parsed?.handoff),
+          _atomic_protocol_normalization:{
+            version:'qda_direct_atomic_artifact_v0_1',
+            original_status:text(parsed?.status)||null,
+            original_outcome:text(parsed?.outcome)||null,
+            normalized_status:'COMPLETE',
+            python_verification_still_required:true,
+          },
+        };
+        status='COMPLETE';
+        console.log('AAU_AUTONOMOUS_ATOMIC_PROTOCOL_NORMALIZED',JSON.stringify({
+          agent_id:agentId,
+          intent_execution_id:intentExecutionId,
+          node_path:node.node_path,
+          normalization:'qda_direct_atomic_artifact_v0_1',
+          python_verification_still_required:true,
+        }));
+      }
+    }
+
     if(!['SPLIT','NEED_CONTEXT','COMPLETE'].includes(status)){
       if(!durableAtomic.parsed){
         await saveJsonPhaseCheckpoint(
