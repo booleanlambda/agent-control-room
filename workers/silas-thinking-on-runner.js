@@ -1,7 +1,8 @@
 // Matched case; independent Silas-only THINKING ON sequence with durable checkpoints.
 // Does not wake normal agent or alter degree, grading, resources or policy.
-import { nvidiaChatCompletion } from './providers/nvidia.js';
+import { modelChatCompletion, modelProviderConfigStatus } from './providers/model-provider.js';
 import { pilotHelpers as h } from './silas-thinking-on-helper.js';
+const modelProviderReady=()=>{try{return modelProviderConfigStatus().ready===true;}catch{return false;}};
 const names=['','plan','analysis_ab','business_decision','changed_conditions','board_memo'];
 const root=h.ROOT;
 function frozenBrief(brief,n){if(n<4){const {novel_variant,...base}=brief;return base;}return brief;}
@@ -65,7 +66,7 @@ async function callStep(brief,briefSha,step,prior,{revision=false}={}){
  const priorPayload=prior.map(p=>({step:p.step,revision:p.revision,output:p.output,output_sha256:p.output_sha256,assessment:p.assessment}));
  const user=ask+'\nFROZEN CASE AND DURABLE CHECKPOINTS:\n'+JSON.stringify({brief:frozenBrief(brief,step),prior:priorPayload});
  const start=Date.now();let r;
- try{r=await nvidiaChatCompletion({model:h.MODEL,messages:[{role:'system',content:system},{role:'user',content:user}],
+ try{r=await modelChatCompletion({model:h.MODEL,messages:[{role:'system',content:system},{role:'user',content:user}],
    temperature:0,jsonMode:true,enableThinking:true,maxTokens:4096,timeoutMs:300000});}
  catch(e){h.log('ON_BLOCKED',{step,revision,reason:'model_or_timeout',code:e.code||e.name||'error',elapsed_ms:Date.now()-start});return null;}
  let o;try{o=JSON.parse(String(r.content||''));}catch{o=null;}
@@ -89,7 +90,7 @@ async function callStep(brief,briefSha,step,prior,{revision=false}={}){
  return rec;
 }
 export async function runSilasThinkingOn(){
- if(!h.token||!process.env.NVIDIA_API_KEY)throw Error('on_pilot_credentials_missing');
+ if(!h.token||!modelProviderReady())throw Error('on_pilot_credentials_missing');
  const phase=Number(process.env.AAU_SILAS_THINKING_ON_PHASE||2);
  if(![2,5].includes(phase))throw Error('invalid_on_pilot_phase');
  const f=await h.read(root+'/brief.json');if(!f)throw Error('on_pilot_brief_missing');
