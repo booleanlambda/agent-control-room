@@ -435,6 +435,7 @@ export async function nvidiaChatCompletion({
   temperature = 0.2,
   jsonMode = null,
   enableThinking = null,
+  reasoningEffort = null,
   timeoutMs = null,
   runtimeRole = 'generic',
   usageContext = null,
@@ -481,6 +482,16 @@ export async function nvidiaChatCompletion({
   };
   if (resolvedJsonMode === true) requestBody.response_format = { type: 'json_object' };
   if (typeof resolvedThinking === 'boolean') requestBody.chat_template_kwargs = { enable_thinking: resolvedThinking };
+  const resolvedReasoningEffort=clean(reasoningEffort).toLowerCase();
+  if (resolvedReasoningEffort) {
+    requestBody.reasoning_effort=resolvedReasoningEffort;
+    if (resolvedModel === 'meta/muse-glimmer-30b') {
+      requestBody.chat_template_kwargs={
+        ...(requestBody.chat_template_kwargs||{}),
+        reasoning_strength:resolvedReasoningEffort,
+      };
+    }
+  }
 
   const baseCallMeta={
     runtimeRole,
