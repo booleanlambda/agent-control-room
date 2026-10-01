@@ -5980,7 +5980,7 @@ export async function runAutonomousRequirementCognition({
     if(label==='total pv'){
       return new RegExp('\\b(?:total(?:\\s+(?:aggregate\\s+)?pv)?|total\\s+sum)\\s*[:=]\\s*\\$?\\s*'+number,'gi');
     }
-    const parts=label.split(' ').filter(Boolean).map(v=>v.replace(/[.*+?^$()|[\]\\]/g,'\\  async function materializeQdaProblemFromVerifiedDescendants(node,artifact){'));
+    const parts=label.split(' ').filter(Boolean).map(v=>v.replace(/[.*+?^$()|[\]\\]/g,'\\$&'));
     if(!parts.length)return null;
     return new RegExp('\\b'+parts.join('[\\s_-]*')+'\\b\\s*[:=]\\s*\\$?\\s*'+number,'gi');
   }
