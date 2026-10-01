@@ -106,8 +106,16 @@ function qdaQuantitativeAtomicRequirement(packet,node){
   if(qdaVerifiedResultsSynthesisRequirement(node))return false;
   if(qdaStatisticalAtomicRequirement(packet,node))return false;
   const requirement=text(node?.requirement_text);
-  if(!/QDA601/i.test(requirement))return false;
-  return /(calculate|compute|compound|discount|retention|churn|present value|future value|\bPV\b|\bFV\b|\bNPV\b|rate|ratio|revenue|cost|margin|probab|scenario|optimization)/i.test(requirement);
+  const unitCode=text(packet?.qda_601_context?.next_unit?.unit_code).toUpperCase();
+  const inheritedQdaAssignment=/^QDA601-M\d+-U\d+$/.test(unitCode);
+
+  // QDA identity is assignment-scoped, not wording-scoped. Agent-authored
+  // descendants are allowed to paraphrase or omit the unit code; they must not
+  // silently fall out of deterministic arithmetic verification because the
+  // literal string "QDA601" disappeared from a child requirement.
+  if(!inheritedQdaAssignment&&!/QDA601/i.test(requirement))return false;
+
+  return /(calculat|compute|compound|discount|retention|churn|present value|future value|\bPV\b|\bFV\b|\bNPV\b|rate|ratio|revenue|cost|margin|probab|scenario|optimization|cash(?:\s+flow|\s+balance|\s+inflow|\s+outflow)?|runway|break[- ]?even|python_checks?)/i.test(requirement);
 }
 function quantitativeArtifactBody(artifact){
   let parsed=artifact;
@@ -6481,7 +6489,18 @@ export async function runAutonomousRequirementCognition({
       }
     };
     await walk(node.node_path);
-    if(!checks.length)return {artifact:parsed,materialized:false,check_count:0};
+    if(!checks.length){
+      const verification=deterministicMathVerification(packet,node,parsed);
+      return {
+        artifact:parsed,
+        materialized:false,
+        check_count:0,
+        verification,
+        verification_blocked:
+          verification.required===true
+          &&(verification.ok!==true||verification.all_match!==true),
+      };
+    }
 
     const normalized={
       ...parsed,
@@ -7082,6 +7101,67 @@ export async function runAutonomousRequirementCognition({
       ?await materializeQdaProblemFromVerifiedDescendants(node,artifact)
       :{artifact,materialized:false,check_count:0};
     artifact=qdaProblemMaterialization.artifact;
+
+    // Fail closed at split-parent synthesis too. Atomic descendants already
+    // have their own deterministic gate, but a parent must never become
+    // completed if verified-descendant materialization cannot establish an
+    // executable Python-check set for the final quantitative artifact.
+    const splitParentMathVerification=outcome==='COMPLETE'
+      ?deterministicMathVerification(packet,node,artifact)
+      :{required:false,ok:true,all_match:true};
+    if(
+      splitParentMathVerification.required===true
+      &&(
+        qdaProblemMaterialization.verification_blocked===true
+        ||splitParentMathVerification.ok!==true
+        ||splitParentMathVerification.all_match!==true
+      )
+    ){
+      const nextPayload={...asObject(node.decision_payload)};
+      for(const key of [
+        'synthesis_complete','synthesis_outcome','synthesis_reason',
+        'synthesis_provenance_review','synthesis_provenance_pending'
+      ])delete nextPayload[key];
+      node=await saveNode({
+        nodePath:node.node_path,
+        parentPath:node.parent_path??parentPathOf(node.node_path),
+        ordinal:node.ordinal||0,
+        requirement:node.requirement_text,
+        sourceKind:node.source_kind,
+        sourceRef:node.source_ref,
+        status:'split',
+        decisionType:'SPLIT',
+        decisionPayload:{
+          ...nextPayload,
+          synthesis_cursor:0,
+          synthesis_accumulator:{},
+          synthesis_rebuild_reason:'quantitative_parent_deterministic_verification_blocked',
+          synthesis_rebuild_at:new Date().toISOString(),
+          deterministic_math_verification:splitParentMathVerification,
+          deterministic_math_gate:'split_parent_fail_closed_v0_1',
+          reconsider_decomposition:false,
+        },
+        contextPayload:node.context_payload||{},
+        resultArtifact:null,
+      });
+      node.parent_path=node.parent_path??parentPathOf(node.node_path);
+      console.warn('AAU_QDA_SPLIT_PARENT_DETERMINISTIC_COMPLETION_BLOCKED',JSON.stringify({
+        agent_id:agentId,
+        intent_execution_id:intentExecutionId,
+        node_path:node.node_path,
+        error:splitParentMathVerification.error||null,
+        check_count:Number(splitParentMathVerification.check_count||0),
+        required_check_count:Number(splitParentMathVerification.required_check_count||0),
+        policy:'split_parent_fail_closed_v0_1',
+      }));
+      return process(
+        node.node_path,
+        node.parent_path,
+        pathDepth(node.node_path),
+        0
+      );
+    }
+
     const resultArtifact=JSON.stringify({status:outcome,artifact,handoff:asObject(final?.parsed?.handoff)});
     const completedDecisionPayload={...(node.decision_payload||{})};
     delete completedDecisionPayload.synthesis_provenance_pending;
