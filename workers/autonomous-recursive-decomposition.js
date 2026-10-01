@@ -1058,26 +1058,6 @@ function qda601HoldRequirement(packet){
 
   const status=text(qda.status);
   const next=asObject(qda.next_unit);
-  const authRemediation=qda601AuthenticatorRemediation(packet);
-
-  if(status==='in_progress' && text(next.unit_code) && authRemediation.active){
-    return {
-      source_kind:'supplemental_training',
-      source_ref:text(next.unit_code),
-      requirement:[
-        'QDA-601 independent authenticator remediation is the authoritative lifecycle obligation while Stage 4 is suspended.',
-        'Remediate the rejected artifact for exactly '+text(next.unit_code)+'; do not restart or recompute already verified child mathematics unless the authenticator report identifies a substantive mathematical error.',
-        'Preserve the completed problem tree, deterministic Python evidence, child result hashes, and prior self-audit evidence.',
-        'Latest rejected authenticator review: '+authRemediation.review_id+'.',
-        authRemediation.rejected_file_id?'Rejected file ID: '+authRemediation.rejected_file_id+'.':'',
-        authRemediation.artifact_sha256?'Rejected artifact SHA256: '+authRemediation.artifact_sha256+'.':'',
-        'AUTHENTICATOR FAILURE REPORT: '+JSON.stringify(authRemediation.report),
-        'Use self-remediation to rebuild only the final synthesis/artifact surface from resolved verified evidence, address the cited failure, and resubmit the same canonical filename '+text(next.filename)+'.',
-        'Independent verification remains external; do not self-certify a QDA pass.'
-      ].filter(Boolean).join(' ')
-    };
-  }
-
   if(status==='in_progress' && text(next.unit_code)){
     return {
       source_kind:'supplemental_training',
@@ -1718,7 +1698,7 @@ export async function runAutonomousRequirementCognition({
     &&externalAuthenticatorRemediation.active
   ){
     const reopened=await rpc(
-      'aau_bridge_reopen_completed_cognition_assignment_for_qda_review_v0_1',
+      'aau_bridge_reopen_qda_assignment_for_auth_review_v0_1',
       {
         p_agent_id:agentId,
         p_wake_request_id:intentExecutionId,
@@ -2492,10 +2472,19 @@ export async function runAutonomousRequirementCognition({
     };
   }
 
-  function selfRemediationVerificationBoundary(repairType){
-    return text(repairType).toUpperCase()==='REBUILD_SYNTHESIS_FROM_RESOLVED_EVIDENCE'
-      ?'POST_SYNTHESIS_PROVENANCE'
-      :'POST_FRESH_DISCOVERY';
+  function selfRemediationVerificationBoundary(repairType,subject=null){
+    if(text(repairType).toUpperCase()!=='REBUILD_SYNTHESIS_FROM_RESOLVED_EVIDENCE')
+      return 'POST_FRESH_DISCOVERY';
+    const nodeFailure=asObject(asObject(subject?.decision_payload).synthesis_failure);
+    const episodeFailure=asObject(asObject(asObject(subject?.pre_state).synthesis).failure);
+    const failureType=text(nodeFailure.failure_type)||text(episodeFailure.failure_type);
+    return failureType==='independent_authenticator_verified_fail'
+      ?'POST_INDEPENDENT_AUTHENTICATOR'
+      :'POST_SYNTHESIS_PROVENANCE';
+  }
+
+  function selfRemediationResumeMode(boundary){
+    return boundary==='POST_FRESH_DISCOVERY'?'DISCOVERY':'SYNTHESIS';
   }
 
   function cleanedRemediationDecisionPayload(payload){
@@ -2537,7 +2526,7 @@ export async function runAutonomousRequirementCognition({
     if(!SELF_REMEDIATION_REPAIR_TYPES.includes(repairType))
       throw new Error('autonomous_decomposition_remediation_repair_not_allowed:'+node.node_path);
 
-    const verificationBoundary=selfRemediationVerificationBoundary(repairType);
+    const verificationBoundary=selfRemediationVerificationBoundary(repairType,node);
     let nextContext=asObject(contextPayload);
     let nextSiblingEvidence=asArray(siblingEvidence);
     if(repairType==='REFRESH_SIBLING_EVIDENCE'){
@@ -2614,7 +2603,7 @@ export async function runAutonomousRequirementCognition({
       siblingEvidence:nextSiblingEvidence,
       postState,
       verification_boundary:verificationBoundary,
-      resume_mode:verificationBoundary==='POST_SYNTHESIS_PROVENANCE'?'SYNTHESIS':'DISCOVERY',
+      resume_mode:selfRemediationResumeMode(verificationBoundary),
     };
   }
 
@@ -2624,7 +2613,7 @@ export async function runAutonomousRequirementCognition({
   }){
     const effectivePostState=postState||remediationStateSnapshot(node,contextPayload,pinnedEvidence,siblingEvidence);
     const repairType=text(episode.repair_type).toUpperCase();
-    const verificationBoundary=selfRemediationVerificationBoundary(repairType);
+    const verificationBoundary=selfRemediationVerificationBoundary(repairType,episode);
     await remediationRpc('update',node.node_path,{
       remediation_id:episode.remediation_id,
       status:'verifying',
@@ -2812,7 +2801,7 @@ export async function runAutonomousRequirementCognition({
       observed_after:'',
       remaining_problem:clip(remainingProblem||reason,2400),
       agent_authored:false,
-      verification_boundary:selfRemediationVerificationBoundary(episode.repair_type),
+      verification_boundary:selfRemediationVerificationBoundary(episode.repair_type,episode),
       external_verification:externalVerification,
     };
     await remediationRpc('update',node.node_path,{
@@ -2831,9 +2820,8 @@ export async function runAutonomousRequirementCognition({
     if(episode.status==='applied'){
       return {
         node,contextPayload,siblingEvidence,postState:asObject(episode.post_state),
-        verification_boundary:selfRemediationVerificationBoundary(episode.repair_type),
-        resume_mode:selfRemediationVerificationBoundary(episode.repair_type)==='POST_SYNTHESIS_PROVENANCE'
-          ?'SYNTHESIS':'DISCOVERY',
+        verification_boundary:selfRemediationVerificationBoundary(episode.repair_type,episode),
+        resume_mode:selfRemediationResumeMode(selfRemediationVerificationBoundary(episode.repair_type,episode)),
       };
     }
     if(episode.status==='verifying'){
@@ -3102,7 +3090,7 @@ export async function runAutonomousRequirementCognition({
       if(
         activeRemediation
         &&String(activeRemediation.status)==='applied'
-        &&selfRemediationVerificationBoundary(activeRemediation.repair_type)==='POST_SYNTHESIS_PROVENANCE'
+        &&selfRemediationVerificationBoundary(activeRemediation.repair_type,activeRemediation)!=='POST_FRESH_DISCOVERY'
       ){
         return {node,decision:'SPLIT',self_remediation_applied:true};
       }
@@ -3622,7 +3610,7 @@ export async function runAutonomousRequirementCognition({
       if(
         activeRemediation
         &&String(activeRemediation.status)==='applied'
-        &&selfRemediationVerificationBoundary(activeRemediation.repair_type)==='POST_FRESH_DISCOVERY'
+        &&selfRemediationVerificationBoundary(activeRemediation.repair_type,activeRemediation)==='POST_FRESH_DISCOVERY'
       ){
         const verifiedRemediation=await verifyRemediationEpisode(node,activeRemediation,{
           contextPayload,
@@ -6916,43 +6904,81 @@ export async function runAutonomousRequirementCognition({
         ){
           const remediationPinnedEvidence=await loadPinnedEvidence(node.node_path);
           const remediationSiblingEvidence=authoritativeSiblingEvidence(node.context_payload||{});
-          const verifiedRemediation=await verifyRemediationEpisode(node,activeSynthesisRemediation,{
-            contextPayload:node.context_payload||{},
-            pinnedEvidence:remediationPinnedEvidence,
-            siblingEvidence:remediationSiblingEvidence,
-            externalVerification:{
-              kind:'synthesis_provenance',
-              ok:true,
-              status:'ACCEPT',
-              issue_count:0,
-              quantitative_drift_guard_passed:true,
-              artifact_hash:sha256(artifactText(final?.parsed?.artifact)),
-              provenance_reason:clip(synthesisProvenanceReview?.reason,2200),
-            },
-            preserveCurrentCognition:true,
-          });
-          node=verifiedRemediation.node;
-          if(!verifiedRemediation.verified){
-            // verifyRemediationEpisode has already persisted this episode as
-            // failed. Clear the stale in-memory active pointer so the generic
-            // synthesis-failure handoff does not write a second failure update.
-            activeSynthesisRemediation=null;
-            return returnSynthesisFailureToAgent({
-              failureType:'self_remediation_verification_failed',
-              reason:verifiedRemediation.verification?.remaining_problem
-                ||verifiedRemediation.verification?.reason
-                ||'The bound agent did not verify its own synthesis remediation.',
-              review:synthesisProvenanceReview,
-              externalVerification:{
-                kind:'synthesis_provenance',
-                ok:true,
-                status:'ACCEPT',
-                issue_count:0,
-                quantitative_drift_guard_passed:true,
+          const remediationBoundary=selfRemediationVerificationBoundary(
+            activeSynthesisRemediation.repair_type,
+            activeSynthesisRemediation
+          );
+          const internalVerification={
+            kind:'synthesis_provenance',
+            ok:true,
+            status:'ACCEPT',
+            issue_count:0,
+            quantitative_drift_guard_passed:true,
+            artifact_hash:sha256(artifactText(final?.parsed?.artifact)),
+            provenance_reason:clip(synthesisProvenanceReview?.reason,2200),
+          };
+
+          if(remediationBoundary==='POST_INDEPENDENT_AUTHENTICATOR'){
+            const postState=remediationStateSnapshot(
+              node,node.context_payload||{},remediationPinnedEvidence,remediationSiblingEvidence
+            );
+            const triggeringFailure=asObject(node?.decision_payload?.synthesis_failure);
+            await remediationRpc('update',node.node_path,{
+              remediation_id:activeSynthesisRemediation.remediation_id,
+              status:'verifying',
+              post_state:postState,
+              verification_result:{
+                status:'PENDING',
+                verification_boundary:'POST_INDEPENDENT_AUTHENTICATOR',
+                internal_synthesis_verification:internalVerification,
+                triggering_authenticator_review_id:
+                  text(triggeringFailure.authenticator_review_id)||null,
+                verification_started_at:new Date().toISOString(),
               },
             });
+            node.decision_payload={
+              ...asObject(node.decision_payload),
+              self_remediation_in_progress:{
+                ...asObject(node?.decision_payload?.self_remediation_in_progress),
+                remediation_id:activeSynthesisRemediation.remediation_id,
+                verification_boundary:'POST_INDEPENDENT_AUTHENTICATOR',
+                fresh_cognition_required:false,
+                internal_synthesis_verified:true,
+                awaiting_independent_authenticator:true,
+                internal_synthesis_verified_at:new Date().toISOString(),
+              },
+            };
+            console.log('AAU_AUTONOMOUS_SELF_REMEDIATION_AWAITING_AUTHENTICATOR',JSON.stringify({
+              agent_id:agentId,
+              intent_execution_id:intentExecutionId,
+              node_path:node.node_path,
+              remediation_id:activeSynthesisRemediation.remediation_id,
+              triggering_review_id:text(triggeringFailure.authenticator_review_id)||null,
+              artifact_hash:internalVerification.artifact_hash,
+            }));
+            activeSynthesisRemediation=null;
+          }else{
+            const verifiedRemediation=await verifyRemediationEpisode(node,activeSynthesisRemediation,{
+              contextPayload:node.context_payload||{},
+              pinnedEvidence:remediationPinnedEvidence,
+              siblingEvidence:remediationSiblingEvidence,
+              externalVerification:internalVerification,
+              preserveCurrentCognition:true,
+            });
+            node=verifiedRemediation.node;
+            if(!verifiedRemediation.verified){
+              activeSynthesisRemediation=null;
+              return returnSynthesisFailureToAgent({
+                failureType:'self_remediation_verification_failed',
+                reason:verifiedRemediation.verification?.remaining_problem
+                  ||verifiedRemediation.verification?.reason
+                  ||'The bound agent did not verify its own synthesis remediation.',
+                review:synthesisProvenanceReview,
+                externalVerification:internalVerification,
+              });
+            }
+            activeSynthesisRemediation=null;
           }
-          activeSynthesisRemediation=null;
         }
         break;
       }catch(error){
