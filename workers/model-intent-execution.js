@@ -2948,6 +2948,23 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
     packet,decision,deepCognition
   );
   if(qdaAuthoritativeMaterialization.failures?.length){
+    console.error('AAU_QDA601_VERIFIED_CHILD_MATERIALIZATION_BLOCKED',JSON.stringify({
+      agent_id:requestedAgentId,
+      intent_execution_id:requestedIntentExecutionId,
+      unit_code:packet?.qda_601_context?.next_unit?.unit_code||null,
+      failures:qdaAuthoritativeMaterialization.failures,
+      authoritative_children:(Array.isArray(deepCognition?.authoritativeChildren)?deepCognition.authoritativeChildren:[]).map(child=>({
+        node_path:child?.node_path||null,
+        status:child?.status||null,
+        decision_type:child?.decision_type||null,
+        requirement_text:String(child?.requirement_text||'').slice(0,800),
+        deterministic_math_verified:child?.deterministic_math_verified===true,
+        deterministic_math_check_count:Number(child?.deterministic_math_check_count||0),
+        qda_verified_descendant_materialized:child?.qda_verified_descendant_materialized===true,
+        qda_verified_descendant_check_count:Number(child?.qda_verified_descendant_check_count||0),
+        result_hash:child?.result_hash||null,
+      })),
+    }));
     const error=new Error('qda601_verified_child_materialization_blocked');
     error.failureDetails={
       schema:'aau.qda601_verified_child_materialization.v0_1',
