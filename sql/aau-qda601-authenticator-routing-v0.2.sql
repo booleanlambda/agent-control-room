@@ -208,11 +208,11 @@ begin
 
   insert into agent_lab.cognition_assignment_runtime(
     agent_id,assignment_key,model_id,epoch_no,budget_quantum_tokens,
-    initial_budget_units,remaining_budget_units,status,wake_request_id,metadata
+    initial_budget_units,remaining_budget_units,status,metadata
   ) values (
     v_prev.agent_id,v_prev.assignment_key,v_prev.model_id,v_prev.epoch_no+1,
     v_prev.budget_quantum_tokens,v_prev.initial_budget_units,v_prev.initial_budget_units,
-    'active',p_wake_request_id,
+    'active',
     jsonb_build_object(
       'contract','qda_external_authenticator_remediation_epoch_v0_1',
       'renewal_reason','independent_authenticator_verified_fail',
