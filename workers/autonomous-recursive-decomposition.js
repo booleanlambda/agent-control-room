@@ -183,8 +183,10 @@ function deterministicMathVerification(packet,node,artifact){
   const artifactBody=quantitativeArtifactBody(artifact);
   const descendantMaterialization=
     asObject(artifactBody?.runtime_verified_descendant_materialization);
-  const verifiedDescendantCoverage=
-    descendantMaterialization.contract==='qda_problem_verified_descendant_materialization_v0_1';
+  const verifiedDescendantCoverage=[
+    'qda_problem_verified_descendant_materialization_v0_1',
+    'qda_verified_descendant_materialization_v0_2_recursive',
+  ].includes(descendantMaterialization.contract);
 
   // For a split QDA parent, the durable atomic descendants are the arithmetic
   // execution boundary. Their structured checks are already fail-closed and are
@@ -6441,8 +6443,11 @@ export async function runAutonomousRequirementCognition({
       deterministic_guard:'verified_child_quantitative_evidence_v0_1',
     };
   }
-  async function materializeQdaProblemFromVerifiedDescendants(node,artifact){
-    if(!/QDA601/i.test(text(node?.requirement_text)) || pathDepth(node?.node_path)!==1){
+  async function materializeQdaQuantitativeFromVerifiedDescendants(node,artifact){
+    // Quantitative verification is subtree-scoped, not depth-scoped. Any QDA
+    // split node may inherit deterministic evidence from verified atomic leaves
+    // beneath it, regardless of how deeply the bound agent decomposed the work.
+    if(!qdaQuantitativeAtomicRequirement(packet,node)){
       return {artifact,materialized:false,check_count:0};
     }
     const parsed=typeof artifact==='string'
@@ -6451,8 +6456,10 @@ export async function runAutonomousRequirementCognition({
     if(!parsed || typeof parsed!=='object' || Array.isArray(parsed)){
       return {artifact,materialized:false,check_count:0};
     }
-    if(parsed?.runtime_verified_descendant_materialization?.contract
-       ==='qda_problem_verified_descendant_materialization_v0_1'
+    if([
+         'qda_problem_verified_descendant_materialization_v0_1',
+         'qda_verified_descendant_materialization_v0_2_recursive',
+       ].includes(parsed?.runtime_verified_descendant_materialization?.contract)
        &&Array.isArray(parsed.python_checks)
        &&parsed.python_checks.length){
       const verification=verifyPythonMathChecks(
@@ -6470,6 +6477,7 @@ export async function runAutonomousRequirementCognition({
 
     const checks=[];
     const sources=[];
+    const unverifiedQuantitativeAtomicDescendants=[];
     const visited=new Set();
     const walk=async(parentPath)=>{
       if(visited.has(parentPath))return;
@@ -6484,24 +6492,50 @@ export async function runAutonomousRequirementCognition({
         if(status!=='completed')continue;
         const decision=String(child?.decision_type||'').toUpperCase();
         if(decision==='ATOMIC'){
+          if(!qdaQuantitativeAtomicRequirement(packet,child))continue;
+          const childDecision=asObject(child.decision_payload);
+          const childRecordedVerification=
+            asObject(childDecision.deterministic_math_verification);
+          const childRecordedVerified=
+            childDecision.deterministic_math_verified===true
+            &&childRecordedVerification.ok===true
+            &&childRecordedVerification.all_match===true;
           const parts=resultParts(child.result_artifact);
           const field=pythonChecksFromArtifact(parts.artifact);
           const childChecks=field?.type_ok===true?field.value:[];
-          if(childChecks.length){
-            const verification=verifyPythonMathChecks(
-              childChecks,{absoluteTolerance:0.005,relativeTolerance:1e-9}
-            );
-            if(verification.ok===true&&verification.all_match===true){
-              childChecks.forEach(check=>checks.push({
-                ...check,
-                label:String(child.node_path)+':'+String(check?.label||'check'),
-              }));
-              sources.push({
-                node_path:child.node_path,
-                result_hash:child.result_hash||null,
-                check_count:childChecks.length,
-              });
-            }
+          const verification=childChecks.length
+            ?verifyPythonMathChecks(
+                childChecks,{absoluteTolerance:0.005,relativeTolerance:1e-9}
+              )
+            :{ok:false,all_match:false,error:field?.error||'python_checks_required'};
+          if(
+            childRecordedVerified
+            &&verification.ok===true
+            &&verification.all_match===true
+          ){
+            childChecks.forEach(check=>checks.push({
+              ...check,
+              label:String(child.node_path)+':'+String(check?.label||'check'),
+            }));
+            sources.push({
+              node_path:child.node_path,
+              result_hash:child.result_hash||null,
+              check_count:childChecks.length,
+              deterministic_math_gate:
+                text(childDecision.deterministic_math_gate)||null,
+            });
+          }else{
+            unverifiedQuantitativeAtomicDescendants.push({
+              node_path:child.node_path,
+              result_hash:child.result_hash||null,
+              recorded_verified:childDecision.deterministic_math_verified===true,
+              recorded_ok:childRecordedVerification.ok===true,
+              recorded_all_match:childRecordedVerification.all_match===true,
+              executable_check_count:childChecks.length,
+              rerun_ok:verification.ok===true,
+              rerun_all_match:verification.all_match===true,
+              error:verification.error||childRecordedVerification.error||null,
+            });
           }
           continue;
         }
@@ -6509,6 +6543,26 @@ export async function runAutonomousRequirementCognition({
       }
     };
     await walk(node.node_path);
+    if(unverifiedQuantitativeAtomicDescendants.length){
+      return {
+        artifact:parsed,
+        materialized:false,
+        check_count:checks.length,
+        sources,
+        unverified_descendants:unverifiedQuantitativeAtomicDescendants,
+        verification:{
+          required:true,
+          ok:false,
+          all_match:false,
+          failure_class:'descendant_verification',
+          error:'unverified_quantitative_atomic_descendants',
+          check_count:checks.length,
+          unverified_descendant_count:unverifiedQuantitativeAtomicDescendants.length,
+          unverified_descendants:unverifiedQuantitativeAtomicDescendants,
+        },
+        verification_blocked:true,
+      };
+    }
     if(!checks.length){
       const verification=deterministicMathVerification(packet,node,parsed);
       return {
@@ -6536,16 +6590,19 @@ export async function runAutonomousRequirementCognition({
           :[parsed.evidence],
       python_checks:checks,
       runtime_verified_descendant_materialization:{
-        contract:'qda_problem_verified_descendant_materialization_v0_1',
+        contract:'qda_verified_descendant_materialization_v0_2_recursive',
         arithmetic_recomputation_forbidden:true,
-        source:'completed_atomic_descendants',
+        aggregation_scope:'recursive_node_subtree',
+        materialized_node_path:node.node_path,
+        materialized_node_depth:pathDepth(node.node_path),
+        source:'completed_verified_atomic_descendants',
         descendants:sources,
       },
     };
     const verification=deterministicMathVerification(packet,node,normalized);
     if(verification.required===true && (verification.ok!==true||verification.all_match!==true)){
       throw new Error(
-        'qda_problem_verified_descendant_materialization_invalid:'
+        'qda_recursive_verified_descendant_materialization_invalid:'
         +node.node_path+':'+String(verification.error||'verification_failed')
       );
     }
@@ -7118,7 +7175,7 @@ export async function runAutonomousRequirementCognition({
       : artifactText(rawFinalArtifact);
     if(!artifactText(artifact))throw new Error('autonomous_decomposition_synthesis_empty:'+node.node_path);
     const qdaProblemMaterialization=outcome==='COMPLETE'
-      ?await materializeQdaProblemFromVerifiedDescendants(node,artifact)
+      ?await materializeQdaQuantitativeFromVerifiedDescendants(node,artifact)
       :{artifact,materialized:false,check_count:0};
     artifact=qdaProblemMaterialization.artifact;
 
@@ -7390,7 +7447,7 @@ export async function runAutonomousRequirementCognition({
         );
         if(!legacyChild){
           const parts=resultParts(node.result_artifact);
-          const qdaMaterialization=await materializeQdaProblemFromVerifiedDescendants(
+          const qdaMaterialization=await materializeQdaQuantitativeFromVerifiedDescendants(
             node,parts.artifact
           );
           if(qdaMaterialization.materialized===true){
@@ -7419,7 +7476,7 @@ export async function runAutonomousRequirementCognition({
             });
             repaired.parent_path=node.parent_path??parentPathOf(node.node_path);
             node=repaired;
-            console.log('AAU_QDA_PROBLEM_VERIFIED_DESCENDANTS_MATERIALIZED',JSON.stringify({
+            console.log('AAU_QDA_VERIFIED_DESCENDANTS_MATERIALIZED',JSON.stringify({
               agent_id:agentId,
               intent_execution_id:intentExecutionId,
               node_path:node.node_path,
