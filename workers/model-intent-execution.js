@@ -2949,8 +2949,8 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
   );
   if(qdaAuthoritativeMaterialization.failures?.length){
     console.error('AAU_QDA601_VERIFIED_CHILD_MATERIALIZATION_BLOCKED',JSON.stringify({
-      agent_id:requestedAgentId,
-      intent_execution_id:requestedIntentExecutionId,
+      agent_id:packet?.agent?.agent_id||packet?.agent_id||null,
+      intent_execution_id:packet?.wake_request?.wake_request_id||packet?.wake_request_id||null,
       unit_code:packet?.qda_601_context?.next_unit?.unit_code||null,
       failures:qdaAuthoritativeMaterialization.failures,
       authoritative_children:(Array.isArray(deepCognition?.authoritativeChildren)?deepCognition.authoritativeChildren:[]).map(child=>({
