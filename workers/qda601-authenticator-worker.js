@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
-import { withReviewerNvidiaSlot,isReviewerModelInBackoff,noteReviewerModelTimeout,noteReviewerModelSuccess } from './reviewer-nvidia-endpoint-gate.js';
-import { nvidiaChatCompletion } from './providers/nvidia.js';
+import { withReviewerModelSlot,isReviewerModelInBackoff,noteReviewerModelTimeout,noteReviewerModelSuccess } from './reviewer-model-endpoint-gate.js';
+import { modelChatCompletion, modelProviderConfigStatus } from './providers/model-provider.js';
 import { getModelRuntimeProfile } from './model-runtime-profiles.js';
 
 const SB=String(process.env.AAU_SUPABASE_URL||'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/,'');
 const anon=String(process.env.AAU_SUPABASE_ANON_KEY||'').trim();
 const bridge=String(process.env.AAU_BROKER_BRIDGE_TOKEN||'').trim();
-const nvidiaKey=String(process.env.NVIDIA_API_KEY||'').trim();
+const modelProviderReady=()=>{try{return modelProviderConfigStatus().ready===true;}catch{return false;}};
 const executorId=`render:qda601-authenticator:${process.env.RENDER_INSTANCE_ID||process.pid}`;
 const pollMs=Math.max(3000,Number(process.env.AAU_QDA601_AUTHENTICATOR_POLL_MS||5000));
 let timer=null,working=false;
@@ -90,11 +90,11 @@ Return exactly one JSON object with keys: overall_score, arithmetic_accuracy, fi
 
 FROZEN ARTIFACT:
 ${task.artifact}`;
-  return withReviewerNvidiaSlot('qda601_authenticator',async()=>{
+  return withReviewerModelSlot('qda601_authenticator',async()=>{
     const begun=Date.now();
     try{
       const profile=getModelRuntimeProfile(model);
-      const out=await nvidiaChatCompletion({
+      const out=await modelChatCompletion({
         model,messages:[{role:'system',content:system},{role:'user',content:user}],
         maxTokens:model.startsWith('meta/')?2600:2200,temperature:0,
         jsonMode:profile.supports_json_mode===true,
@@ -104,8 +104,8 @@ ${task.artifact}`;
       });
       noteReviewerModelSuccess(model);
       return {content:String(out.content||out.reasoning_content||'').trim(),model:out.model_returned||model,
-        latency_ms:Date.now()-begun,runtime_contract:out.runtime_contract||null};
-    }catch(e){if(e?.name==='AbortError')noteReviewerModelTimeout(model);throw e;}
+        provider:out.provider||null,latency_ms:Date.now()-begun,runtime_contract:out.runtime_contract||null};
+    }catch(e){if(e?.code==='MODEL_TIMEOUT'||e?.name==='AbortError')noteReviewerModelTimeout(model);throw e;}
   });
 }
 
@@ -121,7 +121,7 @@ async function authenticate(task){
       try{
         const out=await callModel(model,task);
         const g=normalize(out.content);
-        const report={...g.report,review_provider:'nvidia_direct',review_model:out.model,
+        const report={...g.report,review_provider:out.provider||null,review_model:out.model,
           review_model_requested:model,authenticator_fallback_used:model!==PRIMARY,
           artifact_sha256:actualSha,frozen_file_id:task.file_id,frozen_unit_code:task.unit_code,
           independent_from_bound_agent_model:true,review_latency_ms:out.latency_ms,
@@ -134,7 +134,7 @@ async function authenticate(task){
         last=e;
         console.warn('AAU_QDA601_AUTHENTICATOR_MODEL_FAILED',JSON.stringify({
           review_id:task.review_id,unit_code:task.unit_code,model,attempt,error:String(e?.message||e).slice(0,900)}));
-        const status=Number(e?.status||0),retryable=e?.name==='AbortError'||status===429||status>=500;
+        const status=Number(e?.status||0),retryable=e?.code==='MODEL_TIMEOUT'||e?.name==='AbortError'||status===429||status>=500;
         if(!retryable)break;
         if(attempt<attempts)await sleep(1500*attempt);
       }
@@ -144,7 +144,7 @@ async function authenticate(task){
 }
 
 async function tick(){
-  if(working||!anon||!bridge||!nvidiaKey)return;
+  if(working||!anon||!bridge||!modelProviderReady())return;
   working=true;let task=null;
   try{
     task=await rpc('aau_bridge_claim_qda601_authenticator_review',{p_executor_id:executorId});
@@ -168,7 +168,7 @@ async function tick(){
 
 export function startQda601AuthenticatorWorker(){
   if(timer)return {started:true,already_running:true,poll_ms:pollMs};
-  if(!anon||!bridge||!nvidiaKey)return {started:false,reason:'required_runtime_credentials_missing'};
+  if(!anon||!bridge||!modelProviderReady())return {started:false,reason:'required_runtime_credentials_missing'};
   timer=setInterval(()=>void tick(),pollMs);void tick();
   return {started:true,poll_ms:pollMs,authenticator:PRIMARY,fallbacks:MODELS.slice(1),
     contract:'qda601_independent_authenticator_v0_1'};
