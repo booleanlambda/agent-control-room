@@ -2825,6 +2825,15 @@ export async function runAutonomousRequirementCognition({
       };
     }
     if(episode.status==='verifying'){
+      const boundary=selfRemediationVerificationBoundary(episode.repair_type,episode);
+      if(boundary==='POST_INDEPENDENT_AUTHENTICATOR'){
+        return {
+          node,contextPayload,siblingEvidence,postState:asObject(episode.post_state),
+          verification_boundary:boundary,
+          resume_mode:'SYNTHESIS',
+          awaiting_independent_authenticator:true,
+        };
+      }
       return verifyRemediationEpisode(node,episode,{
         contextPayload,pinnedEvidence,siblingEvidence,
         postState:Object.keys(asObject(episode.post_state)).length?episode.post_state:null,
@@ -3085,6 +3094,8 @@ export async function runAutonomousRequirementCognition({
         });
         node=resumed.node;
         contextPayload=resumed.contextPayload;
+        if(resumed.resume_mode==='SYNTHESIS')
+          return {node,decision:'SPLIT',self_remediation_verifying:true};
         continue;
       }
       if(
