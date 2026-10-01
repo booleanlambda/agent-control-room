@@ -225,6 +225,39 @@ function deterministicMathVerification(packet,node,artifact){
   };
 }
 
+function compactMathVerificationForPersistence(verification){
+  const v=asObject(verification);
+  const results=asArray(v.results);
+  const failures=results
+    .filter(r=>r?.valid===false||r?.matched===false||r?.error_code)
+    .slice(0,8)
+    .map(r=>({
+      index:Number.isFinite(Number(r?.index))?Number(r.index):null,
+      label:clip(text(r?.label),160)||null,
+      valid:r?.valid===true,
+      matched:r?.matched===true,
+      actual:r?.actual??null,
+      claimed_result:r?.claimed_result??null,
+      error_code:text(r?.error_code)||null,
+    }));
+  return {
+    required:v.required===true,
+    ok:v.ok===true,
+    all_match:v.all_match===true,
+    all_valid:v.all_valid!==false,
+    check_count:Number(v.check_count||0),
+    required_check_count:Number(v.required_check_count||0),
+    coverage_authority:text(v.coverage_authority)||null,
+    failure_class:text(v.failure_class)||null,
+    error:text(v.error)||null,
+    validation_error_count:Number(v.validation_error_count||0),
+    result_count:results.length,
+    failure_samples:failures,
+    results_compacted:true,
+    full_checks_location:'result_artifact.artifact.python_checks',
+  };
+}
+
 function completedAtomicDeterministicRevalidation(packet,node){
   if(text(node?.decision_type).toUpperCase()!=='ATOMIC' || text(node?.node_status||node?.status).toLowerCase()!=='completed'){
     return {required:false,verification:null};
@@ -7214,7 +7247,8 @@ export async function runAutonomousRequirementCognition({
           synthesis_accumulator:{},
           synthesis_rebuild_reason:'quantitative_parent_deterministic_verification_blocked',
           synthesis_rebuild_at:new Date().toISOString(),
-          deterministic_math_verification:splitParentMathVerification,
+          deterministic_math_verification:
+            compactMathVerificationForPersistence(splitParentMathVerification),
           deterministic_math_gate:'split_parent_fail_closed_v0_1',
           reconsider_decomposition:false,
         },
@@ -7241,7 +7275,26 @@ export async function runAutonomousRequirementCognition({
 
     const resultArtifact=JSON.stringify({status:outcome,artifact,handoff:asObject(final?.parsed?.handoff)});
     const completedDecisionPayload={...(node.decision_payload||{})};
-    delete completedDecisionPayload.synthesis_provenance_pending;
+    // Completed split nodes retain durable identity/provenance hashes, but do
+    // not duplicate large discovery, merge, retry, or verifier-detail payloads
+    // that already live in immutable checkpoints/result artifacts.
+    for(const key of [
+      'synthesis_provenance_pending',
+      'routing_discovery_checkpoint',
+      'routing_discovery_checkpointed',
+      'routing_discovery_checkpointed_at',
+      'routing_discovery_reused',
+      'routing_admission',
+      'context_resource_state',
+      'synthesis_accumulator',
+      'provenance_review',
+      'sibling_overlap_validation',
+      'deterministic_math_reconciliation_required',
+      'deterministic_math_retry_nonce',
+      'deterministic_math_verification',
+    ])delete completedDecisionPayload[key];
+    completedDecisionPayload.completion_state_compaction=
+      'durable_checkpoint_references_v0_1';
     const done=await saveNode({
       nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
       requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
@@ -7271,7 +7324,8 @@ export async function runAutonomousRequirementCognition({
           &&qdaProblemMaterialization.verification?.all_match===true?{
             deterministic_math_verified:true,
             deterministic_math_check_count:Number(qdaProblemMaterialization.check_count||0),
-            deterministic_math_verification:qdaProblemMaterialization.verification,
+            deterministic_math_verification:
+              compactMathVerificationForPersistence(qdaProblemMaterialization.verification),
             deterministic_math_gate:'split_parent_verified_descendants_v0_1',
           }:{}),
       },
