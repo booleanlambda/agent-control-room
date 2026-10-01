@@ -307,7 +307,7 @@ export async function runExperimentalNvidiaWake() {
 
       let recovery=null;
       if (providerTransient) {
-        recovery=await rpc('aau_bridge_fail_nvidia_provider_transient_v0_1', {
+        recovery=await rpc('aau_bridge_fail_model_transport_transient_v0_1', {
           p_intent_execution_id:wakeId,
           p_error:message,
         }).catch((recoveryError)=>({
