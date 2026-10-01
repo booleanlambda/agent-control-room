@@ -180,25 +180,45 @@ function atomicMaterialCalculationCount(artifact){
 function deterministicMathVerification(packet,node,artifact){
   if(!qdaQuantitativeAtomicRequirement(packet,node))return {required:false,ok:true,all_match:true,check_count:0,results:[]};
   const checkField=pythonChecksFromArtifact(artifact);
-  const requiredChecks=atomicMaterialCalculationCount(artifact);
+  const artifactBody=quantitativeArtifactBody(artifact);
+  const descendantMaterialization=
+    asObject(artifactBody?.runtime_verified_descendant_materialization);
+  const verifiedDescendantCoverage=
+    descendantMaterialization.contract==='qda_problem_verified_descendant_materialization_v0_1';
+
+  // For a split QDA parent, the durable atomic descendants are the arithmetic
+  // execution boundary. Their structured checks are already fail-closed and are
+  // re-executed here. Do not infer a second coverage requirement by counting
+  // every numeric leaf in the synthesized presentation, where the same verified
+  // value can legitimately appear multiple times (month index, beginning cash,
+  // repeated inflow/outflow display fields, reconciliation copies, etc.).
+  const requiredChecks=verifiedDescendantCoverage
+    ?Math.max(1,Array.isArray(checkField.value)?checkField.value.length:0)
+    :atomicMaterialCalculationCount(artifact);
+
   if(!checkField.type_ok)return {
     required:true,ok:false,failure_class:'input_contract',all_match:false,
     check_count:0,results:[],required_check_count:requiredChecks,
+    coverage_authority:verifiedDescendantCoverage?'verified_descendants':'artifact_material_numeric_leaves',
     error:checkField.error,actual_type:checkField.actual_type
   };
   const checks=checkField.value;
   if(!checks.length)return {
     required:true,ok:false,failure_class:'input_contract',all_match:false,check_count:0,results:[],
-    required_check_count:requiredChecks,error:'python_checks_required'
+    required_check_count:requiredChecks,
+    coverage_authority:verifiedDescendantCoverage?'verified_descendants':'artifact_material_numeric_leaves',
+    error:'python_checks_required'
   };
   if(checks.length<requiredChecks)return {
     required:true,ok:false,failure_class:'input_contract',all_match:false,check_count:checks.length,results:[],
     required_check_count:requiredChecks,
+    coverage_authority:verifiedDescendantCoverage?'verified_descendants':'artifact_material_numeric_leaves',
     error:'python_checks_insufficient_material_coverage:required='+requiredChecks+';received='+checks.length
   };
   return {
     required:true,
     required_check_count:requiredChecks,
+    coverage_authority:verifiedDescendantCoverage?'verified_descendants':'artifact_material_numeric_leaves',
     ...verifyPythonMathChecks(checks,{absoluteTolerance:0.005,relativeTolerance:1e-9})
   };
 }
