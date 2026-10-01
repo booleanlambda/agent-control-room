@@ -133,7 +133,7 @@ function typedArrayField(obj,key){
   }
   return {present:true,type_ok:true,value:obj[key]};
 }
-const NON_MATERIAL_CALCULATION_KEYS=/^(method|expression|formula|formula_or_model|unit|units|label|description|note|notes|explanation)$/i;
+const NON_MATERIAL_CALCULATION_KEYS=/^(method|expression|formula|formula_or_model|unit|units|label|description|note|notes|explanation|step)$/i;
 function materialCalculationLeafCount(value,key=''){
   if(value===null||value===undefined)return 0;
   if(NON_MATERIAL_CALCULATION_KEYS.test(String(key)))return 0;
