@@ -2236,6 +2236,81 @@ export async function runAutonomousRequirementCognition({
     return row;
   }
 
+  function childProposalRejectionStepKey(node,ordinal,candidate,siblingOverlap,previous=[]){
+    return 'childreject:'+sha256({
+      contract:'agent_authored_child_proposal_rejection_v0_1',
+      node_path:node.node_path,
+      ordinal,
+      requirement_hash:node.requirement_hash||sha256(node.requirement_text||''),
+      candidate_requirement_hash:sha256(text(candidate?.requirement)),
+      sibling_ordinal:Number(siblingOverlap?.ordinal||0),
+      sibling_requirement_hash:sha256(text(siblingOverlap?.requirement)),
+      prior_children_signature:childProposalSiblingSignature(previous),
+      rejection_reason:'COGNITION_CHILD_OVERLAP',
+    }).slice(0,54);
+  }
+
+  async function persistChildProposalRejection(node,ordinal,candidate,siblingOverlap,previous=[]){
+    const artifact={
+      contract:'agent_authored_child_proposal_rejection_v0_1',
+      node_path:node.node_path,
+      ordinal,
+      rejection_reason:'COGNITION_CHILD_OVERLAP',
+      candidate:{
+        requirement:text(candidate?.requirement)||null,
+        scope_removed:text(candidate?.scope_removed)||null,
+        completion_criterion:text(candidate?.completion_criterion)||null,
+        reason:text(candidate?.reason)||null,
+      },
+      accepted_sibling:{
+        node_path:text(siblingOverlap?.node_path)||null,
+        ordinal:Number(siblingOverlap?.ordinal||0),
+        status:text(siblingOverlap?.status)||null,
+        requirement:text(siblingOverlap?.requirement)||null,
+        scope_removed:text(siblingOverlap?.scope_removed)||null,
+        completion_criterion:text(siblingOverlap?.completion_criterion)||null,
+      },
+      overlap:{
+        similarity:Number(siblingOverlap?.similarity||0),
+        rejection_threshold:0.78,
+        explicit_instance_id:siblingOverlap?.explicit_instance_id??null,
+        explicit_instance_disjoint:Boolean(siblingOverlap?.explicit_instance_disjoint),
+        canonical_identity:siblingOverlap?.canonical_identity??null,
+        canonical_instance_disjoint:Boolean(siblingOverlap?.canonical_instance_disjoint),
+      },
+      prior_children_signature:childProposalSiblingSignature(previous),
+      recorded_at:new Date().toISOString(),
+    };
+    const stepKey=childProposalRejectionStepKey(node,ordinal,candidate,siblingOverlap,previous);
+    const row=await cognitionStepRpc('save',stepKey,JSON.stringify(artifact),{
+      contract:'agent_authored_child_proposal_rejection_v0_1',
+      node_path:node.node_path,
+      ordinal,
+      rejection_reason:'COGNITION_CHILD_OVERLAP',
+      similarity:Number(siblingOverlap?.similarity||0),
+      rejection_threshold:0.78,
+      prior_children_signature:childProposalSiblingSignature(previous),
+      candidate_requirement_sha256:sha256(text(candidate?.requirement)),
+      sibling_requirement_sha256:sha256(text(siblingOverlap?.requirement)),
+      durable_rejection_evidence:true,
+    });
+    if(row?.status!=='ready')
+      throw new Error('autonomous_decomposition_child_rejection_evidence_persist_failed:'+node.node_path);
+    console.warn('AAU_AUTONOMOUS_CHILD_REJECTION_EVIDENCE_PERSISTED',JSON.stringify({
+      agent_id:agentId,
+      intent_execution_id:intentExecutionId,
+      node_path:node.node_path,
+      ordinal,
+      step_key:stepKey,
+      checkpoint_id:row.step_checkpoint_id||null,
+      rejection_reason:'COGNITION_CHILD_OVERLAP',
+      similarity:Number(siblingOverlap?.similarity||0),
+      rejection_threshold:0.78,
+      sibling_ordinal:Number(siblingOverlap?.ordinal||0),
+    }));
+    return row;
+  }
+
   async function refreshedSiblingContext(node){
     const parentPath=node.parent_path??parentPathOf(node.node_path);
     if(!parentPath){
@@ -4206,8 +4281,12 @@ export async function runAutonomousRequirementCognition({
               );
               const siblingOverlap=previous
                 .map(v=>({
+                  node_path:text(v?.node_path)||null,
                   ordinal:Number(v?.ordinal||0),
+                  status:text(v?.status)||null,
                   requirement:text(v?.requirement),
+                  scope_removed:text(v?.scope_removed)||null,
+                  completion_criterion:text(v?.completion_criterion)||null,
                   similarity:requirementSimilarity(candidate.requirement,v?.requirement),
                   explicit_instance_id:explicitRepeatedInstanceId(v),
                   explicit_instance_disjoint:explicitRepeatedInstancesDisjoint(candidate,v),
@@ -4226,6 +4305,9 @@ export async function runAutonomousRequirementCognition({
                 &&!siblingOverlap.explicit_instance_disjoint
                 &&!siblingOverlap.canonical_instance_disjoint
               ){
+                await persistChildProposalRejection(
+                  node,ordinal,candidate,siblingOverlap,previous
+                );
                 provenanceRevisionGuidance=
                   'The proposed child overlaps accepted child ordinal '
                   +siblingOverlap.ordinal
