@@ -1,7 +1,7 @@
 // Silas-only standalone pilot: bound model, frozen fictional task, immutable checkpoints.
 // No normal wake, degree grading, course submission, resource mutation, or global policy.
 import { createHash } from 'node:crypto';
-import { nvidiaChatCompletion } from './providers/nvidia.js';
+import { modelChatCompletion } from './providers/model-provider.js';
 const REPO='booleanlambda/agent-control-room';
 const BRANCH='pilot/silas-bounded-continuation-20260924';
 const ROOT='pilots/silas-bounded-continuation-20260924';
