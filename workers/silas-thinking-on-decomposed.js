@@ -1,6 +1,6 @@
 // Split ONLY the timed-out Silas thinking-on numerical stage. Retain failed full call separately.
 // This runner writes one immutable result per option and assembles a transparent stage-2 bundle.
-import { nvidiaChatCompletion } from './providers/nvidia.js';
+import { modelChatCompletion, modelProviderConfigStatus } from './providers/model-provider.js';
 import { pilotHelpers as h } from './silas-thinking-on-helper.js';
 const R=h.ROOT;
 const optTasks={
@@ -16,10 +16,11 @@ async function substep(key,brief,sourceSha,plan){
   return x;
  }
  const system='You are Silas in an isolated graduate-level, off-curriculum cognition test, with thinking enabled. This is a bounded portion of the same cold-storage case, not a new task. Calculate independently rather than import prior wrong totals. Return valid JSON only, no unsupported outside research.';
+const modelProviderReady=()=>{try{return modelProviderConfigStatus().ready===true;}catch{return false;}};
  const {novel_variant,...visible}=brief;
  const user=optTasks[key]+'\nFROZEN CASE:\n'+JSON.stringify(visible)+'\nPRIOR PLAN:\n'+JSON.stringify(plan.output);
  let result;const t=Date.now();
- try{result=await nvidiaChatCompletion({model:h.MODEL,messages:[{role:'system',content:system},{role:'user',content:user}],temperature:0,maxTokens:4096,
+ try{result=await modelChatCompletion({model:h.MODEL,messages:[{role:'system',content:system},{role:'user',content:user}],temperature:0,maxTokens:4096,
    timeoutMs:180000,jsonMode:true,enableThinking:true});}
  catch(e){h.log('ON_LEDGER_BLOCKED',{option:key,reason:'request_or_timeout',code:e.code||e.name,elapsed_ms:Date.now()-t});return null;}
  let out;try{out=JSON.parse(result.content);}catch{out=null;}
@@ -44,7 +45,7 @@ async function substep(key,brief,sourceSha,plan){
 }
 
 export async function runSilasThinkingOnDecomposed(){
- if(!h.token||!process.env.NVIDIA_API_KEY)throw Error('missing_pilot_credentials');
+ if(!h.token||!modelProviderReady())throw Error('missing_pilot_credentials');
  const f=await h.read(R+'/brief.json'),planF=await h.read(R+'/step_1.json');
  if(!f||!planF)throw Error('pilot_prerequisite_missing');
  const brief=JSON.parse(f.text),plan=JSON.parse(planF.text);
