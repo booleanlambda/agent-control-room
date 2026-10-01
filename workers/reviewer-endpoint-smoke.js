@@ -15,7 +15,7 @@ async function probe(model, label) {
           {role:'system',content:'Return exactly the single token AAU_REVIEWER_ENDPOINT_OK. No explanation.'},
           {role:'user',content:'Connectivity probe only.'},
         ],
-        maxTokens:64,temperature:0,enableThinking:false,timeoutMs:30000,runtimeRole:'reviewer',
+        maxTokens:64,temperature:0,jsonMode:false,enableThinking:false,timeoutMs:30000,runtimeRole:'reviewer',
       });
       const txt=String(result.content||'').trim();
       const ok=txt.includes('AAU_REVIEWER_ENDPOINT_OK');
