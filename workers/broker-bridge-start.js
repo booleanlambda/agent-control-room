@@ -200,16 +200,6 @@ try {
   }));
 }
 
-if (isEnabled('AAU_EXPERTISE_NVIDIA_MIGRATION')) {
-  try {
-    const { migrateExpertiseVerificationToNvidia } = await import('./migrate-expertise-nvidia.js');
-    const result = await migrateExpertiseVerificationToNvidia();
-    console.log('AAU_EXPERTISE_NVIDIA_MIGRATION_RESULT', JSON.stringify(result));
-  } catch (error) {
-    console.error('AAU_EXPERTISE_NVIDIA_MIGRATION_FAILED', JSON.stringify({ error_name: error?.name || null, message: String(error?.message || error).slice(0, 2000) }));
-  }
-}
-
 // one_shot_expertise_runtime_repair_v0_1
 if (isEnabled('AAU_EXPERTISE_RUNTIME_PATCH')) {
   try {
