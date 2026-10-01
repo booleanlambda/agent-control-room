@@ -351,11 +351,13 @@ async function handleIntent(channel, msg) {
       String(error?.code||'')==='COGNITION_PROVENANCE_CONTINUATION_REQUIRED';
     const cognitionProvenanceContinuationExhausted=
       String(error?.code||'')==='COGNITION_PROVENANCE_CONTINUATION_EXHAUSTED';
+    const modelTransportTransient=String(error?.code||'')==='MODEL_TRANSPORT_TRANSIENT';
     const cognitionRuntimeFault=String(error?.code||'')==='COGNITION_RUNTIME_FAULT';
     if (!terminalSemanticRuntime
         &&!cognitionAdmissionDeferred
         &&!cognitionProvenanceContinuationRequired
         &&!cognitionProvenanceContinuationExhausted
+        &&!modelTransportTransient
         &&!cognitionRuntimeFault) {
       if (event.legacy) {
         await rpc('aau_bridge_reset_autonomous_wake_arm', {
@@ -378,9 +380,11 @@ async function handleIntent(channel, msg) {
             ? 'AAU_COGNITION_PROVENANCE_CONTINUATION_QUEUED'
             : cognitionProvenanceContinuationExhausted
               ? 'AAU_COGNITION_PROVENANCE_CONTINUATION_EXHAUSTED_NOT_REARMED'
-              : cognitionRuntimeFault
-                ? 'AAU_COGNITION_RUNTIME_FAULT_NOT_REARMED'
-                : 'AAU_SEMANTIC_RUNTIME_TERMINAL_NOT_REARMED',
+              : modelTransportTransient
+                ? 'AAU_MODEL_TRANSPORT_TRANSIENT_RETRY_OWNED_BY_RECOVERY'
+                : cognitionRuntimeFault
+                  ? 'AAU_COGNITION_RUNTIME_FAULT_NOT_REARMED'
+                  : 'AAU_SEMANTIC_RUNTIME_TERMINAL_NOT_REARMED',
         JSON.stringify({
           intent_execution_id:event.intent_execution_id,
           agent_id:event.agent_id,
