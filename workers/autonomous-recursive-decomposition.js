@@ -6514,7 +6514,20 @@ export async function runAutonomousRequirementCognition({
         let kids=(await children(node.node_path))
           .filter((child)=>String(child?.status||'')!=='cancelled')
           .sort((a,b)=>Number(a?.ordinal||0)-Number(b?.ordinal||0));
-        const childAuthoringFinalized=Boolean(node?.decision_payload?.children_authored);
+        let childAuthoringFinalized=Boolean(node?.decision_payload?.children_authored);
+        const budgetConstrainedChildAuthoringIncomplete=Boolean(
+          node?.decision_payload?.conserved_branch_economics_constraint_applied
+        )&&Number(node?.decision_payload?.semantic_child_capacity_at_stop??-1)<1;
+        if(childAuthoringFinalized&&budgetConstrainedChildAuthoringIncomplete){
+          childAuthoringFinalized=false;
+          console.log('AAU_BUDGET_CONSTRAINED_CHILD_AUTHORING_CONTINUATION_REQUIRED',JSON.stringify({
+            agent_id:agentId,
+            intent_execution_id:intentExecutionId,
+            node_path:node.node_path,
+            existing_child_count:kids.length,
+            policy:'budget_exhaustion_cannot_imply_semantic_coverage_v0_1',
+          }));
+        }
         if(!childAuthoringFinalized){
           const authoredResult=await authorChildren(node,{branchDepth,singleChildRefinements});
           if(authoredResult?.reconsider){
