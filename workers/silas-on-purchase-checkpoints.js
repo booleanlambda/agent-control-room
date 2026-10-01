@@ -1,7 +1,8 @@
 // Silas-only thinking-ON bounded purchase continuation after the first 180s B timeout.
 // Preserve all original attempts; no gold answers and no agent state or grading mutations.
-import { nvidiaChatCompletion } from './providers/nvidia.js';
+import { modelChatCompletion, modelProviderConfigStatus } from './providers/model-provider.js';
 import { pilotHelpers as h } from './silas-thinking-on-helper.js';
+const modelProviderReady=()=>{try{return modelProviderConfigStatus().ready===true;}catch{return false;}};
 const R=h.ROOT;
 const required1=['day0','day14_pre','day14_post','day28_pre','day28_post'];
 const required2=['day35_pre','day35_post','day42','minimum_cash','minimum_day'];
@@ -22,7 +23,7 @@ async function part(name,brief,sha,prior){
  const {novel_variant,...visible}=brief;
  const user=ask+'\nFROZEN SOURCE:\n'+JSON.stringify(visible)+'\nSAVED PRIOR CHECKPOINT:\n'+JSON.stringify(prior);
  const begin=Date.now();let result;
- try{result=await nvidiaChatCompletion({model:h.MODEL,messages:[{role:'system',content:system},{role:'user',content:user}],
+ try{result=await modelChatCompletion({model:h.MODEL,messages:[{role:'system',content:system},{role:'user',content:user}],
   temperature:0,jsonMode:true,enableThinking:true,maxTokens:3072,timeoutMs:180000});}
  catch(e){h.log('ON_B_PART_BLOCKED',{part:name,reason:'request_or_timeout',code:e.code||e.name,elapsed_ms:Date.now()-begin});return null;}
  let o;try{o=JSON.parse(result.content);}catch{o=null;}
@@ -45,7 +46,7 @@ async function part(name,brief,sha,prior){
 }
 
 export async function runSilasPurchaseBContinuation(){
- if(!h.token||!process.env.NVIDIA_API_KEY)throw Error('pilot_credentials_unavailable');
+ if(!h.token||!modelProviderReady())throw Error('pilot_credentials_unavailable');
  const f=await h.read(R+'/brief.json'),p=await readRow(R+'/step_1.json'),a=await readRow(R+'/step_2_A.json');
  if(!f||!p||!a)throw Error('pilot_prerequisite_missing');
  const brief=JSON.parse(f.text);
