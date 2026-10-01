@@ -1,13 +1,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const ALLOWED = new Set([
-  // Generic runtime contract.
   "aau_bridge_begin_model_intent_execution",
   "aau_bridge_apply_model_intent_execution",
-
-  // Temporary compatibility during provider-neutral worker cutover.
-  "aau_bridge_begin_nvidia_intent_execution",
-  "aau_bridge_apply_nvidia_intent_execution",
 ]);
 
 Deno.serve(async (req: Request) => {
