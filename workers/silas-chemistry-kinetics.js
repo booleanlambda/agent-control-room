@@ -2,8 +2,9 @@
 // Parallel first-order kinetics, Thinking ON, one bounded candidate per checkpoint.
 // No normal wake, grades, credentials, lifecycle, or AAU-wide policy mutation.
 import { createHash } from 'node:crypto';
-import { nvidiaChatCompletion } from './providers/nvidia.js';
+import { modelChatCompletion, modelProviderConfigStatus } from './providers/model-provider.js';
 import { persistRejectedPilotAttempt } from './pilot-rejected-attempt-evidence.js';
+const modelProviderReady=()=>{try{return modelProviderConfigStatus().ready===true;}catch{return false;}};
 
 const REPO='booleanlambda/agent-control-room';
 const EVIDENCE_BRANCH='pilot/silas-chemistry-kinetics-20260925';
@@ -81,7 +82,7 @@ async function recordRejectedAttempt({label,rejectionReason,modelReturned=null,f
 }
 async function invoke(label,system,user,{maxTokens=2048,timeoutMs=180000}={}){
  const start=Date.now(),inputSha256=digest(system+'\n'+user);let r;
- try{r=await nvidiaChatCompletion({model:MODEL,messages:[{role:'system',content:system},{role:'user',content:user}],
+ try{r=await modelChatCompletion({model:MODEL,messages:[{role:'system',content:system},{role:'user',content:user}],
   temperature:0,jsonMode:true,enableThinking:true,maxTokens,timeoutMs});}
  catch(e){
   const elapsedMs=Date.now()-start;
@@ -122,7 +123,7 @@ function candidatePrompt(brief,T,aged){
  return 'Compute exactly ONE candidate temperature for the parallel first-order network A→B and A→C. Use t=600 s. Return JSON {"stage":"kinetics_candidate","source_ids":'+JSON.stringify(source)+',"temperature_K":'+T+',"k_B_s_1":number,"k_C_s_1":number,"k_total_s_1":number,"conversion_X":number,"selectivity_B":number,"yield_B":number,"final_A_M":number,"final_B_M":number,"final_C_M":number,"mass_balance_M":number,"passes":{"conversion":boolean,"selectivity":boolean,"yield":boolean,"temperature":boolean,"nonnegative_and_mass_balance":boolean},"feasible":boolean,"equations":["running calculations"],"chemistry_comment":"..."}. Inputs: R='+brief.system.gas_constant_J_mol_K+' J mol^-1 K^-1; [A]0='+brief.system.initial_A_M+' M; desired A_B='+brief.system.desired.pre_exponential_s_1+' s^-1, Ea_B='+brief.system.desired.activation_energy_J_mol+' J/mol; undesired A_C='+Ac+' s^-1, Ea_C='+brief.system.undesired.activation_energy_J_mol+' J/mol. Frozen constraints: '+JSON.stringify(brief.constraints);
 }
 export async function runSilasChemistryKinetics(){
- if(!token||!process.env.NVIDIA_API_KEY)throw Error('chem_credentials_missing');
+ if(!token||!modelProviderReady())throw Error('chem_credentials_missing');
  const bf=await read(ROOT+'/brief.json');if(!bf)throw Error('chem_brief_missing');
  const brief=JSON.parse(bf.text);
  if(brief.agent_id!==AGENT||brief.bound_model!==MODEL||brief.thinking!==true)throw Error('chem_scope_mismatch');
