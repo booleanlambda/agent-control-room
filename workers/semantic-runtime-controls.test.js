@@ -7,6 +7,7 @@ import {
   semanticChildCapacity,
   repeatedStructuralFailureLocked,
   durableSiblingInspection,
+  classifyModelTransportFailure,
   retryableModelTransportError,
   autonomousEvidenceWindowDecision,
   evidenceCeilingRequiresAgentResolution,
@@ -152,8 +153,15 @@ test('transport retry classification is bounded to transient transport failures'
   assert.equal(retryableModelTransportError({status:503}),true);
   assert.equal(retryableModelTransportError({status:529}),true);
   assert.equal(retryableModelTransportError({status:400}),false);
-  assert.equal(retryableModelTransportError({code:'NVIDIA_TIMEOUT',name:'Error'}),false);
+  assert.equal(retryableModelTransportError({code:'MODEL_TIMEOUT',name:'Error'}),false);
   assert.equal(retryableModelTransportError({name:'AbortError',message:'aborted'}),false);
+  assert.deepEqual(classifyModelTransportFailure({code:'MODEL_TIMEOUT'}),{
+    failure_class:'model_transport_transient',transport_kind:'timeout',transport_status:null,
+    transport_code:'MODEL_TIMEOUT',immediate_retryable:false,cognition_fault:false,
+  });
+  assert.equal(classifyModelTransportFailure({status:504}).failure_class,'model_transport_transient');
+  assert.equal(classifyModelTransportFailure({cause:{code:'ECONNRESET'}}).transport_kind,'network');
+  assert.equal(classifyModelTransportFailure(new Error('decision payload invalid')).failure_class,'unknown');
 });
 
 
