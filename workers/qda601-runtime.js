@@ -562,11 +562,20 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
       if(!childDeterministicVerified){
         failures.push('qda_verified_child_deterministic_math_not_verified:'+String(child?.node_path||index+1));
       }
-      const requiredChecks=materialCalculationCount(response);
-      if(childChecks.length<requiredChecks){
+      // Coverage was already decided by the durable child completion gate.
+      // Do not infer a second coverage requirement from presentation-shaped
+      // calculation fields (which may contain labels, prose, duplicated display
+      // values, or intermediate formatting). Require the persisted verified
+      // check set to be present, then independently re-execute those checks.
+      const durableVerifiedCheckCount=Math.max(0,Number(childDeterministicCheckCount||0));
+      if(durableVerifiedCheckCount<1){
         failures.push(
-          'qda_verified_child_python_coverage_insufficient:'+String(child?.node_path||index+1)
-          +':required='+requiredChecks+';received='+childChecks.length
+          'qda_verified_child_deterministic_check_count_missing:'+String(child?.node_path||index+1)
+        );
+      }else if(childChecks.length<durableVerifiedCheckCount){
+        failures.push(
+          'qda_verified_child_python_set_incomplete:'+String(child?.node_path||index+1)
+          +':verified='+durableVerifiedCheckCount+';received='+childChecks.length
         );
       }else{
         const verification=verifyPythonMathChecks(
@@ -686,8 +695,9 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
       verification_statement:'Every preserved material calculation is backed by the included deterministic Python check set and the recorded verified child result hash chain.',
     },
     runtime_materialization:{
-      contract:'qda_verified_child_artifact_materialization_v0_2',
+      contract:'qda_verified_child_artifact_materialization_v0_3',
       arithmetic_recomputation_forbidden:true,
+      coverage_authority:'durable_child_deterministic_verification',
       source:'autonomous_recursive_decomposition_verified_children',
       children:provenanceChildren,
       python_check_count:aggregateChecks.length,
@@ -868,10 +878,25 @@ function validateUnitPayload(ctx, payload) {
 
   if (quantitative) {
     const responses=Array.isArray(payload.problem_responses)?payload.problem_responses:[];
+    const runtimeVerifiedChildren=
+      ['qda_verified_child_artifact_materialization_v0_2','qda_verified_child_artifact_materialization_v0_3'].includes(payload?.runtime_materialization?.contract)
+      &&Array.isArray(payload?.verification_provenance?.children)
+        ?payload.verification_provenance.children
+        :null;
+    const requiredCoverageForProblem=(response,index)=>{
+      if(runtimeVerifiedChildren){
+        const recorded=Math.max(
+          0,
+          Number(runtimeVerifiedChildren[index]?.deterministic_math_check_count||0)
+        );
+        return Math.max(1,recorded);
+      }
+      return materialCalculationCount(response);
+    };
     for(let index=0;index<Math.min(responses.length,expectedProblems.length);index+=1){
       const responseChecks=Array.isArray(responses[index]?.python_checks)
         ? responses[index].python_checks : [];
-      const requiredChecks=materialCalculationCount(responses[index]);
+      const requiredChecks=requiredCoverageForProblem(responses[index],index);
       if(responseChecks.length<requiredChecks){
         failures.push(
           'qda_python_checks_problem_'+String(index+1)
@@ -887,7 +912,7 @@ function validateUnitPayload(ctx, payload) {
     const checks = Array.isArray(payload.python_checks) ? payload.python_checks : [];
     const minimumCoverage=responses
       .slice(0,expectedProblems.length)
-      .reduce((sum,response)=>sum+materialCalculationCount(response),0);
+      .reduce((sum,response,index)=>sum+requiredCoverageForProblem(response,index),0);
     if (checks.length < minimumCoverage) {
       failures.push(
         'qda_python_checks_material_coverage_required:required='+minimumCoverage
