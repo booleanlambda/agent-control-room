@@ -6461,6 +6461,96 @@ export async function runAutonomousRequirementCognition({
     }));
     const terminalStageContract=stageContractForRequirement(packet,node.requirement_text,node.node_path);
     const authoritativeVerifiedNumericalEvidence=synthesisQuantitativeEvidence(childRows);
+    const synthesisRemediationEpisodes=await loadRemediationEpisodes(node.node_path);
+    let activeSynthesisRemediation=latestActiveRemediation(
+      synthesisRemediationEpisodes,'REBUILD_SYNTHESIS_FROM_RESOLVED_EVIDENCE'
+    );
+
+    const returnSynthesisFailureToAgent=async({
+      failureType,reason,review=null,continuation=null,externalVerification=null
+    })=>{
+      let remediationFailure=null;
+      if(activeSynthesisRemediation){
+        remediationFailure=await failRemediationEpisode(node,activeSynthesisRemediation,{
+          reason:'The post-repair synthesis did not satisfy its verification boundary.',
+          remainingProblem:reason||failureType,
+          externalVerification:externalVerification||{
+            kind:'synthesis_provenance',
+            ok:false,
+            status:text(review?.status)||'REVISE',
+            reason:reason||failureType,
+          },
+        });
+      }
+      const nextPayload={...asObject(node.decision_payload)};
+      delete nextPayload.synthesis_provenance_pending;
+      delete nextPayload.synthesis_complete;
+      delete nextPayload.synthesis_outcome;
+      delete nextPayload.synthesis_reason;
+      delete nextPayload.synthesis_provenance_review;
+      delete nextPayload.self_remediation_in_progress;
+      if(activeSynthesisRemediation){
+        nextPayload.last_self_remediation={
+          remediation_id:activeSynthesisRemediation.remediation_id,
+          attempt_no:Number(activeSynthesisRemediation.attempt_no||0),
+          repair_type:activeSynthesisRemediation.repair_type,
+          status:'FAILED',
+          reason:clip(remediationFailure?.reason||reason||failureType,1600),
+          verification_boundary:'POST_SYNTHESIS_PROVENANCE',
+          verification_agent_authored:false,
+          external_verification:externalVerification||null,
+          verified_by_bound_agent:false,
+        };
+        nextPayload.self_remediation_attempts_used=Number(activeSynthesisRemediation.attempt_no||0);
+      }
+      nextPayload.synthesis_cursor=childRows.length;
+      nextPayload.synthesis_accumulator=accumulator;
+      nextPayload.synthesis_child_result_hashes=currentChildResultHashes;
+      nextPayload.synthesis_failure={
+        contract:'agent_visible_synthesis_failure_v0_2',
+        failure_type:failureType,
+        reason:clip(reason,4000),
+        review:asObject(review),
+        continuation:asObject(continuation),
+        child_state_hash:sha256(childStates),
+        accumulator_hash:sha256(accumulator),
+        child_result_hashes:currentChildResultHashes,
+        prior_synthesis_remediation_id:activeSynthesisRemediation?.remediation_id||null,
+        remediation_verification:remediationFailure,
+        failed_at:new Date().toISOString(),
+        preserved_children:true,
+        preserved_accumulator:true,
+        recovery_policy:'return_to_bound_agent_REMEDIATE_decision',
+      };
+      nextPayload.reconsider_decomposition=true;
+
+      node=await saveNode({
+        nodePath:node.node_path,
+        parentPath:node.parent_path??parentPathOf(node.node_path),
+        ordinal:node.ordinal||0,
+        requirement:node.requirement_text,
+        sourceKind:node.source_kind,
+        sourceRef:node.source_ref,
+        status:'pending',
+        decisionType:null,
+        decisionPayload:nextPayload,
+        contextPayload:node.context_payload||{},
+        resultArtifact:null,
+      });
+      node.parent_path=node.parent_path??parentPathOf(node.node_path);
+
+      console.warn('AAU_SYNTHESIS_FAILURE_RETURNED_TO_SELF_REMEDIATION',JSON.stringify({
+        agent_id:agentId,
+        intent_execution_id:intentExecutionId,
+        node_path:node.node_path,
+        failure_type:failureType,
+        active_remediation_id:activeSynthesisRemediation?.remediation_id||null,
+        remediation_attempts_used:Number(nextPayload.self_remediation_attempts_used||0),
+      }));
+
+      return process(node.node_path,node.parent_path,pathDepth(node.node_path),0);
+    };
+
     let final=null;
     let synthesisProvenanceReview=null;
     const priorProvenanceContinuation=asObject(node?.decision_payload?.synthesis_provenance_pending);
@@ -6486,6 +6576,7 @@ export async function runAutonomousRequirementCognition({
           authoritative_verified_numerical_evidence_hash:
             authoritativeVerifiedNumericalEvidence.length
               ?sha256(authoritativeVerifiedNumericalEvidence):null,
+          synthesis_remediation_nonce:text(node?.decision_payload?.synthesis_remediation_nonce)||null,
           provenance_continuation_round:provenanceContinuationRound,
         });
         const durableFinal=await loadJsonPhaseCheckpoint(
@@ -6528,6 +6619,10 @@ export async function runAutonomousRequirementCognition({
                 :null,
             },
             prior_provenance_revision_guidance:synthesisProvenanceGuidance||null,
+            synthesis_failure:asObject(node?.decision_payload?.synthesis_failure),
+            active_self_remediation:activeSynthesisRemediation
+              ?compactRemediationEpisodes([activeSynthesisRemediation])[0]
+              :null,
             authoritative_verified_numerical_evidence:
               authoritativeVerifiedNumericalEvidence.length
                 ?authoritativeVerifiedNumericalEvidence
@@ -6651,19 +6746,68 @@ export async function runAutonomousRequirementCognition({
             });
             node.parent_path=node.parent_path??parentPathOf(node.node_path);
             const exhausted=nextContinuationRound>=MAX_SYNTHESIS_PROVENANCE_CONTINUATION_ROUNDS;
-            const error=new Error(
-              (exhausted
-                ?'cognition_provenance_continuation_exhausted:'
-                :'cognition_provenance_continuation_required:')
-              +node.node_path
-            );
-            error.code=exhausted
-              ?'COGNITION_PROVENANCE_CONTINUATION_EXHAUSTED'
-              :'COGNITION_PROVENANCE_CONTINUATION_REQUIRED';
+            if(exhausted){
+              return returnSynthesisFailureToAgent({
+                failureType:'synthesis_provenance_continuation_exhausted',
+                reason:synthesisProvenanceGuidance,
+                review:synthesisProvenanceReview,
+                continuation,
+                externalVerification:{
+                  kind:'synthesis_provenance',
+                  ok:false,
+                  status:text(synthesisProvenanceReview?.status)||'REVISE',
+                  issue_count:asArray(synthesisProvenanceReview?.issues).length,
+                  reason:synthesisProvenanceGuidance,
+                },
+              });
+            }
+            const error=new Error('cognition_provenance_continuation_required:'+node.node_path);
+            error.code='COGNITION_PROVENANCE_CONTINUATION_REQUIRED';
             error.provenanceContinuation=continuation;
             throw error;
           }
           continue;
+        }
+
+        if(
+          activeSynthesisRemediation
+          &&['applied','verifying'].includes(String(activeSynthesisRemediation.status||''))
+        ){
+          const remediationPinnedEvidence=await loadPinnedEvidence(node.node_path);
+          const remediationSiblingEvidence=authoritativeSiblingEvidence(node.context_payload||{});
+          const verifiedRemediation=await verifyRemediationEpisode(node,activeSynthesisRemediation,{
+            contextPayload:node.context_payload||{},
+            pinnedEvidence:remediationPinnedEvidence,
+            siblingEvidence:remediationSiblingEvidence,
+            externalVerification:{
+              kind:'synthesis_provenance',
+              ok:true,
+              status:'ACCEPT',
+              issue_count:0,
+              quantitative_drift_guard_passed:true,
+              artifact_hash:sha256(artifactText(final?.parsed?.artifact)),
+              provenance_reason:clip(synthesisProvenanceReview?.reason,2200),
+            },
+            preserveCurrentCognition:true,
+          });
+          node=verifiedRemediation.node;
+          if(!verifiedRemediation.verified){
+            return returnSynthesisFailureToAgent({
+              failureType:'self_remediation_verification_failed',
+              reason:verifiedRemediation.verification?.remaining_problem
+                ||verifiedRemediation.verification?.reason
+                ||'The bound agent did not verify its own synthesis remediation.',
+              review:synthesisProvenanceReview,
+              externalVerification:{
+                kind:'synthesis_provenance',
+                ok:true,
+                status:'ACCEPT',
+                issue_count:0,
+                quantitative_drift_guard_passed:true,
+              },
+            });
+          }
+          activeSynthesisRemediation=null;
         }
         break;
       }catch(error){
