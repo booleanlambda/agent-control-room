@@ -1,9 +1,10 @@
-import { nvidiaChatCompletion } from './providers/nvidia.js';
+import { modelChatCompletion, modelProviderConfigStatus } from './providers/model-provider.js';
 import { pilotHelpers as h } from './silas-continuation-pilot.js';
 import { repairSilasStage2 } from './silas-pilot-stage2-repair.js';
+const modelProviderReady=()=>{try{return modelProviderConfigStatus().ready===true;}catch{return false;}};
 export async function runSilasContinuationPilot(){
  const phase=Number(process.env.AAU_SILAS_PILOT_PHASE||2);
- if(![2,5].includes(phase)||!h.token||!process.env.NVIDIA_API_KEY)throw Error('pilot_invalid_config');
+ if(![2,5].includes(phase)||!h.token||!modelProviderReady())throw Error('pilot_invalid_config');
  const f=await h.read(h.ROOT+'/brief.json'),brief=JSON.parse(f.text);
  if(brief.agent_id!==h.AGENT||brief.bound_model!==h.MODEL)throw Error('pilot_identity_mismatch');
  const prior=[];
@@ -25,7 +26,7 @@ export async function runSilasContinuationPilot(){
   const user=h.asks[n]+'\nFROZEN CASE AND PRIOR CHECKPOINTS:\n'+JSON.stringify({brief:modelBrief,prior:prior.map(x=>({step:x.step,output:x.output,output_sha256:x.output_sha256}))});
   const start=Date.now();
   let r;try{
-   r=await nvidiaChatCompletion({model:h.MODEL,messages:[{role:'system',content:system},{role:'user',content:user}],
+   r=await modelChatCompletion({model:h.MODEL,messages:[{role:'system',content:system},{role:'user',content:user}],
     maxTokens:4096,timeoutMs:120000,temperature:0,jsonMode:true,enableThinking:false});
   }catch(e){h.log('BLOCKED',{step:n,reason:'model_error',code:e.code||e.name,elapsed_ms:Date.now()-start});return;}
   let o;try{o=JSON.parse(r.content);}catch{o=null;}
