@@ -11,7 +11,6 @@ alter table agent_lab.cognition_remediation_episodes
   add constraint cognition_remediation_episodes_repair_type_check
   check (repair_type in (
     'INVALIDATE_DISCOVERY_CHECKPOINT',
-    'REFRESH_SIBING_EVIDENCE',
     'REFRESH_SIBLING_EVIDENCE',
     'REBUILD_SYNTHESIS_FROM_RESOLVED_EVIDENCE'
   ));
