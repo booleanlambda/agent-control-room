@@ -158,7 +158,11 @@ try {
         inputs:{n},
         assumptions:['probe assumption '+n],
         formula_or_model:String(n)+' + 0',
-        calculation:'verified calculation '+n,
+        calculation:{
+          result:n,
+          display:'verified calculation '+n,
+          note:'presentation text must not create a second Python-coverage obligation',
+        },
         units:'count',
         interpretation:'probe interpretation '+n,
         sanity_check:'probe sanity check '+n,
