@@ -141,7 +141,7 @@ grant execute on function public.aau_bridge_complete_qda601_authenticator_review
   text,uuid,text,text,numeric,text,jsonb
 ) to anon,authenticated;
 
-create or replace function public.aau_bridge_reopen_completed_cognition_assignment_for_qda_review_v0_1(
+create or replace function public.aau_bridge_reopen_qda_assignment_for_auth_review_v0_1(
   p_bridge_token text,
   p_agent_id uuid,
   p_wake_request_id uuid,
@@ -248,11 +248,15 @@ begin
 end
 $function$;
 
-revoke all on function public.aau_bridge_reopen_completed_cognition_assignment_for_qda_review_v0_1(
+revoke all on function public.aau_bridge_reopen_qda_assignment_for_auth_review_v0_1(
   text,uuid,uuid,text,text,uuid,text
 ) from public,authenticated,service_role;
-grant execute on function public.aau_bridge_reopen_completed_cognition_assignment_for_qda_review_v0_1(
+grant execute on function public.aau_bridge_reopen_qda_assignment_for_auth_review_v0_1(
   text,uuid,uuid,text,text,uuid,text
 ) to anon;
+
+drop function if exists public.aau_bridge_reopen_completed_cognition_assignment_for_qda_review(
+  text,uuid,uuid,text,text,uuid,text
+);
 
 commit;
