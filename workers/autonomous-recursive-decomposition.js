@@ -5887,6 +5887,143 @@ export async function runAutonomousRequirementCognition({
     return saved;
   }
 
+  function synthesisEvidenceArtifactObject(raw){
+    let value=raw;
+    for(let depth=0;depth<3;depth++){
+      if(typeof value!=='string')break;
+      try{value=JSON.parse(value);}catch{return null;}
+    }
+    return value&&typeof value==='object'&&!Array.isArray(value)?value:null;
+  }
+
+  function synthesisChildHasVerifiedQuantitativeEvidence(child){
+    const payload=asObject(child?.decision_payload);
+    const decision=text(child?.decision_type).toUpperCase();
+    if(decision==='ATOMIC'){
+      return payload.deterministic_math_verified===true
+        ||text(payload.deterministic_math_verified).toLowerCase()==='true';
+    }
+    if(decision==='SPLIT'){
+      const review=asObject(payload.synthesis_provenance_review);
+      return text(review.status).toUpperCase()==='ACCEPT';
+    }
+    return false;
+  }
+
+  function synthesisNumericLeaves(value,path=[],out=[]){
+    if(typeof value==='number'&&Number.isFinite(value)){
+      out.push({path:path.join('.'),key:text(path[path.length-1]),value});
+      return out;
+    }
+    if(Array.isArray(value)){
+      value.forEach((item,index)=>synthesisNumericLeaves(item,[...path,String(index)],out));
+      return out;
+    }
+    if(value&&typeof value==='object'){
+      Object.entries(value).forEach(([key,item])=>
+        synthesisNumericLeaves(item,[...path,key],out)
+      );
+    }
+    return out;
+  }
+
+  function normalizedEvidenceLabel(raw){
+    return text(raw)
+      .replace(/([a-z0-9])([A-Z])/g,'$1 $2')
+      .replace(/[_-]+/g,' ')
+      .replace(/\s+/g,' ')
+      .trim()
+      .toLowerCase();
+  }
+
+  function synthesisQuantitativeEvidence(childRows){
+    const allowedLabels=new Set([
+      'annual payment','term years','discount rate','total pv',
+      'fv result','pv result','pass a result','pass b result','variance',
+    ]);
+    const evidence=[];
+    for(const child of childRows){
+      if(!synthesisChildHasVerifiedQuantitativeEvidence(child))continue;
+      const parts=resultParts(child.result_artifact);
+      const artifact=synthesisEvidenceArtifactObject(parts.artifact);
+      if(!artifact)continue;
+      for(const leaf of synthesisNumericLeaves(artifact)){
+        const label=normalizedEvidenceLabel(leaf.key);
+        const numbered=/^(?:year|yr|y)\s*\d+$/i.test(label);
+        if(!numbered&&!allowedLabels.has(label))continue;
+        evidence.push({
+          source_path:child.node_path,
+          source_result_hash:child.result_hash||sha256(child.result_artifact||''),
+          claim_path:leaf.path,
+          label,
+          value:leaf.value,
+        });
+      }
+    }
+    const deduped=[];
+    const seen=new Set();
+    for(const item of evidence){
+      const key=item.label+'|'+String(item.value);
+      if(seen.has(key))continue;
+      seen.add(key);
+      deduped.push(item);
+    }
+    return deduped.slice(0,160);
+  }
+
+  function synthesisQuantitativeClaimPattern(label){
+    const year=label.match(/^(?:year|yr|y)\s*(\d+)$/i);
+    const number='(-?\\d[\\d,]*(?:\\.\\d+)?)';
+    if(year){
+      return new RegExp('\\b(?:year|yr|y)\\s*'+year[1]+'\\s*[:=]\\s*\\$?\\s*'+number,'gi');
+    }
+    if(label==='total pv'){
+      return new RegExp('\\b(?:total(?:\\s+(?:aggregate\\s+)?pv)?|total\\s+sum)\\s*[:=]\\s*\\$?\\s*'+number,'gi');
+    }
+    const parts=label.split(' ').filter(Boolean).map(v=>v.replace(/[.*+?^$()|[\]\\]/g,'\\  async function materializeQdaProblemFromVerifiedDescendants(node,artifact){'));
+    if(!parts.length)return null;
+    return new RegExp('\\b'+parts.join('[\\s_-]*')+'\\b\\s*[:=]\\s*\\$?\\s*'+number,'gi');
+  }
+
+  function synthesisQuantitativeDriftReview(finalCandidate,evidence){
+    if(!evidence.length)return null;
+    const candidateText=artifactText(finalCandidate?.artifact);
+    if(!candidateText)return null;
+    const issues=[];
+    const bindings=[];
+    for(const item of evidence){
+      const pattern=synthesisQuantitativeClaimPattern(item.label);
+      if(!pattern)continue;
+      let match=null;
+      while((match=pattern.exec(candidateText))!==null){
+        const observed=Number(String(match[1]||'').replaceAll(',',''));
+        if(!Number.isFinite(observed))continue;
+        const tolerance=Math.max(0.005,Math.abs(Number(item.value))*1e-9);
+        const preserved=Math.abs(observed-Number(item.value))<=tolerance;
+        bindings.push({
+          claim:item.label+': '+String(item.value),
+          source_path_or_id:item.source_path,
+          preserved,
+        });
+        if(!preserved){
+          issues.push(
+            item.label+' changed from verified '+String(item.value)
+            +' to '+String(observed)+' during parent synthesis.'
+          );
+        }
+        break;
+      }
+    }
+    if(!issues.length)return null;
+    return {
+      status:'REVISE',
+      reason:'Parent synthesis changed numerical claims already established by verified child evidence. Ordinary synthesis may summarize or interpret verified quantitative evidence but must not silently recompute or alter it.',
+      issues:[...new Set(issues)].slice(0,20),
+      evidence_bindings:bindings.slice(0,80),
+      revision_guidance:'Preserve the AUTHORITATIVE_VERIFIED_NUMERICAL_EVIDENCE values exactly at their established display precision. Correct only the transcription drift in the parent artifact; do not recompute those child results during ordinary synthesis.',
+      deterministic_guard:'verified_child_quantitative_evidence_v0_1',
+    };
+  }
   async function materializeQdaProblemFromVerifiedDescendants(node,artifact){
     if(!/QDA601/i.test(text(node?.requirement_text)) || pathDepth(node?.node_path)!==1){
       return {artifact,materialized:false,check_count:0};
@@ -6136,6 +6273,7 @@ export async function runAutonomousRequirementCognition({
       decision_type:child.decision_type||null,
     }));
     const terminalStageContract=stageContractForRequirement(packet,node.requirement_text,node.node_path);
+    const authoritativeVerifiedNumericalEvidence=synthesisQuantitativeEvidence(childRows);
     let final=null;
     let synthesisProvenanceReview=null;
     const priorProvenanceContinuation=asObject(node?.decision_payload?.synthesis_provenance_pending);
@@ -6158,6 +6296,10 @@ export async function runAutonomousRequirementCognition({
           lifecycle_stage_contract_name:terminalStageContract.name||null,
           lifecycle_stage_contract_hash:terminalStageContract.definition
             ?sha256(terminalStageContract.definition):null,
+          authoritative_verified_numerical_evidence_hash:
+            authoritativeVerifiedNumericalEvidence.length
+              ?sha256(authoritativeVerifiedNumericalEvidence):null,
+          provenance_continuation_round:provenanceContinuationRound,
         });
         const durableFinal=await loadJsonPhaseCheckpoint(
           node.node_path,'FINAL_SYNTHESIS',finalSemanticIdentity
@@ -6176,6 +6318,10 @@ export async function runAutonomousRequirementCognition({
             'Return JSON only: {"outcome":"COMPLETE|BLOCKED","reason":"auditable reason","artifact":"concise semantic parent result OR a real nested JSON object when the parent requirement or prior provenance guidance requires structured fields","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
             'STRUCTURED ARTIFACT RULE: when the parent requirement or prior_provenance_revision_guidance names required fields/schema, artifact MUST be the actual nested JSON object with those fields. Do not encode that object as a string, prose blob, markdown, or JSON-inside-a-string.',
             'When prior provenance guidance requests a shape correction, the corrected shape is authoritative for this synthesis attempt and must be reflected directly in artifact.',
+            ...(authoritativeVerifiedNumericalEvidence.length?[
+              'AUTHORITATIVE VERIFIED NUMERICAL EVIDENCE is supplied below from completed child work that already passed deterministic/provenance checks. Treat these values as evidence, not as prompts to recalculate.',
+              'When you repeat one of those numerical claims, preserve the established value at its displayed precision. Ordinary parent synthesis may interpret or summarize it but must not silently change it. If you believe a verified child value is wrong, preserve it and state the concern as unresolved rather than substituting a new number during synthesis.'
+            ]:[]),
             'Do not add requirements or conclusions that are not supported by the resolved children.',
              'EPISTEMIC THRESHOLD POLICY: '+THRESHOLD_EVIDENCE_POLICY.RULE+' '+THRESHOLD_EVIDENCE_POLICY.PASS+' '+THRESHOLD_EVIDENCE_POLICY.FAIL+' '+THRESHOLD_EVIDENCE_POLICY.UNKNOWN,
              'If a child contains UNKNOWN threshold states, preserve them as UNKNOWN in the parent synthesis unless later resolved by explicit evidence.',
@@ -6195,6 +6341,10 @@ export async function runAutonomousRequirementCognition({
                 :null,
             },
             prior_provenance_revision_guidance:synthesisProvenanceGuidance||null,
+            authoritative_verified_numerical_evidence:
+              authoritativeVerifiedNumericalEvidence.length
+                ?authoritativeVerifiedNumericalEvidence
+                :null,
           })},
         ],stageBudgets.synthesis_final,'req_'+node.node_path.replaceAll('.','_')+'_synthesis_final_'+attempt);
 
@@ -6243,13 +6393,28 @@ export async function runAutonomousRequirementCognition({
           );
         }
 
-        synthesisProvenanceReview=await reviewSynthesisProvenance(
-          node,
-          childRows,
-          accumulator,
+        const quantitativeDriftReview=synthesisQuantitativeDriftReview(
           final?.parsed,
-          synthesisProvenanceGuidance
+          authoritativeVerifiedNumericalEvidence
         );
+        if(quantitativeDriftReview){
+          synthesisProvenanceReview=quantitativeDriftReview;
+          console.log('AAU_SYNTHESIS_QUANTITATIVE_EVIDENCE_DRIFT',JSON.stringify({
+            agent_id:agentId,
+            intent_execution_id:intentExecutionId,
+            node_path:node.node_path,
+            issue_count:quantitativeDriftReview.issues.length,
+            guard:quantitativeDriftReview.deterministic_guard,
+          }));
+        }else{
+          synthesisProvenanceReview=await reviewSynthesisProvenance(
+            node,
+            childRows,
+            accumulator,
+            final?.parsed,
+            synthesisProvenanceGuidance
+          );
+        }
         console.log('AAU_AUTONOMOUS_SYNTHESIS_PROVENANCE_REVIEW',JSON.stringify({
           agent_id:agentId,
           intent_execution_id:intentExecutionId,
