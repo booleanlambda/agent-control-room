@@ -342,14 +342,18 @@ async function requestNvidia(config, requestBody, timeoutMs, userAgent, usageCon
       startedAt,latencyMs:Date.now()-startedAt,
     });
     if (timedOut) {
-      const timeoutError = new Error(`nvidia_timeout_after_${timeoutMs}ms`);
-      timeoutError.code = 'NVIDIA_TIMEOUT';
+      const timeoutError = new Error(`model_timeout_after_${timeoutMs}ms`);
+      timeoutError.code = 'MODEL_TIMEOUT';
+      timeoutError.providerCode = 'NVIDIA_TIMEOUT';
+      timeoutError.provider = 'nvidia_direct';
       timeoutError.providerStatusCode = null;
       timeoutError.providerUsage = null;
       timeoutError.providerTotalTokens = null;
       timeoutError.providerUsageKnown = false;
       throw timeoutError;
     }
+    error.provider = 'nvidia_direct';
+    error.providerCode = transportCode;
     error.providerStatusCode = null;
     error.providerUsage = null;
     error.providerTotalTokens = null;
@@ -367,7 +371,10 @@ async function requestNvidia(config, requestBody, timeoutMs, userAgent, usageCon
       callStatus:'provider_error',providerStatusCode:response.status,
       errorCode:`NVIDIA_HTTP_${response.status}`,startedAt,latencyMs:Date.now()-startedAt,
     });
-    const error = new Error(`nvidia_${response.status}: ${detail}`);
+    const error = new Error(`model_provider_http_${response.status}: ${detail}`);
+    error.code = 'MODEL_HTTP_ERROR';
+    error.provider = 'nvidia_direct';
+    error.providerCode = `NVIDIA_HTTP_${response.status}`;
     error.status = response.status;
     error.providerStatusCode = response.status;
     error.providerUsage = body?.usage && typeof body.usage==='object' ? body.usage : null;
@@ -543,7 +550,7 @@ export async function nvidiaChatCompletion({
   await persistAdminChatReplyEarly(resolvedMessages, content, body?.model || resolvedModel);
 
   return {
-    provider: 'nvidia',
+    provider: 'nvidia_direct',
     model_requested: resolvedModel,
     model_returned: typeof body?.model === 'string' ? body.model : null,
     content,
