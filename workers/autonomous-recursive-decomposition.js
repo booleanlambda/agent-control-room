@@ -7204,9 +7204,19 @@ export async function runAutonomousRequirementCognition({
         terminal_stage_contract_name:terminalStageContract.applies?terminalStageContract.name:null,
         stage_contract_materialization_version:
           terminalStageContract.applies?STAGE_CONTRACT_MATERIALIZATION_VERSION:null,
-        qda_verified_descendant_materialized:qdaProblemMaterialization.materialized===true,
+        qda_verified_descendant_materialized:
+          qdaProblemMaterialization.materialized===true
+          ||qdaProblemMaterialization.already_materialized===true,
         qda_verified_descendant_check_count:Number(qdaProblemMaterialization.check_count||0),
         qda_verified_descendant_sources:asArray(qdaProblemMaterialization.sources),
+        ...(qdaProblemMaterialization.verification?.required===true
+          &&qdaProblemMaterialization.verification?.ok===true
+          &&qdaProblemMaterialization.verification?.all_match===true?{
+            deterministic_math_verified:true,
+            deterministic_math_check_count:Number(qdaProblemMaterialization.check_count||0),
+            deterministic_math_verification:qdaProblemMaterialization.verification,
+            deterministic_math_gate:'split_parent_verified_descendants_v0_1',
+          }:{}),
       },
       contextPayload:node.context_payload||{},resultArtifact,
     });
