@@ -1,4 +1,4 @@
-import { nvidiaChatCompletion } from './providers/nvidia.js';
+import { modelChatCompletion } from './providers/model-provider.js';
 import { researchWeb } from './web-research.js';
 
 const SB=String(process.env.AAU_SUPABASE_URL||'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/,'');
@@ -44,7 +44,7 @@ function selectOfficialSources(sources) {
   return [...byCampus.values()].slice(0,5);
 }
 async function call(model,system,user,label,maxTokens=3900) {
-  const result=await nvidiaChatCompletion({model,messages:[
+  const result=await modelChatCompletion({model,messages:[
     {role:'system',content:system},{role:'user',content:user}],
     maxTokens,temperature:0.1,jsonMode:true,enableThinking:false});
   if(!result.content)throw Error(label+'_empty_response');
