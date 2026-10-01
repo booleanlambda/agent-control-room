@@ -1021,12 +1021,62 @@ function indexObject(root,prefix='',depth=0,out=[]){
   return out;
 }
 
+function qda601AuthenticatorRemediation(packet){
+  const qda=asObject(packet?.qda_601_context);
+  const state=asObject(packet?.state?.state_payload);
+  const required=
+    state.qda_601_remediation_required===true
+    ||text(state.qda_601_remediation_required).toLowerCase()==='true';
+  const reason=text(state.qda_601_remediation_reason);
+  const unit=text(state.qda_601_remediation_unit).toUpperCase();
+  const nextUnit=text(qda?.next_unit?.unit_code).toUpperCase();
+  const reviewId=text(state.qda_601_last_authenticator_review_id);
+  const report=asObject(state.qda_601_authenticator_failure_report);
+  if(
+    !required
+    ||reason!=='independent_authenticator_verified_fail'
+    ||!unit
+    ||unit!==nextUnit
+    ||!reviewId
+  ) return {active:false};
+  return {
+    active:true,
+    unit_code:unit,
+    review_id:reviewId,
+    anchor_review_id:text(state.qda_601_remediation_anchor_review_id)||reviewId,
+    rejected_file_id:text(state.qda_601_last_rejected_file_id)||null,
+    artifact_sha256:text(state.qda_601_authenticator_failure_artifact_sha256)
+      ||text(report.artifact_sha256)||null,
+    score:Number(state.qda_601_authenticator_failure_score??report.overall_score??0)||null,
+    report,
+  };
+}
+
 function qda601HoldRequirement(packet){
   const qda=asObject(packet?.qda_601_context);
   if(qda.assigned!==true || qda.blocking_stage4!==true) return null;
 
   const status=text(qda.status);
   const next=asObject(qda.next_unit);
+  const authRemediation=qda601AuthenticatorRemediation(packet);
+
+  if(status==='in_progress' && text(next.unit_code) && authRemediation.active){
+    return {
+      source_kind:'supplemental_training',
+      source_ref:text(next.unit_code),
+      requirement:[
+        'QDA-601 independent authenticator remediation is the authoritative lifecycle obligation while Stage 4 is suspended.',
+        'Remediate the rejected artifact for exactly '+text(next.unit_code)+'; do not restart or recompute already verified child mathematics unless the authenticator report identifies a substantive mathematical error.',
+        'Preserve the completed problem tree, deterministic Python evidence, child result hashes, and prior self-audit evidence.',
+        'Latest rejected authenticator review: '+authRemediation.review_id+'.',
+        authRemediation.rejected_file_id?'Rejected file ID: '+authRemediation.rejected_file_id+'.':'',
+        authRemediation.artifact_sha256?'Rejected artifact SHA256: '+authRemediation.artifact_sha256+'.':'',
+        'AUTHENTICATOR FAILURE REPORT: '+JSON.stringify(authRemediation.report),
+        'Use self-remediation to rebuild only the final synthesis/artifact surface from resolved verified evidence, address the cited failure, and resubmit the same canonical filename '+text(next.filename)+'.',
+        'Independent verification remains external; do not self-certify a QDA pass.'
+      ].filter(Boolean).join(' ')
+    };
+  }
 
   if(status==='in_progress' && text(next.unit_code)){
     return {
@@ -1609,7 +1659,10 @@ export async function runAutonomousRequirementCognition({
       remediation_required:statePayload.qda_601_remediation_required===true
         ||text(statePayload.qda_601_remediation_required).toLowerCase()==='true',
       remediation_unit:text(statePayload.qda_601_remediation_unit)||null,
-      remediation_review_id:text(statePayload.qda_601_last_authenticator_review_id)||null,
+      // Keep one semantic tree for the entire remediation cycle. The latest
+      // review remains evidence inside the tree, but does not create a new tree.
+      remediation_review_id:text(statePayload.qda_601_remediation_anchor_review_id)
+        ||text(statePayload.qda_601_last_authenticator_review_id)||null,
     }:null,
   }).slice(0,48);
   const idx=contextIndex(packet);
@@ -1658,6 +1711,40 @@ export async function runAutonomousRequirementCognition({
     });
     if(semanticRuntimeSnapshot?.status!=='ready')
       throw new Error('semantic_runtime_initialization_failed');
+  }
+  const externalAuthenticatorRemediation=qda601AuthenticatorRemediation(packet);
+  if(
+    String(semanticRuntimeSnapshot?.runtime_status||'')==='complete'
+    &&externalAuthenticatorRemediation.active
+  ){
+    const reopened=await rpc(
+      'aau_bridge_reopen_completed_cognition_assignment_for_qda_review_v0_1',
+      {
+        p_agent_id:agentId,
+        p_wake_request_id:intentExecutionId,
+        p_assignment_key:assignmentKey,
+        p_model:model,
+        p_review_id:externalAuthenticatorRemediation.review_id,
+        p_unit_code:externalAuthenticatorRemediation.unit_code,
+      }
+    );
+    if(reopened?.status!=='ready'||String(reopened?.runtime_status||'')!=='active')
+      throw new Error('qda_authenticator_remediation_runtime_reopen_failed');
+    semanticRuntime.epoch_no=Number(reopened.epoch_no);
+    semanticRuntimeSnapshot={
+      ...semanticRuntimeSnapshot,
+      ...reopened,
+      runtime_found:true,
+      runtime_status:'active',
+    };
+    console.log('AAU_QDA_AUTHENTICATOR_REMEDIATION_RUNTIME_REOPENED',JSON.stringify({
+      agent_id:agentId,
+      intent_execution_id:intentExecutionId,
+      assignment_key:assignmentKey,
+      epoch_no:semanticRuntime.epoch_no,
+      review_id:externalAuthenticatorRemediation.review_id,
+      unit_code:externalAuthenticatorRemediation.unit_code,
+    }));
   }
   if(String(semanticRuntimeSnapshot?.runtime_status||'')==='budget_exhausted'){
     const error=new Error('semantic_runtime_terminal:budget_exhausted:'+assignmentKey);
@@ -6938,6 +7025,90 @@ export async function runAutonomousRequirementCognition({
     node.parent_path=parentPath;
     counters.nodes++;
 
+    const rootExternalAuthRemediation=
+      nodePath==='R'?qda601AuthenticatorRemediation(packet):{active:false};
+    const lastHandledExternalReview=text(
+      node?.decision_payload?.external_authenticator_remediation_review_id
+    );
+    if(
+      node.node_status==='completed'
+      &&rootExternalAuthRemediation.active
+      &&lastHandledExternalReview!==rootExternalAuthRemediation.review_id
+    ){
+      const priorPayload={...asObject(node.decision_payload)};
+      for(const key of [
+        'synthesis_complete','synthesis_outcome','synthesis_reason',
+        'synthesis_provenance_review','synthesis_provenance_pending',
+        'self_remediation_in_progress','synthesis_remediation_nonce'
+      ]) delete priorPayload[key];
+      priorPayload.synthesis_failure={
+        contract:'external_authenticator_synthesis_failure_v0_1',
+        failure_type:'independent_authenticator_verified_fail',
+        reason:clip(
+          text(rootExternalAuthRemediation.report?.rationale)
+          ||'Independent authenticator rejected the frozen QDA unit artifact.',
+          4000
+        ),
+        review:{
+          status:'REVISE',
+          reason:clip(text(rootExternalAuthRemediation.report?.rationale),4000),
+          issues:[
+            ...asArray(rootExternalAuthRemediation.report?.weaknesses).map(v=>clip(text(v),1200)),
+            ...asArray(rootExternalAuthRemediation.report?.remediation).map(v=>clip(text(v),1200)),
+          ].filter(Boolean).slice(0,20),
+          revision_guidance:clip(
+            asArray(rootExternalAuthRemediation.report?.remediation).map(text).filter(Boolean).join(' '),
+            5000
+          ),
+          external_authenticator:true,
+        },
+        authenticator_review_id:rootExternalAuthRemediation.review_id,
+        rejected_file_id:rootExternalAuthRemediation.rejected_file_id,
+        rejected_artifact_sha256:rootExternalAuthRemediation.artifact_sha256,
+        authenticator_score:rootExternalAuthRemediation.score,
+        authenticator_report:rootExternalAuthRemediation.report,
+        prior_root_result_hash:node.result_hash||null,
+        child_result_hashes:asArray(priorPayload.synthesis_child_result_hashes),
+        accumulator_hash:Object.keys(asObject(priorPayload.synthesis_accumulator)).length
+          ?sha256(priorPayload.synthesis_accumulator):null,
+        preserved_children:true,
+        preserved_accumulator:true,
+        recovery_policy:'return_to_bound_agent_REMEDIATE_decision',
+        failed_at:new Date().toISOString(),
+      };
+      priorPayload.external_authenticator_remediation_review_id=
+        rootExternalAuthRemediation.review_id;
+      priorPayload.external_authenticator_remediation_rejected_file_id=
+        rootExternalAuthRemediation.rejected_file_id;
+      priorPayload.reconsider_decomposition=true;
+      priorPayload.synthesis_recovery_routing_required=true;
+      priorPayload.synthesis_recovery_routing_at=new Date().toISOString();
+
+      node=await saveNode({
+        nodePath:node.node_path,
+        parentPath:node.parent_path??parentPathOf(node.node_path),
+        ordinal:node.ordinal||0,
+        requirement:node.requirement_text,
+        sourceKind:node.source_kind,
+        sourceRef:node.source_ref,
+        status:'pending',
+        decisionType:null,
+        decisionPayload:priorPayload,
+        contextPayload:node.context_payload||{},
+        resultArtifact:null,
+      });
+      node.parent_path=parentPath;
+      console.log('AAU_QDA_AUTHENTICATOR_FAILURE_RETURNED_TO_SELF_REMEDIATION',JSON.stringify({
+        agent_id:agentId,
+        intent_execution_id:intentExecutionId,
+        assignment_key:assignmentKey,
+        node_path:node.node_path,
+        review_id:rootExternalAuthRemediation.review_id,
+        rejected_file_id:rootExternalAuthRemediation.rejected_file_id,
+        prior_root_result_hash:text(priorPayload.synthesis_failure.prior_root_result_hash)||null,
+      }));
+    }
+
     if(node.node_status==='completed'){
       const atomicRevalidation=completedAtomicDeterministicRevalidation(packet,node);
       if(atomicRevalidation.required){
@@ -7327,8 +7498,18 @@ export async function runAutonomousRequirementCognition({
       result_hash:child.result_hash||null,
       result_artifact:child.result_artifact||null,
       deterministic_math_verified:child?.decision_payload?.deterministic_math_verified===true
-        ||String(child?.decision_payload?.deterministic_math_verified||'').toLowerCase()==='true',
-      deterministic_math_check_count:Number(child?.decision_payload?.deterministic_math_check_count||0),
+        ||String(child?.decision_payload?.deterministic_math_verified||'').toLowerCase()==='true'
+        ||child?.decision_payload?.qda_verified_descendant_materialized===true
+        ||String(child?.decision_payload?.qda_verified_descendant_materialized||'').toLowerCase()==='true',
+      deterministic_math_check_count:Math.max(
+        Number(child?.decision_payload?.deterministic_math_check_count||0),
+        Number(child?.decision_payload?.qda_verified_descendant_check_count||0)
+      ),
+      qda_verified_descendant_materialized:
+        child?.decision_payload?.qda_verified_descendant_materialized===true
+        ||String(child?.decision_payload?.qda_verified_descendant_materialized||'').toLowerCase()==='true',
+      qda_verified_descendant_check_count:
+        Number(child?.decision_payload?.qda_verified_descendant_check_count||0),
     });
   }
 
