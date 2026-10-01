@@ -1,10 +1,10 @@
-import { withReviewerNvidiaSlot, isReviewerModelInBackoff, noteReviewerModelTimeout, noteReviewerModelSuccess } from './reviewer-nvidia-endpoint-gate.js';
-import { nvidiaChatCompletion } from './providers/nvidia.js';
+import { withReviewerModelSlot, isReviewerModelInBackoff, noteReviewerModelTimeout, noteReviewerModelSuccess } from './reviewer-model-endpoint-gate.js';
+import { modelChatCompletion, modelProviderConfigStatus } from './providers/model-provider.js';
 
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
 const bridge = String(process.env.AAU_BROKER_BRIDGE_TOKEN || '').trim();
-const nvidiaKey = String(process.env.NVIDIA_API_KEY || '').trim();
+const modelProviderReady=()=>{try{return modelProviderConfigStatus().ready===true;}catch{return false;}};
 const githubToken = String(process.env.AAU_AGENT_GITHUB_TOKEN || '').trim();
 const executorId = `render:product-architecture-conformance:${process.env.RENDER_INSTANCE_ID || process.pid}`;
 const pollMs = Math.max(2500, Number(process.env.AAU_PRODUCT_ARCH_CONFORMANCE_POLL_MS || 5000));
@@ -96,10 +96,10 @@ async function repositorySnapshot(repoFullName, branch) {
 }
 
 async function modelCall(model, system, user, timeoutMs = 110000) {
-  return withReviewerNvidiaSlot('architecture_conformance', async () => {
+  return withReviewerModelSlot('architecture_conformance', async () => {
     const requestStarted=Date.now();
     try{
-      const result=await nvidiaChatCompletion({
+      const result=await modelChatCompletion({
         model,
         messages:[{role:'system',content:system},{role:'user',content:user}],
         maxTokens:2800,
@@ -115,10 +115,11 @@ async function modelCall(model, system, user, timeoutMs = 110000) {
         model:result.model_returned||model,
         text:String(result.content||result.reasoning_content||'').trim(),
         usage:result.usage||null,
+        provider:result.provider||null,
         runtime_contract:result.runtime_contract||null,
       };
     }catch(error){
-      if(error?.name==='AbortError'){
+      if(error?.code==='MODEL_TIMEOUT'||error?.name==='AbortError'){
         noteReviewerModelTimeout(model);
         console.warn('AAU_REVIEWER_ENDPOINT_TIMEOUT',JSON.stringify({
           stage:'architecture_conformance',
@@ -352,7 +353,7 @@ export function startProductArchitectureConformanceWorker() {
   const missing = [
     ['AAU_SUPABASE_ANON_KEY',anon],
     ['AAU_BROKER_BRIDGE_TOKEN',bridge],
-    ['NVIDIA_API_KEY',nvidiaKey],
+    ['MODEL_PROVIDER_RUNTIME',modelProviderReady()?'ready':''],
     ['AAU_AGENT_GITHUB_TOKEN',githubToken],
   ].filter(([,v]) => !v).map(([k]) => k);
   if (missing.length) return { ok:false, ready:false, missing };
