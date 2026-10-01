@@ -413,6 +413,22 @@ function parseAuthoritativeChildArtifact(child){
     try{artifact=JSON.parse(artifact);}catch{return null;}
   }
   if(!artifact || typeof artifact!=='object' || Array.isArray(artifact)) return null;
+
+  // QDA atomic children commonly persist their actual answer under
+  // {problem_response:{...}}. Treat that as the authoritative problem payload
+  // rather than requiring the child serializer to flatten it first.
+  if(artifact.problem_response
+     &&typeof artifact.problem_response==='object'
+     &&!Array.isArray(artifact.problem_response)){
+    const response={...artifact.problem_response};
+    if(!Array.isArray(response.python_checks) && Array.isArray(artifact.python_checks)){
+      response.python_checks=artifact.python_checks;
+    }
+    if(!Array.isArray(response.python_analyses) && Array.isArray(artifact.python_analyses)){
+      response.python_analyses=artifact.python_analyses;
+    }
+    return response;
+  }
   return artifact;
 }
 
@@ -427,9 +443,21 @@ function qdaSha256(value){
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
+function qdaExplicitProblemOrdinal(textValue){
+  const match=String(textValue||'').match(/\bproblem\s+(\d+)\b/i);
+  if(!match)return null;
+  const ordinal=Number(match[1]);
+  return Number.isInteger(ordinal)&&ordinal>0?ordinal:null;
+}
+
+function qdaRequirementUnitCode(textValue){
+  const match=String(textValue||'').match(/\bQDA601-M\d+-U\d+\b/i);
+  return match?String(match[0]).toUpperCase():null;
+}
+
 function qdaProblemSourceBinding(ctx,index,problem,child=null){
   return {
-    contract:'qda601_material_claim_provenance_v0_2',
+    contract:'qda601_material_claim_provenance_v0_3',
     kind:'authoritative_exercise_pack_problem',
     exercise_pack_ref:String(ctx?.next_unit?.exercise_pack_ref||''),
     json_path:'$.packs["'+String(ctx?.next_unit?.unit_code||'')+'"].problems['+String(index)+']',
@@ -454,7 +482,7 @@ function bindQda601ProblemProvenance(ctx,payload){
     const binding=qdaProblemSourceBinding(ctx,index,expectedProblems[index]);
     const evidence=Array.isArray(response.evidence)?response.evidence:[];
     const withoutRuntimeBinding=evidence.filter(item=>
-      !(item && typeof item==='object' && item.contract==='qda601_material_claim_provenance_v0_2')
+      !(item && typeof item==='object' && ['qda601_material_claim_provenance_v0_2','qda601_material_claim_provenance_v0_3'].includes(item.contract))
     );
     return {...response,evidence:[binding,...withoutRuntimeBinding]};
   });
@@ -514,10 +542,19 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
     const childRequirement=String(child?.requirement_text||'').replace(/\s+/g,' ').trim();
     const expectedProblem=String(expectedProblems[index]||'').replace(/\s+/g,' ').trim();
     const artifactProblem=String(artifact?.problem||artifact?.problem_text||'').replace(/\s+/g,' ').trim();
-    const requirementMatches=Boolean(expectedProblem)
+    const expectedOrdinal=index+1;
+    const declaredOrdinal=qdaExplicitProblemOrdinal(childRequirement);
+    const declaredUnit=qdaRequirementUnitCode(childRequirement);
+    const expectedUnit=String(ctx?.next_unit?.unit_code||'').toUpperCase();
+    const explicitBindingMatches=
+      declaredOrdinal===expectedOrdinal
+      &&Boolean(expectedUnit)
+      &&declaredUnit===expectedUnit;
+    const textualBindingMatches=Boolean(expectedProblem)
       && (childRequirement.includes(expectedProblem)
           || artifactProblem===expectedProblem
           || artifactProblem.includes(expectedProblem));
+    const requirementMatches=explicitBindingMatches||textualBindingMatches;
     if(!requirementMatches){
       failures.push(
         'qda_verified_child_requirement_mismatch:'+String(child?.node_path||index+1)
