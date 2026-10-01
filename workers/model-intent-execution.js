@@ -3252,16 +3252,6 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
             error:String(holdError?.message||holdError).slice(0,800),
           }));
         });
-      } else if (cognitionRuntimeFault) {
-        await rpc('aau_bridge_hold_cognition_runtime_fault_v0_1',{
-          p_intent_execution_id:requestedIntentExecutionId,
-          p_error:message,
-        }).catch((holdError)=>{
-          console.error('AAU_COGNITION_RUNTIME_FAULT_HOLD_FAILED',JSON.stringify({
-            intent_execution_id:requestedIntentExecutionId,
-            error:String(holdError?.message||holdError).slice(0,800),
-          }));
-        });
       } else if (providerTransient) {
         await rpc('aau_bridge_fail_model_transport_transient_v0_1',{
           p_intent_execution_id:requestedIntentExecutionId,
@@ -3270,6 +3260,16 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
           console.error('AAU_MODEL_TRANSPORT_TRANSIENT_RECOVERY_FAILED',JSON.stringify({
             intent_execution_id:requestedIntentExecutionId,
             error:String(providerError?.message||providerError).slice(0,800),
+          }));
+        });
+      } else if (cognitionRuntimeFault) {
+        await rpc('aau_bridge_hold_cognition_runtime_fault_v0_1',{
+          p_intent_execution_id:requestedIntentExecutionId,
+          p_error:message,
+        }).catch((holdError)=>{
+          console.error('AAU_COGNITION_RUNTIME_FAULT_HOLD_FAILED',JSON.stringify({
+            intent_execution_id:requestedIntentExecutionId,
+            error:String(holdError?.message||holdError).slice(0,800),
           }));
         });
       } else if (failureDetails) {
@@ -3302,6 +3302,7 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
       || (cognitionAdmissionDeferred?'COGNITION_ADMISSION_DEFERRED':null)
       || (cognitionProvenanceContinuationRequired?'COGNITION_PROVENANCE_CONTINUATION_REQUIRED':null)
       || (cognitionProvenanceContinuationExhausted?'COGNITION_PROVENANCE_CONTINUATION_EXHAUSTED':null)
+      || (providerTransient?'MODEL_TRANSPORT_TRANSIENT':null)
       || (cognitionRuntimeFault?'COGNITION_RUNTIME_FAULT':null)
       || error?.code
       || null;
