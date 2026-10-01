@@ -3046,20 +3046,27 @@ export async function runAutonomousRequirementCognition({
         node?.decision_payload?.evidence_ceiling_resolution
       );
       const evidenceAcquisitionClosed=evidenceCeilingResolution.status==='ACTIVE';
-      // A response that exhausts the atomic output bound twice is mechanical
-      // evidence that the current execution unit is too large for bounded
-      // completion. Do not dead-end on ATOMIC admission. Return semantic control
-      // to the bound agent for agent-authored narrowing via SPLIT.
-      const availableDecisions=atomicOverflowRecovery
-        ? ['SPLIT']
-        : [
-            'ATOMIC',
-            'SPLIT',
+      const synthesisRecoveryRouting=Object.keys(synthesisFailure).length>0;
+      // A synthesis failure is downstream of successful decomposition. An old
+      // atomic-overflow marker must not force the already-resolved parent back
+      // into SPLIT or hide REMEDIATE. At this boundary the agent owns recovery:
+      // repair the synthesis, request genuinely missing context, or conclude BLOCKED.
+      const availableDecisions=synthesisRecoveryRouting
+        ? [
+            ...(remediationAvailable?['REMEDIATE']:[]),
             ...(!evidenceAcquisitionClosed?['NEED_CONTEXT']:[]),
             'BLOCKED',
-            ...(remediationAvailable?['REMEDIATE']:[]),
-          ];
-      if(atomicOverflowRecovery){
+          ]
+        : atomicOverflowRecovery
+          ? ['SPLIT']
+          : [
+              'ATOMIC',
+              'SPLIT',
+              ...(!evidenceAcquisitionClosed?['NEED_CONTEXT']:[]),
+              'BLOCKED',
+              ...(remediationAvailable?['REMEDIATE']:[]),
+            ];
+      if(atomicOverflowRecovery&&!synthesisRecoveryRouting){
         console.warn('AAU_ATOMIC_TRUNCATION_DECOMPOSITION_REQUIRED',JSON.stringify({
           agent_id:agentId,
           intent_execution_id:intentExecutionId,
@@ -3087,6 +3094,20 @@ export async function runAutonomousRequirementCognition({
           evidence_scope:v.evidence_scope||null
         })).sort((a,b)=>String(a.path||'').localeCompare(String(b.path||''))),
         remediation_history:compactRemediationEpisodes(remediationEpisodes),
+        synthesis_failure:Object.keys(synthesisFailure).length?{
+          contract:text(synthesisFailure.contract)||null,
+          failure_type:text(synthesisFailure.failure_type)||null,
+          reason:clip(synthesisFailure.reason,1800)||null,
+          failed_at:text(synthesisFailure.failed_at)||null,
+          accumulator_hash:text(synthesisFailure.accumulator_hash)||null,
+          child_state_hash:text(synthesisFailure.child_state_hash)||null,
+          child_result_hashes:asArray(synthesisFailure.child_result_hashes).map(v=>({
+            path:text(v?.path),status:text(v?.status),
+            decision_type:text(v?.decision_type),result_hash:text(v?.result_hash)
+          })),
+          review_status:text(synthesisFailure?.review?.status)||null,
+          review_issues:asArray(synthesisFailure?.review?.issues).map(v=>clip(text(v),700)),
+        }:null,
         child_authoring_failure_count:Number(node?.decision_payload?.child_authoring_failure_count||0),
         child_authoring_failure:asObject(node?.decision_payload?.child_authoring_failure),
         force_reconsider:Boolean(forceReconsider),
