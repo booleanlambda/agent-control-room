@@ -6825,6 +6825,10 @@ export async function runAutonomousRequirementCognition({
           });
           node=verifiedRemediation.node;
           if(!verifiedRemediation.verified){
+            // verifyRemediationEpisode has already persisted this episode as
+            // failed. Clear the stale in-memory active pointer so the generic
+            // synthesis-failure handoff does not write a second failure update.
+            activeSynthesisRemediation=null;
             return returnSynthesisFailureToAgent({
               failureType:'self_remediation_verification_failed',
               reason:verifiedRemediation.verification?.remaining_problem
