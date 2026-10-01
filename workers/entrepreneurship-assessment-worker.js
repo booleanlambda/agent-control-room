@@ -1,12 +1,12 @@
-import { withReviewerNvidiaSlot, noteReviewerModelTimeout, noteReviewerModelSuccess, isReviewerModelInBackoff } from './reviewer-nvidia-endpoint-gate.js';
+import { withReviewerModelSlot, noteReviewerModelTimeout, noteReviewerModelSuccess, isReviewerModelInBackoff } from './reviewer-model-endpoint-gate.js';
 import { createHash } from 'node:crypto';
-import { nvidiaChatCompletion } from './providers/nvidia.js';
+import { modelChatCompletion, modelProviderConfigStatus } from './providers/model-provider.js';
 import { getModelRuntimeProfile } from './model-runtime-profiles.js';
 
 const SB=String(process.env.AAU_SUPABASE_URL||'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/,'');
 const anon=String(process.env.AAU_SUPABASE_ANON_KEY||'').trim();
 const bridge=String(process.env.AAU_BROKER_BRIDGE_TOKEN||'').trim();
-const nvidiaKey=String(process.env.NVIDIA_API_KEY||'').trim();
+const modelProviderReady=()=>{try{return modelProviderConfigStatus().ready===true;}catch{return false;}};
 const executorId=`render:entrepreneurship-assessor:${process.env.RENDER_INSTANCE_ID||process.pid}`;
 const pollMs=Math.max(3000,Number(process.env.AAU_ENTREPRENEURSHIP_ASSESSOR_POLL_MS||7000));
 let timer=null,working=false;
@@ -108,11 +108,11 @@ async function modelCall(model,taskType,payload){
     ? `Independently grade this complete four-unit course record. Course pass thresholds are embedded in the payload. Evaluate conceptual accuracy, analytical/quantitative rigor, application quality, evidence discipline, and self-critique.\n\nPAYLOAD:\n${reviewInput.serialized}`
     : `Conduct a comprehensive independent final review of the entrepreneurship master's-equivalent record. Test integration across disciplines and whether the venture reasoning would survive an adversarial board/investment-committee discussion. A final pass requires score >=0.85 and no critical failure.\n\nPAYLOAD:\n${reviewInput.serialized}`;
 
-  return withReviewerNvidiaSlot('entrepreneurship_assessment',async()=>{
+  return withReviewerModelSlot('entrepreneurship_assessment',async()=>{
     const begun=Date.now();
     try{
       const profile=getModelRuntimeProfile(model);
-      const result=await nvidiaChatCompletion({
+      const result=await modelChatCompletion({
         model,
         messages:[{role:'system',content:system},{role:'user',content:user}],
         maxTokens:1800,
@@ -157,10 +157,11 @@ async function modelCall(model,taskType,payload){
         model:result.model_returned||model,
         latency_ms:Date.now()-begun,
         reviewAudit:reviewInput.audit,
+        provider:result.provider||null,
         runtime_contract:result.runtime_contract||null,
       };
     }catch(error){
-      if(error?.name==='AbortError'){
+      if(error?.code==='MODEL_TIMEOUT'||error?.name==='AbortError'){
         noteReviewerModelTimeout(model);
         throw new Error('entrepreneurship_assessor_timeout');
       }
@@ -185,8 +186,8 @@ async function gradeClaim(task){
     }
     try{
       const result=await modelCall(model,task.task_type,task.payload);
-      const assessorId=`nvidia_direct/${result.model}`;
-      const report={...result.grade,review_model:result.model,review_provider:'nvidia_direct',latency_ms:result.latency_ms,
+      const assessorId=`${result.provider||'model_provider'}/${result.model}`;
+      const report={...result.grade,review_model:result.model,review_provider:result.provider||null,latency_ms:result.latency_ms,
         independent_from_bound_agent_model:true,assessment_contract:'entrepreneurship_independent_assessment_v0_1',...result.reviewAudit};
       if(task.task_type==='course'){
         return await rpc('aau_bridge_complete_entrepreneurship_course_assessment',{
@@ -209,7 +210,7 @@ async function gradeClaim(task){
 }
 
 async function tick(){
-  if(working||!anon||!bridge||!nvidiaKey) return;
+  if(working||!anon||!bridge||!modelProviderReady()) return;
   working=true;
   let task=null;
   try{
@@ -245,7 +246,7 @@ async function tick(){
 
 export function startEntrepreneurshipAssessmentWorker(){
   if(timer) return {started:true,already_running:true,poll_ms:pollMs};
-  if(!anon||!bridge||!nvidiaKey) return {started:false,reason:'required_runtime_credentials_missing'};
+  if(!anon||!bridge||!modelProviderReady()) return {started:false,reason:'required_runtime_credentials_missing'};
   timer=setInterval(()=>void tick(),pollMs);
   void tick();
   return {started:true,poll_ms:pollMs,models:[MODELS.kimi,MODELS.meta,MODELS.nemotron],
