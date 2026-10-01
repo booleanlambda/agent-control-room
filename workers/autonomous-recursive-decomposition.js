@@ -7074,6 +7074,47 @@ export async function runAutonomousRequirementCognition({
     if(node.node_status==='blocked')return node;
 
     for(let transitions=0;transitions<8;transitions++){
+      const pendingSynthesisFailure=asObject(node?.decision_payload?.synthesis_failure);
+      const synthesisRemediationInProgress=asObject(
+        node?.decision_payload?.self_remediation_in_progress
+      );
+      const synthesisRemediationNonce=text(
+        node?.decision_payload?.synthesis_remediation_nonce
+      );
+      if(
+        Object.keys(pendingSynthesisFailure).length
+        &&!Object.keys(synthesisRemediationInProgress).length
+        &&!synthesisRemediationNonce
+        &&(node.node_status==='split'||node.decision_type==='SPLIT')
+      ){
+        node=await saveNode({
+          nodePath:node.node_path,
+          parentPath:node.parent_path??parentPathOf(node.node_path),
+          ordinal:node.ordinal||0,
+          requirement:node.requirement_text,
+          sourceKind:node.source_kind,
+          sourceRef:node.source_ref,
+          status:'pending',
+          decisionType:null,
+          decisionPayload:{
+            ...(node.decision_payload||{}),
+            reconsider_decomposition:true,
+            synthesis_recovery_routing_required:true,
+            synthesis_recovery_routing_at:new Date().toISOString(),
+          },
+          contextPayload:node.context_payload||{},
+          resultArtifact:null,
+        });
+        node.parent_path=parentPath;
+        console.log('AAU_SYNTHESIS_FAILURE_ROUTING_PRECEDENCE',JSON.stringify({
+          agent_id:agentId,
+          intent_execution_id:intentExecutionId,
+          node_path:node.node_path,
+          failure_type:text(pendingSynthesisFailure.failure_type)||null,
+          policy:'synthesis_failure_precedes_stored_split_v0_1',
+        }));
+      }
+
       if(node.node_status==='split'||node.decision_type==='SPLIT'){
         let kids=(await children(node.node_path))
           .filter((child)=>String(child?.status||'')!=='cancelled')
