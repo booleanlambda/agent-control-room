@@ -1,11 +1,12 @@
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getModelRuntimeProfile, resolveModelTaskBudget } from './model-runtime-profiles.js';
+import { modelChatCompletion, modelProviderConfigStatus } from './providers/model-provider.js';
 
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
 const bridge = String(process.env.AAU_BROKER_BRIDGE_TOKEN || '').trim();
-const nvidiaKey = String(process.env.NVIDIA_API_KEY || '').trim();
-const model = String(process.env.AAU_NVIDIA_VISION_MODEL || 'meta/llama-3.2-11b-vision-instruct').trim();
+const model = String(process.env.AAU_MODEL_VISION_MODEL || 'meta/llama-3.2-11b-vision-instruct').trim();
+const modelProviderReady=()=>{try{return modelProviderConfigStatus().ready===true;}catch{return false;}};
 const workerId = String(process.env.AAU_AGENT_FILE_VISION_WORKER_ID || `render:file-vision:${process.env.RENDER_INSTANCE_ID || process.pid}`).trim();
 const pollMs = Math.max(1000, Number(process.env.AAU_AGENT_FILE_VISION_POLL_MS || 2500));
 const visionProfile = getModelRuntimeProfile(model);
@@ -28,7 +29,7 @@ function requiredConfig() {
   const pairs = [
     ['AAU_SUPABASE_ANON_KEY', anon],
     ['AAU_BROKER_BRIDGE_TOKEN', bridge],
-    ['NVIDIA_API_KEY', nvidiaKey],
+    ['MODEL_PROVIDER_RUNTIME', modelProviderReady() ? 'ready' : ''],
     ['SUPABASE_S3_ENDPOINT', String(process.env.SUPABASE_S3_ENDPOINT || '').trim()],
     ['SUPABASE_S3_ACCESS_KEY_ID', String(process.env.SUPABASE_S3_ACCESS_KEY_ID || '').trim()],
     ['SUPABASE_S3_SECRET_ACCESS_KEY', String(process.env.SUPABASE_S3_SECRET_ACCESS_KEY || '').trim()],
@@ -98,46 +99,32 @@ async function analyzeImage(dataUrl, job) {
     `File name: ${String(job.filename || '').slice(0,255)}. Purpose: ${String(job.purpose || 'attachment').slice(0,100)}.`
   ].join(' ');
 
-  const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${nvidiaKey}`,
-      'content-type': 'application/json',
-      accept: 'application/json',
-      'user-agent': 'AAU-Agent-File-Vision/0.1',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'image_url', image_url: { url: dataUrl } },
-          { type: 'text', text: prompt },
-        ],
-      }],
-      temperature: 0.1,
-      max_tokens: visionTaskBudget.effective_output_tokens,
-      stream: false,
-    }),
-    signal: AbortSignal.timeout(visionTaskBudget.effective_timeout_ms),
+  const result=await modelChatCompletion({
+    model,
+    messages:[{
+      role:'user',
+      content:[
+        {type:'image_url',image_url:{url:dataUrl}},
+        {type:'text',text:prompt},
+      ],
+    }],
+    temperature:0.1,
+    maxTokens:visionTaskBudget.effective_output_tokens,
+    timeoutMs:visionTaskBudget.effective_timeout_ms,
+    jsonMode:false,
+    enableThinking:false,
+    runtimeRole:'vision',
   });
 
-  const raw = await response.text();
-  let body = null;
-  try { body = JSON.parse(raw); } catch {}
-  if (!response.ok) {
-    const detail = body?.error?.message || body?.detail || body?.message || raw.slice(0,1000) || `HTTP ${response.status}`;
-    const error = new Error(`nvidia_vision_${response.status}:${detail}`);
-    error.status = response.status;
-    throw error;
-  }
-  const content = body?.choices?.[0]?.message?.content;
-  if (typeof content !== 'string' || !content.trim()) throw new Error('nvidia_vision_empty_response');
+  const content=String(result.content||'').trim();
+  if(!content)throw new Error('model_vision_empty_response');
+
   return {
-    analysis: parseJsonLoose(content),
-    returned_model_id: typeof body?.model === 'string' ? body.model : model,
-    response_id: body?.id || null,
-    usage: body?.usage || null,
+    analysis:parseJsonLoose(content),
+    provider:result.provider||null,
+    returned_model_id:result.model_returned||model,
+    response_id:result.response_id||null,
+    usage:result.usage||null,
   };
 }
 
@@ -173,9 +160,10 @@ async function processJob(job) {
 
   const dataUrl = `data:${job.mime_type};base64,${Buffer.from(bytes).toString('base64')}`;
   const result = await analyzeImage(dataUrl, job);
-  const completed = await rpc('aau_bridge_complete_agent_file_vision_job', {
+  const completed = await rpc('aau_bridge_complete_agent_file_vision_job_v0_2', {
     p_worker_id: workerId,
     p_file_id: job.file_id,
+    p_provider: result.provider || modelProviderConfigStatus().provider,
     p_model_id: result.returned_model_id || model,
     p_analysis: {
       ...result.analysis,
@@ -186,6 +174,7 @@ async function processJob(job) {
   console.log('AAU_AGENT_FILE_VISION_COMPLETED', JSON.stringify({
     file_id: job.file_id,
     agent_id: job.agent_id,
+    provider: result.provider || null,
     model_requested: model,
     model_returned: result.returned_model_id,
     scheduled_wake_request_id: completed?.wake_request_id || null,
