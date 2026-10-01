@@ -187,7 +187,7 @@ export async function runConfiguredNvidiaManualWake() {
   const workerId = `render-nvidia-manual-${process.env.RENDER_INSTANCE_ID || process.pid}`;
   let begun = null;
   try {
-    begun = await rpc('aau_bridge_begin_nvidia_experimental_wake', {
+    begun = await rpc('aau_bridge_begin_model_experimental_wake', {
       p_wake_request_id: wakeRequestId,
       p_agent_id: agentId,
       p_worker_id: workerId,
@@ -343,7 +343,7 @@ export async function runConfiguredNvidiaManualWake() {
   } catch (error) {
     const message = String(error?.message || error).slice(0,3000);
     if (begun) {
-      await rpc('aau_bridge_fail_nvidia_experimental_wake', { p_wake_request_id: wakeRequestId, p_error: message }).catch(() => {});
+      await rpc('aau_bridge_fail_model_experimental_wake', { p_wake_request_id: wakeRequestId, p_error: message }).catch(() => {});
     }
     console.error('AAU_NVIDIA_MANUAL_WAKE_RESULT', JSON.stringify({ ok:false,wake_request_id:wakeRequestId,agent_id:agentId,error:message }));
     return { ok:false,wake_request_id:wakeRequestId,agent_id:agentId,error:message };
