@@ -1,8 +1,8 @@
-// Explicit opt-in, isolated synthetic probe of agent cognition I/O through the ACTUAL NVIDIA adapter.
+// Explicit opt-in, isolated synthetic probe of agent cognition I/O through the configured model-provider adapter.
 // No agent packets, lifecycle events, memory writes, resource grants, or private evidence are touched.
 // Logs only metrics and booleans; never prints credentials, raw prompts, or model output.
 import { createHash } from 'node:crypto';
-import { nvidiaChatCompletion } from './providers/nvidia.js';
+import { modelChatCompletion, modelProviderConfigStatus } from './providers/model-provider.js';
 
 const MODEL='google/gemma-4-31b-it';
 const RECEIPTS=['AAU_AGENT_HEAD_62B7','AAU_AGENT_MID_8C04','AAU_AGENT_TAIL_51D9'];
@@ -35,7 +35,7 @@ async function runCase(label, inputChars, count, maxTokens, timeoutMs){
   const start=Date.now();
   const requestHash=HASH(SYSTEM+'\n'+user);
   try{
-    const result=await nvidiaChatCompletion({
+    const result=await modelChatCompletion({
       model:MODEL,messages:[{role:'system',content:SYSTEM},{role:'user',content:user}],
       maxTokens,timeoutMs,temperature:0,jsonMode:true,enableThinking:false
     });
@@ -58,7 +58,7 @@ async function runCase(label, inputChars, count, maxTokens, timeoutMs){
   }
 }
 export async function probeAgentCognitionIoTimeout(){
-  if(!String(process.env.NVIDIA_API_KEY||'').trim())return {status:'unavailable',reason:'nvidia_key_missing'};
+  try{if(modelProviderConfigStatus().ready!==true)return {status:'unavailable',reason:'model_provider_unavailable'};}catch{return {status:'unavailable',reason:'model_provider_unavailable'};}
   console.log('AAU_AGENT_IO_TEST_BEGIN',JSON.stringify({model:MODEL,synthetic:true,agent_data_accessed:false}));
   const cases=[
     ['medium_input_standard_output',24500,120,2600,60000],
