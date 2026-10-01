@@ -4097,7 +4097,41 @@ export async function runAutonomousRequirementCognition({
     const existing=allExisting
       .filter((child)=>String(child?.status||'')!=='cancelled')
       .sort((a,b)=>Number(a?.ordinal||0)-Number(b?.ordinal||0));
-    const childAuthoringFinalized=Boolean(node?.decision_payload?.children_authored);
+    let childAuthoringFinalized=Boolean(node?.decision_payload?.children_authored);
+    const budgetConstrainedFinalizationRequiresContinuation=Boolean(
+      node?.decision_payload?.conserved_branch_economics_constraint_applied
+    )&&Number(node?.decision_payload?.semantic_child_capacity_at_stop??-1)<1;
+    if(existing.length&&childAuthoringFinalized&&budgetConstrainedFinalizationRequiresContinuation){
+      const continuationPayload={...(node.decision_payload||{})};
+      delete continuationPayload.children_authored;
+      delete continuationPayload.conserved_branch_economics_constraint_applied;
+      delete continuationPayload.semantic_child_capacity_at_stop;
+      delete continuationPayload.child_count;
+      continuationPayload.budget_constrained_child_authoring_reopened=true;
+      continuationPayload.budget_constrained_child_authoring_reopened_at=new Date().toISOString();
+      node=await saveNode({
+        nodePath:node.node_path,
+        parentPath:node.parent_path??parentPathOf(node.node_path),
+        ordinal:node.ordinal||0,
+        requirement:node.requirement_text,
+        sourceKind:node.source_kind,
+        sourceRef:node.source_ref,
+        status:'split',
+        decisionType:'SPLIT',
+        decisionPayload:continuationPayload,
+        contextPayload:node.context_payload||{},
+        resultArtifact:null,
+      });
+      node.parent_path=node.parent_path??parentPathOf(node.node_path);
+      childAuthoringFinalized=false;
+      console.log('AAU_BUDGET_CONSTRAINED_CHILD_AUTHORING_REOPENED',JSON.stringify({
+        agent_id:agentId,
+        intent_execution_id:intentExecutionId,
+        node_path:node.node_path,
+        existing_child_count:existing.length,
+        policy:'budget_exhaustion_cannot_imply_semantic_coverage_v0_1',
+      }));
+    }
     if(existing.length&&childAuthoringFinalized)
       return {children:existing,reconsider:false};
 
@@ -4213,29 +4247,29 @@ export async function runAutonomousRequirementCognition({
       const structuralBranchingAvailable=currentChildCapacity>=2;
       const singleRefinementAvailable=currentChildCapacity>=1;
       if(currentChildCapacity<1){
-        if(authored.length<1){
-          const economicTerminal=await closeSemanticRuntime('budget_exhausted',{
-            reason:'split_child_authoring_budget_exhausted',
-            node_path:node.node_path,
-            semantic_decision:'SPLIT',
-            remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
-            expected_child_lifecycle_units:Number(branchEconomics.expected_child_lifecycle_units||0),
-            completion_reserve_units:Number(branchEconomics.completion_reserve_units||0),
-            semantic_child_capacity:currentChildCapacity,
-            semantic_state_preserved:true,
-            discovery_replay_forbidden_until_evidence_mutation:true,
-          });
-          const error=new Error(
-            'semantic_runtime_budget_exhausted:split_child_authoring:'+node.node_path
-            +':remaining='+String(economicTerminal?.remaining_budget_units??0)
-          );
-          error.code='SEMANTIC_BUDGET_EXHAUSTED';
-          error.semanticRuntime=economicTerminal;
-          throw error;
-        }
-        return finalizeBudgetConstrainedSplit({
-          runtimeView,branchEconomics,availableChildCapacity:currentChildCapacity,
+        const economicTerminal=await closeSemanticRuntime('budget_exhausted',{
+          reason:authored.length
+            ?'split_child_authoring_continuation_budget_exhausted'
+            :'split_child_authoring_budget_exhausted',
+          node_path:node.node_path,
+          semantic_decision:'SPLIT',
+          remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
+          expected_child_lifecycle_units:Number(branchEconomics.expected_child_lifecycle_units||0),
+          completion_reserve_units:Number(branchEconomics.completion_reserve_units||0),
+          semantic_child_capacity:currentChildCapacity,
+          authored_child_count:authored.length,
+          semantic_state_preserved:true,
+          remaining_scope_decision_preserved:true,
+          budget_exhaustion_cannot_imply_semantic_coverage:true,
+          discovery_replay_forbidden_until_evidence_mutation:true,
         });
+        const error=new Error(
+          'semantic_runtime_budget_exhausted:split_child_authoring:'+node.node_path
+          +':remaining='+String(economicTerminal?.remaining_budget_units??0)
+        );
+        error.code='SEMANTIC_BUDGET_EXHAUSTED';
+        error.semanticRuntime=economicTerminal;
+        throw error;
       }
       const childContextView=agentModelContextView(
         node.context_payload||{},childPinnedEvidence,stageBudgets.child_formulation
