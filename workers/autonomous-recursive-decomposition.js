@@ -2518,6 +2518,44 @@ export async function runAutonomousRequirementCognition({
     return next;
   }
 
+  function compactSynthesisFailureState(raw){
+    const failure=asObject(raw);
+    if(!Object.keys(failure).length)return {};
+    const reportRef=asObject(failure.authenticator_report_ref);
+    const report=asObject(failure.authenticator_report);
+    return {
+      contract:text(failure.contract)||'agent_visible_synthesis_failure_v0_2',
+      failure_type:text(failure.failure_type)||null,
+      reason:clip(failure.reason,1800)||null,
+      review:compactSynthesisReviewState(failure.review),
+      authenticator_review_id:text(failure.authenticator_review_id)||null,
+      authenticator_report_ref:Object.keys(reportRef).length
+        ?reportRef
+        :(
+          text(failure.authenticator_review_id)
+          ?{
+              review_id:text(failure.authenticator_review_id),
+              rejected_file_id:text(failure.rejected_file_id)||null,
+              artifact_sha256:text(failure.rejected_artifact_sha256)||null,
+              report_sha256:Object.keys(report).length?sha256(report):null,
+            }
+          :{}
+        ),
+      rejected_file_id:text(failure.rejected_file_id)||null,
+      rejected_artifact_sha256:text(failure.rejected_artifact_sha256)||null,
+      authenticator_score:Number(failure.authenticator_score||0)||null,
+      prior_root_result_hash:text(failure.prior_root_result_hash)||null,
+      child_result_hashes:asArray(failure.child_result_hashes).slice(0,24),
+      child_state_hash:text(failure.child_state_hash)||null,
+      accumulator_hash:text(failure.accumulator_hash)||null,
+      prior_synthesis_remediation_id:text(failure.prior_synthesis_remediation_id)||null,
+      preserved_children:failure.preserved_children===true,
+      preserved_accumulator:failure.preserved_accumulator===true,
+      recovery_policy:text(failure.recovery_policy)||null,
+      failed_at:text(failure.failed_at)||null,
+    };
+  }
+
   function synthesisRemediationDecisionPayload(payload,episode){
     const next={...asObject(payload)};
     for(const key of [
@@ -2527,6 +2565,9 @@ export async function runAutonomousRequirementCognition({
       'routing_discovery_checkpointed_at','routing_discovery_reused',
       'routing_commit_serialized'
     ]) delete next[key];
+    if(Object.keys(asObject(next.synthesis_failure)).length){
+      next.synthesis_failure=compactSynthesisFailureState(next.synthesis_failure);
+    }
     next.synthesis_remediation_nonce=episode.remediation_id;
     next.synthesis_rebuild_reason='self_remediation_rebuild_from_resolved_evidence';
     next.synthesis_rebuild_at=new Date().toISOString();
@@ -6896,7 +6937,17 @@ export async function runAutonomousRequirementCognition({
               status:'split',
               decisionType:'SPLIT',
               decisionPayload:{
-                ...(node.decision_payload||{}),
+                ...(()=>{
+                  const compact={...asObject(node.decision_payload)};
+                  if(Object.keys(asObject(compact.synthesis_failure)).length)
+                    compact.synthesis_failure=compactSynthesisFailureState(compact.synthesis_failure);
+                  for(const key of [
+                    'routing_discovery_checkpoint','routing_discovery_checkpointed',
+                    'routing_discovery_checkpointed_at','routing_discovery_reused',
+                    'routing_commit_serialized'
+                  ]) delete compact[key];
+                  return compact;
+                })(),
                 synthesis_cursor:childRows.length,
                 synthesis_accumulator:accumulator,
                 synthesis_complete:false,
