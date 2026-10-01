@@ -1533,8 +1533,8 @@ function remediationStateSnapshot(node,contextPayload,pinnedEvidence,siblingEvid
     },
     synthesis:{
       cursor:Number(payload.synthesis_cursor||0),
-      accumulator_hash:Object.keys(asObject(payload.synthesis_accumulator)).length
-        ?sha256(payload.synthesis_accumulator):null,
+      accumulator_present:Object.keys(asObject(payload.synthesis_accumulator)).length>0,
+      accumulator_bytes:bytes(payload.synthesis_accumulator),
       child_result_hashes:asArray(payload.synthesis_child_result_hashes).slice(0,24),
       provenance_pending:asObject(payload.synthesis_provenance_pending),
       provenance_review:asObject(payload.synthesis_provenance_review),
@@ -2542,6 +2542,12 @@ export async function runAutonomousRequirementCognition({
       remediation_id:episode.remediation_id,
       status:'verifying',
       post_state:effectivePostState,
+      verification_result:{
+        status:'PENDING',
+        verification_boundary:verificationBoundary,
+        external_verification:externalVerification,
+        verification_started_at:new Date().toISOString(),
+      },
     });
 
     let verification=null;
@@ -2661,6 +2667,18 @@ export async function runAutonomousRequirementCognition({
       verified_by_bound_agent:verification.status==='VERIFIED'&&Boolean(verification.agent_authored),
     };
     finalPayload.self_remediation_attempts_used=Number(episode.attempt_no||0);
+    if(
+      verification.status==='VERIFIED'
+      &&repairType==='REBUILD_SYNTHESIS_FROM_RESOLVED_EVIDENCE'
+      &&Object.keys(asObject(finalPayload.synthesis_failure)).length
+    ){
+      finalPayload.last_resolved_synthesis_failure={
+        ...asObject(finalPayload.synthesis_failure),
+        resolved_by_remediation_id:episode.remediation_id,
+        resolved_at:new Date().toISOString(),
+      };
+      delete finalPayload.synthesis_failure;
+    }
     if(verification.status==='FAILED')finalPayload.reconsider_decomposition=true;
 
     node=await saveNode({
@@ -3004,6 +3022,11 @@ export async function runAutonomousRequirementCognition({
       const priorCognitiveState=asObject(node?.decision_payload?.routing_discovery_checkpoint);
       const lastRemediation=asObject(node?.decision_payload?.last_self_remediation);
       const synthesisFailure=asObject(node?.decision_payload?.synthesis_failure);
+      const allowedRemediationRepairs=Object.keys(synthesisFailure).length
+        ?SELF_REMEDIATION_REPAIR_TYPES
+        :SELF_REMEDIATION_REPAIR_TYPES.filter(
+          v=>v!=='REBUILD_SYNTHESIS_FROM_RESOLVED_EVIDENCE'
+        );
       const remediationAvailable=
         !activeRemediation
         &&remediationAttemptsUsed<MAX_SELF_REMEDIATION_ATTEMPTS
@@ -3137,7 +3160,7 @@ export async function runAutonomousRequirementCognition({
                 remediationAvailable
                   ? 'REMEDIATE is available because you have a prior durable cognitive state and remaining remediation budget. Choose it only if YOU detect a contradiction, stale belief, or recoverable cognitive-state failure in your own prior reasoning. The runtime will not diagnose the anomaly for you.'
                   : 'REMEDIATE is mechanically unavailable because there is no eligible prior cognitive state or the remediation budget is exhausted.',
-                'If you choose REMEDIATE, YOU must supply observed_anomaly, prior_belief, contradicting_evidence, diagnosis, repair_type, repair_payload, and verification_criterion. Allowed repair types are '+SELF_REMEDIATION_REPAIR_TYPES.join(', ')+'. INVALIDATE_DISCOVERY_CHECKPOINT supersedes your current discovery checkpoint and requires fresh discovery before verification. REFRESH_SIBLING_EVIDENCE mechanically reloads resolved siblings, supersedes discovery, and requires fresh discovery before verification. REBUILD_SYNTHESIS_FROM_RESOLVED_EVIDENCE is available only after a durable synthesis/provenance failure; it preserves resolved children, hashes, and the synthesis accumulator, clears only the failed final-synthesis/provenance surface, and verifies only after a fresh synthesis passes deterministic/provenance checks. No repair changes facts, conclusions, atomic-failure counts, completed child artifacts, or hard resource ceilings.',
+                'If you choose REMEDIATE, YOU must supply observed_anomaly, prior_belief, contradicting_evidence, diagnosis, repair_type, repair_payload, and verification_criterion. Allowed repair types for THIS node are '+allowedRemediationRepairs.join(', ')+'. INVALIDATE_DISCOVERY_CHECKPOINT supersedes your current discovery checkpoint and requires fresh discovery before verification. REFRESH_SIBLING_EVIDENCE mechanically reloads resolved siblings, supersedes discovery, and requires fresh discovery before verification. REBUILD_SYNTHESIS_FROM_RESOLVED_EVIDENCE is available only after a durable synthesis/provenance failure; it preserves resolved children, hashes, and the synthesis accumulator, clears only the failed final-synthesis/provenance surface, and verifies only after a fresh synthesis passes deterministic/provenance checks. No repair changes facts, conclusions, atomic-failure counts, completed child artifacts, or hard resource ceilings.',
                 atomicOverflowRecovery
                   ? 'BOUNDED ATOMIC OVERFLOW RECOVERY: your prior bounded atomic execution exhausted the output limit twice and both partial responses were rejected. ATOMIC is mechanically unavailable for this node. Choose SPLIT and author one or more genuinely narrower child requirements that can each finish independently within the existing output bound. Preserve the original requirement; do not solve it by deleting scope, inflating token limits, or continuing truncated text.'
                   : atomicUnavailable
@@ -3166,7 +3189,7 @@ export async function runAutonomousRequirementCognition({
                 'EPISTEMIC THRESHOLD POLICY: '+THRESHOLD_EVIDENCE_POLICY.RULE+' '+THRESHOLD_EVIDENCE_POLICY.PASS+' '+THRESHOLD_EVIDENCE_POLICY.FAIL+' '+THRESHOLD_EVIDENCE_POLICY.UNKNOWN,
                 'When supplied_context contains research_source_catalog, treat it as the complete discoverable source index for prior research rounds. If context acquisition is available and a source is indexed but its excerpt is insufficient, put its exact listed HTTPS URL in research_urls (not context_requests) so the runtime can fetch it directly.',
                 'Do not solve the requirement or author child requirements in this pass.',
-                'Return complete JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT|BLOCKED|REMEDIATE","block_basis":"EVIDENCE_PROVES_BLOCKED|MORE_EVIDENCE_REQUIRED|null","reason":"auditable reason","requirement_interpretation":"what this requirement actually demands","evidence_assessment":"what the current evidence does and does not establish","inspected_sibling_paths":["R.001..."],"unresolved_gaps":["..."],"context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."],"remediation":{"observed_anomaly":"required when REMEDIATE","prior_belief":"required when REMEDIATE","contradicting_evidence":[],"diagnosis":"required when REMEDIATE","repair_type":"INVALIDATE_DISCOVERY_CHECKPOINT|REFRESH_SIBLING_EVIDENCE|REBUILD_SYNTHESIS_FROM_RESOLVED_EVIDENCE","repair_payload":{},"verification_criterion":"required when REMEDIATE"}}. When decision=BLOCKED, block_basis is required. Use MORE_EVIDENCE_REQUIRED when the gap could be resolved by additional evidence, even if runtime resources are currently exhausted.',
+                'Return complete JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT|BLOCKED|REMEDIATE","block_basis":"EVIDENCE_PROVES_BLOCKED|MORE_EVIDENCE_REQUIRED|null","reason":"auditable reason","requirement_interpretation":"what this requirement actually demands","evidence_assessment":"what the current evidence does and does not establish","inspected_sibling_paths":["R.001..."],"unresolved_gaps":["..."],"context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."],"remediation":{"observed_anomaly":"required when REMEDIATE","prior_belief":"required when REMEDIATE","contradicting_evidence":[],"diagnosis":"required when REMEDIATE","repair_type":"one value from runtime_resource_constraints.allowed_self_remediation_repairs","repair_payload":{},"verification_criterion":"required when REMEDIATE"}}. When decision=BLOCKED, block_basis is required. Use MORE_EVIDENCE_REQUIRED when the gap could be resolved by additional evidence, even if runtime resources are currently exhausted.',
                 forceReconsider
                   ? 'A prior atomic execution was rejected or exhausted. Reconsider the requirement under the persisted constraints rather than repeating the failed action.'
                   : '',
@@ -3215,7 +3238,7 @@ export async function runAutonomousRequirementCognition({
                   self_remediation_available:remediationAvailable,
                   self_remediation_attempts_used:remediationAttemptsUsed,
                   max_self_remediation_attempts:MAX_SELF_REMEDIATION_ATTEMPTS,
-                  allowed_self_remediation_repairs:SELF_REMEDIATION_REPAIR_TYPES,
+                  allowed_self_remediation_repairs:allowedRemediationRepairs,
                   model_runtime_contract:{
                     model_id:agentRuntimeContract.model_id,
                     operational_context_limit_tokens:agentRuntimeContract.operational_context_limit_tokens,
@@ -3232,6 +3255,16 @@ export async function runAutonomousRequirementCognition({
             const candidate=asObject(response?.parsed);
             const rawCandidateDecision=text(candidate.decision).toUpperCase();
             let candidateDecision=rawCandidateDecision;
+            if(
+              rawCandidateDecision==='REMEDIATE'
+              &&!allowedRemediationRepairs.includes(
+                text(candidate?.remediation?.repair_type).toUpperCase()
+              )
+            ){
+              if(attempt===2)
+                throw new Error('autonomous_decomposition_remediation_repair_not_available:'+node.node_path);
+              continue;
+            }
             const blockBasis=text(candidate.block_basis).toUpperCase();
             let blockNormalization=null;
 
