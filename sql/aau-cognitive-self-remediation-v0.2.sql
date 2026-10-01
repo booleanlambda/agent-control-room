@@ -194,6 +194,13 @@ $function$;
 
 revoke all on function public.aau_bridge_cognition_remediation_v0_1(
   text,uuid,uuid,text,text,text,text,jsonb
-) from public, anon, authenticated;
+) from public, authenticated;
+grant execute on function public.aau_bridge_cognition_remediation_v0_1(
+  text,uuid,uuid,text,text,text,text,jsonb
+) to anon;
+
+-- The broker reaches PostgREST under anon and authenticates this SECURITY
+-- DEFINER bridge with agent_lab.assert_broker_bridge_token(), matching the
+-- other cognition bridge functions. Do not grant EXECUTE to PUBLIC.
 
 commit;
