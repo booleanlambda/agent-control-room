@@ -187,6 +187,28 @@ export function buildQda601Context(agentId, packet = {}) {
     evidence_state_labels:curriculum.evidence_state_labels,
     required_submission_fields:curriculum.default_submission_contract.required_fields,
     governing_loop:curriculum.governing_loop,
+    remediation:{
+      required:remediationIndex>=0,
+      unit_code:remediationIndex>=0?units[remediationIndex].unit_code:null,
+      reason:remediationIndex>=0
+        ?String(packet?.state?.state_payload?.qda_601_remediation_reason||'').trim()||null
+        :null,
+      rejected_file_id:remediationIndex>=0
+        ?String(packet?.state?.state_payload?.qda_601_last_rejected_file_id||'').trim()||null
+        :null,
+      latest_authenticator_review_id:remediationIndex>=0
+        ?String(packet?.state?.state_payload?.qda_601_last_authenticator_review_id||'').trim()||null
+        :null,
+      remediation_anchor_review_id:remediationIndex>=0
+        ?String(packet?.state?.state_payload?.qda_601_remediation_anchor_review_id
+          ||packet?.state?.state_payload?.qda_601_last_authenticator_review_id||'').trim()||null
+        :null,
+      failure_report:remediationIndex>=0
+        &&packet?.state?.state_payload?.qda_601_authenticator_failure_report
+        &&typeof packet.state.state_payload.qda_601_authenticator_failure_report==='object'
+          ?packet.state.state_payload.qda_601_authenticator_failure_report
+          :null,
+    },
     progression_cursor:{
       source:'authoritative_last_committed_action_plus_preserved_external_audit_units',
       last_action:lastActionFromPacket(packet) || null,
@@ -207,7 +229,10 @@ export function buildQda601Context(agentId, packet = {}) {
       'Pass A solves the task. Pass B independently reconstructs or attacks the result; do not merely reread Pass A.',
       'For ordinary quantitative units, every problem_response must include python_checks covering every distinct material calculation result, not only a final aggregate. For designated statistics/simulation units, include python_analyses with explicit method specs and your own claims. Python verifies computation only; you remain responsible for choosing the method, assumptions, causal limits, interpretation, and reconciling disagreement.',
       'Do not return to Stage 4 expertise viability while blocking_stage4 is true.',
-      'Runtime/provider/persistence failures are not cognitive failures; preserve the unit and retry persistence rather than changing a correct conclusion merely to satisfy infrastructure.'
+      'Runtime/provider/persistence failures are not cognitive failures; preserve the unit and retry persistence rather than changing a correct conclusion merely to satisfy infrastructure.',
+      ...(remediationIndex>=0 && String(packet?.state?.state_payload?.qda_601_remediation_reason||'')==='independent_authenticator_verified_fail'
+        ?['Independent authenticator remediation is targeted. Preserve previously verified problem solutions and deterministic child evidence unless the authenticator identified a substantive mathematical error. Repair only the rejected artifact/provenance/audit surface identified by qda_601_context.remediation.failure_report, then resubmit the same unit for independent verification.']
+        :[])
     ],
   };
 }
@@ -518,13 +543,23 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
 
     const childChecks=Array.isArray(artifact.python_checks)?artifact.python_checks:[];
     const childAnalyses=Array.isArray(artifact.python_analyses)?artifact.python_analyses:[];
+    const childDeterministicVerified=
+      child?.deterministic_math_verified===true
+      ||String(child?.deterministic_math_verified||'').toLowerCase()==='true'
+      ||child?.qda_verified_descendant_materialized===true
+      ||String(child?.qda_verified_descendant_materialized||'').toLowerCase()==='true';
+    const childDeterministicCheckCount=Math.max(
+      Number(child?.deterministic_math_check_count||0),
+      Number(child?.qda_verified_descendant_check_count||0),
+      childChecks.length
+    );
     if(childChecks.length) response.python_checks=childChecks;
     if(childAnalyses.length) response.python_analyses=childAnalyses;
 
     const quantitative=String(ctx?.next_unit?.type||'').toLowerCase()==='quantitative'
       && !statisticalUnit(ctx);
     if(quantitative){
-      if(child?.deterministic_math_verified!==true){
+      if(!childDeterministicVerified){
         failures.push('qda_verified_child_deterministic_math_not_verified:'+String(child?.node_path||index+1));
       }
       const requiredChecks=materialCalculationCount(response);
@@ -574,8 +609,13 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
     provenanceChildren.push({
       node_path:child?.node_path||null,
       result_hash:child?.result_hash||null,
-      deterministic_math_verified:child?.deterministic_math_verified===true,
-      deterministic_math_check_count:Number(child?.deterministic_math_check_count||childChecks.length||0),
+      deterministic_math_verified:childDeterministicVerified,
+      deterministic_math_check_count:childDeterministicCheckCount,
+      verification_source:
+        child?.qda_verified_descendant_materialized===true
+        ||String(child?.qda_verified_descendant_materialized||'').toLowerCase()==='true'
+          ?'verified_descendant_materialization'
+          :'direct_deterministic_math',
     });
   }
 
@@ -633,11 +673,25 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
       })),
       verdict:'PASS: all resolved child artifacts were preserved and deterministic verification requirements were satisfied before runtime materialization.',
     },
+    verification_provenance:{
+      contract:'qda601_python_verification_provenance_v0_1',
+      exercise_pack_ref:ctx.next_unit.exercise_pack_ref,
+      exercise_pack_problem_set_sha256:qdaSha256(expectedProblems),
+      python_check_count:aggregateChecks.length,
+      python_checks_sha256:qdaSha256(aggregateChecks),
+      python_analysis_count:aggregateAnalyses.length,
+      python_analyses_sha256:aggregateAnalyses.length?qdaSha256(aggregateAnalyses):null,
+      child_result_chain_sha256:qdaSha256(provenanceChildren),
+      children:provenanceChildren,
+      verification_statement:'Every preserved material calculation is backed by the included deterministic Python check set and the recorded verified child result hash chain.',
+    },
     runtime_materialization:{
-      contract:'qda_verified_child_artifact_materialization_v0_1',
+      contract:'qda_verified_child_artifact_materialization_v0_2',
       arithmetic_recomputation_forbidden:true,
       source:'autonomous_recursive_decomposition_verified_children',
       children:provenanceChildren,
+      python_check_count:aggregateChecks.length,
+      python_checks_sha256:qdaSha256(aggregateChecks),
     },
   };
 
