@@ -256,8 +256,8 @@ function arr(v, max) { return Array.isArray(v) ? v.slice(0, max) : []; }
 
 async function rpc(name, args = {}) {
   if (!anon || !bridge) throw new Error('missing_broker_supabase_credentials');
-  const heavySchedulerRpc = name === 'aau_bridge_begin_nvidia_intent_execution'
-    || name === 'aau_bridge_apply_nvidia_intent_execution';
+  const heavySchedulerRpc = name === 'aau_bridge_begin_model_intent_execution'
+    || name === 'aau_bridge_apply_model_intent_execution';
   const requirementNodeCheckpointRpc = name === 'aau_bridge_cognition_requirement_node_v0_1';
   const rpcArgs = { p_bridge_token: bridge, ...args };
   const url = heavySchedulerRpc
@@ -3036,7 +3036,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
   const resolvedWorkerId = String(workerId || `render-nvidia-intent-${process.env.RENDER_INSTANCE_ID || process.pid}`).trim();
   let begun = null;
   try {
-    begun = await rpc('aau_bridge_begin_nvidia_intent_execution', {
+    begun = await rpc('aau_bridge_begin_model_intent_execution', {
       p_intent_execution_id: requestedIntentExecutionId,
       p_agent_id: requestedAgentId,
       p_worker_id: resolvedWorkerId,
@@ -3090,7 +3090,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
       latency_ms: Date.now() - startedAt,
     };
 
-    const applied = await rpc('aau_bridge_apply_nvidia_intent_execution', {
+    const applied = await rpc('aau_bridge_apply_model_intent_execution', {
       p_intent_execution_id: requestedIntentExecutionId,
       p_result: decision,
       p_runtime: runtime,
@@ -3260,7 +3260,7 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
           }));
         });
       } else if (providerTransient) {
-        await rpc('aau_bridge_fail_nvidia_provider_transient_v0_1',{
+        await rpc('aau_bridge_fail_model_transport_transient_v0_1',{
           p_intent_execution_id:requestedIntentExecutionId,
           p_error:message,
         }).catch((providerError)=>{
@@ -3270,13 +3270,13 @@ export async function runNvidiaIntentExecution({ intentExecutionId, agentId, wor
           }));
         });
       } else if (failureDetails) {
-        await rpc('aau_bridge_fail_nvidia_intent_execution_detailed', {
+        await rpc('aau_bridge_fail_model_intent_execution_detailed', {
           p_intent_execution_id: requestedIntentExecutionId,
           p_error: message,
           p_failure_details: failureDetails,
         }).catch(() => {});
       } else {
-        await rpc('aau_bridge_fail_nvidia_intent_execution', { p_intent_execution_id: requestedIntentExecutionId, p_error: message }).catch(() => {});
+        await rpc('aau_bridge_fail_model_intent_execution', { p_intent_execution_id: requestedIntentExecutionId, p_error: message }).catch(() => {});
       }
     }
     console.log('AAU_NVIDIA_INTENT_RESULT', JSON.stringify({
