@@ -161,7 +161,7 @@ Sibling result hashes participate in the discovery context fingerprint so a sibl
 
 ## Level 1 cognitive self-remediation
 
-The bound agent may now choose a first-class `REMEDIATE` action when it detects a recoverable inconsistency in its own durable cognitive state. This is not runtime-authored repair: the runtime exposes prior cognition, current durable evidence, completed sibling outputs, and remediation history; the agent must identify the anomaly, state its prior belief, cite contradicting evidence, diagnose the failure, choose a bounded repair, and define its own verification criterion.
+The bound agent may choose a first-class `REMEDIATE` action when it detects a recoverable inconsistency in its own durable cognitive state. This remains agent-authored recovery: the runtime exposes prior cognition, current durable evidence, completed sibling outputs, synthesis failure evidence when present, and remediation history; the agent must identify the anomaly, state its prior belief, cite contradicting evidence, diagnose the failure, choose an allowed bounded repair, and define its own verification criterion.
 
 A remediation episode is persisted in `agent_lab.cognition_remediation_episodes` with:
 - the observed anomaly,
@@ -170,23 +170,33 @@ A remediation episode is persisted in `agent_lab.cognition_remediation_episodes`
 - the agent-authored diagnosis,
 - the requested repair,
 - pre-repair and post-repair state,
+- the repair-specific verification boundary,
 - the verification criterion,
+- independent/runtime verification evidence when applicable,
 - and the final verification result.
 
-The initial bounded repair vocabulary is deliberately narrow:
+The bounded repair vocabulary is:
 
 `INVALIDATE_DISCOVERY_CHECKPOINT` supersedes the current routing/discovery checkpoint and returns the node to fresh reconsideration without changing evidence, atomic-failure counts, hard resource ceilings, or historical records.
 
 `REFRESH_SIBLING_EVIDENCE` mechanically reloads already resolved sibling outputs into the node context, then supersedes the current discovery checkpoint. The runtime does not decide whether those sibling outputs are relevant or sufficient.
 
-Every remediation must be verified by a separate bound-agent verification pass before the original requirement resumes. `VERIFIED` means the agent judges its own stated verification criterion satisfied. `FAILED` preserves the unsuccessful episode and allows another diagnosis while budget remains. A malformed or timed-out verification is recorded as a non-agent-authored verification failure and must never be mislabeled as successful self-remediation.
+`REBUILD_SYNTHESIS_FROM_RESOLVED_EVIDENCE` is available only after a durable synthesis/provenance failure. It preserves completed children, child result hashes, the parent requirement, durable evidence, and the existing synthesis accumulator. It clears only the failed terminal-synthesis/provenance surface, creates a fresh synthesis checkpoint identity, and returns the parent to synthesis from already resolved evidence.
 
-Remediation is capped at two attempts per requirement node. The repair vocabulary cannot change requirement text, fabricate evidence, erase atomic execution failures, reset hard context ceilings, rewrite completed artifacts, mutate code, deploy services, or modify unrelated nodes.
+**Mechanical repair is never remediation success.** After a repair is applied, the episode remains `applied` while the original cognition resumes. Verification occurs only after the repair-specific fresh-cognition boundary:
 
-An interrupted episode is resumable. Episodes in `proposed`, `applied`, or `verifying` state are resumed at the repair/verification boundary after worker recovery rather than silently skipped.
+- discovery repairs verify only after a fresh discovery checkpoint has been produced from the repaired state;
+- synthesis repairs verify only after a fresh parent synthesis has passed the deterministic evidence guard and synthesis provenance review.
 
-This capability is **Level 1 cognitive self-remediation only**. It does not constitute autonomous workflow repair, source-code modification, infrastructure repair, deployment, or rollback. Those remain later maturity levels.
+The bound agent then performs the self-verification pass against its original verification criterion and the post-cognition state. Where an independent/runtime verifier exists, its result is supplied to the verification pass and is authoritative about its own checks; the agent cannot mark a remediation `VERIFIED` when that external verification failed. `FAILED` preserves the unsuccessful episode and returns the node to agent-owned diagnosis while the remediation-attempt budget remains.
 
+A synthesis/provenance failure that exhausts bounded continuation is therefore not a dead-end runtime error. The failure is persisted as agent-visible `synthesis_failure` evidence, including the review, child hashes, accumulator identity, and prior remediation linkage, and semantic control returns to the bound agent. The agent may choose `REMEDIATE` if it diagnoses a recoverable synthesis-state failure, or another available semantic action if it does not.
+
+Remediation remains capped at two attempts per requirement node. The repair vocabulary cannot change requirement text, fabricate evidence, erase atomic execution failures, reset hard context ceilings, rewrite completed child artifacts, mutate child result hashes, mutate code, deploy services, or modify unrelated nodes.
+
+Interrupted episodes are resumable. `proposed` resumes at mechanical application, `applied` resumes the original cognition until its verification boundary is reached, and `verifying` resumes the verification pass using the persisted independent verification context. No interrupted episode may be silently promoted to success.
+
+This capability is **Level 1 cognitive self-remediation**. It repairs bounded cognitive state and synthesis state only; it does not constitute autonomous source-code modification, infrastructure repair, deployment, or rollback. Those remain later maturity levels.
 
 ## Deep child formulation and durable serialization
 
