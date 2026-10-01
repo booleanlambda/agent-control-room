@@ -1,8 +1,9 @@
 // Silas-only continuation of the FROZEN off-curriculum test after the numerical gate.
 // Does not change agent lifecycle, degrees, grades, policies, or previous pilot evidence.
 // Numerical errors remain visible; preserve responses and evaluate quality AFTER all stages.
-import { nvidiaChatCompletion } from './providers/nvidia.js';
+import { modelChatCompletion, modelProviderConfigStatus } from './providers/model-provider.js';
 import { pilotHelpers as h } from './silas-continuation-pilot.js';
+const modelProviderReady=()=>{try{return modelProviderConfigStatus().ready===true;}catch{return false;}};
 const R=h.ROOT;
 const steps={
   3:{stage:'business_decision',task:'Use the earlier study plan and BOTH original and revised stage-2 submissions. Their option A arithmetic was flagged as incorrect; you are NOT given the correct numbers. Treat them as unverified, recheck the source inputs yourself and do not silently inherit their totals. Compute outsourcing option C; evaluate liquidity, continuity of service, customer trust, supplier dependence, financial and operational risks, and identify what commercial evidence would be needed. Give a conditional decision, separately from the numerical verification status. Provide JSON keys: stage,source_ids,prior_work_reference,option_C (day0,day14_pre,day14_post,day28_pre,day28_post,day35_pre,day35_post,day42,minimum_cash,minimum_day,constraint_pass,formula),decision,reasoning,stakeholder_plan,risks,open_questions,acknowledged_error.'},
@@ -45,7 +46,7 @@ function evidenceCheck(n,v,brief,prior){
  return {passed:issues.length===0,issues};
 }
 export async function runSilasHolisticContinuation(){
- if(!h.token||!process.env.NVIDIA_API_KEY)throw Error('pilot_credentials_unavailable');
+ if(!h.token||!modelProviderReady())throw Error('pilot_credentials_unavailable');
  const limit=Number(process.env.AAU_SILAS_HOLISTIC_PHASE||3);
  if(![3,5].includes(limit))throw Error('pilot_invalid_phase');
  const frozen=await h.read(R+'/brief.json');if(!frozen)throw Error('pilot_brief_missing');
@@ -77,7 +78,7 @@ export async function runSilasHolisticContinuation(){
     '\nSet prior_work_reference exactly to '+prev[prev.length-1].output_sha256+
     '\nFROZEN INFORMATION:\n'+JSON.stringify(input);
   const started=Date.now();let result;
-  try{result=await nvidiaChatCompletion({model:h.MODEL,messages:[{role:'system',content:system},{role:'user',content:user}],
+  try{result=await modelChatCompletion({model:h.MODEL,messages:[{role:'system',content:system},{role:'user',content:user}],
     maxTokens:4096,timeoutMs:120000,temperature:0.1,jsonMode:true,enableThinking:false});}
   catch(e){h.log('HOLISTIC_BLOCKED',{step:n,cause:'model_or_timeout',code:e.code||e.name||'error',elapsed_ms:Date.now()-started});return;}
   let output;try{output=JSON.parse(result.content);}catch{output=null;}
