@@ -1,9 +1,8 @@
 // Explicitly opt-in, read-only, synthetic probe of AAU expertise authenticator I/O.
 // No agent data, grades, state writes, or credentials are logged.
 import { createHash } from 'node:crypto';
+import { modelChatCompletion, modelProviderConfigStatus } from './providers/model-provider.js';
 
-const key=String(process.env.NVIDIA_API_KEY||'').trim();
-const endpoint='https://integrate.api.nvidia.com/v1/chat/completions';
 const expected=['execution','method','security','validation','communication','critical','confidence','unsupported'];
 const receipts=['AUTH_HEAD_62B7','AUTH_MIDDLE_8C04','AUTH_TAIL_51D9'];
 
@@ -20,43 +19,38 @@ const user=[
 ].join('\n');
 
 async function one(model,maxTokens,timeoutMs,label){
- const started=Date.now(),controller=new AbortController();
- const timer=setTimeout(()=>controller.abort(),timeoutMs);
- const request={model,messages:[{role:'system',content:system},{role:'user',content:user}],
-  max_tokens:maxTokens,temperature:0,stream:false};
- if(model.startsWith('nvidia/nemotron'))request.chat_template_kwargs={enable_thinking:false};
+ const started=Date.now();
  try{
-  const response=await fetch(endpoint,{method:'POST',signal:controller.signal,
-    headers:{authorization:`Bearer ${key}`,'content-type':'application/json',accept:'application/json'},
-    body:JSON.stringify(request)});
-  const raw=await response.text();
-  let body;try{body=JSON.parse(raw);}catch{body={};}
-  const result=String(body?.choices?.[0]?.message?.content||'').trim();
-  let grade;try{grade=JSON.parse(result);}catch{grade=null;}
+  const result=await modelChatCompletion({
+    model,messages:[{role:'system',content:system},{role:'user',content:user}],
+    maxTokens,temperature:0,jsonMode:true,
+    enableThinking:model.startsWith('nvidia/nemotron')?false:null,
+    timeoutMs,runtimeRole:'authenticator',
+  });
+  const output=String(result.content||'').trim();
+  let grade;try{grade=JSON.parse(output);}catch{grade=null;}
   const fields=grade&&typeof grade==='object'&&expected.every(k=>Object.hasOwn(grade,k));
   const echoed=Array.isArray(grade?.input_receipts)&&receipts.every((x,i)=>grade.input_receipts[i]===x)&&grade.input_receipts.length===3;
-  const finish=body?.choices?.[0]?.finish_reason||null;
-  const outputTokens=body?.usage?.completion_tokens??null;
-  const promptTokens=body?.usage?.prompt_tokens??null;
-  return {label,model_requested:model,model_returned:body?.model||null,
-   http_status:response.status,elapsed_ms:Date.now()-started,
+  const finish=result.finish_reason||null;
+  return {label,model_requested:model,model_returned:result.model_returned||null,
+   provider:result.provider||null,elapsed_ms:Date.now()-started,
    input_chars:system.length+user.length,
-   input_sha256:createHash('sha256').update(system+'\n'+user).digest('hex'),
-   requested_output_tokens:maxTokens,
-   output_chars:result.length,prompt_tokens:promptTokens,completion_tokens:outputTokens,
+   input_sha256:createHash('sha256').update(system+'\\n'+user).digest('hex'),
+   requested_output_tokens:maxTokens,output_chars:output.length,
+   prompt_tokens:result.usage?.prompt_tokens??null,completion_tokens:result.usage?.completion_tokens??null,
    finish_reason:finish,required_fields_complete:!!fields,head_mid_tail_verified:echoed,
-   review_accepted_under_strict_completion:response.ok&&finish==='stop'&&!!fields&&echoed,
-   error_code:response.ok?null:String(body?.error?.code||body?.error?.message||body?.detail||response.status).slice(0,120)};
+   review_accepted_under_strict_completion:finish==='stop'&&!!fields&&echoed,error_code:null};
  }catch(e){
+  const timedOut=e?.code==='MODEL_TIMEOUT'||e?.name==='AbortError'||e?.name==='TimeoutError';
   return {label,model_requested:model,elapsed_ms:Date.now()-started,
    input_chars:system.length+user.length,requested_output_tokens:maxTokens,
-   error_code:e?.name==='AbortError'?'timeout':String(e?.message||e).slice(0,120),
-   timed_out:e?.name==='AbortError',review_accepted_under_strict_completion:false};
- }finally{clearTimeout(timer);}
+   error_code:timedOut?'timeout':String(e?.code||e?.message||e).slice(0,120),
+   timed_out:timedOut,review_accepted_under_strict_completion:false};
+ }
 }
 
 export async function probeAuthenticatorIoTimeout(){
- if(!key)return {status:'unavailable',reason:'nvidia_key_missing'};
+ try{if(modelProviderConfigStatus().ready!==true)return {status:'unavailable',reason:'model_provider_unavailable'};}catch{return {status:'unavailable',reason:'model_provider_unavailable'};}
  console.log('AAU_AUTH_IO_TEST_BEGIN',JSON.stringify({synthetic:true,source_records_accessed:false,input_chars:system.length+user.length}));
  const tests=[];
  tests.push(await one('moonshotai/kimi-k3',1800,65000,'primary_production_budget'));
