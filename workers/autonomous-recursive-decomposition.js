@@ -5962,13 +5962,20 @@ export async function runAutonomousRequirementCognition({
     }
     const deduped=[];
     const seen=new Set();
+    const valuesByLabel=new Map();
     for(const item of evidence){
+      const labelValues=valuesByLabel.get(item.label)||new Set();
+      labelValues.add(String(item.value));
+      valuesByLabel.set(item.label,labelValues);
       const key=item.label+'|'+String(item.value);
       if(seen.has(key))continue;
       seen.add(key);
       deduped.push(item);
     }
-    return deduped.slice(0,160);
+    return deduped.slice(0,160).map(item=>({
+      ...item,
+      deterministic_guard_eligible:(valuesByLabel.get(item.label)?.size||0)===1,
+    }));
   }
 
   function synthesisQuantitativeClaimPattern(label){
@@ -5992,6 +5999,7 @@ export async function runAutonomousRequirementCognition({
     const issues=[];
     const bindings=[];
     for(const item of evidence){
+      if(item?.deterministic_guard_eligible===false)continue;
       const pattern=synthesisQuantitativeClaimPattern(item.label);
       if(!pattern)continue;
       let match=null;
