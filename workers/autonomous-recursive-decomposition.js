@@ -87,7 +87,17 @@ function qdaStatisticalAtomicRequirement(packet,node){
   if(qdaVerifiedResultsSynthesisRequirement(node))return false;
   const requirement=text(node?.requirement_text);
   const unitCode=text(packet?.qda_601_context?.next_unit?.unit_code).toUpperCase();
-  if(QDA_STATISTICAL_UNIT_CODES.has(unitCode))return true;
+
+  // The QDA curriculum is authoritative about which units use the statistical
+  // Python companion. Do not let incidental language inside an ordinary
+  // quantitative unit (for example "financial calculator simulation") promote
+  // that node into the statistics verifier.
+  if(/^QDA601-M\d+-U\d+$/.test(unitCode)){
+    return QDA_STATISTICAL_UNIT_CODES.has(unitCode);
+  }
+
+  // Keyword inference is only a fallback for QDA work that lacks a canonical
+  // curriculum unit code.
   if(!/QDA601/i.test(requirement))return false;
   return /(descriptive statistic|distribution|confidence interval|sampling|regression|correlation|association|bootstrap|monte carlo|simulation|p-value|t-statistic|variance|standard deviation)/i.test(requirement);
 }
