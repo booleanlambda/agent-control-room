@@ -724,6 +724,52 @@ function explicitRepeatedInstancesDisjoint(a,b){
   return Number.isInteger(aa)&&Number.isInteger(bb)&&aa!==bb;
 }
 
+function explicitPartitionValues(v){
+  const raw=[
+    v?.requirement,
+    v?.requirement_text,
+    v?.completion_criterion,
+  ].filter(Boolean).join(' ');
+  const out={};
+  const dimensions=['year','row','case','month','quarter','week','day','step','part','section'];
+  for(const dimension of dimensions){
+    const values=new Set();
+    const rangePattern=new RegExp(
+      '\\b'+dimension+'s?\\s+(\\d+)\\s*(?:-|–|—|to|through)\\s*(\\d+)\\b','gi'
+    );
+    let match=null;
+    while((match=rangePattern.exec(raw))!==null){
+      const start=Number(match[1]);
+      const end=Number(match[2]);
+      if(!Number.isInteger(start)||!Number.isInteger(end))continue;
+      const low=Math.min(start,end);
+      const high=Math.max(start,end);
+      if(high-low>10000)continue;
+      for(let value=low;value<=high;value++)values.add(value);
+    }
+    const itemPattern=new RegExp('\\b'+dimension+'s?\\s+(\\d+)\\b','gi');
+    while((match=itemPattern.exec(raw))!==null){
+      const value=Number(match[1]);
+      if(Number.isInteger(value))values.add(value);
+    }
+    if(values.size)out[dimension]=[...values].sort((a,b)=>a-b);
+  }
+  return out;
+}
+
+function explicitPartitionsDisjoint(a,b){
+  const aa=explicitPartitionValues(a);
+  const bb=explicitPartitionValues(b);
+  let compared=false;
+  for(const dimension of Object.keys(aa)){
+    if(!Array.isArray(bb[dimension])||!bb[dimension].length)continue;
+    compared=true;
+    const bset=new Set(bb[dimension]);
+    if(aa[dimension].some(value=>bset.has(value)))return false;
+  }
+  return compared;
+}
+
 function candidateLedgerRows(suppliedContext){
   const wrapped=asObject(asObject(suppliedContext)?.expertise_candidate_ledger);
   const ledger=asObject(wrapped.value||wrapped);
@@ -2275,6 +2321,9 @@ export async function runAutonomousRequirementCognition({
         rejection_threshold:0.78,
         explicit_instance_id:siblingOverlap?.explicit_instance_id??null,
         explicit_instance_disjoint:Boolean(siblingOverlap?.explicit_instance_disjoint),
+        explicit_partition_disjoint:Boolean(siblingOverlap?.explicit_partition_disjoint),
+        explicit_partition_candidate:siblingOverlap?.explicit_partition_candidate??{},
+        explicit_partition_sibling:siblingOverlap?.explicit_partition_sibling??{},
         canonical_identity:siblingOverlap?.canonical_identity??null,
         canonical_instance_disjoint:Boolean(siblingOverlap?.canonical_instance_disjoint),
       },
@@ -4290,6 +4339,9 @@ export async function runAutonomousRequirementCognition({
                   similarity:requirementSimilarity(candidate.requirement,v?.requirement),
                   explicit_instance_id:explicitRepeatedInstanceId(v),
                   explicit_instance_disjoint:explicitRepeatedInstancesDisjoint(candidate,v),
+                  explicit_partition_disjoint:explicitPartitionsDisjoint(candidate,v),
+                  explicit_partition_candidate:explicitPartitionValues(candidate),
+                  explicit_partition_sibling:explicitPartitionValues(v),
                   canonical_identity:canonicalCandidateIdentity(
                     v,childContextView.suppliedContext
                   ),
@@ -4303,6 +4355,7 @@ export async function runAutonomousRequirementCognition({
                 siblingOverlap
                 &&siblingOverlap.similarity>=0.78
                 &&!siblingOverlap.explicit_instance_disjoint
+                &&!siblingOverlap.explicit_partition_disjoint
                 &&!siblingOverlap.canonical_instance_disjoint
               ){
                 await persistChildProposalRejection(
@@ -4322,12 +4375,16 @@ export async function runAutonomousRequirementCognition({
                 max_similarity:Number(siblingOverlap?.similarity||0),
                 compared_children:previous.length,
                 explicit_instance_id:candidateInstanceId,
+                explicit_partition_candidate:explicitPartitionValues(candidate),
+                explicit_partition_sibling:siblingOverlap?.explicit_partition_sibling||{},
+                explicit_partition_disjoint:Boolean(siblingOverlap?.explicit_partition_disjoint),
                 canonical_candidate_identity:candidateCanonicalIdentity,
                 compared_sibling_canonical_identity:siblingOverlap?.canonical_identity||null,
                 disjoint_repeated_instance_override:Boolean(
                   siblingOverlap?.similarity>=0.78
                   &&(
                     siblingOverlap?.explicit_instance_disjoint
+                    ||siblingOverlap?.explicit_partition_disjoint
                     ||siblingOverlap?.canonical_instance_disjoint
                   )
                 ),
@@ -4336,7 +4393,9 @@ export async function runAutonomousRequirementCognition({
                     ?'canonical_candidate_identity'
                     :siblingOverlap?.explicit_instance_disjoint
                       ?'explicit_repeated_instance'
-                      :null,
+                      :siblingOverlap?.explicit_partition_disjoint
+                        ?'explicit_partition'
+                        :null,
               };
 
               const provenanceReview=await reviewChildProposalProvenance(
