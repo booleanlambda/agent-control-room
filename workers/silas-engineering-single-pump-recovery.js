@@ -2,7 +2,8 @@
 // Produces model-authored pump/pipe rows, audits them deterministically, assembles pipe screens,
 // then resumes the existing engineering feasibility continuation.
 import { createHash } from 'node:crypto';
-import { nvidiaChatCompletion } from './providers/nvidia.js';
+import { modelChatCompletion, modelProviderConfigStatus } from './providers/model-provider.js';
+const modelProviderReady=()=>{try{return modelProviderConfigStatus().ready===true;}catch{return false;}};
 
 const REPO='booleanlambda/agent-control-room';
 const BRANCH='pilot/silas-engineering-hydraulic-20260924';
@@ -51,7 +52,7 @@ function auditRow(brief,route,pump,o){
 }
 async function call(label,system,user){
  const t=Date.now();let r;
- try{r=await nvidiaChatCompletion({model:MODEL,messages:[{role:'system',content:system},{role:'user',content:user}],
+ try{r=await modelChatCompletion({model:MODEL,messages:[{role:'system',content:system},{role:'user',content:user}],
    temperature:0,jsonMode:true,enableThinking:true,maxTokens:2048,timeoutMs:180000});}
  catch(e){log('BLOCKED',{label,reason:'model_or_timeout',code:e?.code||e?.name||'error',elapsed_ms:Date.now()-t});return null;}
  let o;try{o=JSON.parse(String(r.content||''));}catch{o=null;}
@@ -71,7 +72,7 @@ async function persist(path,meta,call,assessment){
  return row;
 }
 export async function runSilasEngineeringSinglePumpRecovery(){
- if(!token||!process.env.NVIDIA_API_KEY)throw Error('engineering_single_credentials_missing');
+ if(!token||!modelProviderReady())throw Error('engineering_single_credentials_missing');
  const bf=await read(ROOT+'/brief.json');if(!bf)throw Error('engineering_single_brief_missing');
  const brief=JSON.parse(bf.text);
  if(brief.agent_id!==AGENT||brief.bound_model!==MODEL||brief.thinking!==true)throw Error('engineering_single_scope_mismatch');
