@@ -275,7 +275,7 @@ export async function runNvidiaWake({ wakeRequestId, agentId, workerId = null } 
   const resolvedWorkerId = String(workerId || `render-nvidia-autonomous-${process.env.RENDER_INSTANCE_ID || process.pid}`).trim();
   let begun = null;
   try {
-    begun = await rpc('aau_bridge_begin_nvidia_experimental_wake', {
+    begun = await rpc('aau_bridge_begin_model_experimental_wake', {
       p_wake_request_id: requestedWakeId,
       p_agent_id: requestedAgentId,
       p_worker_id: resolvedWorkerId,
@@ -326,7 +326,7 @@ export async function runNvidiaWake({ wakeRequestId, agentId, workerId = null } 
       latency_ms: Date.now() - startedAt,
     };
 
-    const applied = await rpc('aau_bridge_apply_nvidia_experimental_wake', {
+    const applied = await rpc('aau_bridge_apply_model_experimental_wake', {
       p_wake_request_id: requestedWakeId,
       p_result: decision,
       p_runtime: runtime,
@@ -354,7 +354,7 @@ export async function runNvidiaWake({ wakeRequestId, agentId, workerId = null } 
   } catch (error) {
     const message = String(error?.message || error).slice(0,3000);
     if (begun) {
-      await rpc('aau_bridge_fail_nvidia_experimental_wake', {
+      await rpc('aau_bridge_fail_model_experimental_wake', {
         p_wake_request_id: requestedWakeId,
         p_error: message,
       }).catch(() => {});
