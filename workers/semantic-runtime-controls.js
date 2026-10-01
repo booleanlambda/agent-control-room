@@ -390,15 +390,75 @@ export function evidenceAcquisitionBoundaryDecision({
   });
 }
 
-export function retryableModelTransportError(error){
+export function classifyModelTransportFailure(error){
   const code=String(error?.code||error?.cause?.code||'').trim().toUpperCase();
   const name=String(error?.name||'').trim();
   const message=String(error?.message||'').trim().toLowerCase();
-  const status=Number(error?.status||0);
-  if(code==='NVIDIA_TIMEOUT'||name==='AbortError'||name==='TimeoutError')return false;
-  if([429,500,502,503,504,529].includes(status))return true;
-  if(['ECONNRESET','ECONNREFUSED','ENETUNREACH','EAI_AGAIN','ETIMEDOUT','UND_ERR_CONNECT_TIMEOUT','UND_ERR_SOCKET','UND_ERR_HEADERS_TIMEOUT'].includes(code))return true;
-  return name==='TypeError'&&message.includes('fetch failed');
+  const status=Number(
+    error?.status
+      ?? error?.providerStatusCode
+      ?? error?.cause?.status
+      ?? 0
+  );
+
+  if(code==='MODEL_TIMEOUT'||name==='AbortError'||name==='TimeoutError'){
+    return Object.freeze({
+      failure_class:'model_transport_transient',
+      transport_kind:'timeout',
+      transport_status:null,
+      transport_code:code||name,
+      immediate_retryable:false,
+      cognition_fault:false,
+    });
+  }
+
+  if([408,429,500,502,503,504,529].includes(status)){
+    return Object.freeze({
+      failure_class:'model_transport_transient',
+      transport_kind:'http',
+      transport_status:status,
+      transport_code:code||null,
+      immediate_retryable:true,
+      cognition_fault:false,
+    });
+  }
+
+  if(['ECONNRESET','ECONNREFUSED','ENETUNREACH','EAI_AGAIN','ETIMEDOUT','UND_ERR_CONNECT_TIMEOUT','UND_ERR_SOCKET','UND_ERR_HEADERS_TIMEOUT'].includes(code)){
+    return Object.freeze({
+      failure_class:'model_transport_transient',
+      transport_kind:'network',
+      transport_status:null,
+      transport_code:code,
+      immediate_retryable:true,
+      cognition_fault:false,
+    });
+  }
+
+  if(name==='TypeError'&&message.includes('fetch failed')){
+    return Object.freeze({
+      failure_class:'model_transport_transient',
+      transport_kind:'network',
+      transport_status:null,
+      transport_code:'FETCH_FAILED',
+      immediate_retryable:true,
+      cognition_fault:false,
+    });
+  }
+
+  return Object.freeze({
+    failure_class:'unknown',
+    transport_kind:null,
+    transport_status:Number.isFinite(status)&&status>0?status:null,
+    transport_code:code||null,
+    immediate_retryable:false,
+    cognition_fault:false,
+  });
+}
+
+export function retryableModelTransportError(error){
+  const classified=classifyModelTransportFailure(error);
+  return classified.failure_class==='model_transport_transient'
+    &&classified.immediate_retryable===true;
 }
 
 export function pathDepth(nodePath){
