@@ -2971,9 +2971,20 @@ export async function runAutonomousRequirementCognition({
       const resourceView=contextResourceView(contextState,contextPayload);
       const remediationEpisodes=await loadRemediationEpisodes(node.node_path);
       const remediationAttemptsUsed=remediationEpisodes.length;
-      const activeRemediation=[...remediationEpisodes].reverse()
-        .find(v=>['proposed','applied','verifying'].includes(String(v?.status||'')));
-      if(activeRemediation){
+      const activeRemediation=latestActiveRemediation(remediationEpisodes);
+      if(activeRemediation&&String(activeRemediation.status)==='proposed'){
+        const resumed=await resumeSelfRemediationEpisode(node,activeRemediation,{
+          contextPayload,
+          pinnedEvidence,
+          siblingEvidence,
+        });
+        node=resumed.node;
+        contextPayload=resumed.contextPayload;
+        if(resumed.resume_mode==='SYNTHESIS')
+          return {node,decision:'SPLIT',self_remediation_applied:true};
+        continue;
+      }
+      if(activeRemediation&&String(activeRemediation.status)==='verifying'){
         const resumed=await resumeSelfRemediationEpisode(node,activeRemediation,{
           contextPayload,
           pinnedEvidence,
@@ -2983,13 +2994,23 @@ export async function runAutonomousRequirementCognition({
         contextPayload=resumed.contextPayload;
         continue;
       }
+      if(
+        activeRemediation
+        &&String(activeRemediation.status)==='applied'
+        &&selfRemediationVerificationBoundary(activeRemediation.repair_type)==='POST_SYNTHESIS_PROVENANCE'
+      ){
+        return {node,decision:'SPLIT',self_remediation_applied:true};
+      }
       const priorCognitiveState=asObject(node?.decision_payload?.routing_discovery_checkpoint);
       const lastRemediation=asObject(node?.decision_payload?.last_self_remediation);
+      const synthesisFailure=asObject(node?.decision_payload?.synthesis_failure);
       const remediationAvailable=
-        remediationAttemptsUsed<MAX_SELF_REMEDIATION_ATTEMPTS
+        !activeRemediation
+        &&remediationAttemptsUsed<MAX_SELF_REMEDIATION_ATTEMPTS
         && (
           priorCognitiveState.version==='agent_deep_discovery_v0_1'
           || text(lastRemediation.status).toUpperCase()==='FAILED'
+          || Object.keys(synthesisFailure).length>0
         );
       // Semantic routing and runtime admission are separate authorities.
       // Ordinarily the agent can still state NEED_CONTEXT even when the current
@@ -3116,7 +3137,7 @@ export async function runAutonomousRequirementCognition({
                 remediationAvailable
                   ? 'REMEDIATE is available because you have a prior durable cognitive state and remaining remediation budget. Choose it only if YOU detect a contradiction, stale belief, or recoverable cognitive-state failure in your own prior reasoning. The runtime will not diagnose the anomaly for you.'
                   : 'REMEDIATE is mechanically unavailable because there is no eligible prior cognitive state or the remediation budget is exhausted.',
-                'If you choose REMEDIATE, YOU must supply observed_anomaly, prior_belief, contradicting_evidence, diagnosis, repair_type, repair_payload, and verification_criterion. Allowed repair types are '+SELF_REMEDIATION_REPAIR_TYPES.join(', ')+'. INVALIDATE_DISCOVERY_CHECKPOINT supersedes your current discovery checkpoint and makes you reconsider. REFRESH_SIBLING_EVIDENCE mechanically reloads resolved siblings and also supersedes your current discovery checkpoint. Neither repair changes facts, conclusions, atomic-failure counts, or hard resource ceilings.',
+                'If you choose REMEDIATE, YOU must supply observed_anomaly, prior_belief, contradicting_evidence, diagnosis, repair_type, repair_payload, and verification_criterion. Allowed repair types are '+SELF_REMEDIATION_REPAIR_TYPES.join(', ')+'. INVALIDATE_DISCOVERY_CHECKPOINT supersedes your current discovery checkpoint and requires fresh discovery before verification. REFRESH_SIBLING_EVIDENCE mechanically reloads resolved siblings, supersedes discovery, and requires fresh discovery before verification. REBUILD_SYNTHESIS_FROM_RESOLVED_EVIDENCE is available only after a durable synthesis/provenance failure; it preserves resolved children, hashes, and the synthesis accumulator, clears only the failed final-synthesis/provenance surface, and verifies only after a fresh synthesis passes deterministic/provenance checks. No repair changes facts, conclusions, atomic-failure counts, completed child artifacts, or hard resource ceilings.',
                 atomicOverflowRecovery
                   ? 'BOUNDED ATOMIC OVERFLOW RECOVERY: your prior bounded atomic execution exhausted the output limit twice and both partial responses were rejected. ATOMIC is mechanically unavailable for this node. Choose SPLIT and author one or more genuinely narrower child requirements that can each finish independently within the existing output bound. Preserve the original requirement; do not solve it by deleting scope, inflating token limits, or continuing truncated text.'
                   : atomicUnavailable
@@ -3145,7 +3166,7 @@ export async function runAutonomousRequirementCognition({
                 'EPISTEMIC THRESHOLD POLICY: '+THRESHOLD_EVIDENCE_POLICY.RULE+' '+THRESHOLD_EVIDENCE_POLICY.PASS+' '+THRESHOLD_EVIDENCE_POLICY.FAIL+' '+THRESHOLD_EVIDENCE_POLICY.UNKNOWN,
                 'When supplied_context contains research_source_catalog, treat it as the complete discoverable source index for prior research rounds. If context acquisition is available and a source is indexed but its excerpt is insufficient, put its exact listed HTTPS URL in research_urls (not context_requests) so the runtime can fetch it directly.',
                 'Do not solve the requirement or author child requirements in this pass.',
-                'Return complete JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT|BLOCKED|REMEDIATE","block_basis":"EVIDENCE_PROVES_BLOCKED|MORE_EVIDENCE_REQUIRED|null","reason":"auditable reason","requirement_interpretation":"what this requirement actually demands","evidence_assessment":"what the current evidence does and does not establish","inspected_sibling_paths":["R.001..."],"unresolved_gaps":["..."],"context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."],"remediation":{"observed_anomaly":"required when REMEDIATE","prior_belief":"required when REMEDIATE","contradicting_evidence":[],"diagnosis":"required when REMEDIATE","repair_type":"INVALIDATE_DISCOVERY_CHECKPOINT|REFRESH_SIBLING_EVIDENCE","repair_payload":{},"verification_criterion":"required when REMEDIATE"}}. When decision=BLOCKED, block_basis is required. Use MORE_EVIDENCE_REQUIRED when the gap could be resolved by additional evidence, even if runtime resources are currently exhausted.',
+                'Return complete JSON only: {"decision":"ATOMIC|SPLIT|NEED_CONTEXT|BLOCKED|REMEDIATE","block_basis":"EVIDENCE_PROVES_BLOCKED|MORE_EVIDENCE_REQUIRED|null","reason":"auditable reason","requirement_interpretation":"what this requirement actually demands","evidence_assessment":"what the current evidence does and does not establish","inspected_sibling_paths":["R.001..."],"unresolved_gaps":["..."],"context_requests":["exact.path"],"research_queries":["query"],"research_urls":["https://..."],"remediation":{"observed_anomaly":"required when REMEDIATE","prior_belief":"required when REMEDIATE","contradicting_evidence":[],"diagnosis":"required when REMEDIATE","repair_type":"INVALIDATE_DISCOVERY_CHECKPOINT|REFRESH_SIBLING_EVIDENCE|REBUILD_SYNTHESIS_FROM_RESOLVED_EVIDENCE","repair_payload":{},"verification_criterion":"required when REMEDIATE"}}. When decision=BLOCKED, block_basis is required. Use MORE_EVIDENCE_REQUIRED when the gap could be resolved by additional evidence, even if runtime resources are currently exhausted.',
                 forceReconsider
                   ? 'A prior atomic execution was rejected or exhausted. Reconsider the requirement under the persisted constraints rather than repeating the failed action.'
                   : '',
@@ -3157,6 +3178,8 @@ export async function runAutonomousRequirementCognition({
                 authoritative_completed_sibling_evidence:siblingEvidence,
                 sibling_inspection_retry:siblingInspectionRetry,
                 prior_cognitive_state:priorCognitiveState,
+                synthesis_failure:synthesisFailure,
+                active_self_remediation:activeRemediation?compactRemediationEpisodes([activeRemediation])[0]:null,
                 durable_self_remediation_history:compactRemediationEpisodes(remediationEpisodes),
                 decomposition_execution_failure:asObject(node?.decision_payload?.child_authoring_failure),
                 supplied_context:cognitionContext,
@@ -3455,6 +3478,29 @@ export async function runAutonomousRequirementCognition({
 
       if(!discovery)throw new Error('autonomous_decomposition_discovery_checkpoint_missing:'+node.node_path);
 
+      if(
+        activeRemediation
+        &&String(activeRemediation.status)==='applied'
+        &&selfRemediationVerificationBoundary(activeRemediation.repair_type)==='POST_FRESH_DISCOVERY'
+      ){
+        const verifiedRemediation=await verifyRemediationEpisode(node,activeRemediation,{
+          contextPayload,
+          pinnedEvidence,
+          siblingEvidence,
+          externalVerification:{
+            kind:'fresh_discovery_checkpoint',
+            ok:true,
+            discovery_fingerprint:discovery.context_fingerprint,
+            semantic_decision:discovery.decision,
+            reason:'A fresh post-repair discovery checkpoint was produced from the repaired durable state.',
+          },
+          preserveCurrentCognition:true,
+        });
+        node=verifiedRemediation.node;
+        contextPayload=verifiedRemediation.contextPayload;
+        if(!verifiedRemediation.verified)continue;
+      }
+
       let serialized=null;
       const routingCommitIdentity=sha256({
         discovery_fingerprint:discovery.context_fingerprint,
@@ -3541,6 +3587,8 @@ export async function runAutonomousRequirementCognition({
         });
         node=remediated.node;
         contextPayload=remediated.contextPayload;
+        if(remediated.resume_mode==='SYNTHESIS')
+          return {node,decision:'SPLIT',self_remediation_applied:true};
         continue;
       }
 
