@@ -2472,6 +2472,24 @@ export async function runAutonomousRequirementCognition({
     };
   }
 
+  function compactSynthesisReviewState(review){
+    const value=asObject(review);
+    if(!Object.keys(value).length)return {};
+    return {
+      status:text(value.status)||null,
+      reason:clip(value.reason,1600)||null,
+      issues:asArray(value.issues).map(v=>clip(text(v),700)).filter(Boolean).slice(0,10),
+      evidence_bindings:asArray(value.evidence_bindings).map(v=>({
+        claim:clip(text(v?.claim),500)||null,
+        source_path_or_id:clip(text(v?.source_path_or_id),300)||null,
+        preserved:v?.preserved===true,
+      })).slice(0,16),
+      revision_guidance:clip(value.revision_guidance,2200)||null,
+      external_authenticator:value.external_authenticator===true,
+      deterministic_guard:text(value.deterministic_guard)||null,
+    };
+  }
+
   function selfRemediationVerificationBoundary(repairType,subject=null){
     if(text(repairType).toUpperCase()!=='REBUILD_SYNTHESIS_FROM_RESOLVED_EVIDENCE')
       return 'POST_FRESH_DISCOVERY';
@@ -2504,7 +2522,10 @@ export async function runAutonomousRequirementCognition({
     const next={...asObject(payload)};
     for(const key of [
       'synthesis_complete','synthesis_outcome','synthesis_reason',
-      'synthesis_provenance_review','synthesis_provenance_pending'
+      'synthesis_provenance_review','synthesis_provenance_pending',
+      'routing_discovery_checkpoint','routing_discovery_checkpointed',
+      'routing_discovery_checkpointed_at','routing_discovery_reused',
+      'routing_commit_serialized'
     ]) delete next[key];
     next.synthesis_remediation_nonce=episode.remediation_id;
     next.synthesis_rebuild_reason='self_remediation_rebuild_from_resolved_evidence';
@@ -6650,7 +6671,7 @@ export async function runAutonomousRequirementCognition({
         contract:'agent_visible_synthesis_failure_v0_2',
         failure_type:failureType,
         reason:clip(reason,4000),
-        review:asObject(review),
+        review:compactSynthesisReviewState(review),
         continuation:asObject(continuation),
         child_state_hash:sha256(childStates),
         accumulator_hash:sha256(accumulator),
@@ -6858,7 +6879,7 @@ export async function runAutonomousRequirementCognition({
               continuation_round:nextContinuationRound,
               max_continuation_rounds:MAX_SYNTHESIS_PROVENANCE_CONTINUATION_ROUNDS,
               revision_guidance:synthesisProvenanceGuidance,
-              review:asObject(synthesisProvenanceReview),
+              review:compactSynthesisReviewState(synthesisProvenanceReview),
               child_state_hash:sha256(childStates),
               accumulator_hash:sha256(accumulator),
               semantic_state_preserved:true,
@@ -7086,24 +7107,28 @@ export async function runAutonomousRequirementCognition({
           ||'Independent authenticator rejected the frozen QDA unit artifact.',
           4000
         ),
-        review:{
+        review:compactSynthesisReviewState({
           status:'REVISE',
-          reason:clip(text(rootExternalAuthRemediation.report?.rationale),4000),
+          reason:text(rootExternalAuthRemediation.report?.rationale),
           issues:[
-            ...asArray(rootExternalAuthRemediation.report?.weaknesses).map(v=>clip(text(v),1200)),
-            ...asArray(rootExternalAuthRemediation.report?.remediation).map(v=>clip(text(v),1200)),
-          ].filter(Boolean).slice(0,20),
-          revision_guidance:clip(
+            ...asArray(rootExternalAuthRemediation.report?.weaknesses),
+            ...asArray(rootExternalAuthRemediation.report?.remediation),
+          ],
+          revision_guidance:
             asArray(rootExternalAuthRemediation.report?.remediation).map(text).filter(Boolean).join(' '),
-            5000
-          ),
           external_authenticator:true,
-        },
+        }),
         authenticator_review_id:rootExternalAuthRemediation.review_id,
+        authenticator_report_ref:{
+          review_id:rootExternalAuthRemediation.review_id,
+          rejected_file_id:rootExternalAuthRemediation.rejected_file_id,
+          artifact_sha256:rootExternalAuthRemediation.artifact_sha256,
+          report_sha256:Object.keys(rootExternalAuthRemediation.report).length
+            ?sha256(rootExternalAuthRemediation.report):null,
+        },
         rejected_file_id:rootExternalAuthRemediation.rejected_file_id,
         rejected_artifact_sha256:rootExternalAuthRemediation.artifact_sha256,
         authenticator_score:rootExternalAuthRemediation.score,
-        authenticator_report:rootExternalAuthRemediation.report,
         prior_root_result_hash:node.result_hash||null,
         child_result_hashes:asArray(priorPayload.synthesis_child_result_hashes),
         accumulator_hash:Object.keys(asObject(priorPayload.synthesis_accumulator)).length
