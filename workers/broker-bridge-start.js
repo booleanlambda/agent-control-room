@@ -387,35 +387,35 @@ if (isEnabled('AAU_AGENT_FILE_VISION_ENABLED')) {
 // Open the health endpoint before any optional startup cognition can block on a model/provider.
 await import('./broker-bridge-envcheck.js');
 
-const nvidiaWakeEnabled = isEnabled('AAU_NVIDIA_WAKE_ON_START');
-if (nvidiaWakeEnabled) {
+const modelWakeEnabled = isEnabled('AAU_MODEL_WAKE_ON_START');
+if (modelWakeEnabled) {
   try {
-    const { runExperimentalNvidiaWake } = await import('./experimental-nvidia-wake.js');
-    const result = await runExperimentalNvidiaWake();
-    console.log('AAU_NVIDIA_AGENT_WAKE_RESULT', JSON.stringify(result));
+    const { runExperimentalModelWake } = await import('./experimental-model-wake.js');
+    const result = await runExperimentalModelWake();
+    console.log('AAU_MODEL_AGENT_WAKE_RESULT', JSON.stringify(result));
   } catch (error) {
-    console.log('AAU_NVIDIA_AGENT_WAKE_RESULT', JSON.stringify({ status: 'failed', mode: 'experimental_only', error_name: error?.name || null, http_status: error?.status || null, message: String(error?.message || error).slice(0, 2000) }));
+    console.log('AAU_MODEL_AGENT_WAKE_RESULT', JSON.stringify({ status: 'failed', mode: 'experimental_only', error_name: error?.name || null, http_status: error?.status || null, message: String(error?.message || error).slice(0, 2000) }));
   }
 }
 
-const singleWakeConfigured = isEnabled('AAU_NVIDIA_SINGLE_WAKE_ON_START') && Boolean(
-  String(process.env.AAU_NVIDIA_SINGLE_WAKE_REQUEST_ID || '').trim() && String(process.env.AAU_NVIDIA_SINGLE_WAKE_AGENT_ID || '').trim()
+const singleWakeConfigured = isEnabled('AAU_MODEL_SINGLE_WAKE_ON_START') && Boolean(
+  String(process.env.AAU_MODEL_SINGLE_WAKE_REQUEST_ID || '').trim() && String(process.env.AAU_MODEL_SINGLE_WAKE_AGENT_ID || '').trim()
 );
 if (singleWakeConfigured) {
-  const { runConfiguredNvidiaSingleWake } = await import('./nvidia-single-agent-wake.js');
-  await runConfiguredNvidiaSingleWake();
+  const { runConfiguredModelSingleWake } = await import('./model-single-agent-wake.js');
+  await runConfiguredModelSingleWake();
 }
 
-const manualWakeConfigured = isEnabled('AAU_NVIDIA_MANUAL_WAKE_ON_START') && Boolean(
-  String(process.env.AAU_NVIDIA_MANUAL_WAKE_REQUEST_ID || '').trim() && String(process.env.AAU_NVIDIA_MANUAL_WAKE_AGENT_ID || '').trim()
+const manualWakeConfigured = isEnabled('AAU_MODEL_MANUAL_WAKE_ON_START') && Boolean(
+  String(process.env.AAU_MODEL_MANUAL_WAKE_REQUEST_ID || '').trim() && String(process.env.AAU_MODEL_MANUAL_WAKE_AGENT_ID || '').trim()
 );
 if (manualWakeConfigured) {
   try {
-    const { runConfiguredNvidiaManualWake } = await import('./nvidia-manual-agent-wake.js');
-    const result = await runConfiguredNvidiaManualWake();
-    console.log('AAU_NVIDIA_MANUAL_WAKE_STARTUP_RESULT', JSON.stringify(result));
+    const { runConfiguredModelManualWake } = await import('./model-manual-agent-wake.js');
+    const result = await runConfiguredModelManualWake();
+    console.log('AAU_MODEL_MANUAL_WAKE_STARTUP_RESULT', JSON.stringify(result));
   } catch (error) {
-    console.error('AAU_NVIDIA_MANUAL_WAKE_STARTUP_FAILED', JSON.stringify({ error_name: error?.name || null, message: String(error?.message || error).slice(0, 2000) }));
+    console.error('AAU_MODEL_MANUAL_WAKE_STARTUP_FAILED', JSON.stringify({ error_name: error?.name || null, message: String(error?.message || error).slice(0, 2000) }));
   }
 }
 
