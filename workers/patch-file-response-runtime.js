@@ -35,7 +35,7 @@ async function patchFile(path, transform, message) {
   return { path, changed: true, commit_sha: response?.commit?.sha || null };
 }
 
-function patchNvidiaIntentWorker(source) {
+function patchModelIntentWorker(source) {
   if (source.includes('file_response_repair_v0_1')) return source;
   let next = source;
 
@@ -69,8 +69,8 @@ function patchNvidiaIntentWorker(source) {
 
 export async function patchFileResponseRuntime() {
   const worker = await patchFile(
-    'workers/nvidia-intent-execution.js',
-    patchNvidiaIntentWorker,
+    'workers/model-intent-execution.js',
+    patchModelIntentWorker,
     'fix: enforce file-specific agent replies after lifecycle repair',
   );
   const { patchExpertiseArtifactStage } = await import('./patch-expertise-artifact-stage.js');
