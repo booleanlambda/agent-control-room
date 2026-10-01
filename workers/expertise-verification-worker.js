@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
-import { withReviewerNvidiaSlot, isReviewerModelInBackoff, noteReviewerModelTimeout, noteReviewerModelSuccess } from './reviewer-nvidia-endpoint-gate.js';
+import { modelChatCompletion, modelProviderConfigStatus } from './providers/model-provider.js';
+import { withReviewerModelSlot, isReviewerModelInBackoff, noteReviewerModelTimeout, noteReviewerModelSuccess } from './reviewer-model-endpoint-gate.js';
 import {
   resolveModelRuntimeContract,
   assertModelRequestWithinBudget,
@@ -8,7 +9,7 @@ import {
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
 const bridge = String(process.env.AAU_BROKER_BRIDGE_TOKEN || '').trim();
-const nvidiaKey = String(process.env.NVIDIA_API_KEY || '').trim();
+const modelProviderReady=()=>{try{return modelProviderConfigStatus().ready===true;}catch{return false;}};
 const executorId = `render:expertise:${process.env.RENDER_INSTANCE_ID || process.pid}`;
 const pollMs = Math.max(2500, Number(process.env.AAU_EXPERTISE_VERIFIER_POLL_MS || 5000));
 
@@ -85,7 +86,7 @@ async function checkpointVerification(run, stage, fields = {}) {
   return rpc('aau_bridge_checkpoint_expertise_verification', args);
 }
 
-async function nvidiaCall({ model, system, user, maxTokens = null, temperature = 0, timeoutMs = null, jsonMode = false, runtimeRole = 'generic' }) {
+async function modelCall({ model, system, user, maxTokens = null, temperature = 0, timeoutMs = null, jsonMode = false, runtimeRole = 'generic' }) {
   const runtimeContract=resolveModelRuntimeContract(model,runtimeRole);
   const messages=[{ role: 'system', content: system }, { role: 'user', content: user }];
   const resolvedMaxTokens=Math.max(
@@ -107,72 +108,56 @@ async function nvidiaCall({ model, system, user, maxTokens = null, temperature =
       runtimeContract.max_request_timeout_ms
     )
   );
-  const body = {
-    model,
-    messages,
-    max_tokens: resolvedMaxTokens,
-    temperature,
-    stream: false,
-  };
-  if (jsonMode === true) body.response_format = { type: 'json_object' }; // glm_json_grade_mode_v0_1
-  // Reasoning consumes max_tokens. Tune each model's documented knob without
-  // treating reasoning_content as a final grade.
-  if (model === 'meta/muse-glimmer-30b') {
-    body.chat_template_kwargs = { reasoning_strength: 'low' };
-    body.reasoning_effort = 'low';
-    body.temperature = 0.95;
-  } else if (model === 'openai/gpt-oss-20b') {
-    body.reasoning_effort = 'low';
-  }
-  if (model === 'z-ai/glm-5.3') body.chat_template_kwargs = { enable_thinking: false }; // glm_auth_no_thinking_v0_1
-  else if (String(model || '').startsWith('nvidia/nemotron')) body.chat_template_kwargs = { enable_thinking: false }; // candidate_no_thinking_v0_1
-  if (model === 'deepseek-ai/deepseek-v4-flash-0731') body.chat_template_kwargs = { thinking: false, reasoning_effort: 'low' };
-  return withReviewerNvidiaSlot('expertise_verification', async () => {
-  const controller = new AbortController();
-  const requestStarted = Date.now();
-  const timer = setTimeout(() => controller.abort(), resolvedTimeoutMs);
-  try {
-    const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        authorization: `Bearer ${nvidiaKey}`,
-        'content-type': 'application/json',
-        accept: 'application/json',
-        'user-agent': 'AAU-Expertise-Verifier/0.2',
-      },
-      body: JSON.stringify(body),
-    });
-    const parsed = await jsonResponse(response);
-    if (!response.ok) {
-      const e = new Error(`nvidia_${response.status}:${parsed.body?.error?.message || parsed.body?.detail || parsed.raw.slice(0, 700)}`);
-      e.status = response.status;
-      throw e;
+
+  const modelName=String(model||'');
+  const disableThinking=
+       modelName==='z-ai/glm-5.3'
+    || modelName.startsWith('nvidia/nemotron')
+    || modelName==='deepseek-ai/deepseek-v4-flash-0731';
+  const reasoningEffort=
+       modelName==='meta/muse-glimmer-30b'
+    || modelName==='openai/gpt-oss-20b'
+    || modelName==='deepseek-ai/deepseek-v4-flash-0731'
+      ? 'low'
+      : null;
+  const effectiveTemperature=modelName==='meta/muse-glimmer-30b' ? 0.95 : temperature;
+
+  return withReviewerModelSlot('expertise_verification', async () => {
+    const requestStarted=Date.now();
+    try {
+      const result=await modelChatCompletion({
+        model,
+        messages,
+        maxTokens:resolvedMaxTokens,
+        temperature:effectiveTemperature,
+        jsonMode,
+        enableThinking:disableThinking ? false : null,
+        reasoningEffort,
+        timeoutMs:resolvedTimeoutMs,
+        runtimeRole,
+      });
+      noteReviewerModelSuccess(model);
+      return {
+        text:String(result.content||result.reasoning_content||'').trim(),
+        model:result.model_returned||model,
+        provider:result.provider||null,
+        finish_reason:result.finish_reason||null,
+        usage:result.usage||null,
+      };
+    } catch (error) {
+      if (error?.code==='MODEL_TIMEOUT'||error?.name==='AbortError'||error?.name==='TimeoutError') {
+        noteReviewerModelTimeout(model);
+        console.warn('AAU_REVIEWER_ENDPOINT_TIMEOUT', JSON.stringify({
+          stage:'expertise', model, duration_ms:Date.now()-requestStarted,
+          request_chars:system.length+user.length,
+          timeout_ms:resolvedTimeoutMs,
+          runtime_role:runtimeRole,
+          estimated_input_tokens:preflight.estimated_input_tokens,
+          max_input_tokens:preflight.max_input_tokens,
+        }));
+      }
+      throw error;
     }
-    noteReviewerModelSuccess(model);
-    const message = parsed.body?.choices?.[0]?.message || {};
-    return {
-      text: String(message.content || parsed.body?.choices?.[0]?.text || '').trim(),
-      model: parsed.body?.model || model,
-      finish_reason: parsed.body?.choices?.[0]?.finish_reason || null,
-      usage: parsed.body?.usage || null,
-    };
-  } catch (error) {
-    if (error?.name === 'AbortError') {
-      noteReviewerModelTimeout(model);
-      console.warn('AAU_REVIEWER_ENDPOINT_TIMEOUT', JSON.stringify({
-        stage:'expertise', model, duration_ms:Date.now()-requestStarted,
-        request_chars:system.length+user.length,
-        timeout_ms:resolvedTimeoutMs,
-        runtime_role:runtimeRole,
-        estimated_input_tokens:preflight.estimated_input_tokens,
-        max_input_tokens:preflight.max_input_tokens,
-      }));
-    }
-    throw error;
-  } finally {
-    clearTimeout(timer);
-  }
   });
 }
 
@@ -314,7 +299,7 @@ async function answerChallenge(run, packet, existingAnswers = [], competenceReco
       const boundedUser = attempt === 1 ? user : user
         + '\n\nCOMPLETION RETRY: the prior generation was not accepted as complete. Solve the SAME task from scratch; do not continue partial text. Keep the answer bounded and complete within the existing output budget. Preserve all task constraints and required derivations.';
       try {
-        const candidate = await nvidiaCall({
+        const candidate = await modelCall({
           model:run.candidate_model_id,system,user:boundedUser,
           maxTokens:run?.metadata?.academic_standard_version === 'aau_owned_master_us_v0_3' ? 1800 : 700,
           temperature:0.10,timeoutMs:120000,runtimeRole:'candidate'
@@ -435,7 +420,7 @@ async function gradeAnswer(run, task, answer) {
   const reference=await academicReference(run,task);
   const system = 'You are the independent AAU expertise authenticator. You did not train the candidate. Grade only the supplied answer against the fresh task and fixed anchors. Do not reward fluency without correctness. Return exactly one JSON object and no explanation with numeric fields execution, method, security, validation, communication (0-100), string critical, numeric confidence (0-1), and boolean unsupported.';
   const user = `DOMAIN: ${run.domain}\nTARGET: ${run.target_standard}\nSCENARIO: ${task.scenario}\nTASK: ${task.prompt}\nINDEPENDENT AAU REFERENCE ANSWER (private, not given to candidate): ${reference||'legacy_assessment_no_reference_answer'}\nGRADING ANCHORS: ${JSON.stringify(task.grading_anchors)}\nCRITICAL FAILURES: ${JSON.stringify(task.critical_failures || [])}\nCANDIDATE ANSWER:\n${answer.answer}\n\nRubric: execution/correctness 30%, method/system design 20%, security/reliability 20%, validation/evidence 15%, communication/professional judgment 15%.\nReturn one JSON object: {"execution":NN,"method":NN,"security":NN,"validation":NN,"communication":NN,"critical":"none","confidence":0.00,"unsupported":false}. Set unsupported=true for a material unsupported claim.`;
-  // authenticator_fallback_chain_v0_1: Moonshot primary, Meta then NVIDIA fallback.
+  // authenticator_fallback_chain_v0_1: Moonshot primary with configured model-provider fallbacks.
   const primaryAuthenticator = 'moonshotai/kimi-k3';
   const authModels = [
     primaryAuthenticator,
@@ -452,7 +437,7 @@ async function gradeAnswer(run, task, answer) {
     const maxAttempts = model === primaryAuthenticator || model === 'openai/gpt-oss-20b' ? 2 : 1;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const result = await nvidiaCall({
+        const result = await modelCall({
           model, system, user,
           maxTokens: model.startsWith('meta/') ? 2500
             : model === 'openai/gpt-oss-20b' ? (attempt === 1 ? 1800 : 3200)
@@ -507,7 +492,7 @@ async function adjudicate(run, task, answer, prior) {
     const maxAttempts = model === primaryAdjudicator ? 2 : 1;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const result = await nvidiaCall({
+        const result = await modelCall({
           model,
           system,
           user,
@@ -560,7 +545,7 @@ function deterministicDecision(run, packet, authGrades, adjGrades, competenceRec
     gate: { task_count: final.length, mean_score: Number(mean.toFixed(6)), mean_score_min: meanMin, task_score_min: taskMin, required_task_count: countMin, passed_task_count: countPassed, critical_error_count: critical.length, unsupported_claim_count: unsupported.length },
     final_grades: final,
     provenance: {
-      provider: manuallyReviewed ? 'nvidia_direct_and_operator_attested_review' : 'nvidia_direct',
+      provider: manuallyReviewed ? 'model_provider_and_operator_attested_review' : 'model_provider',
       manual_review_used: manuallyReviewed,
       candidate_model: run.candidate_model_id,
       task_authority_model: packet.authority?.model || run.task_authority_model,
@@ -721,8 +706,8 @@ async function loop() {
 }
 
 export function startExpertiseVerificationWorker() {
-  const missing = [['AAU_SUPABASE_ANON_KEY', anon], ['AAU_BROKER_BRIDGE_TOKEN', bridge], ['NVIDIA_API_KEY', nvidiaKey]].filter(([, v]) => !v).map(([k]) => k);
+  const missing = [['AAU_SUPABASE_ANON_KEY', anon], ['AAU_BROKER_BRIDGE_TOKEN', bridge], ['MODEL_PROVIDER_RUNTIME', modelProviderReady()?'ready':'']].filter(([, v]) => !v).map(([k]) => k);
   if (missing.length) return { ok: false, ready: false, missing };
   if (!running) { running = true; loop().catch((e) => console.error('AAU_EXPERTISE_VERIFIER_FATAL', e)); }
-  return { ok: true, ready: true, executor_id: executorId, poll_ms: pollMs, provider: 'nvidia_direct', task_authority: 'deterministic:aau-task-authority-v0.1', authenticator: 'moonshotai/kimi-k3', authenticator_fallbacks: ['meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b','openai/gpt-oss-20b'], adjudicator: 'openai/gpt-oss-20b', adjudicator_fallbacks: ['z-ai/glm-5.3','meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b'] };
+  return { ok: true, ready: true, executor_id: executorId, poll_ms: pollMs, provider: modelProviderConfigStatus().provider, task_authority: 'deterministic:aau-task-authority-v0.1', authenticator: 'moonshotai/kimi-k3', authenticator_fallbacks: ['meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b','openai/gpt-oss-20b'], adjudicator: 'openai/gpt-oss-20b', adjudicator_fallbacks: ['z-ai/glm-5.3','meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b'] };
 }
