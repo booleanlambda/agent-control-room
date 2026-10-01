@@ -1,7 +1,8 @@
 // Silas-only off-curriculum engineering exercise with thinking ON and durable bounded steps.
 // No normal wake, academic grading, lifecycle, or AAU-wide policy mutation.
 import { createHash } from 'node:crypto';
-import { nvidiaChatCompletion } from './providers/nvidia.js';
+import { modelChatCompletion, modelProviderConfigStatus } from './providers/model-provider.js';
+const modelProviderReady=()=>{try{return modelProviderConfigStatus().ready===true;}catch{return false;}};
 const REPO='booleanlambda/agent-control-room';
 const EVIDENCE_BRANCH='pilot/silas-engineering-hydraulic-20260924';
 const ROOT='pilots/silas-engineering-hydraulic-20260924';
@@ -76,7 +77,7 @@ function candidateMatrix(brief,length){
 }
 async function modelCall({label,system,user,maxTokens=4096}){
  const started=Date.now();let r;
- try{r=await nvidiaChatCompletion({model:MODEL,messages:[{role:'system',content:system},{role:'user',content:user}],temperature:0,jsonMode:true,enableThinking:true,maxTokens,timeoutMs:300000});}
+ try{r=await modelChatCompletion({model:MODEL,messages:[{role:'system',content:system},{role:'user',content:user}],temperature:0,jsonMode:true,enableThinking:true,maxTokens,timeoutMs:300000});}
  catch(e){log('BLOCKED',{label,reason:'model_or_timeout',code:e?.code||e?.name||'error',elapsed_ms:Date.now()-started});return null;}
  let out;try{out=JSON.parse(String(r.content||''));}catch{out=null;}
  if(r.model_returned!==MODEL||r.finish_reason!=='stop'||!out){
@@ -97,7 +98,7 @@ async function persistModel(path,meta,call,assessment){
  return row;
 }
 export async function runSilasEngineeringExercise(){
- if(!token||!process.env.NVIDIA_API_KEY)throw Error('engineering_credentials_missing');
+ if(!token||!modelProviderReady())throw Error('engineering_credentials_missing');
  const briefFile=await read(ROOT+'/brief.json');if(!briefFile)throw Error('engineering_brief_missing');
  const brief=JSON.parse(briefFile.text);
  if(brief.agent_id!==AGENT||brief.bound_model!==MODEL||brief.thinking!==true)throw Error('engineering_scope_or_model_mismatch');
