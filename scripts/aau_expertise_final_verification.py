@@ -15,6 +15,8 @@ EXPERIMENT_ID = os.environ.get("EXPERIMENT_ID", "6cd14e30-7dad-4410-89e3-5f779ba
 SIM_AGENT_ID = os.environ.get("SIM_AGENT_ID", "e854982e-baf4-4b23-81e0-148babe66378")
 
 AUTHENTICATOR_MODEL = "z-ai/glm-5.3"
+MODEL_PROVIDER = os.environ.get("AAU_MODEL_PROVIDER", "").strip()
+MODEL_PROVIDER_CHAT_URL = os.environ.get("AAU_MODEL_PROVIDER_CHAT_URL", "").strip()
 
 GRADE_RE = re.compile(
     r"GRADE\s+execution=(\d{1,3})\s+method=(\d{1,3})\s+security=(\d{1,3})\s+validation=(\d{1,3})\s+communication=(\d{1,3})\s+critical=([A-Za-z0-9_\-]+)\s+confidence=(0(?:\.\d+)?|1(?:\.0+)?)\s+unsupported=([A-Za-z0-9_\-]+)",
@@ -87,7 +89,11 @@ def http_json(url, headers=None, payload=None, timeout=180):
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.status, json.loads(r.read().decode())
 
-def nvidia_call(key, model, system, user, max_tokens=800, temperature=0, timeout=210):
+def model_provider_call(key, model, system, user, max_tokens=800, temperature=0, timeout=210):
+    if not MODEL_PROVIDER:
+        die("MODEL_PROVIDER_MISSING")
+    if not MODEL_PROVIDER_CHAT_URL:
+        die("MODEL_PROVIDER_CHAT_URL_MISSING")
     body = {
         "model": model,
         "temperature": temperature,
@@ -104,7 +110,7 @@ def nvidia_call(key, model, system, user, max_tokens=800, temperature=0, timeout
         "Accept": "application/json",
         "User-Agent": "AAU-Expertise-Verification/0.4",
     }
-    _, obj = http_json("https://integrate.api.nvidia.com/v1/chat/completions", headers=headers, payload=payload, timeout=timeout)
+    _, obj = http_json(MODEL_PROVIDER_CHAT_URL, headers=headers, payload=payload, timeout=timeout)
     msg = obj.get("choices", [{}])[0].get("message", {}) or {}
     text = msg.get("content") or msg.get("reasoning_content") or obj.get("choices", [{}])[0].get("text") or ""
     return obj, text
@@ -122,7 +128,7 @@ def xkiro_call(key, model, system, user, max_tokens=1200, temperature=0.2, timeo
     text = obj.get("choices", [{}])[0].get("message", {}).get("content") or ""
     return obj, text
 
-def nvidia_candidate_models():
+def model_provider_candidate_models():
     return {
         "openai/gpt-oss-20b",
         "meta/muse-glimmer-30b",
@@ -158,7 +164,7 @@ def parse_grade(raw, allowed_critical):
     }
 
 def mode_task_authority():
-    key = os.environ.get("NVIDIA_API_KEY")
+    key = os.environ.get("AAU_MODEL_PROVIDER_API_KEY")
     if not key:
         die("TASK_AUTHORITY_SECRET_MISSING")
 
@@ -207,7 +213,7 @@ Requirements:
 - C8 must test delivery/rollback/value claims and professional refusal boundaries.
 """
 
-    available = nvidia_candidate_models()
+    available = model_provider_candidate_models()
     preferred = [
         "openai/gpt-oss-20b",
         "meta/muse-glimmer-30b",
@@ -220,7 +226,7 @@ Requirements:
     used = None
     for model in candidates:
         try:
-            obj, text = nvidia_call(key, model, system, user, max_tokens=2600, temperature=0.35, timeout=180)
+            obj, text = model_provider_call(key, model, system, user, max_tokens=2600, temperature=0.35, timeout=180)
             start, end = text.find("{"), text.rfind("}")
             if start < 0 or end <= start:
                 print(f"TASK_AUTHORITY_MODEL_UNUSABLE={model}")
@@ -281,7 +287,7 @@ Requirements:
             "note": "Exact frozen Wake-41 harness independently rerun with matching hash; providers remained mocked.",
         },
     }
-    result["task_authority"] = {"provider": "NVIDIA Direct", "model": used}
+    result["task_authority"] = {"provider": MODEL_PROVIDER, "model": used}
     full_hash = sha_obj(result)
     result["sealed_full_packet_sha256"] = full_hash
 
@@ -388,7 +394,7 @@ Answer in roughly 350-650 words. Use the evidence ID(s) only to trace relevant p
     print("ALL_8_TASKS_ATTEMPTED=true")
 
 def mode_authenticator():
-    key = os.environ.get("NVIDIA_API_KEY")
+    key = os.environ.get("AAU_MODEL_PROVIDER_API_KEY")
     if not key:
         die("AUTHENTICATOR_SECRET_MISSING")
     packet = json.load(open("grader_packet.json"))
@@ -448,7 +454,7 @@ Replace NN with integers 0-100. Replace critical=NONE only if there is no protoc
         served = ""
         for attempt in range(1, 4):
             try:
-                obj, raw = nvidia_call(key, model, system, user, max_tokens=1200, temperature=0, timeout=240)
+                obj, raw = model_provider_call(key, model, system, user, max_tokens=1200, temperature=0, timeout=240)
                 served = obj.get("model") or model
                 parsed = parse_grade(raw, allowed_critical)
                 if parsed:
@@ -492,7 +498,7 @@ Replace NN with integers 0-100. Replace critical=NONE only if there is no protoc
     if len(served_models) != 1:
         die("AUTHENTICATOR_MODEL_CHANGED_WITHIN_ASSESSMENT")
     obj = {
-        "authenticator_provider": "NVIDIA Direct",
+        "authenticator_provider": MODEL_PROVIDER,
         "authenticator_model": served_models[0],
         "packet_full_sha256": packet["sealed_full_packet_sha256"],
         "portfolio_manifest_sha256": PORTFOLIO_MANIFEST_SHA256,
@@ -510,7 +516,7 @@ Replace NN with integers 0-100. Replace critical=NONE only if there is no protoc
     print(f"ADJUDICATION_COUNT={len(flags)}")
 
 def mode_adjudicator():
-    key = os.environ.get("NVIDIA_API_KEY")
+    key = os.environ.get("AAU_MODEL_PROVIDER_API_KEY")
     if not key:
         die("ADJUDICATOR_SECRET_MISSING")
     task_model = os.environ.get("TASK_AUTHORITY_MODEL", "")
@@ -529,7 +535,7 @@ def mode_adjudicator():
         print("ADJUDICATION_SKIPPED_NO_FLAGS=true")
         return
 
-    avail = nvidia_candidate_models()
+    avail = model_provider_candidate_models()
     preferred = [
         "meta/muse-glimmer-30b",
         "openai/gpt-oss-20b",
@@ -574,7 +580,7 @@ Use integers 0-100. Critical must be NONE or one exact protocol critical-error t
         served = ""
         for model in candidates:
             try:
-                obj, raw = nvidia_call(key, model, system, user, max_tokens=900, temperature=0, timeout=210)
+                obj, raw = model_provider_call(key, model, system, user, max_tokens=900, temperature=0, timeout=210)
                 parsed = parse_grade(raw, allowed_critical)
                 if parsed:
                     served = obj.get("model") or model
@@ -700,8 +706,8 @@ def mode_final():
             "mode": "external_multi_runtime_assessment",
             "github_run_id": os.environ.get("GITHUB_RUN_ID"),
             "learner_runtime": "xKiro",
-            "authenticator_runtime": "NVIDIA direct API via separate GitHub Actions job",
-            "adjudicator_runtime": "NVIDIA direct API via separate GitHub Actions job when flagged",
+            "authenticator_runtime": "configured model provider via separate GitHub Actions job",
+            "adjudicator_runtime": "configured model provider via separate GitHub Actions job when flagged",
             "independent_evaluation_performed": True,
         },
     }
