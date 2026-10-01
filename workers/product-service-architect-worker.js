@@ -1,9 +1,9 @@
-import { nvidiaChatCompletion } from './providers/nvidia.js';
+import { modelChatCompletion, modelProviderConfigStatus } from './providers/model-provider.js';
 
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
 const anon = String(process.env.AAU_SUPABASE_ANON_KEY || '').trim();
 const bridge = String(process.env.AAU_BROKER_BRIDGE_TOKEN || '').trim();
-const nvidiaKey = String(process.env.NVIDIA_API_KEY || '').trim();
+const modelProviderReady=()=>{try{return modelProviderConfigStatus().ready===true;}catch{return false;}};
 const executorId = `render:product-service-architect:${process.env.RENDER_INSTANCE_ID || process.pid}`;
 const pollMs = Math.max(2500, Number(process.env.AAU_PRODUCT_SERVICE_ARCHITECT_POLL_MS || 5000));
 let running = false;
@@ -37,7 +37,7 @@ async function rpc(name, args = {}) {
 }
 
 async function modelCall(model, system, user) {
-  const result=await nvidiaChatCompletion({
+  const result=await modelChatCompletion({
     model,
     messages:[{role:'system',content:system},{role:'user',content:user}],
     maxTokens:4200,
@@ -233,7 +233,7 @@ export function startProductServiceArchitectWorker() {
   const missing = [
     ['AAU_SUPABASE_ANON_KEY',anon],
     ['AAU_BROKER_BRIDGE_TOKEN',bridge],
-    ['NVIDIA_API_KEY',nvidiaKey],
+    ['MODEL_PROVIDER_RUNTIME',modelProviderReady()?'ready':''],
   ].filter(([,v]) => !v).map(([k]) => k);
   if (missing.length) return { ok:false, ready:false, missing };
   if (!running) {
