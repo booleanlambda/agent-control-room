@@ -2203,6 +2203,34 @@ function buildStructuredCommitPacket(packet, modeInfo) {
   ];
   const out={};
   for(const key of keys)if(deep[key]!==undefined&&deep[key]!==null)out[key]=deep[key];
+
+  // The QDA file is deterministically materialized after structured commit from
+  // verified recursive cognition. The packaging model only needs the unit
+  // identity/state, not the full exercise pack, rubric, check arrays, or other
+  // payloads that invite redundant regeneration.
+  if(deep?.qda_601_context?.assigned===true){
+    const qda=deep.qda_601_context;
+    const unit=qda?.next_unit&&typeof qda.next_unit==='object'?qda.next_unit:{};
+    out.qda_601_context={
+      assigned:true,
+      blocking_stage4:qda.blocking_stage4===true,
+      status:qda.status||null,
+      program_version:qda.program_version||null,
+      next_unit:{
+        program_version:unit.program_version||qda.program_version||null,
+        module_code:unit.module_code||null,
+        unit_code:unit.unit_code||null,
+        title:unit.title||null,
+        filename:unit.filename||null,
+      },
+      structured_commit_materialization:{
+        runtime_owned:true,
+        source:'verified_recursive_cognition',
+        model_must_not_emit_unit_file:true,
+      },
+    };
+  }
+
   if(!mba) out.recent_activity=deepRecentActivity(packet).recent_summaries.slice(0,2);
   out.structured_commit_context={
     contract:'deep_work_checkpoint_structured_commit_v0_1',
@@ -2213,12 +2241,15 @@ function buildStructuredCommitPacket(packet, modeInfo) {
   return out;
 }
 
-async function completeDeepStructured(model, messages, agentId, intentExecutionId, checkpointId) {
+async function completeDeepStructured(model, messages, agentId, intentExecutionId, checkpointId, options={}) {
+  const maxTokens=Number.isFinite(Number(options?.maxTokens))
+    ?Math.max(1000,Math.min(8000,Math.trunc(Number(options.maxTokens))))
+    :2600;
   for(let attempt=1;attempt<=2;attempt+=1){
     const started=Date.now();
     try{
       const result=await completeStructured(model,messages,{
-        maxTokens:2600,timeoutMs:300000,
+        maxTokens,timeoutMs:300000,
         audit:{agentId,executionId:intentExecutionId,executionContext:'wake',model,phase:'structured_commit_attempt_'+attempt},
       });
       console.log('AAU_STRUCTURED_COMMIT_RESULT',JSON.stringify({
@@ -2431,15 +2462,18 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
   const buildBaseMessages = (workArtifact = null) => {
     const knowledgePrompt = knowledgePoolReviewPrompt(packet);
     const systemPrompt = workArtifact ? STRUCTURED_COMMIT_SYSTEM_PROMPT : SYSTEM_PROMPT;
+    const qdaStructuredCommit=Boolean(workArtifact&&packet?.qda_601_context?.assigned===true);
     return [
       { role:'system', content:systemPrompt },
       ...(knowledgePrompt ? [{ role:'system', content:knowledgePrompt }] : []),
       { role:'user', content:packetText },
       ...(workArtifact ? [{
         role:'user',
-        content:'PRIVATE DEEP-WORK ARTIFACT FOR THIS SAME COGNITION (not chain-of-thought; do not quote it as hidden reasoning):\n'
-          + workArtifact.slice(0,30000)
-          + '\n\nUsing the authoritative task packet plus this checked work artifact, return the required FULL AAU JSON object. Preserve your substantive autonomy. The structured pass is packaging/commit, not a new independent reviewer. If the current task is an entrepreneurship study unit, obey next_unit.minimum_submission_chars exactly: do not summarize or compress submission.analysis below that minimum, and preserve the quantitative derivations/checks needed to audit the answer.',
+        content:qdaStructuredCommit
+          ?'QDA-601 DEEP WORK IS ALREADY COMPLETE AND DETERMINISTICALLY VERIFIED. Do not reproduce the deep artifact, calculations, python_checks, or current unit file. Return only the compact required AAU JSON envelope. Set associations to [] unless there is a genuine non-QDA association required by the packet. The runtime will inject and validate the exact QDA unit file from the verified recursive artifact after your response. Keep stated_reason concise and include exactly one ordinary five-minute continuation intent unless valid sleep is permitted.'
+          :'PRIVATE DEEP-WORK ARTIFACT FOR THIS SAME COGNITION (not chain-of-thought; do not quote it as hidden reasoning):\n'
+            + workArtifact.slice(0,30000)
+            + '\n\nUsing the authoritative task packet plus this checked work artifact, return the required FULL AAU JSON object. Preserve your substantive autonomy. The structured pass is packaging/commit, not a new independent reviewer. If the current task is an entrepreneurship study unit, obey next_unit.minimum_submission_chars exactly: do not summarize or compress submission.analysis below that minimum, and preserve the quantitative derivations/checks needed to audit the answer.',
       }] : []),
     ];
   };
@@ -2455,7 +2489,10 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
       checkpoint_id:deepCognition.meta?.checkpoint_id || null,
     }));
     baseMessages = buildBaseMessages(deepCognition.artifact);
-    ai = await completeDeepStructured(model, baseMessages, agentId, intentExecutionId, deepCognition.meta?.checkpoint_id || null);
+    ai = await completeDeepStructured(
+      model,baseMessages,agentId,intentExecutionId,deepCognition.meta?.checkpoint_id||null,
+      {maxTokens:packet?.qda_601_context?.assigned===true?3600:2600}
+    );
   } else {
     baseMessages = buildBaseMessages();
     ai = await completeStructured(model, baseMessages,{audit:{agentId,executionId:intentExecutionId,executionContext:'wake',model,phase:'fast_primary'}});
@@ -2475,7 +2512,10 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
       checkpoint_id:deepCognition.meta?.checkpoint_id || null,
     }));
     baseMessages = buildBaseMessages(deepCognition.artifact);
-    ai = await completeDeepStructured(model, baseMessages, agentId, intentExecutionId, deepCognition.meta?.checkpoint_id || null);
+    ai = await completeDeepStructured(
+      model,baseMessages,agentId,intentExecutionId,deepCognition.meta?.checkpoint_id||null,
+      {maxTokens:packet?.qda_601_context?.assigned===true?3600:2600}
+    );
     decision = applySleepIntentPolicy(packet, sanitizeDecision(parseDecision(ai.content)));
   }
 
