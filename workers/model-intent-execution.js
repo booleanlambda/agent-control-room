@@ -2159,6 +2159,12 @@ MBA Entrepreneurship stage:
 - Preserve the artifact's substantive analysis and calculations. submission.analysis must meet next_unit.minimum_submission_chars.
 - Do not wait for per-unit feedback after submitting completed work; the runtime owns persistence and assessment.
 
+QDA-601 deterministic structured-commit rule:
+- When qda_601_context.assigned is true, do NOT reproduce, recompute, summarize into a new file payload, or emit the current QDA unit's agent_file_output_v0_1 association during this packaging pass.
+- Return a compact AAU envelope only. Keep associations free of the current QDA unit file. The runtime deterministically materializes and injects the exact canonical QDA file from the already verified recursive cognition artifact after this model response.
+- Do not restate python_checks or the full quantitative artifact in stated_reason, candidate_actions, memory, or next_intents. Preserve only a compact action/reason and normal continuation fields.
+- This rule applies only to structured commit packaging; it does not waive any QDA validation or persistence requirement. Runtime materialization must still pass the canonical QDA contract before commit.
+
 Knowledge pools:
 - Review BOTH general and peripheral components only from offered source-backed IDs. Source attribution is not independent factual verification.
 - For accepted refresh candidates use status="added" and exact refresh_item_ids; for seed candidates use seed_item_ids; for event candidates use event_ids.
