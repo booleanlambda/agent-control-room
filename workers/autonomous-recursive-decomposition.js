@@ -410,6 +410,14 @@ function companionNormalizedArtifact(payload){
   }
   return normalized;
 }
+
+export function qdaDirectAtomicArtifactCandidate(payload){
+  const src=asObject(payload);
+  if(src?.artifact&&typeof src.artifact==='object'&&!Array.isArray(src.artifact)){
+    return asObject(companionNormalizedArtifact(src));
+  }
+  return src;
+}
 function canonicalizeHashValue(v){
   if(Array.isArray(v))return v.map(canonicalizeHashValue);
   if(v&&typeof v==='object'){
@@ -5441,11 +5449,7 @@ export async function runAutonomousRequirementCognition({
     if(!['SPLIT','NEED_CONTEXT','COMPLETE'].includes(status)
        &&(qdaQuantitativeAtomicRequirement(packet,node)
           ||qdaStatisticalAtomicRequirement(packet,node))){
-      const directQdaArtifact=
-        parsed?.artifact&&typeof parsed.artifact==='object'&&!Array.isArray(parsed.artifact)
-          ?companionNormalizedArtifact(parsed)
-          :asObject(parsed);
-      const directQdaObject=asObject(directQdaArtifact);
+      const directQdaObject=qdaDirectAtomicArtifactCandidate(parsed);
       const hasQdaBody=
         Object.keys(directQdaObject).length>0
         &&(
