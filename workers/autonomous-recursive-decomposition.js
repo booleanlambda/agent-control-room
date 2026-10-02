@@ -2575,10 +2575,105 @@ export async function runAutonomousRequirementCognition({
       'context_requests','research_queries','research_urls','routing_discovery_checkpoint',
       'routing_discovery_checkpointed','routing_discovery_checkpointed_at',
       'routing_discovery_reused','routing_commit_serialized',
-      'blocked_by_bound_agent','block_reason','context_resource_at_block'
+      'blocked_by_bound_agent','block_reason','context_resource_at_block',
+      // A fresh discovery may repartition the node. Child-authoring state from
+      // the superseded partition must not short-circuit or bias the repaired one.
+      'children_authored','child_count','child_authoring_failure_count',
+      'child_authoring_failure','conserved_branch_economics_constraint_applied',
+      'semantic_child_capacity_at_stop','budget_constrained_child_authoring_reopened',
+      'budget_constrained_child_authoring_reopened_at',
+      'synthesis_cursor','synthesis_accumulator','synthesis_child_result_hashes',
+      'synthesis_complete','synthesis_outcome','synthesis_reason',
+      'synthesis_provenance_review','synthesis_provenance_pending'
     ]) delete next[key];
     next.reconsider_decomposition=true;
     return next;
+  }
+
+  async function retireUnresolvedDescendantsForDiscoveryRepair(node,episode){
+    const repairType=text(episode?.repair_type).toUpperCase();
+    if(!['INVALIDATE_DISCOVERY_CHECKPOINT','REFRESH_SIBLING_EVIDENCE'].includes(repairType)){
+      return {retired:[],preserved_completed:[]};
+    }
+
+    const retired=[];
+    const preservedCompleted=[];
+    const visited=new Set();
+
+    async function walk(parentNodePath){
+      if(visited.has(parentNodePath))return;
+      visited.add(parentNodePath);
+      const refs=(await children(parentNodePath))
+        .sort((a,b)=>Number(a?.ordinal||0)-Number(b?.ordinal||0));
+      for(const ref of refs){
+        const child=await getNode(ref.node_path);
+        if(child?.status!=='ready')continue;
+        const childStatus=text(child.node_status||child.status).toLowerCase();
+
+        // Snapshot descendants before cancelling their parent so the durable
+        // audit tree remains traversable even though the active branch is retired.
+        await walk(child.node_path);
+
+        if(childStatus==='completed'){
+          preservedCompleted.push({
+            node_path:child.node_path,
+            result_hash:child.result_hash||null,
+            requirement_hash:child.requirement_hash||null,
+          });
+          continue;
+        }
+        if(childStatus==='cancelled')continue;
+
+        const cancellationPayload={
+          cancellation_contract:'parent_discovery_remediation_partition_supersession_v0_1',
+          cancelled_by_parent_path:node.node_path,
+          remediation_id:episode.remediation_id,
+          repair_type:repairType,
+          prior_status:childStatus||null,
+          prior_decision_type:text(child.decision_type)||null,
+          prior_requirement_hash:child.requirement_hash||null,
+          prior_result_hash:child.result_hash||null,
+          prior_decision_payload_sha256:sha256(asObject(child.decision_payload)),
+          cancelled_at:new Date().toISOString(),
+          reusable_only_if_explicitly_rebound:false,
+        };
+        await saveNode({
+          nodePath:child.node_path,
+          parentPath:parentNodePath,
+          ordinal:child.ordinal||0,
+          requirement:child.requirement_text,
+          sourceKind:child.source_kind,
+          sourceRef:child.source_ref,
+          status:'cancelled',
+          decisionType:child.decision_type??null,
+          decisionPayload:cancellationPayload,
+          contextPayload:child.context_payload||{},
+          resultArtifact:child.result_artifact||null,
+        });
+        retired.push({
+          node_path:child.node_path,
+          prior_status:childStatus||null,
+          prior_decision_type:text(child.decision_type)||null,
+          requirement_hash:child.requirement_hash||null,
+        });
+      }
+    }
+
+    await walk(node.node_path);
+    if(retired.length){
+      console.log('AAU_AUTONOMOUS_REMEDIATION_DESCENDANTS_RETIRED',JSON.stringify({
+        agent_id:agentId,
+        intent_execution_id:intentExecutionId,
+        node_path:node.node_path,
+        remediation_id:episode.remediation_id,
+        repair_type:repairType,
+        retired_count:retired.length,
+        retired_paths:retired.map(v=>v.node_path),
+        preserved_completed_count:preservedCompleted.length,
+        policy:'parent_discovery_remediation_partition_supersession_v0_1',
+      }));
+    }
+    return {retired,preserved_completed:preservedCompleted};
   }
 
   function compactSynthesisFailureState(raw){
@@ -2660,6 +2755,11 @@ export async function runAutonomousRequirementCognition({
       nextSiblingEvidence=refreshed.siblingEvidence;
     }
 
+    const descendantReconciliation=
+      verificationBoundary==='POST_FRESH_DISCOVERY'
+        ?await retireUnresolvedDescendantsForDiscoveryRepair(node,episode)
+        :{retired:[],preserved_completed:[]};
+
     let nextPayload;
     let nextStatus='pending';
     let nextDecisionType=null;
@@ -2686,6 +2786,13 @@ export async function runAutonomousRequirementCognition({
       requested_by_bound_agent:true,
       mechanical_repair_applied:true,
       fresh_cognition_required:true,
+      descendant_reconciliation:{
+        contract:'parent_discovery_remediation_partition_supersession_v0_1',
+        retired_count:descendantReconciliation.retired.length,
+        retired_paths:descendantReconciliation.retired.map(v=>v.node_path),
+        preserved_completed_count:descendantReconciliation.preserved_completed.length,
+        preserved_completed:descendantReconciliation.preserved_completed.slice(0,16),
+      },
       applied_at:new Date().toISOString(),
     };
 
@@ -2720,6 +2827,8 @@ export async function runAutonomousRequirementCognition({
       repair_type:repairType,
       verification_boundary:verificationBoundary,
       verification_deferred:true,
+      retired_unresolved_descendant_count:descendantReconciliation.retired.length,
+      preserved_completed_descendant_count:descendantReconciliation.preserved_completed.length,
     }));
 
     return {
