@@ -50,6 +50,38 @@ try {
 }
 
 try {
+  const {
+    verifyPythonMathChecks,
+    verifyPythonMathChecksChunked,
+    PYTHON_MATH_MAX_CHECKS,
+  } = await import('./python-math.js');
+  const checks=Array.from({length:PYTHON_MATH_MAX_CHECKS+5},(_,index)=>({
+    label:'chunk_probe_'+String(index+1),
+    expression:String(index+1)+' + 1',
+    claimed_result:index+2,
+  }));
+  const strict=verifyPythonMathChecks(checks);
+  const chunked=verifyPythonMathChecksChunked(checks);
+  console.log('AAU_PYTHON_MATH_CHUNKED_RUNTIME_PROBE',JSON.stringify({
+    ok:strict.ok===false
+      &&strict.error==='python_check_contract_invalid'
+      &&chunked.ok===true
+      &&chunked.all_match===true
+      &&chunked.check_count===checks.length
+      &&chunked.batch_count===2,
+    strict_error:strict.error||null,
+    strict_check_count:strict.check_count,
+    chunked_check_count:chunked.check_count,
+    chunked_batch_count:chunked.batch_count,
+    batch_size_limit:chunked.batch_size_limit,
+  }));
+} catch (error) {
+  console.error('AAU_PYTHON_MATH_CHUNKED_RUNTIME_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
   const { runPythonStatisticalAnalyses } = await import('./python-quant.js');
   const probe = runPythonStatisticalAnalyses([
     {
