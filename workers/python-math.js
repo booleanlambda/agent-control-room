@@ -2,7 +2,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const PYTHON_RUNNER = fileURLToPath(new URL('./python-math-runner.py', import.meta.url));
-const MAX_CHECKS=64;
+export const PYTHON_MATH_MAX_CHECKS=64;
+const MAX_CHECKS=PYTHON_MATH_MAX_CHECKS;
 const MAX_EXPR_CHARS=600;
 
 function plainObject(value){
@@ -155,3 +156,92 @@ export function verifyPythonMathChecks(checks, options = {}) {
     results,
   };
 }
+
+export function verifyPythonMathChecksChunked(checks, options = {}) {
+  if(!Array.isArray(checks) || checks.length<=MAX_CHECKS){
+    const single=verifyPythonMathChecks(checks,options);
+    return {
+      ...single,
+      chunked:false,
+      batch_count:Array.isArray(checks)&&checks.length?1:0,
+      batch_size_limit:MAX_CHECKS,
+      batches:Array.isArray(checks)&&checks.length?[{
+        batch_index:0,
+        offset:0,
+        check_count:single.check_count,
+        ok:single.ok===true,
+        all_match:single.all_match===true,
+        all_valid:single.all_valid===true,
+        error:single.error||null,
+      }]:[],
+    };
+  }
+
+  const results=[];
+  const validationFailures=[];
+  const batches=[];
+  let allOk=true;
+  let allMatch=true;
+  let allValid=true;
+  let validationErrorCount=0;
+  let firstFailure=null;
+
+  for(let offset=0,batchIndex=0;offset<checks.length;offset+=MAX_CHECKS,batchIndex+=1){
+    const slice=checks.slice(offset,offset+MAX_CHECKS);
+    const verified=verifyPythonMathChecks(slice,options);
+    batches.push({
+      batch_index:batchIndex,
+      offset,
+      requested_check_count:slice.length,
+      check_count:verified.check_count,
+      ok:verified.ok===true,
+      all_match:verified.all_match===true,
+      all_valid:verified.all_valid===true,
+      failure_class:verified.failure_class||null,
+      error:verified.error||null,
+    });
+
+    for(const row of Array.isArray(verified.results)?verified.results:[]){
+      results.push({
+        ...row,
+        index:Number.isInteger(row?.index)?row.index+offset:row?.index,
+        batch_index:batchIndex,
+      });
+    }
+    for(const failure of Array.isArray(verified.validation_failures)?verified.validation_failures:[]){
+      const originalPath=String(failure?.path||'');
+      const path=originalPath.replace(
+        /^python_checks\[(\d+)\]/,
+        (_,index)=>'python_checks['+(Number(index)+offset)+']'
+      );
+      validationFailures.push({...failure,path,batch_index:batchIndex});
+    }
+
+    validationErrorCount+=Number(verified.validation_error_count||0);
+    if(verified.ok!==true || verified.all_match!==true || verified.all_valid===false){
+      allOk=false;
+      allMatch=false;
+      if(verified.all_valid===false)allValid=false;
+      if(!firstFailure)firstFailure={batch_index:batchIndex,...verified};
+    }
+  }
+
+  return {
+    ok:allOk,
+    failure_class:firstFailure?.failure_class||null,
+    all_match:allMatch,
+    all_valid:allValid,
+    validation_error_count:validationErrorCount,
+    check_count:checks.length,
+    results,
+    validation_failures:validationFailures,
+    error:firstFailure
+      ?'python_check_chunk_failed:batch='+firstFailure.batch_index+':'+String(firstFailure.error||'verification_failed')
+      :null,
+    chunked:true,
+    batch_count:batches.length,
+    batch_size_limit:MAX_CHECKS,
+    batches,
+  };
+}
+
