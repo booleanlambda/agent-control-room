@@ -26,6 +26,10 @@ import { materializeQda601UnitFromVerifiedChildren } from './qda601-runtime.js';
 // The bound agent authors decomposition. Runtime only persists/routes/checkpoints.
 
 const MAX_ATOMIC_EXECUTION_FAILURES=1;
+// Protocol-shape failures are runtime/serialization failures, not failed cognition.
+// Keep them on a separate bounded recovery path so malformed wrappers can never
+// consume the atomic cognition allowance or force semantic decomposition.
+const MAX_ATOMIC_PROTOCOL_FAILURES=2;
 // Semantic work is bounded by the conserved assignment-epoch budget.
 // The 16-level path ceiling is only a storage geometry emergency brake.
 const MAX_CHILDREN_PER_NODE=16;
@@ -3332,8 +3336,11 @@ export async function runAutonomousRequirementCognition({
     }
     contextPayload=boundInMemoryContext(contextPayload,pinnedEvidence,10000);
     const atomicExecutionFailures=Math.max(0,Number(node?.decision_payload?.atomic_execution_failures||0));
+    const atomicProtocolFailures=Math.max(0,Number(node?.decision_payload?.atomic_protocol_failures||0));
     const atomicUnavailable=atomicExecutionFailures>=MAX_ATOMIC_EXECUTION_FAILURES;
+    const atomicProtocolRecoveryExhausted=atomicProtocolFailures>=MAX_ATOMIC_PROTOCOL_FAILURES;
     const priorAtomicRejection=text(node?.decision_payload?.prior_atomic_rejection).toUpperCase();
+    const priorAtomicProtocolRejection=text(node?.decision_payload?.prior_atomic_protocol_rejection).toUpperCase();
     const atomicOverflowRecovery=
       atomicUnavailable && priorAtomicRejection==='TRUNCATED_RESPONSE';
     const normalizedBranchDepth=pathDepth(node.node_path);
@@ -4237,6 +4244,8 @@ export async function runAutonomousRequirementCognition({
         admissionReasons.push('insufficient_branch_lifecycle_budget');
       if(decision==='ATOMIC'&&atomicUnavailable)
         admissionReasons.push('bounded_atomic_execution_admission_exhausted');
+      if(decision==='ATOMIC'&&!atomicUnavailable&&atomicProtocolRecoveryExhausted)
+        admissionReasons.push('atomic_protocol_recovery_exhausted');
       if(decision==='NEED_CONTEXT'&&!effectiveResourceView.available)
         admissionReasons.push('context_acquisition_resource_exhausted');
       if(decision==='REMEDIATE'&&!remediationAvailable)
@@ -4258,6 +4267,9 @@ export async function runAutonomousRequirementCognition({
           context_resource_reasons:effectiveResourceView.reasons,
           evidence_window_renewal:evidenceRenewalAssessment,
           atomic_execution_failures:atomicExecutionFailures,
+          atomic_protocol_failures:atomicProtocolFailures,
+          atomic_protocol_recovery_exhausted:atomicProtocolRecoveryExhausted,
+          prior_atomic_protocol_rejection:priorAtomicProtocolRejection||null,
           discovery_fingerprint:discovery.context_fingerprint,
           resume_policy:'reuse_semantic_decision_until_evidence_mutation',
           deferred_at:new Date().toISOString(),
@@ -5493,8 +5505,8 @@ export async function runAutonomousRequirementCognition({
           }
         );
       }
-      const atomicExecutionFailures=
-        Math.max(0,Number(node?.decision_payload?.atomic_execution_failures||0))+1;
+      const atomicProtocolFailures=
+        Math.max(0,Number(node?.decision_payload?.atomic_protocol_failures||0))+1;
       const reset=await saveNode({
         nodePath:node.node_path,
         parentPath:node.parent_path??parentPathOf(node.node_path),
@@ -5506,11 +5518,14 @@ export async function runAutonomousRequirementCognition({
         decisionType:null,
         decisionPayload:{
           ...(node.decision_payload||{}),
-          prior_atomic_rejection:'atomic_status_invalid_after_protocol_normalization',
-          reconsider_decomposition:true,
-          atomic_execution_failures:atomicExecutionFailures,
-          atomic_unavailable:atomicExecutionFailures>=MAX_ATOMIC_EXECUTION_FAILURES,
-          atomic_protocol_recovery_version:'structured_stage_contract_direct_atomic_v0_1',
+          // A valid JSON response with an invalid/missing atomic wrapper is a
+          // protocol-shape failure. It must not poison the agent's semantic
+          // ATOMIC allowance or be reported as failed cognition.
+          prior_atomic_protocol_rejection:'atomic_status_invalid_after_protocol_normalization',
+          atomic_protocol_failures:atomicProtocolFailures,
+          atomic_protocol_recovery_exhausted:atomicProtocolFailures>=MAX_ATOMIC_PROTOCOL_FAILURES,
+          reconsider_decomposition:false,
+          atomic_protocol_recovery_version:'separate_protocol_failure_accounting_v0_2',
         },
         contextPayload:node.context_payload||{},
         resultArtifact:null,
