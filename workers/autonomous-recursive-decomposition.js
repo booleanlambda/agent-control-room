@@ -20,6 +20,7 @@ import {
 } from './semantic-runtime-controls.js';
 import { verifyPythonMathChecks, verifyPythonMathChecksChunked } from './python-math.js';
 import { runPythonStatisticalAnalyses } from './python-quant.js';
+import { materializeQda601UnitFromVerifiedChildren } from './qda601-runtime.js';
 
 // AAU autonomous recursive decomposition v0.1
 // The bound agent authors decomposition. Runtime only persists/routes/checkpoints.
@@ -6832,7 +6833,170 @@ export async function runAutonomousRequirementCognition({
     };
   }
 
+  async function completeQdaRootFromVerifiedChildren(node,childRows){
+    if(
+      node?.node_path!=='R'
+      ||packet?.qda_601_context?.assigned!==true
+      ||packet?.qda_601_context?.status!=='in_progress'
+    )return null;
+
+    const expectedProblems=asArray(packet?.qda_601_context?.next_unit?.exercise_pack?.problems);
+    if(!expectedProblems.length||childRows.length!==expectedProblems.length)return null;
+    if(!childRows.every(child=>
+      String(child?.node_status||child?.status||'').toLowerCase()==='completed'
+    ))return null;
+
+    const authoritativeChildren=childRows.map(child=>{
+      const decision=asObject(child?.decision_payload);
+      return {
+        node_path:child.node_path,
+        status:'completed',
+        requirement_text:child.requirement_text,
+        result_artifact:child.result_artifact,
+        result_hash:child.result_hash||null,
+        deterministic_math_verified:decision.deterministic_math_verified===true,
+        deterministic_math_check_count:Number(decision.deterministic_math_check_count||0),
+        qda_verified_descendant_materialized:
+          decision.qda_verified_descendant_materialized===true,
+        qda_verified_descendant_check_count:
+          Number(decision.qda_verified_descendant_check_count||0),
+      };
+    });
+
+    const canonical=materializeQda601UnitFromVerifiedChildren(
+      packet,{authoritativeChildren}
+    );
+    if(!canonical.applies)return null;
+    if(!canonical.payload){
+      const error=new Error(
+        'qda_root_verified_child_materialization_invalid:'
+        +canonical.failures.join('|')
+      );
+      error.code='COGNITION_RESPONSE_REJECTED';
+      throw error;
+    }
+
+    // Attach the recursive evidence contract and independently re-execute the
+    // aggregate check set. This uses bounded chunking when the subtree exceeds
+    // the single Python-call safety ceiling.
+    const recursive=await materializeQdaQuantitativeFromVerifiedDescendants(
+      node,canonical.payload
+    );
+    const artifact=recursive.artifact;
+    const verification=deterministicMathVerification(packet,node,artifact);
+    if(
+      recursive.verification_blocked===true
+      ||verification.required!==true
+      ||verification.ok!==true
+      ||verification.all_match!==true
+    ){
+      const error=new Error(
+        'qda_root_recursive_verification_invalid:'
+        +String(verification.error||'verification_failed')
+      );
+      error.code='COGNITION_RESPONSE_REJECTED';
+      throw error;
+    }
+
+    const currentChildResultHashes=childRows.map(child=>({
+      path:child.node_path,
+      result_hash:child.result_hash||sha256(child.result_artifact||''),
+      status:child.node_status||child.status||null,
+      decision_type:child.decision_type||null,
+    }));
+    const completedDecisionPayload={...asObject(node.decision_payload)};
+    for(const key of [
+      'synthesis_provenance_pending',
+      'routing_discovery_checkpoint',
+      'routing_discovery_checkpointed',
+      'routing_discovery_checkpointed_at',
+      'routing_discovery_reused',
+      'routing_admission',
+      'context_resource_state',
+      'synthesis_accumulator',
+      'provenance_review',
+      'sibling_overlap_validation',
+      'deterministic_math_reconciliation_required',
+      'deterministic_math_retry_nonce',
+      'deterministic_math_verification',
+    ])delete completedDecisionPayload[key];
+
+    const resultArtifact=JSON.stringify({
+      status:'COMPLETE',
+      artifact,
+      handoff:{
+        conclusions:asArray(artifact?.problem_responses).map((response,index)=>
+          text(response?.interpretation)
+          ||'Problem '+String(index+1)+' verified and preserved.'
+        ),
+        facts:asArray(recursive.sources).map(source=>
+          String(source?.node_path||'child')+':'+String(source?.result_hash||'')
+        ),
+        unresolved:[],
+      },
+    });
+
+    const done=await saveNode({
+      nodePath:node.node_path,
+      parentPath:node.parent_path??parentPathOf(node.node_path),
+      ordinal:node.ordinal||0,
+      requirement:node.requirement_text,
+      sourceKind:node.source_kind,
+      sourceRef:node.source_ref,
+      status:'completed',
+      decisionType:'SPLIT',
+      decisionPayload:{
+        ...completedDecisionPayload,
+        completion_state_compaction:'durable_checkpoint_references_v0_1',
+        synthesis_cursor:childRows.length,
+        synthesis_child_result_hashes:currentChildResultHashes,
+        synthesis_complete:true,
+        synthesis_outcome:'COMPLETE',
+        synthesis_reason:
+          'Canonical QDA root materialized deterministically from exact verified child artifacts.',
+        decomposition_decision:'SPLIT',
+        blocked_child_count:0,
+        synthesis_provenance_review:{
+          status:'ACCEPT',
+          issue_count:0,
+          reason:'Exact verified child problem responses were preserved without model rewriting.',
+          deterministic_guard:'qda_root_verified_child_materialization_v0_1',
+        },
+        qda_root_verified_child_materialized:true,
+        qda_root_materialization_contract:
+          text(artifact?.runtime_materialization?.contract)
+          ||'qda_verified_child_artifact_materialization_v0_3',
+        qda_verified_descendant_materialized:
+          recursive.materialized===true||recursive.already_materialized===true,
+        qda_verified_descendant_check_count:Number(recursive.check_count||0),
+        qda_verified_descendant_sources:asArray(recursive.sources),
+        deterministic_math_verified:true,
+        deterministic_math_check_count:Number(recursive.check_count||0),
+        deterministic_math_verification:
+          compactMathVerificationForPersistence(verification),
+        deterministic_math_gate:'qda_root_verified_children_recursive_v0_1',
+      },
+      contextPayload:node.context_payload||{},
+      resultArtifact,
+    });
+    done.parent_path=node.parent_path??parentPathOf(node.node_path);
+    console.log('AAU_QDA_ROOT_VERIFIED_CHILDREN_MATERIALIZED',JSON.stringify({
+      agent_id:agentId,
+      intent_execution_id:intentExecutionId,
+      node_path:node.node_path,
+      unit_code:packet?.qda_601_context?.next_unit?.unit_code||null,
+      problem_count:expectedProblems.length,
+      python_check_count:Number(recursive.check_count||0),
+      child_paths:authoritativeChildren.map(child=>child.node_path),
+      contract:'qda_root_verified_child_materialization_v0_1',
+    }));
+    return done;
+  }
+
   async function synthesize(node,childRows){
+    const qdaRootCompletion=await completeQdaRootFromVerifiedChildren(node,childRows);
+    if(qdaRootCompletion)return qdaRootCompletion;
+
     const currentChildResultHashes=childRows.map(child=>({
       path:child.node_path,
       result_hash:child.result_hash||sha256(child.result_artifact||''),
