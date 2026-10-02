@@ -6921,16 +6921,39 @@ export async function runAutonomousRequirementCognition({
       'deterministic_math_verification',
     ])delete completedDecisionPayload[key];
 
+    const canonicalMaterializationSha256=sha256(artifact);
+    // The bridge deliberately caps a node result artifact at 20 KB. Do not
+    // duplicate the full canonical QDA file in the root node: the verified
+    // child rows are the durable source of truth and qda601-runtime rebuilds
+    // the exact file from them during structured commit. Persist only the proof
+    // summary/hash needed for continuity and audit.
+    const compactConclusions=asArray(artifact?.problem_responses).map((response,index)=>({
+      problem_id:response?.problem_id??index+1,
+      interpretation:clip(
+        text(response?.interpretation)
+        ||'Problem '+String(index+1)+' verified and preserved.',
+        600
+      ),
+    }));
     const resultArtifact=JSON.stringify({
       status:'COMPLETE',
-      artifact,
+      artifact:{
+        contract:'qda_root_verified_child_summary_v0_1',
+        unit_code:packet?.qda_601_context?.next_unit?.unit_code||null,
+        exercise_pack_ref:packet?.qda_601_context?.next_unit?.exercise_pack_ref||null,
+        canonical_materialization_sha256:canonicalMaterializationSha256,
+        problem_count:expectedProblems.length,
+        python_check_count:Number(recursive.check_count||0),
+        child_result_chain:currentChildResultHashes.map(child=>({
+          path:child.path,
+          result_hash:child.result_hash,
+        })),
+        conclusions:compactConclusions,
+      },
       handoff:{
-        conclusions:asArray(artifact?.problem_responses).map((response,index)=>
-          text(response?.interpretation)
-          ||'Problem '+String(index+1)+' verified and preserved.'
-        ),
-        facts:asArray(recursive.sources).map(source=>
-          String(source?.node_path||'child')+':'+String(source?.result_hash||'')
+        conclusions:compactConclusions.map(item=>item.interpretation),
+        facts:currentChildResultHashes.map(child=>
+          String(child.path||'child')+':'+String(child.result_hash||'')
         ),
         unresolved:[],
       },
@@ -6966,6 +6989,8 @@ export async function runAutonomousRequirementCognition({
         qda_root_materialization_contract:
           text(artifact?.runtime_materialization?.contract)
           ||'qda_verified_child_artifact_materialization_v0_3',
+        qda_root_canonical_materialization_sha256:canonicalMaterializationSha256,
+        qda_root_result_storage_contract:'qda_root_verified_child_summary_v0_1',
         qda_verified_descendant_materialized:
           recursive.materialized===true||recursive.already_materialized===true,
         qda_verified_descendant_check_count:Number(recursive.check_count||0),
