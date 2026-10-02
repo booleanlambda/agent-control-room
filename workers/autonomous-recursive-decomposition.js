@@ -169,12 +169,84 @@ function materialCalculationLeafCount(value,key=''){
   }
   return 0;
 }
-function pythonChecksFromArtifact(artifact){
+export function pythonChecksFromArtifact(artifact){
   const obj=quantitativeArtifactBody(artifact);
-  return typedArrayField(obj,'python_checks');
+  const direct=typedArrayField(obj,'python_checks');
+  if(!direct.type_ok)return direct;
+
+  const responsesField=typedArrayField(obj,'problem_responses');
+  if(!responsesField.type_ok)return {
+    ...responsesField,
+    error:'problem_responses_must_be_array',
+  };
+
+  const nested=[];
+  for(let index=0;index<responsesField.value.length;index+=1){
+    const response=responsesField.value[index];
+    if(!response||typeof response!=='object'||Array.isArray(response))continue;
+    const field=typedArrayField(response,'python_checks');
+    if(!field.type_ok)return {
+      present:true,type_ok:false,value:[],
+      error:'problem_responses['+index+'].python_checks_must_be_array',
+      actual_type:field.actual_type,
+    };
+    for(const check of field.value){
+      nested.push({
+        ...check,
+        label:String(
+          check?.label
+          ||'problem_'+String(response?.problem_id??index+1)+'_check'
+        ),
+        problem:typeof check?.problem==='string'
+          ?check.problem
+          :String(response?.problem_statement||response?.problem||'problem_'+String(response?.problem_id??index+1)),
+      });
+    }
+  }
+
+  // Some QDA artifacts are already canonicalized and therefore contain the
+  // same checks both at top level and inside problem_responses. Preserve one
+  // exact instance of each check so verification coverage is not inflated.
+  const combined=[...direct.value,...nested];
+  const seen=new Set();
+  const value=[];
+  for(const check of combined){
+    const fingerprint=JSON.stringify({
+      label:check?.label??null,
+      expression:check?.expression??null,
+      claimed_result:check?.claimed_result??null,
+      problem:check?.problem??null,
+    });
+    if(seen.has(fingerprint))continue;
+    seen.add(fingerprint);
+    value.push(check);
+  }
+  return {
+    present:direct.present||nested.length>0,
+    type_ok:true,
+    value,
+    source:direct.value.length&&nested.length
+      ?'top_level_and_problem_responses'
+      :nested.length?'problem_responses':'top_level',
+  };
 }
 function atomicMaterialCalculationCount(artifact){
   const obj=quantitativeArtifactBody(artifact);
+  if(Array.isArray(obj.problem_responses)&&obj.problem_responses.length){
+    return Math.max(
+      1,
+      obj.problem_responses.reduce(
+        (sum,response)=>sum+Math.max(
+          1,
+          materialCalculationLeafCount(
+            response&&typeof response==='object'?response.calculation:null,
+            'calculation'
+          )
+        ),
+        0
+      )
+    );
+  }
   return Math.max(1,materialCalculationLeafCount(obj.calculation,'calculation'));
 }
 function deterministicMathVerification(packet,node,artifact){
