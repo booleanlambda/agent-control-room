@@ -5441,7 +5441,10 @@ export async function runAutonomousRequirementCognition({
     if(!['SPLIT','NEED_CONTEXT','COMPLETE'].includes(status)
        &&(qdaQuantitativeAtomicRequirement(packet,node)
           ||qdaStatisticalAtomicRequirement(packet,node))){
-      const directQdaArtifact=companionNormalizedArtifact(parsed);
+      const directQdaArtifact=
+        parsed?.artifact&&typeof parsed.artifact==='object'&&!Array.isArray(parsed.artifact)
+          ?companionNormalizedArtifact(parsed)
+          :asObject(parsed);
       const directQdaObject=asObject(directQdaArtifact);
       const hasQdaBody=
         Object.keys(directQdaObject).length>0
