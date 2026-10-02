@@ -82,7 +82,10 @@ try {
 }
 
 try {
-  const { pythonChecksFromArtifact } = await import('./autonomous-recursive-decomposition.js');
+  const {
+    pythonChecksFromArtifact,
+    qdaDirectAtomicArtifactCandidate,
+  } = await import('./autonomous-recursive-decomposition.js');
   const { verifyPythonMathChecks } = await import('./python-math.js');
   const artifact={
     exercise_pack_ref:'probe',
@@ -94,16 +97,26 @@ try {
   };
   const field=pythonChecksFromArtifact(artifact);
   const verification=verifyPythonMathChecks(field.value);
+  const wrapperless={
+    inputs:{p_a:0.6,p_b:0.4},
+    calculation:{sum:'0.6 + 0.4 = 1'},
+    python_checks:[{label:'wrapperless',expression:'0.6 + 0.4',claimed_result:1}],
+  };
+  const direct=qdaDirectAtomicArtifactCandidate(wrapperless);
   console.log('AAU_QDA601_NESTED_PYTHON_CHECKS_PROBE',JSON.stringify({
     ok:field.type_ok===true
       &&field.value.length===3
       &&field.source==='problem_responses'
       &&verification.ok===true
-      &&verification.all_match===true,
+      &&verification.all_match===true
+      &&direct===wrapperless
+      &&Array.isArray(direct.python_checks)
+      &&direct.python_checks.length===1,
     source:field.source||null,
     check_count:field.value.length,
     verifier_ok:verification.ok===true,
     all_match:verification.all_match===true,
+    wrapperless_direct_ok:direct===wrapperless,
   }));
 } catch (error) {
   console.error('AAU_QDA601_NESTED_PYTHON_CHECKS_PROBE',JSON.stringify({
