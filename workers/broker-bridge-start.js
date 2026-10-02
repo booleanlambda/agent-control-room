@@ -82,6 +82,36 @@ try {
 }
 
 try {
+  const { pythonChecksFromArtifact } = await import('./autonomous-recursive-decomposition.js');
+  const { verifyPythonMathChecks } = await import('./python-math.js');
+  const artifact={
+    exercise_pack_ref:'probe',
+    problem_responses:[
+      {problem_id:1,calculation:'1+1=2',python_checks:[{label:'p1',expression:'1 + 1',claimed_result:2}]},
+      {problem_id:2,calculation:'2+2=4',python_checks:[{label:'p2',expression:'2 + 2',claimed_result:4}]},
+      {problem_id:3,calculation:'3+3=6',python_checks:[{label:'p3',expression:'3 + 3',claimed_result:6}]},
+    ],
+  };
+  const field=pythonChecksFromArtifact(artifact);
+  const verification=verifyPythonMathChecks(field.value);
+  console.log('AAU_QDA601_NESTED_PYTHON_CHECKS_PROBE',JSON.stringify({
+    ok:field.type_ok===true
+      &&field.value.length===3
+      &&field.source==='problem_responses'
+      &&verification.ok===true
+      &&verification.all_match===true,
+    source:field.source||null,
+    check_count:field.value.length,
+    verifier_ok:verification.ok===true,
+    all_match:verification.all_match===true,
+  }));
+} catch (error) {
+  console.error('AAU_QDA601_NESTED_PYTHON_CHECKS_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
   const { runPythonStatisticalAnalyses } = await import('./python-quant.js');
   const probe = runPythonStatisticalAnalyses([
     {
