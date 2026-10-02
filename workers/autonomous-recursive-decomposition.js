@@ -18,7 +18,7 @@ import {
   MAX_MODEL_TRANSPORT_ATTEMPTS,
   pathDepth,
 } from './semantic-runtime-controls.js';
-import { verifyPythonMathChecks } from './python-math.js';
+import { verifyPythonMathChecks, verifyPythonMathChecksChunked } from './python-math.js';
 import { runPythonStatisticalAnalyses } from './python-quant.js';
 
 // AAU autonomous recursive decomposition v0.1
@@ -217,11 +217,14 @@ function deterministicMathVerification(packet,node,artifact){
     coverage_authority:verifiedDescendantCoverage?'verified_descendants':'artifact_material_numeric_leaves',
     error:'python_checks_insufficient_material_coverage:required='+requiredChecks+';received='+checks.length
   };
+  const verifier=verifiedDescendantCoverage
+    ?verifyPythonMathChecksChunked
+    :verifyPythonMathChecks;
   return {
     required:true,
     required_check_count:requiredChecks,
     coverage_authority:verifiedDescendantCoverage?'verified_descendants':'artifact_material_numeric_leaves',
-    ...verifyPythonMathChecks(checks,{absoluteTolerance:0.005,relativeTolerance:1e-9})
+    ...verifier(checks,{absoluteTolerance:0.005,relativeTolerance:1e-9})
   };
 }
 
@@ -6604,7 +6607,7 @@ export async function runAutonomousRequirementCognition({
        ].includes(parsed?.runtime_verified_descendant_materialization?.contract)
        &&Array.isArray(parsed.python_checks)
        &&parsed.python_checks.length){
-      const verification=verifyPythonMathChecks(
+      const verification=verifyPythonMathChecksChunked(
         parsed.python_checks,{absoluteTolerance:0.005,relativeTolerance:1e-9}
       );
       if(verification.ok===true&&verification.all_match===true){
