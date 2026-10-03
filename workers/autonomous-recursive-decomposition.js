@@ -8732,7 +8732,7 @@ export async function runAutonomousRequirementCognition({
       }
 
       const forceReconsider=Boolean(node?.decision_payload?.reconsider_decomposition);
-      if(!forceReconsider&&qdaDirectProblemFastAtomic(node,parentPath)){
+      if(qdaDirectProblemFastAtomic(node,parentPath)){
         const result=await executeAtomic(node);
         node=result.node;
         node.parent_path=parentPath;
