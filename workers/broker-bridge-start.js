@@ -21,6 +21,30 @@ try {
 
 try {
   const { verifyPythonMathChecks } = await import('./python-math.js');
+  const cents=verifyPythonMathChecks([
+    {label:'two_decimal_rounding',expression:'100 / 3',claimed_result:33.33}
+  ],{absoluteTolerance:0.005,relativeTolerance:1e-9});
+  const probabilityDrift=verifyPythonMathChecks([
+    {label:'probability_precision_reject',expression:'0.4048191 / 0.5524091',claimed_result:0.7324815}
+  ],{absoluteTolerance:0.005,relativeTolerance:1e-9});
+  console.log('AAU_PYTHON_MATH_PRECISION_PROBE',JSON.stringify({
+    ok:cents.ok===true
+      &&cents.all_match===true
+      &&probabilityDrift.ok===true
+      &&probabilityDrift.all_match===false,
+    cents_actual:cents.results?.[0]?.actual??null,
+    cents_tolerance:cents.results?.[0]?.absolute_tolerance??null,
+    probability_actual:probabilityDrift.results?.[0]?.actual??null,
+    probability_tolerance:probabilityDrift.results?.[0]?.absolute_tolerance??null,
+  }));
+} catch (error) {
+  console.error('AAU_PYTHON_MATH_PRECISION_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
+  const { verifyPythonMathChecks } = await import('./python-math.js');
   const quoted=verifyPythonMathChecks([
     {label:'quoted_number',expression:'1 + 1',claimed_result:'2'}
   ]);
