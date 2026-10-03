@@ -7481,24 +7481,51 @@ export async function runAutonomousRequirementCognition({
       String(child?.node_status||child?.status||'').toLowerCase()==='completed'
     ))return null;
 
-    const authoritativeChildren=childRows.map(child=>{
+    const authoritativeChildren=await Promise.all(childRows.map(async child=>{
       const decision=asObject(child?.decision_payload);
+      let resultArtifact=child.result_artifact;
+      let statisticalVerified=decision.deterministic_statistics_verified===true;
+      let statisticalCount=Number(decision.deterministic_statistics_analysis_count||0);
+      let statisticalDescendantMaterialized=false;
+      if(qdaStatisticalAtomicRequirement(packet,child)){
+        const parts=resultParts(resultArtifact);
+        const direct=pythonAnalysesFromArtifact(parts.artifact);
+        if(!(direct?.type_ok===true&&asArray(direct.value).length)){
+          const recovered=await verifiedStatAnalysesBelow(child.node_path);
+          if(recovered.length){
+            let parsed=null;
+            try{parsed=JSON.parse(String(parts.artifact||''));}catch{}
+            if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)){
+              throw new Error('qda_root_statistical_parent_artifact_invalid:'+String(child.node_path));
+            }
+            parsed={...parsed,python_analyses:recovered};
+            resultArtifact=JSON.stringify({status:'COMPLETE',artifact:parsed,handoff:parts.handoff});
+            statisticalVerified=true;
+            statisticalCount=recovered.length;
+            statisticalDescendantMaterialized=true;
+            console.log('AAU_QDA_STATISTICAL_DESCENDANTS_MATERIALIZED',JSON.stringify({
+              agent_id:agentId,intent_execution_id:intentExecutionId,
+              node_path:child.node_path,analysis_count:recovered.length
+            }));
+          }
+        }
+      }
       return {
         node_path:child.node_path,
         status:'completed',
         requirement_text:child.requirement_text,
-        result_artifact:child.result_artifact,
+        result_artifact:resultArtifact,
         result_hash:child.result_hash||null,
         deterministic_math_verified:decision.deterministic_math_verified===true,
         deterministic_math_check_count:Number(decision.deterministic_math_check_count||0),
-        deterministic_statistics_verified:decision.deterministic_statistics_verified===true,
-        deterministic_statistics_analysis_count:Number(decision.deterministic_statistics_analysis_count||0),
+        deterministic_statistics_verified:statisticalVerified,
+        deterministic_statistics_analysis_count:statisticalCount,
         qda_verified_descendant_materialized:
-          decision.qda_verified_descendant_materialized===true,
+          decision.qda_verified_descendant_materialized===true||statisticalDescendantMaterialized,
         qda_verified_descendant_check_count:
           Number(decision.qda_verified_descendant_check_count||0),
       };
-    });
+    }));
 
     const canonical=materializeQda601UnitFromVerifiedChildren(
       packet,{authoritativeChildren}
