@@ -229,10 +229,27 @@ def proportion_ci(spec):
     successes = finite_float(spec.get("successes"), "successes")
     total = finite_float(spec.get("total"), "total")
     confidence = finite_float(spec.get("confidence", 0.95), "confidence")
+    raw_method = spec.get("method", "wilson")
+    if not isinstance(raw_method, str):
+        raise QuantError("proportion_ci_method_must_be_string")
+    method = raw_method.strip().lower()
+    if method not in ("wilson", "wald"):
+        raise QuantError("proportion_ci_method_not_allowed")
     if total <= 0 or successes < 0 or successes > total:
         raise QuantError("proportion_counts_invalid")
     p = successes / total
     z = confidence_z(confidence)
+    if method == "wald":
+        half = z * math.sqrt(p * (1 - p) / total)
+        return {
+            "successes": successes,
+            "total": total,
+            "proportion": p,
+            "confidence": confidence,
+            "method": "wald",
+            "ci_low": p - half,
+            "ci_high": p + half,
+        }
     denom = 1 + z * z / total
     center = (p + z * z / (2 * total)) / denom
     half = z * math.sqrt(p * (1 - p) / total + z * z / (4 * total * total)) / denom

@@ -5647,7 +5647,7 @@ export async function runAutonomousRequirementCognition({
             'Do NOT rewrite, reconsider, or expand the substantive answer. Do NOT change its method, inputs, calculations, interpretation, units, assumptions, or conclusions.',
             'Return exactly one JSON object: {"python_analyses":[{"id":"...","analysis":"...","spec":{},"claims":{}}]}.',
             'CRITICAL JSON TYPE RULE: every numerical value inside spec and claims MUST be a raw JSON number, never a quoted string, expression, fraction string, object wrapper, or sentence.',
-            'For proportion_ci use exactly spec {"successes":NUMBER,"total":NUMBER,"confidence":NUMBER}.',
+            'For proportion_ci use spec {"successes":NUMBER,"total":NUMBER,"confidence":NUMBER,"method":"wald"|"wilson"}. Method MUST match the frozen substantive artifact: use "wald" when it uses the normal approximation p ± z*sqrt(p(1-p)/n); use "wilson" when it uses the Wilson score interval.',
             'For difference_proportions_ci use exactly spec {"successes_a":NUMBER,"total_a":NUMBER,"successes_b":NUMBER,"total_b":NUMBER,"confidence":NUMBER}.',
             'For describe use spec {"values":[NUMBER,...]}.',
             'For pearson_correlation use spec {"x":[NUMBER,...],"y":[NUMBER,...]}.',
