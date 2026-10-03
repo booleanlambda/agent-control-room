@@ -122,6 +122,123 @@ function qdaQuantitativeAtomicRequirement(packet,node){
 
   return /(calculat|compute|compound|discount|retention|churn|present value|future value|\bPV\b|\bFV\b|\bNPV\b|rate|ratio|revenue|cost|margin|probab|scenario|optimization|cash(?:\s+flow|\s+balance|\s+inflow|\s+outflow)?|runway|break[- ]?even|python_checks?)/i.test(requirement);
 }
+
+function qdaCurriculumDependencies(problem,ordinal){
+  if(ordinal<=1)return [];
+  const value=text(problem);
+  const explicit=[...value.matchAll(/\b(?:problem|question|item)\s+(\d+)\b/ig)]
+    .map(match=>Number(match[1]))
+    .filter(value=>Number.isInteger(value)&&value>0&&value<ordinal);
+  if(explicit.length)return [...new Set(explicit)].sort((x,y)=>x-y);
+
+  // These phrases make a prior result semantically material rather than merely
+  // sharing the same case inputs. Keep those units dependency-ordered.
+  if(/\bfirst posterior\b/i.test(value))return [1];
+  if(/\bupdate again\b/i.test(value))return [Math.max(1,ordinal-1)];
+  if(/\bsame metrics\b.*\bcompare with A\b/i.test(value))return [1];
+  if(/\b(?:previous|prior|earlier)\s+(?:result|answer|estimate|calculation|problem)\b/i.test(value)){
+    return [Math.max(1,ordinal-1)];
+  }
+  return [];
+}
+
+export function qdaCurriculumFastPathPlan(packet){
+  const qda=asObject(packet?.qda_601_context);
+  const next=asObject(qda.next_unit);
+  const exercisePack=asObject(next.exercise_pack);
+  const unitCode=text(next.unit_code).toUpperCase();
+  const exercisePackRef=text(next.exercise_pack_ref);
+  const problems=asArray(exercisePack.problems).map(text).filter(Boolean);
+  const applies=
+    qda.assigned===true
+    &&text(qda.status)==='in_progress'
+    &&/^QDA601-M\d+-U\d+$/.test(unitCode)
+    &&problems.length>=2;
+  if(!applies){
+    return {
+      applies:false,
+      unit_code:unitCode||null,
+      problem_count:problems.length,
+      children:[],
+      contract:'qda_curriculum_fast_path_v0_1',
+    };
+  }
+
+  const statistical=QDA_STATISTICAL_UNIT_CODES.has(unitCode);
+  const externalResearch=exercisePack.external_research===true;
+  const requiredFields=[
+    'inputs','assumptions','formula_or_model','calculation','units',
+    'interpretation','sanity_check','evidence','self_audit'
+  ];
+  const children=problems.map((problem,index)=>{
+    const ordinal=index+1;
+    const dependsOn=qdaCurriculumDependencies(problem,ordinal);
+    const syntheticNode={requirement_text:'Solve Problem '+ordinal+' of '+unitCode+': '+problem};
+    const quantitative=!statistical&&qdaQuantitativeAtomicRequirement(packet,syntheticNode);
+    const verifierRequirement=statistical
+      ?'Include python_analyses with explicit method specifications and claims for every material statistical result so the Python statistics companion can independently recompute them.'
+      :quantitative
+        ?'Include python_checks for every material numerical result using the deterministic safe-math contract.'
+        :'';
+    const dependencyRequirement=dependsOn.length
+      ?'Use the verified result from prerequisite Problem '+dependsOn.join(' and Problem ')+' as authoritative sibling evidence; do not recompute that prerequisite unless explicitly required by this problem.'
+      :'This problem has no prerequisite problem result and may execute independently.';
+    return {
+      ordinal,
+      node_path:'R.'+String(ordinal).padStart(3,'0'),
+      problem,
+      depends_on:dependsOn,
+      requirement:[
+        'Solve Problem '+ordinal+' of '+unitCode+': "'+problem+'"',
+        'This is the exact authoritative curriculum problem; do not replace, merge, or broaden it.',
+        externalResearch
+          ?'Use only research explicitly allowed by the exercise pack and preserve source evidence.'
+          :'External research is forbidden; the exercise pack is self-contained.',
+        exercisePackRef
+          ?'Preserve exercise_pack_ref exactly as "'+exercisePackRef+'".'
+          :'Preserve the current authoritative exercise-pack binding.',
+        dependencyRequirement,
+        'Return all required submission fields: '+requiredFields.join(', ')+'.',
+        'self_audit must contain independent Pass A (solve) and Pass B (reconstruct or attack).',
+        verifierRequirement,
+      ].filter(Boolean).join(' '),
+      statistical,
+      quantitative,
+      source_kind:'qda_curriculum_problem',
+      source_ref:(exercisePackRef||unitCode)+'#problem-'+ordinal,
+    };
+  });
+
+  const waves=[];
+  const unresolved=new Map(children.map(child=>[child.ordinal,child]));
+  const resolved=new Set();
+  while(unresolved.size){
+    const ready=[...unresolved.values()]
+      .filter(child=>child.depends_on.every(dep=>resolved.has(dep)))
+      .sort((x,y)=>x.ordinal-y.ordinal);
+    if(!ready.length)break;
+    waves.push(ready.map(child=>child.ordinal));
+    ready.forEach(child=>{
+      resolved.add(child.ordinal);
+      unresolved.delete(child.ordinal);
+    });
+  }
+
+  return {
+    applies:true,
+    unit_code:unitCode,
+    module_code:text(next.module_code)||null,
+    exercise_pack_ref:exercisePackRef||null,
+    external_research:externalResearch,
+    statistical,
+    problem_count:problems.length,
+    children,
+    dependency_waves:waves,
+    max_parallelism:3,
+    contract:'qda_curriculum_fast_path_v0_1',
+  };
+}
+
 function quantitativeArtifactBody(artifact){
   let parsed=artifact;
   if(typeof artifact==='string'){
@@ -5292,6 +5409,157 @@ export async function runAutonomousRequirementCognition({
     throw new Error('autonomous_decomposition_child_resource_limit:'+node.node_path);
   }
 
+  async function ensureQdaCurriculumRootSplit(node){
+    if(node?.node_path!=='R')return null;
+    const plan=qdaCurriculumFastPathPlan(packet);
+    if(!plan.applies)return null;
+    if(qda601AuthenticatorRemediation(packet).active)return null;
+
+    const existing=(await children('R'))
+      .filter(child=>String(child?.status||child?.node_status||'')!=='cancelled')
+      .sort((x,y)=>Number(x?.ordinal||0)-Number(y?.ordinal||0));
+    if(existing.length)return null;
+
+    const authored=[];
+    for(const spec of plan.children){
+      const requirementHash=sha256(spec.requirement);
+      await chargeSemanticRuntime({
+        eventKind:'semantic_node_created',
+        materialKey:spec.node_path+':'+requirementHash,
+        nodePath:spec.node_path,
+        costUnits:semanticRuntime.node_create_units,
+        eventFingerprint:sha256({
+          parent_path:'R',
+          child_path:spec.node_path,
+          requirement_hash:requirementHash,
+          qda_curriculum_fast_path:true,
+        }),
+        metadata:{
+          parent_path:'R',
+          ordinal:spec.ordinal,
+          requirement_hash:requirementHash,
+          qda_curriculum_fast_path:true,
+          qda_unit_code:plan.unit_code,
+        },
+      });
+      const child=await saveNode({
+        nodePath:spec.node_path,
+        parentPath:'R',
+        ordinal:spec.ordinal,
+        requirement:spec.requirement,
+        sourceKind:spec.source_kind,
+        sourceRef:spec.source_ref,
+        status:'pending',
+        decisionType:'ATOMIC',
+        decisionPayload:{
+          authored_by_runtime_from_authoritative_curriculum:true,
+          qda_curriculum_problem_fast_path:true,
+          qda_curriculum_fast_path_contract:plan.contract,
+          qda_unit_code:plan.unit_code,
+          qda_problem_ordinal:spec.ordinal,
+          qda_problem_sha256:sha256(spec.problem),
+          qda_problem_dependencies:spec.depends_on,
+          deterministic_execution_expected:true,
+          statistical_verification_expected:spec.statistical===true,
+          quantitative_math_verification_expected:spec.quantitative===true,
+          sibling_dependency_required:spec.depends_on.length>0,
+          provenance_review:{
+            status:'ACCEPT',
+            issue_count:0,
+            reason:'Exact problem text is bound directly to the authoritative QDA exercise pack.',
+            deterministic_guard:'qda_authoritative_curriculum_problem_binding_v0_1',
+          },
+        },
+        contextPayload:boundContextPayload({
+          ...inheritedChildContext(node.context_payload),
+          qda_601_context:packet?.qda_601_context,
+          qda_curriculum_problem_binding:{
+            unit_code:plan.unit_code,
+            exercise_pack_ref:plan.exercise_pack_ref,
+            problem_ordinal:spec.ordinal,
+            problem_sha256:sha256(spec.problem),
+            depends_on:spec.depends_on,
+            contract:'qda_authoritative_curriculum_problem_binding_v0_1',
+          },
+        }),
+        resultArtifact:null,
+      });
+      child.parent_path='R';
+      authored.push(child);
+      counters.nodes++;
+    }
+
+    const split=await saveNode({
+      nodePath:'R',
+      parentPath:null,
+      ordinal:node.ordinal||0,
+      requirement:node.requirement_text,
+      sourceKind:node.source_kind,
+      sourceRef:node.source_ref,
+      status:'split',
+      decisionType:'SPLIT',
+      decisionPayload:{
+        ...(node.decision_payload||{}),
+        child_count:authored.length,
+        children_authored:true,
+        qda_curriculum_fast_path:true,
+        qda_curriculum_fast_path_contract:plan.contract,
+        qda_curriculum_problem_count:plan.problem_count,
+        qda_curriculum_dependency_waves:plan.dependency_waves,
+        qda_curriculum_parallel_execution:true,
+        qda_curriculum_parallelism:plan.max_parallelism,
+        child_authoring_protocol:'authoritative_curriculum_deterministic_problem_split_v0_1',
+        coverage_note:'Each authoritative exercise-pack problem is bound to exactly one direct child.',
+        reconsider_decomposition:false,
+      },
+      contextPayload:boundContextPayload({
+        ...(node.context_payload||{}),
+        qda_601_context:packet?.qda_601_context,
+      }),
+      resultArtifact:null,
+    });
+    split.parent_path=null;
+    console.log('AAU_QDA_CURRICULUM_FAST_PATH_SPLIT',JSON.stringify({
+      agent_id:agentId,
+      intent_execution_id:intentExecutionId,
+      unit_code:plan.unit_code,
+      problem_count:plan.problem_count,
+      child_paths:authored.map(child=>child.node_path),
+      dependency_waves:plan.dependency_waves,
+      max_parallelism:plan.max_parallelism,
+      contract:plan.contract,
+    }));
+    return {node:split,children:authored,plan};
+  }
+
+  function qdaRootProblemExecutionPlan(node,kids){
+    if(node?.node_path!=='R')return null;
+    const plan=qdaCurriculumFastPathPlan(packet);
+    if(!plan.applies||kids.length!==plan.problem_count)return null;
+    const byOrdinal=new Map(kids.map(child=>[Number(child?.ordinal||0),child]));
+    for(const spec of plan.children){
+      const child=byOrdinal.get(spec.ordinal);
+      if(!child)return null;
+      const requirement=text(child?.requirement_text);
+      if(!new RegExp('\\bProblem\\s+'+String(spec.ordinal)+'\\b','i').test(requirement))return null;
+      if(/\\bProblems\\s+\\d+/i.test(requirement))return null;
+    }
+    return {plan,byOrdinal};
+  }
+
+  function qdaDirectProblemFastAtomic(node,parentPath){
+    if(parentPath!=='R')return false;
+    const plan=qdaCurriculumFastPathPlan(packet);
+    if(!plan.applies)return false;
+    const ordinal=Number(node?.ordinal||0);
+    if(!Number.isInteger(ordinal)||ordinal<1||ordinal>plan.problem_count)return false;
+    if(Boolean(node?.decision_payload?.reconsider_decomposition))return false;
+    if(Number(node?.decision_payload?.atomic_execution_failures||0)>0)return false;
+    const requirement=text(node?.requirement_text);
+    return new RegExp('\\bProblem\\s+'+String(ordinal)+'\\b','i').test(requirement)
+      &&!/\\bProblems\\s+\\d+/i.test(requirement);
+  }
+
   async function executeAtomic(node){
     let pinnedEvidence=await loadPinnedEvidence(node.node_path);
     const atomicDurableCatalog=await loadDurableResearchCatalog(node.node_path);
@@ -8060,6 +8328,16 @@ export async function runAutonomousRequirementCognition({
     }
     if(node.node_status==='blocked')return node;
 
+    // QDA already supplies exact problem boundaries. Materialize those
+    // boundaries deterministically instead of spending model calls discovering them.
+    if(node.node_path==='R'&&node.node_status==='pending'){
+      const fastSplit=await ensureQdaCurriculumRootSplit(node);
+      if(fastSplit?.node){
+        node=fastSplit.node;
+        node.parent_path=parentPath;
+      }
+    }
+
     for(let transitions=0;transitions<8;transitions++){
       const pendingSynthesisFailure=asObject(node?.decision_payload?.synthesis_failure);
       const synthesisRemediationInProgress=asObject(
@@ -8132,45 +8410,144 @@ export async function runAutonomousRequirementCognition({
         if(!kids.length)
           throw new Error('autonomous_decomposition_split_requires_child:'+node.node_path);
         const completed=[];
-        for(const child of kids){
-          child.parent_path=node.node_path;
-          const inherited=inheritedChildContext(node.context_payload);
-          if(completed.length||Object.keys(inherited).length){
-            const current=await getNode(child.node_path);
-            if(current?.status!=='ready')throw new Error('autonomous_decomposition_child_lookup_failed:'+child.node_path);
-            const routed=await saveNode({
-              nodePath:current.node_path,
-              parentPath:node.node_path,
-              ordinal:current.ordinal||child.ordinal||0,
-              requirement:current.requirement_text,
-              sourceKind:current.source_kind||child.source_kind||'agent_decomposition',
-              sourceRef:current.source_ref??child.source_ref??node.node_path,
-              status:current.node_status,
-              decisionType:current.decision_type??null,
-              decisionPayload:current.decision_payload||{},
-              contextPayload:boundContextPayload({
-                ...(current.context_payload||{}),
-                ...inherited,
-                ...(completed.length?{completed_sibling_results:compactCompletedSiblingResults(completed)}:{}),
-              }),
-              resultArtifact:current.result_artifact||null,
-            });
-            routed.parent_path=node.node_path;
-          }
-          const done=await process(
-            child.node_path,
-            node.node_path,
-            pathDepth(child.node_path),
-            0
+        const qdaExecution=qdaRootProblemExecutionPlan(node,kids);
+        if(qdaExecution){
+          const begun=Date.now();
+          const resolvedByOrdinal=new Map();
+          let waveCount=0;
+          let peakParallelism=0;
+          const remaining=new Map(
+            qdaExecution.plan.children.map(spec=>[
+              spec.ordinal,{spec,child:qdaExecution.byOrdinal.get(spec.ordinal)}
+            ])
           );
-          if(done.node_status!=='completed'&&done.node_status!=='blocked')
-            throw new Error('autonomous_decomposition_child_not_resolved:'+child.node_path);
-          completed.push(done);
+
+          while(remaining.size){
+            const ready=[...remaining.values()]
+              .filter(({spec})=>spec.depends_on.every(dep=>resolvedByOrdinal.has(dep)))
+              .sort((x,y)=>x.spec.ordinal-y.spec.ordinal);
+            if(!ready.length)
+              throw new Error('qda_curriculum_dependency_cycle:'+qdaExecution.plan.unit_code);
+            const wave=ready.slice(0,qdaExecution.plan.max_parallelism);
+            waveCount++;
+            peakParallelism=Math.max(peakParallelism,wave.length);
+
+            const settled=await Promise.allSettled(wave.map(async({spec,child})=>{
+              child.parent_path=node.node_path;
+              const dependencies=spec.depends_on
+                .map(dep=>resolvedByOrdinal.get(dep))
+                .filter(Boolean);
+              const inherited=inheritedChildContext(node.context_payload);
+              if(dependencies.length||Object.keys(inherited).length){
+                const current=await getNode(child.node_path);
+                if(current?.status!=='ready')
+                  throw new Error('autonomous_decomposition_child_lookup_failed:'+child.node_path);
+                const routed=await saveNode({
+                  nodePath:current.node_path,
+                  parentPath:node.node_path,
+                  ordinal:current.ordinal||child.ordinal||0,
+                  requirement:current.requirement_text,
+                  sourceKind:current.source_kind||child.source_kind||'qda_curriculum_problem',
+                  sourceRef:current.source_ref??child.source_ref??node.node_path,
+                  status:current.node_status,
+                  decisionType:current.decision_type??null,
+                  decisionPayload:{
+                    ...(current.decision_payload||{}),
+                    qda_problem_dependencies:spec.depends_on,
+                    qda_dependency_wave:waveCount,
+                  },
+                  contextPayload:boundContextPayload({
+                    ...(current.context_payload||{}),
+                    ...inherited,
+                    ...(dependencies.length?{
+                      completed_sibling_results:compactCompletedSiblingResults(dependencies),
+                      dependency_context_contract:'qda_curriculum_explicit_problem_dependency_v0_1',
+                    }:{}),
+                  }),
+                  resultArtifact:current.result_artifact||null,
+                });
+                routed.parent_path=node.node_path;
+              }
+              const done=await process(
+                child.node_path,
+                node.node_path,
+                pathDepth(child.node_path),
+                0
+              );
+              if(done.node_status!=='completed'&&done.node_status!=='blocked')
+                throw new Error('autonomous_decomposition_child_not_resolved:'+child.node_path);
+              return {ordinal:spec.ordinal,done};
+            }));
+            const failed=settled.find(row=>row.status==='rejected');
+            if(failed)throw failed.reason;
+            for(const row of settled){
+              resolvedByOrdinal.set(row.value.ordinal,row.value.done);
+              remaining.delete(row.value.ordinal);
+            }
+          }
+
+          completed.push(...[...resolvedByOrdinal.entries()]
+            .sort((x,y)=>x[0]-y[0])
+            .map(([,done])=>done));
+          console.log('AAU_QDA_CURRICULUM_PARALLEL_CHILDREN_RESOLVED',JSON.stringify({
+            agent_id:agentId,
+            intent_execution_id:intentExecutionId,
+            unit_code:qdaExecution.plan.unit_code,
+            child_count:completed.length,
+            dependency_waves:waveCount,
+            peak_parallelism:peakParallelism,
+            elapsed_ms:Date.now()-begun,
+            child_paths:completed.map(child=>child.node_path),
+            policy:'qda_dependency_aware_parallel_v0_1',
+          }));
+        }else{
+          for(const child of kids){
+            child.parent_path=node.node_path;
+            const inherited=inheritedChildContext(node.context_payload);
+            if(completed.length||Object.keys(inherited).length){
+              const current=await getNode(child.node_path);
+              if(current?.status!=='ready')throw new Error('autonomous_decomposition_child_lookup_failed:'+child.node_path);
+              const routed=await saveNode({
+                nodePath:current.node_path,
+                parentPath:node.node_path,
+                ordinal:current.ordinal||child.ordinal||0,
+                requirement:current.requirement_text,
+                sourceKind:current.source_kind||child.source_kind||'agent_decomposition',
+                sourceRef:current.source_ref??child.source_ref??node.node_path,
+                status:current.node_status,
+                decisionType:current.decision_type??null,
+                decisionPayload:current.decision_payload||{},
+                contextPayload:boundContextPayload({
+                  ...(current.context_payload||{}),
+                  ...inherited,
+                  ...(completed.length?{completed_sibling_results:compactCompletedSiblingResults(completed)}:{}),
+                }),
+                resultArtifact:current.result_artifact||null,
+              });
+              routed.parent_path=node.node_path;
+            }
+            const done=await process(
+              child.node_path,
+              node.node_path,
+              pathDepth(child.node_path),
+              0
+            );
+            if(done.node_status!=='completed'&&done.node_status!=='blocked')
+              throw new Error('autonomous_decomposition_child_not_resolved:'+child.node_path);
+            completed.push(done);
+          }
         }
         return synthesize(node,completed);
       }
 
       const forceReconsider=Boolean(node?.decision_payload?.reconsider_decomposition);
+      if(!forceReconsider&&qdaDirectProblemFastAtomic(node,parentPath)){
+        const result=await executeAtomic(node);
+        node=result.node;
+        node.parent_path=parentPath;
+        if(result.completed)return node;
+        if(result.split||result.reconsider)continue;
+      }
       const decision=await decide(node,{forceReconsider,branchDepth,singleChildRefinements});
       node=decision.node;
       node.parent_path=parentPath;

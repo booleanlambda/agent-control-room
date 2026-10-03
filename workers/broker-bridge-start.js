@@ -494,6 +494,56 @@ try {
   }));
 }
 
+try {
+  const { qdaCurriculumFastPathPlan } = await import('./autonomous-recursive-decomposition.js');
+  const independent=qdaCurriculumFastPathPlan({
+    qda_601_context:{
+      assigned:true,status:'in_progress',
+      next_unit:{
+        unit_code:'QDA601-M4-U2',module_code:'QDA601-M4',
+        exercise_pack_ref:'curriculum/qda601-exercise-packs-v0.1.json#QDA601-M4-U2',
+        exercise_pack:{external_research:false,problems:[
+          'Campaign A converts 420 of 6,000 visitors; B converts 500 of 6,250. Compute rates and approximate 95% confidence intervals for each proportion.',
+          'Compute an approximate 95% CI for the difference B−A and state whether zero is included.',
+          'A retention sample observes 342 retained of 400 users. Estimate the proportion and 95% CI; explain what the interval does and does not claim.',
+        ]},
+      },
+    },
+  });
+  const dependent=qdaCurriculumFastPathPlan({
+    qda_601_context:{
+      assigned:true,status:'in_progress',
+      next_unit:{
+        unit_code:'QDA601-M3-U3',module_code:'QDA601-M3',
+        exercise_pack_ref:'curriculum/qda601-exercise-packs-v0.1.json#QDA601-M3-U3',
+        exercise_pack:{external_research:false,problems:[
+          'Prior probability that true high demand exists is 0.30. A positive pilot result has P(+|high)=0.80 and P(+|low)=0.25. Compute posterior after a positive pilot.',
+          'A second independent signal conditional on demand has P(+|high)=0.70 and P(+|low)=0.35. Update again after a second positive signal.',
+          'Then update the first posterior for a negative second signal and compare how strongly the evidence should change the thesis.',
+        ]},
+      },
+    },
+  });
+  console.log('AAU_QDA_CURRICULUM_FAST_PATH_PROBE',JSON.stringify({
+    ok:independent.applies===true
+      &&independent.problem_count===3
+      &&independent.statistical===true
+      &&independent.children.every(child=>child.depends_on.length===0)
+      &&JSON.stringify(independent.dependency_waves)==='[[1,2,3]]'
+      &&dependent.applies===true
+      &&JSON.stringify(dependent.children.map(child=>child.depends_on))==='[[],[1],[1]]'
+      &&JSON.stringify(dependent.dependency_waves)==='[[1],[2,3]]',
+    independent_waves:independent.dependency_waves,
+    dependent_waves:dependent.dependency_waves,
+    child_paths:independent.children.map(child=>child.node_path),
+    contract:independent.contract,
+  }));
+} catch (error) {
+  console.error('AAU_QDA_CURRICULUM_FAST_PATH_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
 // one_shot_expertise_runtime_repair_v0_1
 if (isEnabled('AAU_EXPERTISE_RUNTIME_PATCH')) {
   try {
