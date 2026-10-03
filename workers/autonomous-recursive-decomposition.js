@@ -116,6 +116,7 @@ function qdaQuantitativeAtomicRequirement(packet,node){
   if(qdaStatisticalAtomicRequirement(packet,node))return false;
   const requirement=text(node?.requirement_text);
   const unitCode=text(packet?.qda_601_context?.next_unit?.unit_code).toUpperCase();
+  if(QDA_STATISTICAL_UNIT_CODES.has(unitCode))return false;
   const inheritedQdaAssignment=/^QDA601-M\d+-U\d+$/.test(unitCode);
 
   // QDA identity is assignment-scoped, not wording-scoped. Agent-authored
