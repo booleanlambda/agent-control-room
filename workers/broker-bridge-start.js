@@ -528,12 +528,13 @@ try {
     ok:independent.applies===true
       &&independent.problem_count===3
       &&independent.statistical===true
-      &&independent.children.every(child=>child.depends_on.length===0)
-      &&JSON.stringify(independent.dependency_waves)==='[[1,2,3]]'
+      &&JSON.stringify(independent.children.map(child=>child.depends_on))==='[[],[1],[]]'
+      &&JSON.stringify(independent.dependency_waves)==='[[1,3],[2]]'
       &&dependent.applies===true
       &&JSON.stringify(dependent.children.map(child=>child.depends_on))==='[[],[1],[1]]'
       &&JSON.stringify(dependent.dependency_waves)==='[[1],[2,3]]',
     independent_waves:independent.dependency_waves,
+    independent_dependencies:independent.children.map(child=>child.depends_on),
     dependent_waves:dependent.dependency_waves,
     child_paths:independent.children.map(child=>child.node_path),
     contract:independent.contract,

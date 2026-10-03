@@ -123,16 +123,26 @@ function qdaQuantitativeAtomicRequirement(packet,node){
   return /(calculat|compute|compound|discount|retention|churn|present value|future value|\bPV\b|\bFV\b|\bNPV\b|rate|ratio|revenue|cost|margin|probab|scenario|optimization|cash(?:\s+flow|\s+balance|\s+inflow|\s+outflow)?|runway|break[- ]?even|python_checks?)/i.test(requirement);
 }
 
-function qdaCurriculumDependencies(problem,ordinal){
+const QDA_CURRICULUM_DEPENDENCY_OVERRIDES=Object.freeze({
+  'QDA601-M2-U2':Object.freeze({2:[1],3:[1,2]}),
+  'QDA601-M2-U3':Object.freeze({2:[1],3:[1,2]}),
+  'QDA601-M2-U4':Object.freeze({2:[1]}),
+  'QDA601-M3-U2':Object.freeze({2:[1],3:[1]}),
+  'QDA601-M3-U3':Object.freeze({2:[1],3:[1]}),
+  'QDA601-M3-U4':Object.freeze({2:[1],3:[1,2]}),
+  'QDA601-M4-U2':Object.freeze({2:[1]}),
+});
+function qdaCurriculumDependencies(unitCode,problem,ordinal){
   if(ordinal<=1)return [];
+  const canonical=text(unitCode).toUpperCase();
+  const override=QDA_CURRICULUM_DEPENDENCY_OVERRIDES[canonical]?.[ordinal];
+  if(Array.isArray(override))return [...override];
+
   const value=text(problem);
   const explicit=[...value.matchAll(/\b(?:problem|question|item)\s+(\d+)\b/ig)]
     .map(match=>Number(match[1]))
     .filter(value=>Number.isInteger(value)&&value>0&&value<ordinal);
   if(explicit.length)return [...new Set(explicit)].sort((x,y)=>x-y);
-
-  // These phrases make a prior result semantically material rather than merely
-  // sharing the same case inputs. Keep those units dependency-ordered.
   if(/\bfirst posterior\b/i.test(value))return [1];
   if(/\bupdate again\b/i.test(value))return [Math.max(1,ordinal-1)];
   if(/\bsame metrics\b.*\bcompare with A\b/i.test(value))return [1];
@@ -172,7 +182,7 @@ export function qdaCurriculumFastPathPlan(packet){
   ];
   const children=problems.map((problem,index)=>{
     const ordinal=index+1;
-    const dependsOn=qdaCurriculumDependencies(problem,ordinal);
+    const dependsOn=qdaCurriculumDependencies(unitCode,problem,ordinal);
     const syntheticNode={requirement_text:'Solve Problem '+ordinal+' of '+unitCode+': '+problem};
     const quantitative=!statistical&&qdaQuantitativeAtomicRequirement(packet,syntheticNode);
     const verifierRequirement=statistical
