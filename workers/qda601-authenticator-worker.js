@@ -43,7 +43,7 @@ function normalize(raw){
   const r={
     overall_score:score01(x.overall_score,'overall_score'),
     arithmetic_accuracy:score01(x.arithmetic_accuracy,'arithmetic_accuracy'),
-    financial_model_integrity:score01(x.financial_model_integrity,'financial_model_integrity'),
+    model_integrity:score01(x.model_integrity??x.financial_model_integrity,'model_integrity'),
     reconciliation_consistency:score01(x.reconciliation_consistency,'reconciliation_consistency'),
     evidence_provenance:score01(x.evidence_provenance,'evidence_provenance'),
     material_numeric_contradictions:Number(x.material_numeric_contradictions),
@@ -60,11 +60,11 @@ function normalize(raw){
   if(r.rationale.length<80||!r.strengths.length||!r.weaknesses.length)
     throw new Error('qda_authenticator_review_incomplete');
   const pass=r.overall_score>=0.90&&r.arithmetic_accuracy>=0.95&&
-    r.financial_model_integrity>=0.90&&r.reconciliation_consistency>=0.90&&
+    r.model_integrity>=0.90&&r.reconciliation_consistency>=0.90&&
     r.evidence_provenance>=1.00&&r.material_numeric_contradictions===0&&r.self_audit_pass===true;
   r.deterministic_gate={
     overall_score_floor:0.90,arithmetic_accuracy_floor:0.95,
-    financial_model_integrity_floor:0.90,reconciliation_consistency_floor:0.90,
+    model_integrity_floor:0.90,reconciliation_consistency_floor:0.90,
     evidence_provenance_floor:1.00,material_numeric_contradictions_max:0,
     self_audit_required:true,non_compensatory_pass:pass,
     contract:'qda_601_authenticator_unit_gate_v0_1'
@@ -80,13 +80,13 @@ FROZEN_ARTIFACT_SHA256: ${task.artifact_sha256}
 QDA NON-COMPENSATORY STANDARD:
 - overall_score >= 0.90
 - arithmetic_accuracy >= 0.95
-- financial_model_integrity >= 0.90
+- model_integrity >= 0.90
 - reconciliation_consistency >= 0.90
 - evidence_provenance = 1.00
 - material_numeric_contradictions = 0
 - self_audit_pass = true
 
-Return exactly one JSON object with keys: overall_score, arithmetic_accuracy, financial_model_integrity, reconciliation_consistency, evidence_provenance, material_numeric_contradictions, self_audit_pass, verdict, strengths, weaknesses, rationale, remediation. Score fields are 0..1. contradictions is a nonnegative integer. self_audit_pass is boolean.
+MODEL_INTEGRITY: score the integrity of the quantitative/statistical method appropriate to this unit; for regression/statistics, assess model interpretation, assumptions, uncertainty and causal restraint, not the presence of a financial model.\n\nReturn exactly one JSON object with keys: overall_score, arithmetic_accuracy, model_integrity, reconciliation_consistency, evidence_provenance, material_numeric_contradictions, self_audit_pass, verdict, strengths, weaknesses, rationale, remediation. Score fields are 0..1. contradictions is a nonnegative integer. self_audit_pass is boolean.
 
 FROZEN ARTIFACT:
 ${task.artifact}`;
