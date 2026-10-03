@@ -7454,6 +7454,20 @@ export async function runAutonomousRequirementCognition({
     };
   }
 
+  async function verifiedStatAnalysesBelow(path){
+    const out=[];
+    for(const ref of await children(path)){
+      const n=await getNode(ref.node_path);
+      if(n?.status!=='ready'||String(n?.node_status||'').toLowerCase()!=='completed')continue;
+      if(String(n?.decision_type||'').toUpperCase()==='SPLIT'){out.push(...await verifiedStatAnalysesBelow(n.node_path));continue;}
+      const d=asObject(n.decision_payload);
+      if(d.deterministic_statistics_verified!==true)continue;
+      const f=pythonAnalysesFromArtifact(resultParts(n.result_artifact).artifact);
+      if(f?.type_ok===true)out.push(...asArray(f.value));
+    }
+    return out;
+  }
+
   async function completeQdaRootFromVerifiedChildren(node,childRows){
     if(
       node?.node_path!=='R'
