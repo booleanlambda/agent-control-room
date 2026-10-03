@@ -499,6 +499,80 @@ function bindQda601ProblemProvenance(ctx,payload){
   return bound;
 }
 
+function qdaExplicitProblemOrdinals(textValue){
+  const text=String(textValue||'');
+  const match=text.match(/\bproblems?\s+(.{1,100}?)(?=\s+(?:of|for|from|using|in)\b|[:.;]|$)/i);
+  if(!match)return [];
+  const segment=String(match[1]||'').trim();
+  const values=[...segment.matchAll(/\d+/g)].map(row=>Number(row[0]))
+    .filter(value=>Number.isInteger(value)&&value>0);
+  const range=segment.match(/(\d+)\s*(?:-|–|—|\bto\b|\bthrough\b)\s*(\d+)/i);
+  if(range){
+    const first=Number(range[1]);
+    const last=Number(range[2]);
+    if(Number.isInteger(first)&&Number.isInteger(last)&&first>0&&last>=first&&last-first<=100){
+      for(let value=first;value<=last;value+=1)values.push(value);
+    }
+  }
+  return [...new Set(values)].sort((a,b)=>a-b);
+}
+
+function qdaChildProblemOrdinals(ctx,child,artifact,expectedProblems){
+  const requirement=String(child?.requirement_text||'').replace(/\s+/g,' ').trim();
+  const expectedUnit=String(ctx?.next_unit?.unit_code||'').toUpperCase();
+  const declaredUnit=qdaRequirementUnitCode(requirement);
+  if(declaredUnit&&expectedUnit&&declaredUnit!==expectedUnit){
+    return {ordinals:[],unit_mismatch:true};
+  }
+
+  const explicit=qdaExplicitProblemOrdinals(requirement)
+    .filter(ordinal=>ordinal>=1&&ordinal<=expectedProblems.length);
+  if(explicit.length)return {ordinals:explicit,unit_mismatch:false};
+
+  const inferred=[];
+  const artifactResponses=Array.isArray(artifact?.problem_responses)?artifact.problem_responses:[];
+  for(let index=0;index<expectedProblems.length;index+=1){
+    const expected=String(expectedProblems[index]||'').replace(/\s+/g,' ').trim();
+    if(expected&&requirement.includes(expected)){
+      inferred.push(index+1);
+      continue;
+    }
+    const responseMatch=artifactResponses.some(response=>{
+      if(!response||typeof response!=='object'||Array.isArray(response))return false;
+      const ordinal=Number(response.problem_id??response.id);
+      if(Number.isInteger(ordinal)&&ordinal===index+1)return true;
+      const problem=String(response.problem||response.problem_text||'').replace(/\s+/g,' ').trim();
+      return Boolean(expected)&&(problem===expected||problem.includes(expected));
+    });
+    if(responseMatch)inferred.push(index+1);
+  }
+
+  if(!inferred.length){
+    const ordinal=qdaExplicitProblemOrdinal(requirement);
+    if(ordinal&&ordinal<=expectedProblems.length)inferred.push(ordinal);
+  }
+  return {ordinals:[...new Set(inferred)].sort((a,b)=>a-b),unit_mismatch:false};
+}
+
+function qdaArtifactProblemResponse(artifact,ordinal,expectedProblem,coveredOrdinals){
+  const responses=Array.isArray(artifact?.problem_responses)?artifact.problem_responses:[];
+  if(!responses.length)return artifact;
+
+  const expected=String(expectedProblem||'').replace(/\s+/g,' ').trim();
+  const exact=responses.find(response=>{
+    if(!response||typeof response!=='object'||Array.isArray(response))return false;
+    const responseOrdinal=Number(response.problem_id??response.id);
+    if(Number.isInteger(responseOrdinal)&&responseOrdinal===ordinal)return true;
+    const problem=String(response.problem||response.problem_text||'').replace(/\s+/g,' ').trim();
+    return Boolean(expected)&&(problem===expected||problem.includes(expected));
+  });
+  if(exact)return exact;
+
+  const position=coveredOrdinals.indexOf(ordinal);
+  if(position>=0&&responses.length===coveredOrdinals.length&&responses[position])return responses[position];
+  return artifact;
+}
+
 export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
   const ctx=packet?.qda_601_context;
   if(!ctx?.assigned || ctx?.status!=='in_progress' || !ctx?.next_unit) {
@@ -520,67 +594,25 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
     .sort((a,b)=>String(a?.node_path||'').localeCompare(String(b?.node_path||'')));
 
   const failures=[];
-  if(ordered.length!==expectedProblems.length){
-    failures.push(
-      'qda_verified_child_count_mismatch:expected='+expectedProblems.length
-      +';received='+ordered.length
-    );
-  }
+  const coverageByProblem=expectedProblems.map(()=>[]);
+  const childInfos=[];
 
-  const problemResponses=[];
-  const aggregateChecks=[];
-  const aggregateAnalyses=[];
-  const provenanceChildren=[];
-
-  for(let index=0;index<Math.min(ordered.length,expectedProblems.length);index+=1){
-    const child=ordered[index];
+  for(const child of ordered){
     const artifact=parseAuthoritativeChildArtifact(child);
     if(!artifact){
-      failures.push('qda_verified_child_artifact_invalid:'+String(child?.node_path||index+1));
+      failures.push('qda_verified_child_artifact_invalid:'+String(child?.node_path||'unknown'));
       continue;
     }
 
-    // Provenance is not only "which child" but "child of which exact assigned
-    // problem". A verified child from a later/earlier QDA unit must never be
-    // relabeled into the current exercise pack by ordinal position.
-    const childRequirement=String(child?.requirement_text||'').replace(/\s+/g,' ').trim();
-    const expectedProblem=String(expectedProblems[index]||'').replace(/\s+/g,' ').trim();
-    const artifactProblem=String(artifact?.problem||artifact?.problem_text||'').replace(/\s+/g,' ').trim();
-    const expectedOrdinal=index+1;
-    const declaredOrdinal=qdaExplicitProblemOrdinal(childRequirement);
-    const declaredUnit=qdaRequirementUnitCode(childRequirement);
-    const expectedUnit=String(ctx?.next_unit?.unit_code||'').toUpperCase();
-    const explicitBindingMatches=
-      declaredOrdinal===expectedOrdinal
-      &&Boolean(expectedUnit)
-      &&declaredUnit===expectedUnit;
-    const textualBindingMatches=Boolean(expectedProblem)
-      && (childRequirement.includes(expectedProblem)
-          || artifactProblem===expectedProblem
-          || artifactProblem.includes(expectedProblem));
-    const requirementMatches=explicitBindingMatches||textualBindingMatches;
-    if(!requirementMatches){
-      failures.push(
-        'qda_verified_child_requirement_mismatch:'+String(child?.node_path||index+1)
-        +':expected_problem_sha256='+qdaSha256(expectedProblems[index])
-      );
+    const coverage=qdaChildProblemOrdinals(ctx,child,artifact,expectedProblems);
+    if(coverage.unit_mismatch){
+      failures.push('qda_verified_child_unit_mismatch:'+String(child?.node_path||'unknown'));
       continue;
     }
-
-    const sourceBinding=qdaProblemSourceBinding(ctx,index,expectedProblems[index],child);
-    const response={
-      problem_id:index+1,
-      problem:expectedProblems[index],
-      inputs:artifact.inputs,
-      assumptions:arrayifyArtifactField(artifact.assumptions),
-      formula_or_model:artifact.formula_or_model,
-      calculation:artifact.calculation,
-      units:artifact.units,
-      interpretation:artifact.interpretation,
-      sanity_check:artifact.sanity_check,
-      evidence:[sourceBinding,...arrayifyArtifactField(artifact.evidence)],
-      self_audit:artifact.self_audit,
-    };
+    if(!coverage.ordinals.length){
+      failures.push('qda_verified_child_problem_coverage_missing:'+String(child?.node_path||'unknown'));
+      continue;
+    }
 
     const childChecks=Array.isArray(artifact.python_checks)?artifact.python_checks:[];
     const childAnalyses=Array.isArray(artifact.python_analyses)?artifact.python_analyses:[];
@@ -594,28 +626,17 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
       Number(child?.qda_verified_descendant_check_count||0),
       childChecks.length
     );
-    if(childChecks.length) response.python_checks=childChecks;
-    if(childAnalyses.length) response.python_analyses=childAnalyses;
 
-    const quantitative=String(ctx?.next_unit?.type||'').toLowerCase()==='quantitative'
-      && !statisticalUnit(ctx);
-    if(quantitative){
+    if(!statisticalUnit(ctx) && (childDeterministicVerified||childDeterministicCheckCount>0||childChecks.length>0)){
       if(!childDeterministicVerified){
-        failures.push('qda_verified_child_deterministic_math_not_verified:'+String(child?.node_path||index+1));
+        failures.push('qda_verified_child_deterministic_math_not_verified:'+String(child?.node_path||'unknown'));
       }
-      // Coverage was already decided by the durable child completion gate.
-      // Do not infer a second coverage requirement from presentation-shaped
-      // calculation fields (which may contain labels, prose, duplicated display
-      // values, or intermediate formatting). Require the persisted verified
-      // check set to be present, then independently re-execute those checks.
       const durableVerifiedCheckCount=Math.max(0,Number(childDeterministicCheckCount||0));
       if(durableVerifiedCheckCount<1){
-        failures.push(
-          'qda_verified_child_deterministic_check_count_missing:'+String(child?.node_path||index+1)
-        );
+        failures.push('qda_verified_child_deterministic_check_count_missing:'+String(child?.node_path||'unknown'));
       }else if(childChecks.length<durableVerifiedCheckCount){
         failures.push(
-          'qda_verified_child_python_set_incomplete:'+String(child?.node_path||index+1)
+          'qda_verified_child_python_set_incomplete:'+String(child?.node_path||'unknown')
           +':verified='+durableVerifiedCheckCount+';received='+childChecks.length
         );
       }else{
@@ -627,7 +648,7 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
             (verification.failure_class==='input_contract'
               ?'qda_verified_child_python_contract_invalid:'
               :'qda_verified_child_python_runtime_invalid:')
-            +String(child?.node_path||index+1)
+            +String(child?.node_path||'unknown')
           );
         }else if(!verification.all_match){
           const invalid=Array.isArray(verification.results)
@@ -636,40 +657,116 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
             (invalid
               ?'qda_verified_child_python_expression_or_type_invalid:'
               :'qda_verified_child_python_disagreement:')
-            +String(child?.node_path||index+1)
+            +String(child?.node_path||'unknown')
           );
         }
       }
     }
 
     if(statisticalUnit(ctx) && !childAnalyses.length){
-      failures.push('qda_verified_child_statistical_analysis_missing:'+String(child?.node_path||index+1));
+      failures.push('qda_verified_child_statistical_analysis_missing:'+String(child?.node_path||'unknown'));
     }
 
-    childChecks.forEach(check=>aggregateChecks.push({
-      ...check,
-      label:String(child?.node_path||'child')+':'+String(check?.label||'check'),
-    }));
-    childAnalyses.forEach(analysis=>aggregateAnalyses.push({
-      ...analysis,
-      id:String(child?.node_path||'child')+':'+String(analysis?.id||'analysis'),
-    }));
+    const info={
+      child,
+      artifact,
+      coveredOrdinals:coverage.ordinals,
+      childChecks,
+      childAnalyses,
+      childDeterministicVerified,
+      childDeterministicCheckCount,
+    };
+    childInfos.push(info);
+    for(const ordinal of coverage.ordinals)coverageByProblem[ordinal-1].push(info);
+  }
 
-    problemResponses.push(response);
+  for(let index=0;index<coverageByProblem.length;index+=1){
+    const sources=coverageByProblem[index];
+    if(sources.length===0){
+      failures.push(
+        'qda_verified_problem_uncovered:problem='+String(index+1)
+        +':expected_problem_sha256='+qdaSha256(expectedProblems[index])
+      );
+    }else if(sources.length>1){
+      failures.push(
+        'qda_verified_problem_duplicate_coverage:problem='+String(index+1)
+        +':children='+sources.map(info=>String(info.child?.node_path||'unknown')).join(',')
+      );
+    }
+  }
+
+  if(failures.length)return {applies:true,payload:null,failures};
+
+  const problemResponses=[];
+  const aggregateChecks=[];
+  const aggregateAnalyses=[];
+  const provenanceChildren=[];
+  const problemCoverage=[];
+
+  for(const info of childInfos){
+    info.childChecks.forEach(check=>aggregateChecks.push({
+      ...check,
+      label:String(info.child?.node_path||'child')+':'+String(check?.label||'check'),
+    }));
+    info.childAnalyses.forEach(analysis=>aggregateAnalyses.push({
+      ...analysis,
+      id:String(info.child?.node_path||'child')+':'+String(analysis?.id||'analysis'),
+    }));
     provenanceChildren.push({
-      node_path:child?.node_path||null,
-      result_hash:child?.result_hash||null,
-      deterministic_math_verified:childDeterministicVerified,
-      deterministic_math_check_count:childDeterministicCheckCount,
+      node_path:info.child?.node_path||null,
+      result_hash:info.child?.result_hash||null,
+      covered_problem_indices:info.coveredOrdinals.map(ordinal=>ordinal-1),
+      covered_problem_ids:info.coveredOrdinals,
+      deterministic_math_verified:info.childDeterministicVerified,
+      deterministic_math_check_count:info.childDeterministicCheckCount,
       verification_source:
-        child?.qda_verified_descendant_materialized===true
-        ||String(child?.qda_verified_descendant_materialized||'').toLowerCase()==='true'
+        info.child?.qda_verified_descendant_materialized===true
+        ||String(info.child?.qda_verified_descendant_materialized||'').toLowerCase()==='true'
           ?'verified_descendant_materialization'
           :'direct_deterministic_math',
     });
   }
 
-  if(failures.length) return {applies:true,payload:null,failures};
+  for(let index=0;index<expectedProblems.length;index+=1){
+    const info=coverageByProblem[index][0];
+    const ordinal=index+1;
+    const selected=qdaArtifactProblemResponse(
+      info.artifact,ordinal,expectedProblems[index],info.coveredOrdinals
+    );
+    const responseChecks=Array.isArray(selected?.python_checks)
+      ?selected.python_checks:info.childChecks;
+    const responseAnalyses=Array.isArray(selected?.python_analyses)
+      ?selected.python_analyses:info.childAnalyses;
+    const sourceBinding=qdaProblemSourceBinding(ctx,index,expectedProblems[index],info.child);
+    const response={
+      problem_id:ordinal,
+      problem:expectedProblems[index],
+      inputs:selected?.inputs,
+      assumptions:arrayifyArtifactField(selected?.assumptions),
+      formula_or_model:selected?.formula_or_model,
+      calculation:selected?.calculation,
+      units:selected?.units,
+      interpretation:selected?.interpretation,
+      sanity_check:selected?.sanity_check,
+      evidence:[sourceBinding,...arrayifyArtifactField(selected?.evidence)],
+      self_audit:selected?.self_audit,
+    };
+    if(responseChecks.length)response.python_checks=responseChecks;
+    if(responseAnalyses.length)response.python_analyses=responseAnalyses;
+    problemResponses.push(response);
+    problemCoverage.push({
+      problem_index:index,
+      problem_id:ordinal,
+      source_problem_sha256:qdaSha256(expectedProblems[index]),
+      child_node_path:info.child?.node_path||null,
+      child_result_hash:info.child?.result_hash||null,
+      child_covers_problem_ids:info.coveredOrdinals,
+      deterministic_math_verified:info.childDeterministicVerified,
+      deterministic_math_check_count:info.childDeterministicCheckCount,
+      response_check_count:responseChecks.length,
+      response_analysis_count:responseAnalyses.length,
+    });
+  }
 
   const fieldByProblem=(field)=>({
     source:'verified_child_artifacts',
@@ -711,6 +808,8 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
         problem:responseLabel(response,index),
         value:response?.self_audit?.pass_a
           ??response?.self_audit?.pass_a_result
+          ??response?.self_audit?.pass_a_solution
+          ??response?.self_audit?.pass_a_analysis
           ??response?.calculation?.pass_a
           ??'Preserved from verified child artifact.',
       })),
@@ -718,13 +817,14 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
         problem:responseLabel(response,index),
         value:response?.self_audit?.pass_b
           ??response?.self_audit?.pass_b_result
+          ??response?.self_audit?.pass_b_attack
           ??response?.calculation?.pass_b
           ??'Preserved from verified child artifact.',
       })),
-      verdict:'PASS: all resolved child artifacts were preserved and deterministic verification requirements were satisfied before runtime materialization.',
+      verdict:'PASS: every assigned problem is covered exactly once by verified child evidence and deterministic verification requirements were satisfied before runtime materialization.',
     },
     verification_provenance:{
-      contract:'qda601_python_verification_provenance_v0_1',
+      contract:'qda601_python_verification_provenance_v0_2_problem_coverage',
       exercise_pack_ref:ctx.next_unit.exercise_pack_ref,
       exercise_pack_problem_set_sha256:qdaSha256(expectedProblems),
       python_check_count:aggregateChecks.length,
@@ -733,14 +833,16 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
       python_analyses_sha256:aggregateAnalyses.length?qdaSha256(aggregateAnalyses):null,
       child_result_chain_sha256:qdaSha256(provenanceChildren),
       children:provenanceChildren,
-      verification_statement:'Every preserved material calculation is backed by the included deterministic Python check set and the recorded verified child result hash chain.',
+      problem_coverage:problemCoverage,
+      verification_statement:'Every assigned problem has exactly one verified child source. A child may cover multiple assigned problems; deterministic check sets are counted once per verified child and bound to every problem that child covers.',
     },
     runtime_materialization:{
-      contract:'qda_verified_child_artifact_materialization_v0_3',
+      contract:'qda_verified_child_artifact_materialization_v0_4_problem_coverage',
       arithmetic_recomputation_forbidden:true,
-      coverage_authority:'durable_child_deterministic_verification',
+      coverage_authority:'complete_nonduplicated_problem_coverage_plus_durable_child_verification',
       source:'autonomous_recursive_decomposition_verified_children',
       children:provenanceChildren,
+      problem_coverage:problemCoverage,
       python_check_count:aggregateChecks.length,
       python_checks_sha256:qdaSha256(aggregateChecks),
     },
@@ -937,12 +1039,22 @@ function validateUnitPayload(ctx, payload) {
 
   if (quantitative) {
     const responses=Array.isArray(payload.problem_responses)?payload.problem_responses:[];
+    const runtimeMaterializationContract=String(payload?.runtime_materialization?.contract||'');
     const runtimeVerifiedChildren=
-      ['qda_verified_child_artifact_materialization_v0_2','qda_verified_child_artifact_materialization_v0_3'].includes(payload?.runtime_materialization?.contract)
+      ['qda_verified_child_artifact_materialization_v0_2','qda_verified_child_artifact_materialization_v0_3','qda_verified_child_artifact_materialization_v0_4_problem_coverage'].includes(runtimeMaterializationContract)
       &&Array.isArray(payload?.verification_provenance?.children)
         ?payload.verification_provenance.children
         :null;
+    const runtimeProblemCoverage=
+      runtimeMaterializationContract==='qda_verified_child_artifact_materialization_v0_4_problem_coverage'
+      &&Array.isArray(payload?.verification_provenance?.problem_coverage)
+        ?payload.verification_provenance.problem_coverage
+        :null;
     const requiredCoverageForProblem=(response,index)=>{
+      if(runtimeProblemCoverage){
+        const coverage=runtimeProblemCoverage.find(row=>Number(row?.problem_index)===index);
+        return Math.max(1,Number(coverage?.response_check_count||0));
+      }
       if(runtimeVerifiedChildren){
         const recorded=Math.max(
           0,
@@ -969,9 +1081,12 @@ function validateUnitPayload(ctx, payload) {
       failures.push('qda_python_checks_array_required');
     }
     const checks = Array.isArray(payload.python_checks) ? payload.python_checks : [];
-    const minimumCoverage=responses
-      .slice(0,expectedProblems.length)
-      .reduce((sum,response,index)=>sum+requiredCoverageForProblem(response,index),0);
+    const minimumCoverage=runtimeProblemCoverage&&runtimeVerifiedChildren
+      ?runtimeVerifiedChildren.reduce((sum,child)=>
+          sum+Math.max(0,Number(child?.deterministic_math_check_count||0)),0)
+      :responses
+        .slice(0,expectedProblems.length)
+        .reduce((sum,response,index)=>sum+requiredCoverageForProblem(response,index),0);
     if (checks.length < minimumCoverage) {
       failures.push(
         'qda_python_checks_material_coverage_required:required='+minimumCoverage
