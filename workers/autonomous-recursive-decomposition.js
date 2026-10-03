@@ -5594,12 +5594,12 @@ export async function runAutonomousRequirementCognition({
       &&!/\\bProblems\\s+\\d+/i.test(requirement);
   }
 
-  async function repairMissingStatisticalAnalysisContract(
+  async function repairStatisticalAnalysisContract(
     node,proposedArtifact,verification
   ){
     if(
       verification?.required!==true
-      ||verification?.error!=='python_statistical_analyses_required'
+      ||(verification?.ok===true&&verification?.all_claims_match===true)
     )return null;
 
     let artifactObject=null;
@@ -5620,12 +5620,44 @@ export async function runAutonomousRequirementCognition({
     const normalizeAnalyses=value=>asArray(value).map(row=>{
       const item=asObject(row);
       const analysis=text(item.analysis);
+      const spec=normalizeQdaStatisticalContractNumbers(item.spec);
+      const claims={
+        ...asObject(normalizeQdaStatisticalContractNumbers(item.claims)),
+      };
+      const moveClaim=(from,to)=>{
+        if(claims[to]===undefined&&claims[from]!==undefined)claims[to]=claims[from];
+        if(from!==to)delete claims[from];
+      };
+      if(analysis==='proportion_ci'){
+        moveClaim('p','proportion');
+        moveClaim('rate','proportion');
+        moveClaim('lower','ci_low');
+        moveClaim('lower_bound','ci_low');
+        moveClaim('ci_lower','ci_low');
+        moveClaim('upper','ci_high');
+        moveClaim('upper_bound','ci_high');
+        moveClaim('ci_upper','ci_high');
+      }
+      if(analysis==='difference_proportions_ci'){
+        moveClaim('diff','difference_b_minus_a');
+        moveClaim('difference','difference_b_minus_a');
+        moveClaim('p_a','proportion_a');
+        moveClaim('rate_a','proportion_a');
+        moveClaim('p_b','proportion_b');
+        moveClaim('rate_b','proportion_b');
+        moveClaim('lower','ci_low');
+        moveClaim('lower_bound','ci_low');
+        moveClaim('ci_lower','ci_low');
+        moveClaim('upper','ci_high');
+        moveClaim('upper_bound','ci_high');
+        moveClaim('ci_upper','ci_high');
+      }
       const approximateCi=
         analysis==='proportion_ci'||analysis==='difference_proportions_ci';
       return {
         ...item,
-        spec:normalizeQdaStatisticalContractNumbers(item.spec),
-        claims:normalizeQdaStatisticalContractNumbers(item.claims),
+        spec,
+        claims,
         ...(approximateCi&&item.absolute_tolerance===undefined
           ?{absolute_tolerance:1e-6}
           :{}),
@@ -5642,9 +5674,17 @@ export async function runAutonomousRequirementCognition({
       return {artifact:repairedArtifact,verification:repairedVerification};
     };
 
-    let analyses=normalizeAnalyses(durable.parsed?.python_analyses);
+    const embeddedAnalyses=
+      durable.parsed?.python_analyses
+      ??artifactObject.python_analyses
+      ??asObject(artifactObject.self_audit).python_analyses;
+    let analyses=normalizeAnalyses(embeddedAnalyses);
     let verified=verifyAnalyses(analyses);
-    if(!durable.parsed){
+    const alreadyRepaired=
+      verified?.verification?.required===true
+      &&verified.verification.ok===true
+      &&verified.verification.all_claims_match===true;
+    if(!durable.parsed&&!alreadyRepaired){
       let priorFailure=verification;
       for(let compactAttempt=1;compactAttempt<=2;compactAttempt++){
         const response=await callJson([
@@ -5710,7 +5750,7 @@ export async function runAutonomousRequirementCognition({
         intent_execution_id:intentExecutionId,
         node_path:node.node_path,
         analysis_count:analyses.length,
-        policy:'missing_analysis_contract_compact_repair_v0_2',
+        policy:'statistical_contract_compact_repair_v0_3',
       }));
       return {
         artifact:verified.artifact,
@@ -5729,7 +5769,7 @@ export async function runAutonomousRequirementCognition({
       failure_class:rejectedVerification.failure_class||null,
       all_claims_match:rejectedVerification.all_claims_match===true,
       repair_shape:clip(safeJson(analyses),1800),
-      policy:'missing_analysis_contract_compact_repair_v0_2',
+      policy:'statistical_contract_compact_repair_v0_3',
     }));
     return {
       artifact:verified?.artifact||proposedArtifact,
@@ -6117,9 +6157,10 @@ export async function runAutonomousRequirementCognition({
     let proposedStatisticsVerification=deterministicStatisticalVerification(packet,node,proposedArtifact);
     if(
       proposedStatisticsVerification.required===true
-      &&proposedStatisticsVerification.error==='python_statistical_analyses_required'
+      &&(!proposedStatisticsVerification.ok
+        ||!proposedStatisticsVerification.all_claims_match)
     ){
-      const repaired=await repairMissingStatisticalAnalysisContract(
+      const repaired=await repairStatisticalAnalysisContract(
         node,proposedArtifact,proposedStatisticsVerification
       );
       if(repaired?.artifact){
