@@ -7882,6 +7882,9 @@ export async function runAutonomousRequirementCognition({
       const atomicRevalidation=completedAtomicDeterministicRevalidation(packet,node);
       if(atomicRevalidation.required){
         await reopenCompletedRuntimeForDeterministicRevalidation(node.node_path);
+        const revalidationDecisionPayload={...(node.decision_payload||{})};
+        delete revalidationDecisionPayload.deterministic_math_verified;
+        delete revalidationDecisionPayload.deterministic_math_check_count;
         node=await saveNode({
           nodePath:node.node_path,
           parentPath:node.parent_path??parentPathOf(node.node_path),
@@ -7892,7 +7895,7 @@ export async function runAutonomousRequirementCognition({
           status:'pending',
           decisionType:'ATOMIC',
           decisionPayload:{
-            ...(node.decision_payload||{}),
+            ...revalidationDecisionPayload,
             deterministic_math_reconciliation_required:true,
             deterministic_math_attempts:Math.max(0,Number(node?.decision_payload?.deterministic_math_attempts||0)),
             deterministic_math_verification:atomicRevalidation.verification,
