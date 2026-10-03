@@ -5711,7 +5711,7 @@ export async function runAutonomousRequirementCognition({
             'For mean_ci use spec {"values":[NUMBER,...],"confidence":NUMBER}.',
             'For one_sample_t use spec {"values":[NUMBER,...],"mu0":NUMBER}.',
             'For welch_t use spec {"x":[NUMBER,...],"y":[NUMBER,...]}.',
-            'For coefficient_t use spec {"estimate":NUMBER,"se":NUMBER} when only t is claimed; add "df":NUMBER only when the frozen answer claims a p-value and the degrees of freedom are supported by the exercise data. Never invent df.',
+            'For coefficient_t use spec {"estimate":NUMBER,"se":NUMBER,"df":NUMBER}. Use the exercise-design residual degrees of freedom when available. If the frozen answer reports only a rounded t-statistic, copy that rounded t claim; the runtime verifies it with a 0.005 absolute tolerance.',
             'Allowed analysis names also include bootstrap_ci and monte_carlo_expression when the frozen answer actually selected them.',
             'claims MUST copy the frozen answer numerical claims using result-field names such as proportion, ci_low, ci_high, difference_b_minus_a, mean, median, r, slope, t, or p_two_sided.',
             'Do not copy a rate expression such as "420/6000" into successes or total. successes is the count 420 and total is the count 6000.',
