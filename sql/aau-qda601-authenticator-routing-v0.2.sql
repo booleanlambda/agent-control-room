@@ -89,13 +89,18 @@ begin
        - 'qda_601_remediation_unit'
        - 'qda_601_remediation_reason'
        - 'qda_601_authenticator_failure_report'
+       - 'qda_601_authenticator_failure_artifact_sha256'
+       - 'qda_601_authenticator_failure_score'
        - 'qda_601_remediation_anchor_review_id'
        - 'qda_601_last_rejected_file_id'
      ) || jsonb_build_object(
        'last_action','qda601_complete_'||v_action_unit,
        'qda_601_last_verified_unit',v_action_unit,
        'qda_601_last_verified_review_id',v.review_id,
-       'qda_601_last_verified_artifact_sha256',v.artifact_sha256
+       'qda_601_last_verified_artifact_sha256',v.artifact_sha256,
+       'qda_601_last_authenticator_review_id',v.review_id,
+       'qda_601_last_authenticator_verdict',v.verdict,
+       'qda_601_last_authenticator_unit',v_action_unit
      ),
      current_focus='QDA-601 '||v_action_unit||' independently verified; progression may advance to the next canonical unit.',
      updated_at=now()
@@ -115,6 +120,8 @@ begin
          end,
        'qda_601_last_rejected_file_id',v.file_id,
        'qda_601_last_authenticator_review_id',v.review_id,
+       'qda_601_last_authenticator_verdict',v.verdict,
+       'qda_601_last_authenticator_unit',v_action_unit,
        'qda_601_authenticator_failure_artifact_sha256',v.artifact_sha256,
        'qda_601_authenticator_failure_score',v.score,
        'qda_601_authenticator_failure_report',p_report
