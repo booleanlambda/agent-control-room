@@ -309,6 +309,107 @@ try {
   }));
 }
 
+try {
+  const { materializeQda601UnitFromVerifiedChildren } = await import('./qda601-runtime.js');
+  const makeCombinedChild=()=>({
+    node_path:'R.001',
+    status:'completed',
+    decision_type:'ATOMIC',
+    requirement_text:'Solve Problems 1 and 2 of the QDA601-M1-U3 exercise pack.',
+    result_hash:'probe_combined_12',
+    deterministic_math_verified:true,
+    deterministic_math_check_count:2,
+    result_artifact:JSON.stringify({
+      artifact:JSON.stringify({
+        inputs:{shared:true},
+        assumptions:['combined child covers two assigned problems'],
+        formula_or_model:'shared verified model',
+        calculation:{first:1,second:2},
+        units:'count',
+        interpretation:'combined verified interpretation',
+        sanity_check:'combined verified sanity check',
+        evidence:{provenance:'probe_combined'},
+        self_audit:{pass_a:'combined pass a',pass_b:'combined pass b',verdict:'PASS'},
+        python_checks:[
+          {label:'problem_1_probe',expression:'1 + 0',claimed_result:1},
+          {label:'problem_2_probe',expression:'2 + 0',claimed_result:2},
+        ],
+      }),
+      handoff:{conclusions:[],facts:[],unresolved:[]},
+    }),
+  });
+  const makeSingleChild=()=>({
+    node_path:'R.002',
+    status:'completed',
+    decision_type:'ATOMIC',
+    requirement_text:'Solve Problem 3 of the QDA601-M1-U3 exercise pack.',
+    result_hash:'probe_single_3',
+    deterministic_math_verified:true,
+    deterministic_math_check_count:1,
+    result_artifact:JSON.stringify({
+      artifact:JSON.stringify({
+        inputs:{n:3},
+        assumptions:['single child covers assigned problem three'],
+        formula_or_model:'3 + 0',
+        calculation:{result:3},
+        units:'count',
+        interpretation:'problem three interpretation',
+        sanity_check:'problem three sanity check',
+        evidence:{provenance:'probe_single'},
+        self_audit:{pass_a:'single pass a',pass_b:'single pass b',verdict:'PASS'},
+        python_checks:[
+          {label:'problem_3_probe',expression:'3 + 0',claimed_result:3},
+        ],
+      }),
+      handoff:{conclusions:[],facts:[],unresolved:[]},
+    }),
+  });
+  const probe=materializeQda601UnitFromVerifiedChildren({
+    qda_601_context:{
+      assigned:true,
+      status:'in_progress',
+      next_unit:{
+        type:'quantitative',
+        title:'Multi-problem child probe',
+        module_code:'QDA601-M1',
+        unit_code:'QDA601-M1-U3',
+        exercise_pack_ref:'probe_multi_problem',
+        exercise_pack:{problems:[
+          'Assigned problem one.',
+          'Assigned problem two.',
+          'Assigned problem three.',
+        ]},
+      },
+    },
+  },{
+    authoritativeChildren:[makeCombinedChild(),makeSingleChild()],
+  });
+  const coverage=probe.payload?.verification_provenance?.problem_coverage||[];
+  console.log('AAU_QDA601_MULTI_PROBLEM_CHILD_MATERIALIZER_PROBE', JSON.stringify({
+    ok:probe.applies===true && Boolean(probe.payload) && probe.failures.length===0
+      && probe.payload.problem_responses.length===3
+      && probe.payload.python_checks.length===3
+      && probe.payload.verification_provenance?.children?.length===2
+      && coverage.length===3
+      && coverage[0]?.child_node_path==='R.001'
+      && coverage[1]?.child_node_path==='R.001'
+      && coverage[2]?.child_node_path==='R.002',
+    problem_count:probe.payload?.problem_responses?.length||0,
+    child_count:probe.payload?.verification_provenance?.children?.length||0,
+    python_check_count:probe.payload?.python_checks?.length||0,
+    problem_coverage:coverage.map(row=>({
+      problem_id:row?.problem_id||null,
+      child_node_path:row?.child_node_path||null,
+    })),
+    failures:probe.failures||[],
+  }));
+} catch (error) {
+  console.error('AAU_QDA601_MULTI_PROBLEM_CHILD_MATERIALIZER_PROBE', JSON.stringify({
+    ok:false,
+    error:String(error?.message || error).slice(0,500),
+  }));
+}
+
 // one_shot_expertise_runtime_repair_v0_1
 if (isEnabled('AAU_EXPERTISE_RUNTIME_PATCH')) {
   try {
