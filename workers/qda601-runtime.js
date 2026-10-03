@@ -73,33 +73,52 @@ function lastActionFromPacket(packet) {
   ).trim();
 }
 
+function qdaVerifiedUnitIndexFromPacket(packet){
+  const raw=String(
+    packet?.state?.state_payload?.qda_601_last_verified_unit
+    ??packet?.state?.qda_601_last_verified_unit
+    ??''
+  ).trim().toUpperCase();
+  if(!raw)return -1;
+  return units.findIndex(unit=>unit.unit_code.toUpperCase()===raw);
+}
+
 function cursorFromLastAction(packet) {
+  const verifiedIndex=qdaVerifiedUnitIndexFromPacket(packet);
   const action = lastActionFromPacket(packet).toLowerCase();
-  if (!action.startsWith('qda601_')) return {completedIndex:-1,researchIndex:null,pendingIndex:null,final:false};
+  let cursor={completedIndex:-1,researchIndex:null,pendingIndex:null,final:false};
 
   if (action.startsWith('qda601_final_submission')) {
-    return {completedIndex:units.length-1,researchIndex:null,pendingIndex:null,final:true};
+    cursor={completedIndex:units.length-1,researchIndex:null,pendingIndex:null,final:true};
+  } else {
+    const completeMatch = action.match(/^qda601_complete_(qda601-m\d+-u\d+)/i);
+    if (completeMatch) {
+      const idx = units.findIndex(u => u.unit_code.toLowerCase() === completeMatch[1].toLowerCase());
+      cursor={completedIndex:idx,researchIndex:null,pendingIndex:null,final:false};
+    } else {
+      const submitMatch = action.match(/^qda601_submit_(qda601-m\d+-u\d+)/i);
+      if (submitMatch) {
+        const idx = units.findIndex(u => u.unit_code.toLowerCase() === submitMatch[1].toLowerCase());
+        cursor={completedIndex:Math.max(-1,idx-1),researchIndex:null,pendingIndex:idx,final:false};
+      } else {
+        const researchMatch = action.match(/^qda601_research_(qda601-m\d+-u\d+)/i);
+        if (researchMatch) {
+          const idx = units.findIndex(u => u.unit_code.toLowerCase() === researchMatch[1].toLowerCase());
+          cursor={completedIndex:Math.max(-1,idx-1),researchIndex:idx,pendingIndex:null,final:false};
+        }
+      }
+    }
   }
 
-  const completeMatch = action.match(/^qda601_complete_(qda601-m\d+-u\d+)/i);
-  if (completeMatch) {
-    const idx = units.findIndex(u => u.unit_code.toLowerCase() === completeMatch[1].toLowerCase());
-    return {completedIndex:idx,researchIndex:null,pendingIndex:null,final:false};
+  // Independent authenticator completion is the authoritative progression
+  // boundary. A later wake may carry a stale qda601_submit_* action, but it must
+  // never move a verified unit back into pending verification.
+  if(verifiedIndex>=0 && !cursor.final){
+    cursor.completedIndex=Math.max(cursor.completedIndex,verifiedIndex);
+    if(cursor.pendingIndex!==null && cursor.pendingIndex<=verifiedIndex)cursor.pendingIndex=null;
+    if(cursor.researchIndex!==null && cursor.researchIndex<=verifiedIndex)cursor.researchIndex=null;
   }
-
-  const submitMatch = action.match(/^qda601_submit_(qda601-m\d+-u\d+)/i);
-  if (submitMatch) {
-    const idx = units.findIndex(u => u.unit_code.toLowerCase() === submitMatch[1].toLowerCase());
-    return {completedIndex:Math.max(-1,idx-1),researchIndex:null,pendingIndex:idx,final:false};
-  }
-
-  const researchMatch = action.match(/^qda601_research_(qda601-m\d+-u\d+)/i);
-  if (researchMatch) {
-    const idx = units.findIndex(u => u.unit_code.toLowerCase() === researchMatch[1].toLowerCase());
-    return {completedIndex:Math.max(-1,idx-1),researchIndex:idx,pendingIndex:null,final:false};
-  }
-
-  return {completedIndex:-1,researchIndex:null,pendingIndex:null,final:false};
+  return cursor;
 }
 
 function remediationUnitCodeFromPacket(packet) {
