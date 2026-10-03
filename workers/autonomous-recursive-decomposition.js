@@ -3448,7 +3448,15 @@ export async function runAutonomousRequirementCognition({
     const usage=response?.result?.usage||response?.usage||error?.providerUsage||error?.usage||null;
     const explicitTotal=Number(usage?.total_tokens ?? error?.providerTotalTokens);
     const hasReportedTotal=Number.isFinite(explicitTotal)&&explicitTotal>=0;
-    const providerStatus=response?200:(Number.isFinite(Number(error?.providerStatusCode))?Math.floor(Number(error.providerStatusCode)):(Number.isFinite(Number(error?.status))?Math.floor(Number(error.status)):null));
+    const rawProviderStatus=response
+      ?200
+      :(Number.isFinite(Number(error?.providerStatusCode))
+        ?Math.floor(Number(error.providerStatusCode))
+        :(Number.isFinite(Number(error?.status))?Math.floor(Number(error.status)):null));
+    const providerStatus=
+      rawProviderStatus!==null&&rawProviderStatus>=100&&rawProviderStatus<=599
+        ?rawProviderStatus
+        :null;
     if(hasReportedTotal){
       const actualUnits=explicitTotal>0?Math.max(1,Math.ceil(explicitTotal/semanticRuntime.quantum_tokens)):(providerStatus===200?1:0);
       return {settledUnits:Math.min(reservation.reservedUnits,actualUnits),providerStatus,providerTotalTokens:Math.floor(explicitTotal),reason:providerStatus===200?'provider_completed_actual_usage':'provider_error_reported_usage',settlementCapped:actualUnits>reservation.reservedUnits};
