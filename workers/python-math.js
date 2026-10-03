@@ -57,6 +57,25 @@ function tolerance(value,fallback,name){
   return {ok:true,value};
 }
 
+// Treat the configured absolute tolerance as a ceiling, not a blanket license.
+// Currency rounded to 2 decimals can still use a half-cent tolerance, while a
+// probability claimed to 7 decimals must agree at that precision.
+function claimedDecimalPlaces(value){
+  if(!finiteNumber(value))return 0;
+  const raw=String(Math.abs(value)).toLowerCase();
+  const parts=raw.split('e');
+  const coefficient=parts[0];
+  const exponent=parts.length>1?Number(parts[1]):0;
+  const fraction=(coefficient.split('.')[1]||'').length;
+  return Math.max(0,fraction-(Number.isFinite(exponent)?exponent:0));
+}
+function precisionAwareAbsoluteTolerance(value,cap){
+  const places=claimedDecimalPlaces(value);
+  if(places<=0)return Math.min(cap,1e-9);
+  const halfUnit=0.5*Math.pow(10,-places);
+  return Math.min(cap,Math.max(1e-12,halfUnit));
+}
+
 export function verifyPythonMathChecks(checks, options = {}) {
   const contract=validatePythonMathChecks(checks);
   if(!contract.ok){
@@ -90,6 +109,7 @@ export function verifyPythonMathChecks(checks, options = {}) {
       label:check.label,
       expression:check.expression,
       claimed_result:check.claimed_result,
+      runtime_absolute_tolerance:precisionAwareAbsoluteTolerance(check.claimed_result,abs.value),
       ...(typeof check.problem==='string'?{problem:check.problem}:{}),
     })),
     absolute_tolerance:abs.value,
