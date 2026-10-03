@@ -99,7 +99,11 @@ function qdaStatisticalAtomicRequirement(packet,node){
   // quantitative unit (for example "financial calculator simulation") promote
   // that node into the statistics verifier.
   if(/^QDA601-M\d+-U\d+$/.test(unitCode)){
-    return QDA_STATISTICAL_UNIT_CODES.has(unitCode);
+    if(!QDA_STATISTICAL_UNIT_CODES.has(unitCode))return false;
+    const conceptualOnly=
+      /\b(?:interpret|explain|discuss)\b/i.test(requirement)
+      &&!/\b(?:compute|calculate|approximate|estimate|derive|fit|test|quantify)\b|confidence interval|t-statistic|p-value|bootstrap|monte carlo/i.test(requirement);
+    return !conceptualOnly;
   }
 
   // Keyword inference is only a fallback for QDA work that lacks a canonical
@@ -205,8 +209,10 @@ export function qdaCurriculumFastPathPlan(packet){
     const ordinal=index+1;
     const dependsOn=qdaCurriculumDependencies(unitCode,problem,ordinal);
     const syntheticNode={requirement_text:'Solve Problem '+ordinal+' of '+unitCode+': '+problem};
+    const statisticalVerification=
+      statistical&&qdaStatisticalAtomicRequirement(packet,syntheticNode);
     const quantitative=!statistical&&qdaQuantitativeAtomicRequirement(packet,syntheticNode);
-    const verifierRequirement=statistical
+    const verifierRequirement=statisticalVerification
       ?'Include python_analyses with explicit method specifications and claims for every material statistical result so the Python statistics companion can independently recompute them.'
       :quantitative
         ?'Include python_checks for every material numerical result using the deterministic safe-math contract.'
@@ -233,7 +239,7 @@ export function qdaCurriculumFastPathPlan(packet){
         'self_audit must contain independent Pass A (solve) and Pass B (reconstruct or attack).',
         verifierRequirement,
       ].filter(Boolean).join(' '),
-      statistical,
+      statistical:statisticalVerification,
       quantitative,
       source_kind:'qda_curriculum_problem',
       source_ref:(exercisePackRef||unitCode)+'#problem-'+ordinal,
@@ -5654,12 +5660,16 @@ export async function runAutonomousRequirementCognition({
       }
       const approximateCi=
         analysis==='proportion_ci'||analysis==='difference_proportions_ci';
+      const roundedCoefficientT=analysis==='coefficient_t';
       return {
         ...item,
         spec,
         claims,
         ...(approximateCi&&item.absolute_tolerance===undefined
           ?{absolute_tolerance:1e-6}
+          :{}),
+        ...(roundedCoefficientT&&item.absolute_tolerance===undefined
+          ?{absolute_tolerance:0.005}
           :{}),
       };
     });
@@ -5701,7 +5711,7 @@ export async function runAutonomousRequirementCognition({
             'For mean_ci use spec {"values":[NUMBER,...],"confidence":NUMBER}.',
             'For one_sample_t use spec {"values":[NUMBER,...],"mu0":NUMBER}.',
             'For welch_t use spec {"x":[NUMBER,...],"y":[NUMBER,...]}.',
-            'For coefficient_t use spec {"estimate":NUMBER,"se":NUMBER,"df":NUMBER}.',
+            'For coefficient_t use spec {"estimate":NUMBER,"se":NUMBER} when only t is claimed; add "df":NUMBER only when the frozen answer claims a p-value and the degrees of freedom are supported by the exercise data. Never invent df.',
             'Allowed analysis names also include bootstrap_ci and monte_carlo_expression when the frozen answer actually selected them.',
             'claims MUST copy the frozen answer numerical claims using result-field names such as proportion, ci_low, ci_high, difference_b_minus_a, mean, median, r, slope, t, or p_two_sided.',
             'Do not copy a rate expression such as "420/6000" into successes or total. successes is the count 420 and total is the count 6000.',
