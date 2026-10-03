@@ -790,7 +790,10 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
       }
     }
 
-    if(statisticalUnit(ctx)){
+    const childStatisticalRequired=
+      statisticalUnit(ctx)
+      &&coverage.ordinals.some(ordinal=>statisticalProblemRequiresPython(ctx,ordinal-1));
+    if(childStatisticalRequired){
       if(!childAnalyses.length){
         failures.push('qda_verified_child_statistical_analysis_missing:'+String(child?.node_path||'unknown'));
       }else{
@@ -818,6 +821,7 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
       childAnalyses,
       childDeterministicVerified,
       childDeterministicCheckCount,
+      childStatisticalRequired,
     };
     childInfos.push(info);
     for(const ordinal of coverage.ordinals)coverageByProblem[ordinal-1].push(info);
@@ -862,6 +866,8 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
       covered_problem_ids:info.coveredOrdinals,
       deterministic_math_verified:info.childDeterministicVerified,
       deterministic_math_check_count:info.childDeterministicCheckCount,
+      statistical_verification_required:info.childStatisticalRequired===true,
+      statistical_analysis_count:info.childAnalyses.length,
       verification_source:
         info.child?.qda_verified_descendant_materialized===true
         ||String(info.child?.qda_verified_descendant_materialized||'').toLowerCase()==='true'
@@ -1082,6 +1088,17 @@ const QDA_STATISTICAL_UNIT_CODES=new Set([
 function statisticalUnit(ctx){
   return QDA_STATISTICAL_UNIT_CODES.has(String(ctx?.next_unit?.unit_code || '').toUpperCase());
 }
+function statisticalProblemRequiresPython(ctx,index){
+  if(!statisticalUnit(ctx))return false;
+  const problems=Array.isArray(ctx?.next_unit?.exercise_pack?.problems)
+    ?ctx.next_unit.exercise_pack.problems:[];
+  const requirement=String(problems[index]||'').trim();
+  if(!requirement)return true;
+  const conceptualOnly=
+    /\b(?:interpret|explain|discuss|identify)\b/i.test(requirement)
+    &&!/\b(?:compute|calculate|approximate|estimate|derive|fit|test|quantify)\b|confidence interval|t-statistic|p-value|bootstrap|monte carlo/i.test(requirement);
+  return !conceptualOnly;
+}
 function containsFiniteNumber(value,depth=0){
   if(depth>8 || value===null || value===undefined)return false;
   if(typeof value==='number')return Number.isFinite(value);
@@ -1167,7 +1184,10 @@ function validateUnitPayload(ctx, payload) {
   const quantitative = deterministicMathUnit(ctx,payload);
   if(Array.isArray(payload.problem_responses)){
     payload.problem_responses.slice(0,expectedProblems.length).forEach((response,index)=>{
-      failures.push(...validateProblemResponseTypes(response,index,quantitative,statistical));
+      failures.push(...validateProblemResponseTypes(
+        response,index,quantitative,
+        statistical&&statisticalProblemRequiresPython(ctx,index)
+      ));
     });
   }
   for (const key of required) {
