@@ -573,6 +573,24 @@ function qdaArtifactProblemResponse(artifact,ordinal,expectedProblem,coveredOrdi
   return artifact;
 }
 
+function qdaProblemScopedArtifactField(artifact,selected,ordinal,field){
+  if(selected && selected[field]!==null && selected[field]!==undefined)return selected[field];
+  if(artifact && artifact[field]!==null && artifact[field]!==undefined)return artifact[field];
+  if(!artifact || typeof artifact!=='object' || Array.isArray(artifact))return undefined;
+
+  const prefix=new RegExp('^problem[_\\s-]*'+String(ordinal)+'(?:[_\\s-]|$)','i');
+  const entries=Object.entries(artifact)
+    .filter(([key,value])=>prefix.test(String(key))&&value!==null&&value!==undefined);
+  if(!entries.length)return undefined;
+
+  if(field==='calculation'){
+    if(entries.length===1)return entries[0][1];
+    return Object.fromEntries(entries);
+  }
+  const exact=entries.find(([key])=>String(key).toLowerCase().includes(String(field).toLowerCase()));
+  return exact?exact[1]:undefined;
+}
+
 export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
   const ctx=packet?.qda_601_context;
   if(!ctx?.assigned || ctx?.status!=='in_progress' || !ctx?.next_unit) {
@@ -741,15 +759,19 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
     const response={
       problem_id:ordinal,
       problem:expectedProblems[index],
-      inputs:selected?.inputs,
-      assumptions:arrayifyArtifactField(selected?.assumptions),
-      formula_or_model:selected?.formula_or_model,
-      calculation:selected?.calculation,
-      units:selected?.units,
-      interpretation:selected?.interpretation,
-      sanity_check:selected?.sanity_check,
-      evidence:[sourceBinding,...arrayifyArtifactField(selected?.evidence)],
-      self_audit:selected?.self_audit,
+      inputs:qdaProblemScopedArtifactField(info.artifact,selected,ordinal,'inputs'),
+      assumptions:arrayifyArtifactField(
+        qdaProblemScopedArtifactField(info.artifact,selected,ordinal,'assumptions')
+      ),
+      formula_or_model:qdaProblemScopedArtifactField(info.artifact,selected,ordinal,'formula_or_model'),
+      calculation:qdaProblemScopedArtifactField(info.artifact,selected,ordinal,'calculation'),
+      units:qdaProblemScopedArtifactField(info.artifact,selected,ordinal,'units'),
+      interpretation:qdaProblemScopedArtifactField(info.artifact,selected,ordinal,'interpretation'),
+      sanity_check:qdaProblemScopedArtifactField(info.artifact,selected,ordinal,'sanity_check'),
+      evidence:[sourceBinding,...arrayifyArtifactField(
+        qdaProblemScopedArtifactField(info.artifact,selected,ordinal,'evidence')
+      )],
+      self_audit:qdaProblemScopedArtifactField(info.artifact,selected,ordinal,'self_audit'),
     };
     if(responseChecks.length)response.python_checks=responseChecks;
     if(responseAnalyses.length)response.python_analyses=responseAnalyses;
