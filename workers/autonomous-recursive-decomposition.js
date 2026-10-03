@@ -9015,26 +9015,52 @@ export async function runAutonomousRequirementCognition({
   for(const childRef of authoritativeRootChildRefs){
     const child=await getNode(childRef.node_path);
     if(child?.status!=='ready')continue;
+    const decision=asObject(child.decision_payload);
+    let resultArtifact=child.result_artifact||null;
+    let statisticalVerified=decision.deterministic_statistics_verified===true;
+    let statisticalCount=Number(decision.deterministic_statistics_analysis_count||0);
+    let statisticalDescendantMaterialized=false;
+    if(qdaStatisticalAtomicRequirement(packet,child)){
+      const parts=resultParts(resultArtifact);
+      const direct=pythonAnalysesFromArtifact(parts.artifact);
+      if(!(direct?.type_ok===true&&asArray(direct.value).length)){
+        const recovered=await verifiedStatAnalysesBelow(child.node_path);
+        if(recovered.length){
+          let parsed=null;
+          try{parsed=JSON.parse(String(parts.artifact||''));}catch{}
+          if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed)){
+            parsed={...parsed,python_analyses:recovered};
+            resultArtifact=JSON.stringify({status:'COMPLETE',artifact:parsed,handoff:parts.handoff});
+            statisticalVerified=true;
+            statisticalCount=recovered.length;
+            statisticalDescendantMaterialized=true;
+          }
+        }
+      }
+    }
     authoritativeRootChildren.push({
       node_path:child.node_path,
       status:child.node_status||null,
       decision_type:child.decision_type||null,
       requirement_text:child.requirement_text||null,
       result_hash:child.result_hash||null,
-      result_artifact:child.result_artifact||null,
-      deterministic_math_verified:child?.decision_payload?.deterministic_math_verified===true
-        ||String(child?.decision_payload?.deterministic_math_verified||'').toLowerCase()==='true'
-        ||child?.decision_payload?.qda_verified_descendant_materialized===true
-        ||String(child?.decision_payload?.qda_verified_descendant_materialized||'').toLowerCase()==='true',
+      result_artifact:resultArtifact,
+      deterministic_math_verified:decision.deterministic_math_verified===true
+        ||String(decision.deterministic_math_verified||'').toLowerCase()==='true'
+        ||decision.qda_verified_descendant_materialized===true
+        ||String(decision.qda_verified_descendant_materialized||'').toLowerCase()==='true',
       deterministic_math_check_count:Math.max(
-        Number(child?.decision_payload?.deterministic_math_check_count||0),
-        Number(child?.decision_payload?.qda_verified_descendant_check_count||0)
+        Number(decision.deterministic_math_check_count||0),
+        Number(decision.qda_verified_descendant_check_count||0)
       ),
+      deterministic_statistics_verified:statisticalVerified,
+      deterministic_statistics_analysis_count:statisticalCount,
       qda_verified_descendant_materialized:
-        child?.decision_payload?.qda_verified_descendant_materialized===true
-        ||String(child?.decision_payload?.qda_verified_descendant_materialized||'').toLowerCase()==='true',
+        decision.qda_verified_descendant_materialized===true
+        ||String(decision.qda_verified_descendant_materialized||'').toLowerCase()==='true'
+        ||statisticalDescendantMaterialized,
       qda_verified_descendant_check_count:
-        Number(child?.decision_payload?.qda_verified_descendant_check_count||0),
+        Number(decision.qda_verified_descendant_check_count||0),
     });
   }
 
