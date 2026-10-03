@@ -144,7 +144,12 @@ def main():
             expression = item.get("expression")
             claimed = strict_number(item.get("claimed_result"), "claimed_result")
             actual = safe_eval(expression)
-            matched = math.isclose(actual, claimed, rel_tol=rel_tol, abs_tol=abs_tol)
+            check_abs_tol = strict_nonnegative_number(
+                item.get("runtime_absolute_tolerance", abs_tol),
+                "runtime_absolute_tolerance",
+            )
+            check_abs_tol = min(abs_tol, check_abs_tol)
+            matched = math.isclose(actual, claimed, rel_tol=rel_tol, abs_tol=check_abs_tol)
             all_match = all_match and matched
             results.append({
                 "index": index,
@@ -153,6 +158,8 @@ def main():
                 "matched": matched,
                 "actual": actual,
                 "claimed_result": claimed,
+                "absolute_tolerance": check_abs_tol,
+                "relative_tolerance": rel_tol,
                 "error_code": None,
             })
         except Exception as exc:
