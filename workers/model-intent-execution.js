@@ -3268,7 +3268,7 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
       && !cognitionAdmissionDeferred
       && !cognitionProvenanceContinuationRequired
       && !cognitionProvenanceContinuationExhausted
-      && /^autonomous_decomposition_/i.test(message);
+      && /^(?:autonomous_decomposition_|qda_(?:root|recursive)_)/i.test(message);
     if (begun) {
       if (terminalSemanticRuntimeCode) {
         await rpc('aau_bridge_hold_semantic_runtime_terminal_v0_2',{
