@@ -7602,7 +7602,24 @@ export async function runAutonomousRequirementCognition({
       'deterministic_statistics_reconciliation_required',
       'deterministic_statistics_retry_nonce',
       'deterministic_statistics_verification',
+      'synthesis_failure',
+      'self_remediation_in_progress',
+      'synthesis_remediation_nonce',
+      'reconsider_decomposition',
+      'synthesis_recovery_routing_required',
+      'synthesis_recovery_routing_at',
     ])delete completedDecisionPayload[key];
+    const completedExternalRemediation=qda601AuthenticatorRemediation(packet);
+    if(completedExternalRemediation.active){
+      completedDecisionPayload.external_authenticator_remediation_review_id=
+        completedExternalRemediation.review_id;
+      completedDecisionPayload.external_authenticator_remediation_rejected_file_id=
+        completedExternalRemediation.rejected_file_id;
+      completedDecisionPayload.external_authenticator_remediation_resolved_at=
+        new Date().toISOString();
+      completedDecisionPayload.external_authenticator_remediation_resolution_contract=
+        'qda_verified_root_materialization_closes_review_v0_1';
+    }
 
     const canonicalMaterializationSha256=sha256(artifact);
     const compactConclusions=asArray(artifact?.problem_responses).map((response,index)=>({
@@ -8516,6 +8533,45 @@ export async function runAutonomousRequirementCognition({
         rejected_file_id:rootExternalAuthRemediation.rejected_file_id,
         prior_root_result_hash:text(priorPayload.synthesis_failure.prior_root_result_hash)||null,
       }));
+    }
+
+    if(
+      nodePath==='R'
+      &&node.node_status==='pending'
+      &&rootExternalAuthRemediation.active
+      &&lastHandledExternalReview===rootExternalAuthRemediation.review_id
+      &&(
+        node?.decision_payload?.deterministic_statistics_verified===true
+        ||node?.decision_payload?.qda_verified_descendant_materialized===true
+      )
+    ){
+      const refs=(await children('R'))
+        .filter(child=>String(child?.status||child?.node_status||'')!=='cancelled')
+        .sort((a,b)=>Number(a?.ordinal||0)-Number(b?.ordinal||0));
+      const completedChildren=[];
+      for(const ref of refs){
+        const child=await getNode(ref.node_path);
+        if(child?.status==='ready')completedChildren.push({...child,parent_path:'R'});
+      }
+      if(
+        completedChildren.length
+        &&completedChildren.every(child=>
+          String(child?.node_status||child?.status||'').toLowerCase()==='completed'
+        )
+      ){
+        const recoveredRoot=await completeQdaRootFromVerifiedChildren(node,completedChildren);
+        if(recoveredRoot){
+          console.log('AAU_QDA_HANDLED_REMEDIATION_ROOT_RECOVERED',JSON.stringify({
+            agent_id:agentId,
+            intent_execution_id:intentExecutionId,
+            assignment_key:assignmentKey,
+            review_id:rootExternalAuthRemediation.review_id,
+            child_count:completedChildren.length,
+            policy:'handled_auth_review_verified_children_recovery_v0_1',
+          }));
+          return ensureCanonicalStageCandidateSubmission(recoveredRoot);
+        }
+      }
     }
 
     if(node.node_status==='completed'){
