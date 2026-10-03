@@ -5560,6 +5560,103 @@ export async function runAutonomousRequirementCognition({
       &&!/\\bProblems\\s+\\d+/i.test(requirement);
   }
 
+  async function repairMissingStatisticalAnalysisContract(
+    node,proposedArtifact,verification
+  ){
+    if(
+      verification?.required!==true
+      ||verification?.error!=='python_statistical_analyses_required'
+    )return null;
+
+    let artifactObject=null;
+    try{artifactObject=JSON.parse(String(proposedArtifact||''));}catch{}
+    if(!artifactObject||typeof artifactObject!=='object'||Array.isArray(artifactObject))return null;
+
+    const repairIdentity=sha256({
+      node_path:node.node_path,
+      requirement:node.requirement_text,
+      artifact_sha256:sha256(proposedArtifact),
+      failure:verification.error,
+      contract:'qda_statistical_analysis_contract_repair_v0_1',
+    });
+    const durable=await loadJsonPhaseCheckpoint(
+      node.node_path,'STATISTICAL_ANALYSIS_CONTRACT_REPAIR',repairIdentity
+    );
+    let repair=durable.parsed;
+    if(!repair){
+      const response=await callJson([
+        {role:'system',content:[
+          'You are the same bound autonomous agent repairing ONLY a missing QDA statistical verification contract.',
+          'The substantive artifact is already written. Do not rewrite its reasoning, numbers, interpretation, units, assumptions, or conclusions.',
+          'Select the correct Python statistical analysis specification(s) needed to independently verify every material statistical claim already present.',
+          'Allowed analysis names: describe, pearson_correlation, simple_linear_regression, proportion_ci, difference_proportions_ci, mean_ci, one_sample_t, welch_t, coefficient_t, bootstrap_ci, monte_carlo_expression.',
+          'Return JSON only: {"python_analyses":[{"id":"...","analysis":"...","spec":{},"claims":{}}]}.',
+          'Use exact numeric inputs from the requirement/artifact. claims must be the artifact numerical claims to be independently checked.',
+          'Do not add a new substantive claim merely to satisfy the verifier.',
+        ].join('\n')},
+        {role:'user',content:safeJson({
+          requirement:node.requirement_text,
+          frozen_substantive_artifact:artifactObject,
+          verifier_error:verification.error,
+        })},
+      ],stageBudgets.atomic_execution,
+      'req_'+node.node_path.replaceAll('.','_')+'_statistics_contract_repair');
+      repair=asObject(response?.parsed);
+    }
+
+    const analyses=asArray(repair?.python_analyses);
+    if(!analyses.length)return null;
+    const repairedObject={...artifactObject,python_analyses:analyses};
+    const repairedArtifact=safeJson(repairedObject);
+    const repairedVerification=deterministicStatisticalVerification(
+      packet,node,repairedArtifact
+    );
+    if(
+      repairedVerification.required===true
+      &&repairedVerification.ok===true
+      &&repairedVerification.all_claims_match===true
+    ){
+      if(!durable.parsed){
+        await saveJsonPhaseCheckpoint(
+          node.node_path,'STATISTICAL_ANALYSIS_CONTRACT_REPAIR',repairIdentity,
+          {python_analyses:analyses},{
+            repaired:true,
+            analysis_count:analyses.length,
+            verification_engine:'aau_quantitative_python_v0_1',
+          }
+        );
+      }
+      console.log('AAU_QDA_STATISTICAL_ANALYSIS_CONTRACT_REPAIRED',JSON.stringify({
+        agent_id:agentId,
+        intent_execution_id:intentExecutionId,
+        node_path:node.node_path,
+        analysis_count:analyses.length,
+        policy:'missing_analysis_contract_compact_repair_v0_1',
+      }));
+      return {
+        artifact:repairedArtifact,
+        verification:repairedVerification,
+        analysis_count:analyses.length,
+      };
+    }
+
+    console.warn('AAU_QDA_STATISTICAL_ANALYSIS_CONTRACT_REPAIR_REJECTED',JSON.stringify({
+      agent_id:agentId,
+      intent_execution_id:intentExecutionId,
+      node_path:node.node_path,
+      analysis_count:analyses.length,
+      error:repairedVerification.error||null,
+      failure_class:repairedVerification.failure_class||null,
+      all_claims_match:repairedVerification.all_claims_match===true,
+    }));
+    return {
+      artifact:repairedArtifact,
+      verification:repairedVerification,
+      analysis_count:analyses.length,
+      rejected:true,
+    };
+  }
+
   async function executeAtomic(node){
     let pinnedEvidence=await loadPinnedEvidence(node.node_path);
     const atomicDurableCatalog=await loadDurableResearchCatalog(node.node_path);
@@ -5931,11 +6028,23 @@ export async function runAutonomousRequirementCognition({
       reset.parent_path=node.parent_path??parentPathOf(node.node_path);
       return {reconsider:true,node:reset};
     }
-    const proposedArtifact=artifactText(companionNormalizedArtifact(parsed));
+    let proposedArtifact=artifactText(companionNormalizedArtifact(parsed));
     if(!proposedArtifact)throw new Error('autonomous_decomposition_atomic_artifact_empty:'+node.node_path);
     const proposedHandoff=asObject(parsed?.handoff);
     const proposedMathVerification=deterministicMathVerification(packet,node,proposedArtifact);
-    const proposedStatisticsVerification=deterministicStatisticalVerification(packet,node,proposedArtifact);
+    let proposedStatisticsVerification=deterministicStatisticalVerification(packet,node,proposedArtifact);
+    if(
+      proposedStatisticsVerification.required===true
+      &&proposedStatisticsVerification.error==='python_statistical_analyses_required'
+    ){
+      const repaired=await repairMissingStatisticalAnalysisContract(
+        node,proposedArtifact,proposedStatisticsVerification
+      );
+      if(repaired?.artifact){
+        proposedArtifact=repaired.artifact;
+        proposedStatisticsVerification=repaired.verification;
+      }
+    }
     if(!durableAtomic.parsed){
       await saveJsonPhaseCheckpoint(
         node.node_path,'ATOMIC_EXECUTION',atomicSemanticIdentity,parsed,{
@@ -6000,6 +6109,47 @@ export async function runAutonomousRequirementCognition({
         Number(node?.decision_payload?.deterministic_statistics_attempts||0)
       );
       const statisticsAttempt=priorStatisticsAttempts+1;
+      if(statisticsAttempt>=3){
+        const reset=await saveNode({
+          nodePath:node.node_path,
+          parentPath:node.parent_path??parentPathOf(node.node_path),
+          ordinal:node.ordinal||0,
+          requirement:node.requirement_text,
+          sourceKind:node.source_kind,
+          sourceRef:node.source_ref,
+          status:'pending',
+          decisionType:null,
+          decisionPayload:{
+            ...(node.decision_payload||{}),
+            deterministic_statistics_reconciliation_required:true,
+            deterministic_statistics_attempts:statisticsAttempt,
+            deterministic_statistics_verification:proposedStatisticsVerification,
+            deterministic_statistics_gate:'bounded_statistics_repair_exhausted_v0_1',
+            atomic_unavailable:true,
+            reconsider_decomposition:true,
+          },
+          contextPayload:{
+            ...(node.context_payload||{}),
+            deterministic_statistics_feedback:{
+              attempt:statisticsAttempt,
+              verifier:'aau_quantitative_python_v0_1',
+              verification:proposedStatisticsVerification,
+              instruction:'The bounded direct statistical repair path is exhausted. Narrow or decompose the requirement while preserving the exact curriculum problem and verified inputs.',
+            },
+          },
+          resultArtifact:null,
+        });
+        reset.parent_path=node.parent_path??parentPathOf(node.node_path);
+        console.warn('AAU_QDA_STATISTICAL_REPAIR_BOUNDED_DECOMPOSITION',JSON.stringify({
+          agent_id:agentId,
+          intent_execution_id:intentExecutionId,
+          node_path:node.node_path,
+          attempts:statisticsAttempt,
+          error:proposedStatisticsVerification.error||null,
+          policy:'statistics_repair_max_two_full_retries_v0_1',
+        }));
+        return {reconsider:true,node:reset};
+      }
       const reset=await saveNode({
         nodePath:node.node_path,
         parentPath:node.parent_path??parentPathOf(node.node_path),
