@@ -1884,6 +1884,46 @@ export async function runAutonomousRequirementCognition({
     throw error;
   }
 
+  async function reopenCompletedRuntimeForDeterministicRevalidation(nodePath){
+    if(String(semanticRuntimeSnapshot?.runtime_status||'')==='active')return semanticRuntimeSnapshot;
+    if(String(semanticRuntimeSnapshot?.runtime_status||'')!=='complete'){
+      throw new Error(
+        'deterministic_revalidation_runtime_not_reopenable:'
+        +String(semanticRuntimeSnapshot?.runtime_status||'unknown')
+      );
+    }
+    const reopened=await rpc(
+      'aau_bridge_reopen_completed_cognition_for_deterministic_revalidation_v0_1',
+      {
+        p_agent_id:agentId,
+        p_wake_request_id:intentExecutionId,
+        p_assignment_key:assignmentKey,
+        p_model:model,
+        p_node_path:nodePath,
+      }
+    );
+    if(reopened?.status!=='ready'||String(reopened?.runtime_status||'')!=='active'){
+      throw new Error('deterministic_revalidation_runtime_reopen_failed');
+    }
+    semanticRuntime.epoch_no=Number(reopened.epoch_no);
+    semanticRuntimeSnapshot={
+      ...semanticRuntimeSnapshot,
+      ...reopened,
+      runtime_found:true,
+      runtime_status:'active',
+    };
+    console.log('AAU_DETERMINISTIC_REVALIDATION_RUNTIME_REOPENED',JSON.stringify({
+      agent_id:agentId,
+      intent_execution_id:intentExecutionId,
+      assignment_key:assignmentKey,
+      node_path:nodePath,
+      epoch_no:semanticRuntime.epoch_no,
+      carried_forward_remaining_budget_units:Number(reopened.remaining_budget_units||0),
+      compute_grant_units:Number(reopened.compute_grant_units||0),
+    }));
+    return semanticRuntimeSnapshot;
+  }
+
   async function semanticRuntimeView(){
     const row=await semanticRuntimeRpc('get');
     if(row?.status!=='ready')throw new Error('semantic_runtime_state_unavailable');
@@ -7841,6 +7881,7 @@ export async function runAutonomousRequirementCognition({
     if(node.node_status==='completed'){
       const atomicRevalidation=completedAtomicDeterministicRevalidation(packet,node);
       if(atomicRevalidation.required){
+        await reopenCompletedRuntimeForDeterministicRevalidation(node.node_path);
         node=await saveNode({
           nodePath:node.node_path,
           parentPath:node.parent_path??parentPathOf(node.node_path),
@@ -7894,6 +7935,9 @@ export async function runAutonomousRequirementCognition({
         const legacyChild=existingChildren.find(child=>
           completedAtomicDeterministicRevalidation(packet,child).required
         );
+        if(legacyChild){
+          await reopenCompletedRuntimeForDeterministicRevalidation(legacyChild.node_path);
+        }
         if(!legacyChild){
           const parts=resultParts(node.result_artifact);
           const qdaMaterialization=await materializeQdaQuantitativeFromVerifiedDescendants(
