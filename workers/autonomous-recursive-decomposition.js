@@ -6153,6 +6153,21 @@ export async function runAutonomousRequirementCognition({
     let proposedArtifact=artifactText(companionNormalizedArtifact(parsed));
     if(!proposedArtifact)throw new Error('autonomous_decomposition_atomic_artifact_empty:'+node.node_path);
     const proposedHandoff=asObject(parsed?.handoff);
+
+    // Persist the model's completed atomic answer before deterministic verifier
+    // repair. A worker replacement during a compact repair must never force the
+    // expensive atomic solve to run again.
+    if(!durableAtomic.parsed){
+      await saveJsonPhaseCheckpoint(
+        node.node_path,'ATOMIC_EXECUTION',atomicSemanticIdentity,parsed,{
+          atomic_status:'COMPLETE',
+          artifact_hash:sha256(proposedArtifact),
+          deterministic_verification_pending:true,
+          checkpoint_boundary:'pre_deterministic_repair_v0_1',
+        }
+      );
+    }
+
     const proposedMathVerification=deterministicMathVerification(packet,node,proposedArtifact);
     let proposedStatisticsVerification=deterministicStatisticalVerification(packet,node,proposedArtifact);
     if(
@@ -6167,14 +6182,6 @@ export async function runAutonomousRequirementCognition({
         proposedArtifact=repaired.artifact;
         proposedStatisticsVerification=repaired.verification;
       }
-    }
-    if(!durableAtomic.parsed){
-      await saveJsonPhaseCheckpoint(
-        node.node_path,'ATOMIC_EXECUTION',atomicSemanticIdentity,parsed,{
-          atomic_status:'COMPLETE',
-          artifact_hash:sha256(proposedArtifact),
-        }
-      );
     }
 
     // Deterministic arithmetic is checked BEFORE model reconciliation. A known
