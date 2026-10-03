@@ -8590,6 +8590,46 @@ export async function runAutonomousRequirementCognition({
       }
     }
 
+    if(
+      nodePath==='R'
+      &&['split','pending'].includes(String(node.node_status||'').toLowerCase())
+      &&packet?.qda_601_context?.assigned===true
+      &&packet?.qda_601_context?.status==='in_progress'
+    ){
+      const refs=(await children('R'))
+        .filter(child=>String(child?.status||child?.node_status||'')!=='cancelled')
+        .sort((a,b)=>Number(a?.ordinal||0)-Number(b?.ordinal||0));
+      const durableChildren=[];
+      for(const ref of refs){
+        const child=await getNode(ref.node_path);
+        if(child?.status==='ready')durableChildren.push({...child,parent_path:'R'});
+      }
+      const expectedProblemCount=asArray(
+        packet?.qda_601_context?.next_unit?.exercise_pack?.problems
+      ).length;
+      if(
+        expectedProblemCount>0
+        &&durableChildren.length===expectedProblemCount
+        &&durableChildren.every(child=>
+          String(child?.node_status||child?.status||'').toLowerCase()==='completed'
+        )
+      ){
+        const recoveredRoot=await completeQdaRootFromVerifiedChildren(node,durableChildren);
+        if(recoveredRoot){
+          console.log('AAU_QDA_ROOT_DB_COMPLETION_RECOVERY',JSON.stringify({
+            agent_id:agentId,
+            intent_execution_id:intentExecutionId,
+            assignment_key:assignmentKey,
+            unit_code:packet?.qda_601_context?.next_unit?.unit_code||null,
+            child_count:durableChildren.length,
+            child_paths:durableChildren.map(child=>child.node_path),
+            policy:'durable_direct_children_root_convergence_v0_1',
+          }));
+          return ensureCanonicalStageCandidateSubmission(recoveredRoot);
+        }
+      }
+    }
+
     if(node.node_status==='completed'){
       const atomicRevalidation=completedAtomicDeterministicRevalidation(packet,node);
       if(atomicRevalidation.required){
