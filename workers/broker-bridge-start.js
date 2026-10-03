@@ -545,6 +545,33 @@ try {
   }));
 }
 
+try {
+  const { normalizeQdaStatisticalContractNumbers } = await import('./autonomous-recursive-decomposition.js');
+  const input={
+    successes:'342',
+    total:'400',
+    confidence:'0.95',
+    note:'400 users',
+    values:['1','2.5','03','x'],
+  };
+  const out=normalizeQdaStatisticalContractNumbers(input);
+  console.log('AAU_QDA_STATISTICAL_CONTRACT_NUMBER_NORMALIZER_PROBE',JSON.stringify({
+    ok:out.successes===342
+      &&out.total===400
+      &&out.confidence===0.95
+      &&out.note==='400 users'
+      &&out.values[0]===1
+      &&out.values[1]===2.5
+      &&out.values[2]==='03'
+      &&out.values[3]==='x',
+    output:out,
+  }));
+} catch (error) {
+  console.error('AAU_QDA_STATISTICAL_CONTRACT_NUMBER_NORMALIZER_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
 // one_shot_expertise_runtime_repair_v0_1
 if (isEnabled('AAU_EXPERTISE_RUNTIME_PATCH')) {
   try {

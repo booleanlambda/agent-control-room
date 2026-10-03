@@ -132,6 +132,27 @@ const QDA_CURRICULUM_DEPENDENCY_OVERRIDES=Object.freeze({
   'QDA601-M3-U4':Object.freeze({2:[1],3:[1,2]}),
   'QDA601-M4-U2':Object.freeze({2:[1]}),
 });
+const QDA_STRICT_JSON_NUMBER=/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
+export function normalizeQdaStatisticalContractNumbers(value){
+  if(typeof value==='string'){
+    const trimmed=value.trim();
+    if(QDA_STRICT_JSON_NUMBER.test(trimmed)){
+      const number=Number(trimmed);
+      if(Number.isFinite(number))return number;
+    }
+    return value;
+  }
+  if(Array.isArray(value))return value.map(normalizeQdaStatisticalContractNumbers);
+  if(value&&typeof value==='object'){
+    return Object.fromEntries(
+      Object.entries(value).map(([key,item])=>[
+        key,normalizeQdaStatisticalContractNumbers(item)
+      ])
+    );
+  }
+  return value;
+}
+
 function qdaCurriculumDependencies(unitCode,problem,ordinal){
   if(ordinal<=1)return [];
   const canonical=text(unitCode).toUpperCase();
@@ -5563,8 +5584,11 @@ export async function runAutonomousRequirementCognition({
     if(!plan.applies)return false;
     const ordinal=Number(node?.ordinal||0);
     if(!Number.isInteger(ordinal)||ordinal<1||ordinal>plan.problem_count)return false;
-    if(Boolean(node?.decision_payload?.reconsider_decomposition))return false;
-    if(Number(node?.decision_payload?.atomic_execution_failures||0)>0)return false;
+    const statisticsRepairOnly=
+      node?.decision_payload?.deterministic_statistics_reconciliation_required===true
+      &&!text(node?.decision_payload?.prior_atomic_rejection);
+    if(Boolean(node?.decision_payload?.reconsider_decomposition)&&!statisticsRepairOnly)return false;
+    if(Number(node?.decision_payload?.atomic_execution_failures||0)>0&&!statisticsRepairOnly)return false;
     const requirement=text(node?.requirement_text);
     return new RegExp('\\bProblem\\s+'+String(ordinal)+'\\b','i').test(requirement)
       &&!/\\bProblems\\s+\\d+/i.test(requirement);
@@ -5614,7 +5638,14 @@ export async function runAutonomousRequirementCognition({
       repair=asObject(response?.parsed);
     }
 
-    const analyses=asArray(repair?.python_analyses);
+    const analyses=asArray(repair?.python_analyses).map(row=>{
+      const item=asObject(row);
+      return {
+        ...item,
+        spec:normalizeQdaStatisticalContractNumbers(item.spec),
+        claims:normalizeQdaStatisticalContractNumbers(item.claims),
+      };
+    });
     if(!analyses.length)return null;
     const repairedObject={...artifactObject,python_analyses:analyses};
     const repairedArtifact=safeJson(repairedObject);
