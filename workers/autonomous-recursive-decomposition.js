@@ -5611,34 +5611,13 @@ export async function runAutonomousRequirementCognition({
       requirement:node.requirement_text,
       artifact_sha256:sha256(proposedArtifact),
       failure:verification.error,
-      contract:'qda_statistical_analysis_contract_repair_v0_1',
+      contract:'qda_statistical_analysis_contract_repair_v0_2',
     });
     const durable=await loadJsonPhaseCheckpoint(
       node.node_path,'STATISTICAL_ANALYSIS_CONTRACT_REPAIR',repairIdentity
     );
-    let repair=durable.parsed;
-    if(!repair){
-      const response=await callJson([
-        {role:'system',content:[
-          'You are the same bound autonomous agent repairing ONLY a missing QDA statistical verification contract.',
-          'The substantive artifact is already written. Do not rewrite its reasoning, numbers, interpretation, units, assumptions, or conclusions.',
-          'Select the correct Python statistical analysis specification(s) needed to independently verify every material statistical claim already present.',
-          'Allowed analysis names: describe, pearson_correlation, simple_linear_regression, proportion_ci, difference_proportions_ci, mean_ci, one_sample_t, welch_t, coefficient_t, bootstrap_ci, monte_carlo_expression.',
-          'Return JSON only: {"python_analyses":[{"id":"...","analysis":"...","spec":{},"claims":{}}]}.',
-          'Use exact numeric inputs from the requirement/artifact. claims must be the artifact numerical claims to be independently checked.',
-          'Do not add a new substantive claim merely to satisfy the verifier.',
-        ].join('\n')},
-        {role:'user',content:safeJson({
-          requirement:node.requirement_text,
-          frozen_substantive_artifact:artifactObject,
-          verifier_error:verification.error,
-        })},
-      ],stageBudgets.atomic_execution,
-      'req_'+node.node_path.replaceAll('.','_')+'_statistics_contract_repair');
-      repair=asObject(response?.parsed);
-    }
 
-    const analyses=asArray(repair?.python_analyses).map(row=>{
+    const normalizeAnalyses=value=>asArray(value).map(row=>{
       const item=asObject(row);
       return {
         ...item,
@@ -5646,16 +5625,67 @@ export async function runAutonomousRequirementCognition({
         claims:normalizeQdaStatisticalContractNumbers(item.claims),
       };
     });
-    if(!analyses.length)return null;
-    const repairedObject={...artifactObject,python_analyses:analyses};
-    const repairedArtifact=safeJson(repairedObject);
-    const repairedVerification=deterministicStatisticalVerification(
-      packet,node,repairedArtifact
-    );
+
+    const verifyAnalyses=analyses=>{
+      if(!analyses.length)return null;
+      const repairedObject={...artifactObject,python_analyses:analyses};
+      const repairedArtifact=safeJson(repairedObject);
+      const repairedVerification=deterministicStatisticalVerification(
+        packet,node,repairedArtifact
+      );
+      return {artifact:repairedArtifact,verification:repairedVerification};
+    };
+
+    let analyses=normalizeAnalyses(durable.parsed?.python_analyses);
+    let verified=verifyAnalyses(analyses);
+    if(!durable.parsed){
+      let priorFailure=verification;
+      for(let compactAttempt=1;compactAttempt<=2;compactAttempt++){
+        const response=await callJson([
+          {role:'system',content:[
+            'You are the same bound autonomous agent repairing ONLY the Python statistical verification contract for an already-written QDA answer.',
+            'Do NOT rewrite, reconsider, or expand the substantive answer. Do NOT change its method, inputs, calculations, interpretation, units, assumptions, or conclusions.',
+            'Return exactly one JSON object: {"python_analyses":[{"id":"...","analysis":"...","spec":{},"claims":{}}]}.',
+            'CRITICAL JSON TYPE RULE: every numerical value inside spec and claims MUST be a raw JSON number, never a quoted string, expression, fraction string, object wrapper, or sentence.',
+            'For proportion_ci use exactly spec {"successes":NUMBER,"total":NUMBER,"confidence":NUMBER}.',
+            'For difference_proportions_ci use exactly spec {"successes_a":NUMBER,"total_a":NUMBER,"successes_b":NUMBER,"total_b":NUMBER,"confidence":NUMBER}.',
+            'For describe use spec {"values":[NUMBER,...]}.',
+            'For pearson_correlation use spec {"x":[NUMBER,...],"y":[NUMBER,...]}.',
+            'For simple_linear_regression use spec {"x":[NUMBER,...],"y":[NUMBER,...]}.',
+            'For mean_ci use spec {"values":[NUMBER,...],"confidence":NUMBER}.',
+            'For one_sample_t use spec {"values":[NUMBER,...],"mu0":NUMBER}.',
+            'For welch_t use spec {"x":[NUMBER,...],"y":[NUMBER,...]}.',
+            'For coefficient_t use spec {"estimate":NUMBER,"se":NUMBER,"df":NUMBER}.',
+            'Allowed analysis names also include bootstrap_ci and monte_carlo_expression when the frozen answer actually selected them.',
+            'claims MUST copy the frozen answer numerical claims using result-field names such as proportion, ci_low, ci_high, difference_b_minus_a, mean, median, r, slope, t, or p_two_sided.',
+            'Do not copy a rate expression such as "420/6000" into successes or total. successes is the count 420 and total is the count 6000.',
+            'Do not invent a claim or substitute Python output for a claim from the frozen answer.',
+          ].join('\n')},
+          {role:'user',content:safeJson({
+            requirement:node.requirement_text,
+            frozen_substantive_artifact:artifactObject,
+            prior_python_analyses:compactAttempt>1?analyses:[],
+            python_verifier_feedback:priorFailure,
+            compact_repair_attempt:compactAttempt,
+          })},
+        ],stageBudgets.atomic_execution,
+        'req_'+node.node_path.replaceAll('.','_')+'_statistics_contract_repair_'+compactAttempt);
+
+        analyses=normalizeAnalyses(response?.parsed?.python_analyses);
+        verified=verifyAnalyses(analyses);
+        if(
+          verified?.verification?.required===true
+          &&verified.verification.ok===true
+          &&verified.verification.all_claims_match===true
+        )break;
+        priorFailure=verified?.verification||priorFailure;
+      }
+    }
+
     if(
-      repairedVerification.required===true
-      &&repairedVerification.ok===true
-      &&repairedVerification.all_claims_match===true
+      verified?.verification?.required===true
+      &&verified.verification.ok===true
+      &&verified.verification.all_claims_match===true
     ){
       if(!durable.parsed){
         await saveJsonPhaseCheckpoint(
@@ -5664,6 +5694,7 @@ export async function runAutonomousRequirementCognition({
             repaired:true,
             analysis_count:analyses.length,
             verification_engine:'aau_quantitative_python_v0_1',
+            contract:'qda_statistical_analysis_contract_repair_v0_2',
           }
         );
       }
@@ -5672,27 +5703,30 @@ export async function runAutonomousRequirementCognition({
         intent_execution_id:intentExecutionId,
         node_path:node.node_path,
         analysis_count:analyses.length,
-        policy:'missing_analysis_contract_compact_repair_v0_1',
+        policy:'missing_analysis_contract_compact_repair_v0_2',
       }));
       return {
-        artifact:repairedArtifact,
-        verification:repairedVerification,
+        artifact:verified.artifact,
+        verification:verified.verification,
         analysis_count:analyses.length,
       };
     }
 
+    const rejectedVerification=verified?.verification||verification;
     console.warn('AAU_QDA_STATISTICAL_ANALYSIS_CONTRACT_REPAIR_REJECTED',JSON.stringify({
       agent_id:agentId,
       intent_execution_id:intentExecutionId,
       node_path:node.node_path,
       analysis_count:analyses.length,
-      error:repairedVerification.error||null,
-      failure_class:repairedVerification.failure_class||null,
-      all_claims_match:repairedVerification.all_claims_match===true,
+      error:rejectedVerification.error||null,
+      failure_class:rejectedVerification.failure_class||null,
+      all_claims_match:rejectedVerification.all_claims_match===true,
+      repair_shape:clip(safeJson(analyses),1800),
+      policy:'missing_analysis_contract_compact_repair_v0_2',
     }));
     return {
-      artifact:repairedArtifact,
-      verification:repairedVerification,
+      artifact:verified?.artifact||proposedArtifact,
+      verification:rejectedVerification,
       analysis_count:analyses.length,
       rejected:true,
     };
