@@ -5619,10 +5619,16 @@ export async function runAutonomousRequirementCognition({
 
     const normalizeAnalyses=value=>asArray(value).map(row=>{
       const item=asObject(row);
+      const analysis=text(item.analysis);
+      const approximateCi=
+        analysis==='proportion_ci'||analysis==='difference_proportions_ci';
       return {
         ...item,
         spec:normalizeQdaStatisticalContractNumbers(item.spec),
         claims:normalizeQdaStatisticalContractNumbers(item.claims),
+        ...(approximateCi&&item.absolute_tolerance===undefined
+          ?{absolute_tolerance:1e-6}
+          :{}),
       };
     });
 
@@ -5659,6 +5665,7 @@ export async function runAutonomousRequirementCognition({
             'Allowed analysis names also include bootstrap_ci and monte_carlo_expression when the frozen answer actually selected them.',
             'claims MUST copy the frozen answer numerical claims using result-field names such as proportion, ci_low, ci_high, difference_b_minus_a, mean, median, r, slope, t, or p_two_sided.',
             'Do not copy a rate expression such as "420/6000" into successes or total. successes is the count 420 and total is the count 6000.',
+            'For approximate proportion confidence intervals, the runtime applies absolute_tolerance 0.000001 so a six-decimal reported bound is verified at its stated numerical precision rather than against hidden extra digits.',
             'Do not invent a claim or substitute Python output for a claim from the frozen answer.',
           ].join('\n')},
           {role:'user',content:safeJson({

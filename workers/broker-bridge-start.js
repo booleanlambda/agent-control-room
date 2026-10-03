@@ -152,6 +152,28 @@ try {
   const { runPythonStatisticalAnalyses } = await import('./python-quant.js');
   const probe = runPythonStatisticalAnalyses([
     {
+      id:'startup_rounded_wald_proportion_probe',
+      analysis:'proportion_ci',
+      spec:{successes:342,total:400,confidence:0.95,method:'wald'},
+      claims:{proportion:0.855,ci_low:0.820494,ci_high:0.889506},
+      absolute_tolerance:1e-6
+    }
+  ]);
+  console.log('AAU_PYTHON_STATISTICS_APPROXIMATE_CI_TOLERANCE_PROBE',JSON.stringify({
+    ok:probe.ok===true&&probe.all_claims_match===true,
+    analysis_count:probe.analysis_count,
+    error:probe.error||null,
+  }));
+} catch (error) {
+  console.error('AAU_PYTHON_STATISTICS_APPROXIMATE_CI_TOLERANCE_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
+  const { runPythonStatisticalAnalyses } = await import('./python-quant.js');
+  const probe = runPythonStatisticalAnalyses([
+    {
       id:'startup_wald_proportion_probe',
       analysis:'proportion_ci',
       spec:{successes:420,total:6000,confidence:0.95,method:'wald'},
