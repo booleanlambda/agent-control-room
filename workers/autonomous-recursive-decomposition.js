@@ -7737,6 +7737,63 @@ export async function runAutonomousRequirementCognition({
       resultArtifact,
     });
     done.parent_path=node.parent_path??parentPathOf(node.node_path);
+
+    // Canonical verified-root materialization is a stronger terminal boundary
+    // than a still-open root remediation checkpoint. Close any remediation
+    // episode that was already mechanically applied (or was mid-verification)
+    // so a later re-entry cannot resurrect stale remediation state and reopen
+    // an otherwise completed QDA assignment. Preserve the audit distinction:
+    // this is runtime/external verification, not agent-authored self-verification.
+    const completedRootRemediationClosures=[];
+    const rootRemediationEpisodes=await loadRemediationEpisodes(node.node_path);
+    for(const episode of rootRemediationEpisodes){
+      const episodeStatus=String(episode?.status||'').toLowerCase();
+      if(!['applied','verifying'].includes(episodeStatus))continue;
+      const priorVerificationBoundary=selfRemediationVerificationBoundary(
+        episode.repair_type,episode
+      );
+      const operationalVerification={
+        status:'VERIFIED',
+        reason:'Canonical QDA root completion from exact verified child artifacts supersedes the pending remediation verification boundary.',
+        observed_after:'The QDA root is completed from verified children and passed runtime-owned canonical materialization plus deterministic/statistical verification.',
+        remaining_problem:'',
+        agent_authored:false,
+        verification_boundary:'POST_QDA_CANONICAL_ROOT_MATERIALIZATION',
+        superseded_verification_boundary:priorVerificationBoundary,
+        external_verification:{
+          kind:'qda_verified_root_materialization',
+          ok:true,
+          root_result_hash:done.result_hash||sha256(resultArtifact),
+          canonical_materialization_sha256:canonicalMaterializationSha256,
+          verification_mode:verificationMode,
+          child_count:authoritativeChildren.length,
+        },
+        operational_closure:true,
+      };
+      await remediationRpc('update',node.node_path,{
+        remediation_id:episode.remediation_id,
+        status:'succeeded',
+        post_state:asObject(episode.post_state),
+        verification_result:operationalVerification,
+      });
+      completedRootRemediationClosures.push({
+        remediation_id:episode.remediation_id,
+        prior_status:episodeStatus,
+        repair_type:episode.repair_type,
+        superseded_verification_boundary:priorVerificationBoundary,
+      });
+    }
+    if(completedRootRemediationClosures.length){
+      console.log('AAU_QDA_ROOT_REMEDIATION_CLOSED',JSON.stringify({
+        agent_id:agentId,
+        intent_execution_id:intentExecutionId,
+        assignment_key:assignmentKey,
+        node_path:node.node_path,
+        closures:completedRootRemediationClosures,
+        policy:'canonical_verified_root_closes_applied_remediation_v0_1',
+      }));
+    }
+
     console.log('AAU_QDA_ROOT_VERIFIED_CHILDREN_MATERIALIZED',JSON.stringify({
       agent_id:agentId,
       intent_execution_id:intentExecutionId,
