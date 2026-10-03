@@ -1947,8 +1947,16 @@ export async function runAutonomousRequirementCognition({
       remediation_unit:text(statePayload.qda_601_remediation_unit)||null,
       // Keep one semantic tree for the entire remediation cycle. The latest
       // review remains evidence inside the tree, but does not create a new tree.
-      remediation_review_id:text(statePayload.qda_601_remediation_anchor_review_id)
-        ||text(statePayload.qda_601_last_authenticator_review_id)||null,
+      remediation_review_id:(
+        statePayload.qda_601_remediation_required===true
+        ||text(statePayload.qda_601_remediation_required).toLowerCase()==='true'
+      )
+        ?(
+          text(statePayload.qda_601_remediation_anchor_review_id)
+          ||text(statePayload.qda_601_last_authenticator_review_id)
+          ||null
+        )
+        :(text(statePayload.qda_601_last_verified_review_id)||null),
     }:null,
   }).slice(0,48);
   const idx=contextIndex(packet);
