@@ -411,6 +411,89 @@ try {
   }));
 }
 
+try {
+  const { materializeQda601UnitFromVerifiedChildren } = await import('./qda601-runtime.js');
+  const values=[12,13,13,14,15,16,17,18,19,21,24,90];
+  const makeStatChild=(path,n,requirement)=>({
+    node_path:path,
+    status:'completed',
+    decision_type:'ATOMIC',
+    requirement_text:requirement,
+    result_hash:'stat_shape_probe_'+n,
+    deterministic_statistics_verified:true,
+    deterministic_statistics_analysis_count:1,
+    result_artifact:JSON.stringify({
+      artifact:JSON.stringify({
+        inputs:values,
+        assumptions:'probe assumption '+n,
+        formula_or_model:'descriptive statistics',
+        calculation:'verified descriptive calculation '+n,
+        units:'minutes',
+        interpretation:'probe interpretation '+n,
+        sanity_check:'probe sanity check '+n,
+        evidence:'probe evidence '+n,
+        self_audit:{pass_a:'pass a '+n,pass_b:'pass b '+n},
+        python_analyses:[{
+          id:'stat_shape_'+n,
+          analysis:'describe',
+          spec:{values},
+          claims:{mean:22.666666666666668,median:16.5,q1:13.75,q3:19.5},
+        }],
+      }),
+      handoff:{conclusions:[],facts:[],unresolved:[]},
+    }),
+  });
+  const children=[
+    makeStatChild('R.001',1,'Solve Problem 1 of QDA601-M4-U1. Compute mean, median, Q1, Q3, and IQR.'),
+    makeStatChild('R.002',2,'Solve Problem 2 of QDA601-M4-U1. Compare the mean with and without the largest observation.'),
+    makeStatChild('R.003',3,'Solve Problem 3 of QDA601-M4-U1. Segment the dataset and compare means.'),
+  ];
+  const result=materializeQda601UnitFromVerifiedChildren({
+    qda_601_context:{
+      assigned:true,
+      status:'in_progress',
+      next_unit:{
+        type:'quantitative',
+        title:'Statistics shape and coverage probe',
+        module_code:'QDA601-M4',
+        unit_code:'QDA601-M4-U1',
+        exercise_pack_ref:'probe_statistics_shape',
+        exercise_pack:{problems:[
+          'Assigned statistics problem one.',
+          'Assigned statistics problem two.',
+          'Assigned statistics problem three.',
+        ]},
+      },
+    },
+  },{authoritativeChildren:children});
+  const coverage=result.payload?.verification_provenance?.problem_coverage||[];
+  const responses=result.payload?.problem_responses||[];
+  console.log('AAU_QDA601_STATISTICAL_SHAPE_COVERAGE_PROBE',JSON.stringify({
+    ok:result.applies===true
+      &&Boolean(result.payload)
+      &&result.failures.length===0
+      &&coverage.length===3
+      &&coverage[0]?.child_node_path==='R.001'
+      &&coverage[1]?.child_node_path==='R.002'
+      &&coverage[2]?.child_node_path==='R.003'
+      &&responses.every(response=>response?.inputs
+        &&typeof response.inputs==='object'
+        &&!Array.isArray(response.inputs)),
+    problem_count:responses.length,
+    child_paths:coverage.map(row=>row?.child_node_path||null),
+    input_object_flags:responses.map(response=>Boolean(
+      response?.inputs&&typeof response.inputs==='object'&&!Array.isArray(response.inputs)
+    )),
+    analysis_count:Array.isArray(result.payload?.python_analyses)
+      ?result.payload.python_analyses.length:0,
+    failures:result.failures||[],
+  }));
+} catch (error) {
+  console.error('AAU_QDA601_STATISTICAL_SHAPE_COVERAGE_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
 // one_shot_expertise_runtime_repair_v0_1
 if (isEnabled('AAU_EXPERTISE_RUNTIME_PATCH')) {
   try {

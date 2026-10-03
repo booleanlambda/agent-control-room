@@ -527,37 +527,39 @@ function bindQda601ProblemProvenance(ctx,payload){
 
 function qdaExplicitProblemOrdinals(textValue){
   const text=String(textValue||'');
-  const values=[];
-  const add=value=>{
-    const n=Number(value);
-    if(Number.isInteger(n)&&n>0)values.push(n);
-  };
-  for(const match of text.matchAll(/\b(?:problems?|questions?|items?|q)\s*#?\s*(\d+)\b/ig))add(match[1]);
-  for(const match of text.matchAll(/\b(?:problems?|questions?|items?)\s*#?\s*(\d+)\s*(?:-|–|—|\bto\b|\bthrough\b|\band\b)\s*(?:#?\s*)?(\d+)\b/ig)){
-    const first=Number(match[1]), last=Number(match[2]);
-    if(Number.isInteger(first)&&Number.isInteger(last)&&first>0&&last>=first&&last-first<=100){
-      for(let value=first;value<=last;value+=1)values.push(value);
-    }else{
-      add(first); add(last);
-    }
-  }
-  const ordinalWords={first:1,second:2,third:3,fourth:4,fifth:5,sixth:6,seventh:7,eighth:8,ninth:9,tenth:10};
-  for(const match of text.matchAll(/\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\s+(?:problem|question|item)\b/ig)){
-    add(ordinalWords[String(match[1]).toLowerCase()]);
-  }
-  const segmentMatch=text.match(/\bproblems?\s+(.{1,100}?)(?=\s+(?:of|for|from|using|in)\b|[:.;]|$)/i);
-  if(segmentMatch){
-    const segment=String(segmentMatch[1]||'').trim();
-    for(const row of segment.matchAll(/\d+/g))add(row[0]);
+  const unique=values=>[...new Set(values)]
+    .filter(value=>Number.isInteger(value)&&value>0)
+    .sort((a,b)=>a-b);
+
+  // Prefer explicit task labels over incidental notation. In statistics, Q1/Q3
+  // are quartiles, so a bare "Q3" must never claim Problem 3 coverage.
+  const plural=text.match(/\b(?:problems|questions|items)\s+(.{1,100}?)(?=\s+(?:of|for|from|using|in)\b|[:.;]|$)/i);
+  if(plural){
+    const segment=String(plural[1]||'').trim();
+    const values=[...segment.matchAll(/\d+/g)].map(row=>Number(row[0]));
     const range=segment.match(/(\d+)\s*(?:-|–|—|\bto\b|\bthrough\b)\s*(\d+)/i);
     if(range){
-      const first=Number(range[1]), last=Number(range[2]);
+      const first=Number(range[1]),last=Number(range[2]);
       if(Number.isInteger(first)&&Number.isInteger(last)&&first>0&&last>=first&&last-first<=100){
         for(let value=first;value<=last;value+=1)values.push(value);
       }
     }
+    const explicit=unique(values);
+    if(explicit.length)return explicit;
   }
-  return [...new Set(values)].sort((a,b)=>a-b);
+
+  const singular=text.match(/\b(?:problem|question|item)\s*#?\s*(\d+)\b/i);
+  if(singular)return [Number(singular[1])];
+
+  const ordinalWords={first:1,second:2,third:3,fourth:4,fifth:5,sixth:6,seventh:7,eighth:8,ninth:9,tenth:10};
+  const ordinal=text.match(/\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\s+(?:problem|question|item)\b/i);
+  if(ordinal)return [ordinalWords[String(ordinal[1]).toLowerCase()]];
+
+  // Allow shorthand only when it is explicitly introduced as an action target.
+  const shorthand=text.match(/\b(?:solve|answer|complete|work(?:\s+on)?)\s+q\s*#?\s*(\d+)\b/i);
+  if(shorthand)return [Number(shorthand[1])];
+
+  return [];
 }
 
 function qdaSynthesisOnlyChildRequirement(textValue){
