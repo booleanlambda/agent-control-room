@@ -2,7 +2,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const QUANT_RUNNER = fileURLToPath(new URL('./python-quant-runner.py', import.meta.url));
-const MAX_ANALYSES=32;
+export const PYTHON_STATISTICAL_MAX_ANALYSES=32;
+const MAX_ANALYSES=PYTHON_STATISTICAL_MAX_ANALYSES;
 
 export const PYTHON_STATISTICAL_ANALYSES = Object.freeze([
   'describe',
@@ -143,5 +144,87 @@ export function runPythonStatisticalAnalyses(analyses, options = {}) {
     all_claims_match:parsed.all_claims_match === true,
     analysis_count:parsed.analysis_count,
     analyses:rows,
+  };
+}
+
+
+export function runPythonStatisticalAnalysesChunked(analyses, options = {}) {
+  if(!Array.isArray(analyses) || analyses.length<=MAX_ANALYSES){
+    const single=runPythonStatisticalAnalyses(analyses,options);
+    return {
+      ...single,
+      chunked:false,
+      batch_count:Array.isArray(analyses)&&analyses.length?1:0,
+      batch_size_limit:MAX_ANALYSES,
+      batches:Array.isArray(analyses)&&analyses.length?[{
+        batch_index:0,
+        offset:0,
+        requested_analysis_count:analyses.length,
+        analysis_count:single.analysis_count,
+        ok:single.ok===true,
+        all_claims_match:single.all_claims_match===true,
+        failure_class:single.failure_class||null,
+        error:single.error||null,
+      }]:[],
+    };
+  }
+
+  const rows=[];
+  const validationFailures=[];
+  const batches=[];
+  let allOk=true;
+  let allClaimsMatch=true;
+  let firstFailure=null;
+
+  for(let offset=0,batchIndex=0;offset<analyses.length;offset+=MAX_ANALYSES,batchIndex+=1){
+    const slice=analyses.slice(offset,offset+MAX_ANALYSES);
+    const verified=runPythonStatisticalAnalyses(slice,options);
+    batches.push({
+      batch_index:batchIndex,
+      offset,
+      requested_analysis_count:slice.length,
+      analysis_count:verified.analysis_count,
+      ok:verified.ok===true,
+      all_claims_match:verified.all_claims_match===true,
+      failure_class:verified.failure_class||null,
+      error:verified.error||null,
+    });
+    for(const row of Array.isArray(verified.analyses)?verified.analyses:[]){
+      rows.push({
+        ...row,
+        index:Number.isInteger(row?.index)?row.index+offset:row?.index,
+        batch_index:batchIndex,
+      });
+    }
+    for(const failure of Array.isArray(verified.validation_failures)?verified.validation_failures:[]){
+      const originalPath=String(failure?.path||'');
+      const path=originalPath.replace(
+        /^python_analyses\[(\d+)\]/,
+        (_,index)=>'python_analyses['+(Number(index)+offset)+']'
+      );
+      validationFailures.push({...failure,path,batch_index:batchIndex});
+    }
+    if(verified.ok!==true || verified.all_claims_match!==true){
+      if(verified.ok!==true)allOk=false;
+      allClaimsMatch=false;
+      if(!firstFailure)firstFailure={batch_index:batchIndex,...verified};
+    }
+  }
+
+  return {
+    ok:allOk,
+    failure_class:firstFailure?.failure_class||null,
+    engine:'aau_quantitative_python_v0_1',
+    all_claims_match:allClaimsMatch,
+    analysis_count:analyses.length,
+    analyses:rows,
+    validation_failures:validationFailures,
+    error:firstFailure
+      ?'python_statistics_chunk_failed:batch='+firstFailure.batch_index+':'+String(firstFailure.error||'claim_disagreement')
+      :null,
+    chunked:true,
+    batch_count:batches.length,
+    batch_size_limit:MAX_ANALYSES,
+    batches,
   };
 }

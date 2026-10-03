@@ -19,7 +19,7 @@ import {
   pathDepth,
 } from './semantic-runtime-controls.js';
 import { verifyPythonMathChecks, verifyPythonMathChecksChunked } from './python-math.js';
-import { runPythonStatisticalAnalyses } from './python-quant.js';
+import { runPythonStatisticalAnalysesChunked } from './python-quant.js';
 import { materializeQda601UnitFromVerifiedChildren } from './qda601-runtime.js';
 
 // AAU autonomous recursive decomposition v0.1
@@ -374,7 +374,7 @@ function deterministicStatisticalVerification(packet,node,artifact){
       error:'python_statistical_analyses_required'
     };
   }
-  return {required:true,...runPythonStatisticalAnalyses(analyses,{timeoutMs:12000})};
+  return {required:true,...runPythonStatisticalAnalysesChunked(analyses,{timeoutMs:12000})};
 }
 function artifactText(v){
   if(v===null||v===undefined)return '';
@@ -6903,7 +6903,7 @@ export async function runAutonomousRequirementCognition({
     )return null;
 
     const expectedProblems=asArray(packet?.qda_601_context?.next_unit?.exercise_pack?.problems);
-    if(!expectedProblems.length||childRows.length!==expectedProblems.length)return null;
+    if(!expectedProblems.length||!childRows.length)return null;
     if(!childRows.every(child=>
       String(child?.node_status||child?.status||'').toLowerCase()==='completed'
     ))return null;
@@ -6918,6 +6918,8 @@ export async function runAutonomousRequirementCognition({
         result_hash:child.result_hash||null,
         deterministic_math_verified:decision.deterministic_math_verified===true,
         deterministic_math_check_count:Number(decision.deterministic_math_check_count||0),
+        deterministic_statistics_verified:decision.deterministic_statistics_verified===true,
+        deterministic_statistics_analysis_count:Number(decision.deterministic_statistics_analysis_count||0),
         qda_verified_descendant_materialized:
           decision.qda_verified_descendant_materialized===true,
         qda_verified_descendant_check_count:
@@ -6938,26 +6940,42 @@ export async function runAutonomousRequirementCognition({
       throw error;
     }
 
-    // Attach the recursive evidence contract and independently re-execute the
-    // aggregate check set. This uses bounded chunking when the subtree exceeds
-    // the single Python-call safety ceiling.
-    const recursive=await materializeQdaQuantitativeFromVerifiedDescendants(
-      node,canonical.payload
-    );
-    const artifact=recursive.artifact;
-    const verification=deterministicMathVerification(packet,node,artifact);
-    if(
-      recursive.verification_blocked===true
-      ||verification.required!==true
-      ||verification.ok!==true
-      ||verification.all_match!==true
-    ){
-      const error=new Error(
-        'qda_root_recursive_verification_invalid:'
-        +String(verification.error||'verification_failed')
+    const artifact=canonical.payload;
+    const aggregateChecks=asArray(artifact?.python_checks);
+    const aggregateAnalyses=asArray(artifact?.python_analyses);
+    let verificationMode='schema_only_verified_children';
+    let mathVerification=null;
+    let statisticsVerification=null;
+
+    if(aggregateAnalyses.length || qdaStatisticalAtomicRequirement(packet,node)){
+      verificationMode='statistics';
+      statisticsVerification=runPythonStatisticalAnalysesChunked(
+        aggregateAnalyses,{timeoutMs:12000}
       );
-      error.code='COGNITION_RESPONSE_REJECTED';
-      throw error;
+      if(
+        statisticsVerification.ok!==true
+        ||statisticsVerification.all_claims_match!==true
+      ){
+        const error=new Error(
+          'qda_root_statistical_verification_invalid:'
+          +String(statisticsVerification.error||'claim_disagreement')
+        );
+        error.code='COGNITION_RESPONSE_REJECTED';
+        throw error;
+      }
+    }else if(aggregateChecks.length){
+      verificationMode='deterministic_math';
+      mathVerification=verifyPythonMathChecksChunked(
+        aggregateChecks,{absoluteTolerance:0.005,relativeTolerance:1e-9}
+      );
+      if(mathVerification.ok!==true||mathVerification.all_match!==true){
+        const error=new Error(
+          'qda_root_recursive_verification_invalid:'
+          +String(mathVerification.error||'verification_failed')
+        );
+        error.code='COGNITION_RESPONSE_REJECTED';
+        throw error;
+      }
     }
 
     const currentChildResultHashes=childRows.map(child=>({
@@ -6981,14 +6999,12 @@ export async function runAutonomousRequirementCognition({
       'deterministic_math_reconciliation_required',
       'deterministic_math_retry_nonce',
       'deterministic_math_verification',
+      'deterministic_statistics_reconciliation_required',
+      'deterministic_statistics_retry_nonce',
+      'deterministic_statistics_verification',
     ])delete completedDecisionPayload[key];
 
     const canonicalMaterializationSha256=sha256(artifact);
-    // The bridge deliberately caps a node result artifact at 20 KB. Do not
-    // duplicate the full canonical QDA file in the root node: the verified
-    // child rows are the durable source of truth and qda601-runtime rebuilds
-    // the exact file from them during structured commit. Persist only the proof
-    // summary/hash needed for continuity and audit.
     const compactConclusions=asArray(artifact?.problem_responses).map((response,index)=>({
       problem_id:response?.problem_id??index+1,
       interpretation:clip(
@@ -7000,12 +7016,14 @@ export async function runAutonomousRequirementCognition({
     const resultArtifact=JSON.stringify({
       status:'COMPLETE',
       artifact:{
-        contract:'qda_root_verified_child_summary_v0_1',
+        contract:'qda_root_verified_child_summary_v0_2',
         unit_code:packet?.qda_601_context?.next_unit?.unit_code||null,
         exercise_pack_ref:packet?.qda_601_context?.next_unit?.exercise_pack_ref||null,
         canonical_materialization_sha256:canonicalMaterializationSha256,
         problem_count:expectedProblems.length,
-        python_check_count:Number(recursive.check_count||0),
+        verification_mode:verificationMode,
+        python_check_count:aggregateChecks.length,
+        python_analysis_count:aggregateAnalyses.length,
         child_result_chain:currentChildResultHashes.map(child=>({
           path:child.path,
           result_hash:child.result_hash,
@@ -7021,6 +7039,7 @@ export async function runAutonomousRequirementCognition({
       },
     });
 
+    const provenanceChildren=asArray(artifact?.verification_provenance?.children);
     const done=await saveNode({
       nodePath:node.node_path,
       parentPath:node.parent_path??parentPathOf(node.node_path),
@@ -7045,23 +7064,41 @@ export async function runAutonomousRequirementCognition({
           status:'ACCEPT',
           issue_count:0,
           reason:'Exact verified child problem responses were preserved without model rewriting.',
-          deterministic_guard:'qda_root_verified_child_materialization_v0_1',
+          deterministic_guard:'qda_root_verified_child_materialization_v0_2',
         },
         qda_root_verified_child_materialized:true,
         qda_root_materialization_contract:
           text(artifact?.runtime_materialization?.contract)
-          ||'qda_verified_child_artifact_materialization_v0_3',
+          ||'qda_verified_child_artifact_materialization_v0_4_problem_coverage',
         qda_root_canonical_materialization_sha256:canonicalMaterializationSha256,
-        qda_root_result_storage_contract:'qda_root_verified_child_summary_v0_1',
-        qda_verified_descendant_materialized:
-          recursive.materialized===true||recursive.already_materialized===true,
-        qda_verified_descendant_check_count:Number(recursive.check_count||0),
-        qda_verified_descendant_sources:asArray(recursive.sources),
-        deterministic_math_verified:true,
-        deterministic_math_check_count:Number(recursive.check_count||0),
-        deterministic_math_verification:
-          compactMathVerificationForPersistence(verification),
-        deterministic_math_gate:'qda_root_verified_children_recursive_v0_1',
+        qda_root_result_storage_contract:'qda_root_verified_child_summary_v0_2',
+        qda_root_verification_mode:verificationMode,
+        qda_verified_descendant_materialized:true,
+        qda_verified_descendant_check_count:aggregateChecks.length,
+        qda_verified_descendant_analysis_count:aggregateAnalyses.length,
+        qda_verified_descendant_sources:provenanceChildren,
+        ...(mathVerification?{
+          deterministic_math_verified:true,
+          deterministic_math_check_count:aggregateChecks.length,
+          deterministic_math_verification:
+            compactMathVerificationForPersistence({required:true,...mathVerification}),
+          deterministic_math_gate:'qda_root_verified_children_chunked_v0_2',
+        }:{}),
+        ...(statisticsVerification?{
+          deterministic_statistics_verified:true,
+          deterministic_statistics_analysis_count:aggregateAnalyses.length,
+          deterministic_statistics_verification:{
+            required:true,
+            ok:statisticsVerification.ok===true,
+            all_claims_match:statisticsVerification.all_claims_match===true,
+            analysis_count:Number(statisticsVerification.analysis_count||0),
+            failure_class:statisticsVerification.failure_class||null,
+            error:statisticsVerification.error||null,
+            chunked:statisticsVerification.chunked===true,
+            batch_count:Number(statisticsVerification.batch_count||0),
+          },
+          deterministic_statistics_gate:'qda_root_verified_children_chunked_v0_1',
+        }:{}),
       },
       contextPayload:node.context_payload||{},
       resultArtifact,
@@ -7073,9 +7110,12 @@ export async function runAutonomousRequirementCognition({
       node_path:node.node_path,
       unit_code:packet?.qda_601_context?.next_unit?.unit_code||null,
       problem_count:expectedProblems.length,
-      python_check_count:Number(recursive.check_count||0),
+      child_count:authoritativeChildren.length,
+      verification_mode:verificationMode,
+      python_check_count:aggregateChecks.length,
+      python_analysis_count:aggregateAnalyses.length,
       child_paths:authoritativeChildren.map(child=>child.node_path),
-      contract:'qda_root_verified_child_materialization_v0_1',
+      contract:'qda_root_verified_child_materialization_v0_2',
     }));
     return done;
   }

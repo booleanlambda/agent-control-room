@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
-import { verifyPythonMathChecks } from './python-math.js';
-import { runPythonStatisticalAnalyses } from './python-quant.js';
+import { verifyPythonMathChecksChunked } from './python-math.js';
+import { runPythonStatisticalAnalysesChunked } from './python-quant.js';
 
 const curriculum = JSON.parse(
   fs.readFileSync(new URL('../curriculum/quantitative-decision-analysis-v0.1.json', import.meta.url), 'utf8')
@@ -278,6 +278,31 @@ function hasOwn(obj,key){
     && Object.prototype.hasOwnProperty.call(obj,key));
 }
 
+function normalizeQdaProblemResponseShape(response){
+  if(!response || typeof response!=='object' || Array.isArray(response)) return response;
+  const out={...response};
+  if(hasOwn(out,'inputs') && !plainObject(out.inputs)){
+    if(out.inputs!==null && out.inputs!==undefined){
+      out.inputs=Array.isArray(out.inputs)?{values:out.inputs}:{value:out.inputs};
+    }
+  }
+  for(const key of ['assumptions','evidence']){
+    if(hasOwn(out,key) && !Array.isArray(out[key])){
+      out[key]=out[key]===null||out[key]===undefined?[]:[out[key]];
+    }
+  }
+  for(const key of ['formula_or_model','calculation','units']){
+    if(!hasOwn(out,key) || out[key]===null || out[key]===undefined) continue;
+    if(Array.isArray(out[key])) out[key]={values:out[key]};
+    else if(!['string','object'].includes(typeof out[key])) out[key]={value:out[key]};
+  }
+  for(const key of ['interpretation','sanity_check']){
+    if(!hasOwn(out,key) || out[key]===null || out[key]===undefined || typeof out[key]==='string') continue;
+    try{out[key]=JSON.stringify(out[key]);}catch{out[key]=String(out[key]);}
+  }
+  return out;
+}
+
 function responseLabel(response,index){
   return String(
     response?.problem_id
@@ -360,7 +385,9 @@ export function canonicalizeQda601UnitPayload(rawPayload){
     }
   }
 
-  const responses=Array.isArray(payload.problem_responses)?payload.problem_responses:[];
+  const responses=Array.isArray(payload.problem_responses)
+    ?payload.problem_responses.map(normalizeQdaProblemResponseShape):[];
+  if(Array.isArray(payload.problem_responses)) payload.problem_responses=responses;
 
   for(const key of ['inputs','formula_or_model','calculation','units','interpretation','sanity_check']) {
     if(payload[key]===null || payload[key]===undefined) {
@@ -418,20 +445,19 @@ function parseAuthoritativeChildArtifact(child){
   }
   if(!artifact || typeof artifact!=='object' || Array.isArray(artifact)) return null;
 
-  // QDA atomic children commonly persist their actual answer under
-  // {problem_response:{...}}. Treat that as the authoritative problem payload
-  // rather than requiring the child serializer to flatten it first.
-  if(artifact.problem_response
-     &&typeof artifact.problem_response==='object'
-     &&!Array.isArray(artifact.problem_response)){
-    const response={...artifact.problem_response};
-    if(!Array.isArray(response.python_checks) && Array.isArray(artifact.python_checks)){
-      response.python_checks=artifact.python_checks;
+  // QDA atomic children commonly persist their actual answer under a documented
+  // response envelope. Normalize those mechanical wrappers before materialization.
+  for(const key of ['problem_response','response']){
+    if(artifact[key] && typeof artifact[key]==='object' && !Array.isArray(artifact[key])){
+      const response={...artifact[key]};
+      if(!Array.isArray(response.python_checks) && Array.isArray(artifact.python_checks)){
+        response.python_checks=artifact.python_checks;
+      }
+      if(!Array.isArray(response.python_analyses) && Array.isArray(artifact.python_analyses)){
+        response.python_analyses=artifact.python_analyses;
+      }
+      return response;
     }
-    if(!Array.isArray(response.python_analyses) && Array.isArray(artifact.python_analyses)){
-      response.python_analyses=artifact.python_analyses;
-    }
-    return response;
   }
   return artifact;
 }
@@ -501,20 +527,44 @@ function bindQda601ProblemProvenance(ctx,payload){
 
 function qdaExplicitProblemOrdinals(textValue){
   const text=String(textValue||'');
-  const match=text.match(/\bproblems?\s+(.{1,100}?)(?=\s+(?:of|for|from|using|in)\b|[:.;]|$)/i);
-  if(!match)return [];
-  const segment=String(match[1]||'').trim();
-  const values=[...segment.matchAll(/\d+/g)].map(row=>Number(row[0]))
-    .filter(value=>Number.isInteger(value)&&value>0);
-  const range=segment.match(/(\d+)\s*(?:-|–|—|\bto\b|\bthrough\b)\s*(\d+)/i);
-  if(range){
-    const first=Number(range[1]);
-    const last=Number(range[2]);
+  const values=[];
+  const add=value=>{
+    const n=Number(value);
+    if(Number.isInteger(n)&&n>0)values.push(n);
+  };
+  for(const match of text.matchAll(/\b(?:problems?|questions?|items?|q)\s*#?\s*(\d+)\b/ig))add(match[1]);
+  for(const match of text.matchAll(/\b(?:problems?|questions?|items?)\s*#?\s*(\d+)\s*(?:-|–|—|\bto\b|\bthrough\b|\band\b)\s*(?:#?\s*)?(\d+)\b/ig)){
+    const first=Number(match[1]), last=Number(match[2]);
     if(Number.isInteger(first)&&Number.isInteger(last)&&first>0&&last>=first&&last-first<=100){
       for(let value=first;value<=last;value+=1)values.push(value);
+    }else{
+      add(first); add(last);
+    }
+  }
+  const ordinalWords={first:1,second:2,third:3,fourth:4,fifth:5,sixth:6,seventh:7,eighth:8,ninth:9,tenth:10};
+  for(const match of text.matchAll(/\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\s+(?:problem|question|item)\b/ig)){
+    add(ordinalWords[String(match[1]).toLowerCase()]);
+  }
+  const segmentMatch=text.match(/\bproblems?\s+(.{1,100}?)(?=\s+(?:of|for|from|using|in)\b|[:.;]|$)/i);
+  if(segmentMatch){
+    const segment=String(segmentMatch[1]||'').trim();
+    for(const row of segment.matchAll(/\d+/g))add(row[0]);
+    const range=segment.match(/(\d+)\s*(?:-|–|—|\bto\b|\bthrough\b)\s*(\d+)/i);
+    if(range){
+      const first=Number(range[1]), last=Number(range[2]);
+      if(Number.isInteger(first)&&Number.isInteger(last)&&first>0&&last>=first&&last-first<=100){
+        for(let value=first;value<=last;value+=1)values.push(value);
+      }
     }
   }
   return [...new Set(values)].sort((a,b)=>a-b);
+}
+
+function qdaSynthesisOnlyChildRequirement(textValue){
+  const requirement=String(textValue||'');
+  return /(formal synthesis|interpretation|sanity[_ ]check|self[_ ]audit|audit fields?|decision relevance)/i.test(requirement)
+    &&/(using\s+(?:the\s+)?(?:quantitative|verified|numerical|statistical)\s+results?\s+from\s+R\.\d|using\s+.*?results?\s+from\s+R\.\d)/i.test(requirement)
+    &&!/(provide|include|derive|recompute|recalculate|calculate|compute)[^\n]{0,140}(?:calculation|python_checks?|python_analyses)/i.test(requirement);
 }
 
 function qdaChildProblemOrdinals(ctx,child,artifact,expectedProblems){
@@ -573,22 +623,59 @@ function qdaArtifactProblemResponse(artifact,ordinal,expectedProblem,coveredOrdi
   return artifact;
 }
 
+function qdaFieldAliases(field){
+  return {
+    inputs:['inputs','input','input_data','givens','given_data'],
+    assumptions:['assumptions'],
+    formula_or_model:['formula_or_model','formula','model'],
+    calculation:['calculation','calculations','derivation','result','results'],
+    units:['units','unit'],
+    interpretation:['interpretation','conclusion'],
+    sanity_check:['sanity_check','sanity','reasonableness_check'],
+    evidence:['evidence','source_evidence'],
+    self_audit:['self_audit','audit'],
+  }[field]||[field];
+}
+function qdaNormalizedFieldKey(key){
+  return String(key||'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+}
+function qdaFieldFromObject(obj,field){
+  if(!obj || typeof obj!=='object' || Array.isArray(obj))return undefined;
+  const aliases=qdaFieldAliases(field).map(qdaNormalizedFieldKey);
+  for(const [key,value] of Object.entries(obj)){
+    if(value===null||value===undefined)continue;
+    if(aliases.includes(qdaNormalizedFieldKey(key)))return value;
+  }
+  return undefined;
+}
 function qdaProblemScopedArtifactField(artifact,selected,ordinal,field){
-  if(selected && selected[field]!==null && selected[field]!==undefined)return selected[field];
-  if(artifact && artifact[field]!==null && artifact[field]!==undefined)return artifact[field];
+  const selectedValue=qdaFieldFromObject(selected,field);
+  if(selectedValue!==undefined)return selectedValue;
   if(!artifact || typeof artifact!=='object' || Array.isArray(artifact))return undefined;
 
-  const prefix=new RegExp('^problem[_\\s-]*'+String(ordinal)+'(?:[_\\s-]|$)','i');
+  const prefix=new RegExp('^(?:problem|question|item|q)[_\\s-]*0*'+String(ordinal)+'(?:[_\\s-]|$)','i');
   const entries=Object.entries(artifact)
     .filter(([key,value])=>prefix.test(String(key))&&value!==null&&value!==undefined);
-  if(!entries.length)return undefined;
 
-  if(field==='calculation'){
+  for(const [key,value] of entries){
+    if(value && typeof value==='object' && !Array.isArray(value)){
+      const nested=qdaFieldFromObject(value,field);
+      if(nested!==undefined)return nested;
+    }
+    const suffix=String(key).replace(prefix,'');
+    if(qdaFieldAliases(field).map(qdaNormalizedFieldKey).includes(qdaNormalizedFieldKey(suffix))){
+      return value;
+    }
+  }
+
+  const shared=qdaFieldFromObject(artifact,field);
+  if(shared!==undefined)return shared;
+
+  if(field==='calculation' && entries.length){
     if(entries.length===1)return entries[0][1];
     return Object.fromEntries(entries);
   }
-  const exact=entries.find(([key])=>String(key).toLowerCase().includes(String(field).toLowerCase()));
-  return exact?exact[1]:undefined;
+  return undefined;
 }
 
 export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
@@ -628,6 +715,7 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
       continue;
     }
     if(!coverage.ordinals.length){
+      if(qdaSynthesisOnlyChildRequirement(child?.requirement_text)) continue;
       failures.push('qda_verified_child_problem_coverage_missing:'+String(child?.node_path||'unknown'));
       continue;
     }
@@ -658,7 +746,7 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
           +':verified='+durableVerifiedCheckCount+';received='+childChecks.length
         );
       }else{
-        const verification=verifyPythonMathChecks(
+        const verification=verifyPythonMathChecksChunked(
           childChecks,{absoluteTolerance:0.005,relativeTolerance:1e-9}
         );
         if(!verification.ok){
@@ -681,8 +769,24 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
       }
     }
 
-    if(statisticalUnit(ctx) && !childAnalyses.length){
-      failures.push('qda_verified_child_statistical_analysis_missing:'+String(child?.node_path||'unknown'));
+    if(statisticalUnit(ctx)){
+      if(!childAnalyses.length){
+        failures.push('qda_verified_child_statistical_analysis_missing:'+String(child?.node_path||'unknown'));
+      }else{
+        const statisticalVerification=runPythonStatisticalAnalysesChunked(
+          childAnalyses,{timeoutMs:12000}
+        );
+        if(!statisticalVerification.ok){
+          failures.push(
+            (statisticalVerification.failure_class==='input_contract'
+              ?'qda_verified_child_statistics_contract_invalid:'
+              :'qda_verified_child_statistics_runtime_invalid:')
+            +String(child?.node_path||'unknown')
+          );
+        }else if(!statisticalVerification.all_claims_match){
+          failures.push('qda_verified_child_statistics_claim_disagreement:'+String(child?.node_path||'unknown'));
+        }
+      }
     }
 
     const info={
@@ -756,7 +860,7 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
     const responseAnalyses=Array.isArray(selected?.python_analyses)
       ?selected.python_analyses:info.childAnalyses;
     const sourceBinding=qdaProblemSourceBinding(ctx,index,expectedProblems[index],info.child);
-    const response={
+    const response=normalizeQdaProblemResponseShape({
       problem_id:ordinal,
       problem:expectedProblems[index],
       inputs:qdaProblemScopedArtifactField(info.artifact,selected,ordinal,'inputs'),
@@ -772,7 +876,7 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
         qdaProblemScopedArtifactField(info.artifact,selected,ordinal,'evidence')
       )],
       self_audit:qdaProblemScopedArtifactField(info.artifact,selected,ordinal,'self_audit'),
-    };
+    });
     if(responseChecks.length)response.python_checks=responseChecks;
     if(responseAnalyses.length)response.python_analyses=responseAnalyses;
     problemResponses.push(response);
@@ -1115,7 +1219,7 @@ function validateUnitPayload(ctx, payload) {
         +';received='+checks.length
       );
     } else {
-      const pythonVerification = verifyPythonMathChecks(checks,{absoluteTolerance:0.005,relativeTolerance:1e-9});
+      const pythonVerification = verifyPythonMathChecksChunked(checks,{absoluteTolerance:0.005,relativeTolerance:1e-9});
       if (!pythonVerification.ok) {
         if(pythonVerification.failure_class==='input_contract'){
           failures.push('qda_python_check_contract_invalid:'+String(pythonVerification.error||'invalid'));
@@ -1135,7 +1239,7 @@ function validateUnitPayload(ctx, payload) {
     if (analyses.length < 1) {
       failures.push('qda_python_statistical_analyses_required');
     } else {
-      const statisticalVerification = runPythonStatisticalAnalyses(analyses,{timeoutMs:12000});
+      const statisticalVerification = runPythonStatisticalAnalysesChunked(analyses,{timeoutMs:12000});
       if (!statisticalVerification.ok) {
         failures.push(
           statisticalVerification.failure_class==='input_contract'
