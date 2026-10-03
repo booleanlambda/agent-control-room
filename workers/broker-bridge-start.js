@@ -596,6 +596,56 @@ try {
 }
 
 try {
+  const { qdaCurriculumFastPathPlan } = await import('./autonomous-recursive-decomposition.js');
+  const regression=qdaCurriculumFastPathPlan({
+    qda_601_context:{
+      assigned:true,status:'in_progress',
+      next_unit:{
+        unit_code:'QDA601-M4-U3',module_code:'QDA601-M4',
+        exercise_pack_ref:'curriculum/qda601-exercise-packs-v0.1.json#QDA601-M4-U3',
+        exercise_pack:{external_research:false,problems:[
+          'Interpret each coefficient with units and ceteris-paribus language.',
+          'Approximate t-statistics for coefficients and discuss statistical evidence without converting association into causation.',
+          'Explain why the pairwise ad-spend correlation and multivariable coefficient answer different questions; identify plausible confounders.',
+        ]},
+      },
+    },
+  });
+  console.log('AAU_QDA_M4U3_VERIFIER_SCOPE_PROBE',JSON.stringify({
+    ok:regression.applies===true
+      &&regression.problem_count===3
+      &&JSON.stringify(regression.children.map(child=>child.statistical))==='[false,true,false]'
+      &&JSON.stringify(regression.dependency_waves)==='[[1,2,3]]',
+    statistical_flags:regression.children.map(child=>child.statistical),
+    dependency_waves:regression.dependency_waves,
+  }));
+} catch (error) {
+  console.error('AAU_QDA_M4U3_VERIFIER_SCOPE_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
+  const { runPythonStatisticalAnalyses } = await import('./python-quant.js');
+  const probe=runPythonStatisticalAnalyses([{
+    id:'m4u3_rounded_t_probe',
+    analysis:'coefficient_t',
+    spec:{estimate:3.8,se:0.9,df:100},
+    claims:{t:4.22},
+    absolute_tolerance:0.005,
+  }]);
+  console.log('AAU_QDA_M4U3_ROUNDED_T_PROBE',JSON.stringify({
+    ok:probe.ok===true&&probe.all_claims_match===true,
+    analysis_count:probe.analysis_count,
+    error:probe.error||null,
+  }));
+} catch (error) {
+  console.error('AAU_QDA_M4U3_ROUNDED_T_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
   const { normalizeQdaStatisticalContractNumbers } = await import('./autonomous-recursive-decomposition.js');
   const input={
     successes:'342',
