@@ -8285,7 +8285,19 @@ export async function runAutonomousRequirementCognition({
           final?.parsed,
           authoritativeVerifiedNumericalEvidence
         );
-        if(quantitativeDriftReview){
+        if(deterministicEvidenceLedger){
+          synthesisProvenanceReview=deterministicEvidenceLedger.provenance_review;
+          console.log('AAU_DETERMINISTIC_EVIDENCE_LEDGER_MATERIALIZED',JSON.stringify({
+            agent_id:agentId,
+            intent_execution_id:intentExecutionId,
+            node_path:node.node_path,
+            ledger_entry_count:
+              deterministicEvidenceLedger.provenance_review?.deterministic_guard?.ledger_entry_count||0,
+            child_count:
+              deterministicEvidenceLedger.provenance_review?.deterministic_guard?.child_count||0,
+            contract:'exact_completed_child_ledger_v0_1',
+          }));
+        }else if(quantitativeDriftReview){
           synthesisProvenanceReview=quantitativeDriftReview;
           console.log('AAU_SYNTHESIS_QUANTITATIVE_EVIDENCE_DRIFT',JSON.stringify({
             agent_id:agentId,
