@@ -8128,10 +8128,18 @@ export async function runAutonomousRequirementCognition({
 
         const finalCandidate=asObject(final?.parsed);
         const candidateOutcome=text(finalCandidate.outcome).toUpperCase();
-        if(!['COMPLETE','BLOCKED'].includes(candidateOutcome))
-          throw new Error('autonomous_decomposition_synthesis_outcome_invalid:'+node.node_path);
-        if(!artifactText(finalCandidate.artifact))
-          throw new Error('autonomous_decomposition_synthesis_empty:'+node.node_path);
+        if(!['COMPLETE','BLOCKED'].includes(candidateOutcome)){
+          const error=new Error('autonomous_decomposition_synthesis_outcome_invalid:'+node.node_path);
+          error.code='COGNITION_RESPONSE_REJECTED';
+          error.response_contract='final_synthesis_outcome_complete_or_blocked_v0_1';
+          throw error;
+        }
+        if(!artifactText(finalCandidate.artifact)){
+          const error=new Error('autonomous_decomposition_synthesis_empty:'+node.node_path);
+          error.code='COGNITION_RESPONSE_REJECTED';
+          error.response_contract='final_synthesis_nonempty_artifact_v0_1';
+          throw error;
+        }
 
         if(terminalStageContract.applies){
           const allChildrenSubstantivelyResolved=childStates.every(v=>v.status==='completed');
