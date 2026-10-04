@@ -637,6 +637,33 @@ try {
 }
 
 try {
+  const { qdaScenarioPartitionsDisjointForProbe } = await import('./autonomous-recursive-decomposition.js');
+  const childA={
+    requirement:'Solve the parent elasticity problem specifically for the elasticity scenario ε = -0.6.',
+    completion_criterion:'Complete and verify only the ε = -0.6 scenario.'
+  };
+  const childB={
+    requirement:'Solve the parent elasticity problem specifically for the elasticity scenario ε = -1.0.',
+    completion_criterion:'Complete and verify only the ε = -1.0 scenario.'
+  };
+  const childSame={
+    requirement:'Solve the parent elasticity problem specifically for the elasticity scenario ε = -0.6.',
+    completion_criterion:'Complete and verify only the ε = -0.6 scenario.'
+  };
+  console.log('AAU_QDA_ELASTICITY_PARTITION_PROBE',JSON.stringify({
+    ok:qdaScenarioPartitionsDisjointForProbe(childA,childB)===true
+      &&qdaScenarioPartitionsDisjointForProbe(childA,childSame)===false,
+    disjoint:qdaScenarioPartitionsDisjointForProbe(childA,childB),
+    same_partition_disjoint:qdaScenarioPartitionsDisjointForProbe(childA,childSame),
+    contract:'explicit_numeric_scenario_partition_v0_1',
+  }));
+} catch (error) {
+  console.error('AAU_QDA_ELASTICITY_PARTITION_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
   const { qdaCurriculumFastPathPlan } = await import('./autonomous-recursive-decomposition.js');
   const independent=qdaCurriculumFastPathPlan({
     qda_601_context:{
