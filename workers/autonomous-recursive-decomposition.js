@@ -6148,28 +6148,31 @@ export async function runAutonomousRequirementCognition({
           }
         }
 
-        const callBatch=async(targetSubset,suffix)=>{
-          const response=await callJson([
+        const callBatch=async(targetSubset,suffix,{deepFallback=false}={})=>{
+          const messages=[
             {role:'system',content:[
-              'You are the same bound autonomous agent repairing ONLY deterministic Python checks for an already-written quantitative QDA calculation.',
-              'Do not rewrite the answer. Do not return the artifact. Return only {"python_checks":[...]} and nothing else.',
+              'You are mechanically packaging deterministic Python checks for an already-written quantitative QDA calculation.',
+              'Do not rewrite, reconsider, explain, or summarize the answer. Return only {"python_checks":[...]} and nothing else.',
               'Produce EXACTLY one check for each supplied material_result target, in the same order. Do not add extra checks.',
               'Each check must contain nonempty label, safe arithmetic expression, and finite raw JSON-number claimed_result.',
               'The expression must independently reconstruct the stated material result from the supplied frozen inputs/formula. Never use the claimed result itself as a trivial constant-only expression.',
               'SAFE MATH: numeric constants, + - * / ** %, parentheses, pi/e, sqrt/log/log10/exp/abs/round only. No variables, assignments, arrays, indexing, imports, comprehensions, lambdas, attributes, sum(), or range(). Expand finite sums explicitly.',
               'If a material_result is textual, identify the numerical result stated by that text and reconstruct it from the frozen local context.',
-              'This is verification metadata repair only. If the frozen substantive mathematics is inconsistent, preserve that disagreement rather than changing the substantive answer.',
+              'No prose outside JSON. Keep labels short and expressions minimal.',
             ].join('\n')},
             {role:'user',content:safeJson({
-              requirement:clip(text(node.requirement_text),2400),
+              requirement:clip(text(node.requirement_text),1600),
               local_problem_contexts:localContexts,
               material_results:targetSubset,
               required_output_check_count:targetSubset.length,
               repair_batch:batchOrdinal,
             })},
-          ],Math.min(stageBudgets.atomic_execution,1400),
-          'req_'+node.node_path.replaceAll('.','_')
-            +'_math_check_contract_batch_'+String(batchOrdinal)+suffix);
+          ];
+          const phase='req_'+node.node_path.replaceAll('.','_')
+            +'_math_check_contract_batch_'+String(batchOrdinal)+suffix;
+          const response=deepFallback
+            ?await callJson(messages,Math.min(stageBudgets.atomic_execution,2600),phase+'_deep_fallback')
+            :await callSerialize(messages,900,phase);
           const batchChecks=asArray(response?.parsed?.python_checks);
           if(batchChecks.length!==targetSubset.length){
             const error=new Error('qda_math_check_batch_count_mismatch');
@@ -6188,23 +6191,84 @@ export async function runAutonomousRequirementCognition({
           return batchChecks;
         };
 
+        const generateSingleton=async(target,index)=>{
+          const singletonIdentity=sha256({
+            repair_identity:repairIdentity,
+            batch_ordinal:batchOrdinal,
+            singleton_ordinal:index+1,
+            target_path:target.path,
+            contract:'qda_math_check_contract_repair_single_v0_1',
+          });
+          const priorSingleton=await loadJsonPhaseCheckpoint(
+            node.node_path,'MATH_CHECK_CONTRACT_REPAIR_SINGLE',singletonIdentity
+          );
+          const priorChecks=asArray(priorSingleton.parsed?.python_checks);
+          if(priorChecks.length===1){
+            const priorVerification=verifyPythonMathChecksChunked(
+              priorChecks,{absoluteTolerance:0.005,relativeTolerance:1e-9}
+            );
+            if(priorVerification.ok===true&&priorVerification.all_match===true){
+              return priorChecks;
+            }
+          }
+
+          let one;
+          try{
+            one=await callBatch([target],'_single_'+String(index+1));
+          }catch(serializerError){
+            // Serializer mode is the preferred bounded path. If a provider
+            // still emits malformed/truncated JSON for one check, allow one
+            // larger deep fallback for that ONE result only; never regenerate
+            // the whole contract.
+            console.warn('AAU_QDA_MATH_CHECK_SINGLE_SERIALIZER_FALLBACK',JSON.stringify({
+              agent_id:agentId,
+              intent_execution_id:intentExecutionId,
+              node_path:node.node_path,
+              batch_ordinal:batchOrdinal,
+              singleton_ordinal:index+1,
+              error:clip(String(serializerError?.message||serializerError),400),
+              policy:'single_result_serializer_then_deep_v0_1',
+            }));
+            one=await callBatch(
+              [target],
+              '_single_'+String(index+1),
+              {deepFallback:true}
+            );
+          }
+          await saveJsonPhaseCheckpoint(
+            node.node_path,'MATH_CHECK_CONTRACT_REPAIR_SINGLE',singletonIdentity,
+            {python_checks:one},{
+              repaired:true,
+              batch_ordinal:batchOrdinal,
+              singleton_ordinal:index+1,
+              target_path:target.path,
+              check_count:1,
+              contract:'qda_math_check_contract_repair_single_v0_1',
+            }
+          );
+          return one;
+        };
+
         let batchChecks=[];
         try{
+          // This is protocol packaging, not fresh substantive cognition.
+          // Serializer mode has Thinking OFF and a 900-token ceiling, which
+          // prevents the former repair stage from spending thousands of tokens
+          // narrating a small verification structure.
           batchChecks=await callBatch(batchTargets,'');
         }catch(error){
-          const truncated=
-            /TRUNCATED_RESPONSE|finish_reason|length/i.test(
-              String(error?.message||error)
-            );
-          if(!truncated||batchTargets.length===1)throw error;
-          // A batch that still overflows is split locally into single-result
-          // calls. Successful singleton calls are then saved as one durable
-          // batch checkpoint, so the next wake never repeats finished repair.
+          if(batchTargets.length===1)throw error;
+          console.warn('AAU_QDA_MATH_CHECK_BATCH_SPLIT_TO_SINGLETONS',JSON.stringify({
+            agent_id:agentId,
+            intent_execution_id:intentExecutionId,
+            node_path:node.node_path,
+            batch_ordinal:batchOrdinal,
+            target_count:batchTargets.length,
+            error:clip(String(error?.message||error),400),
+            policy:'batch_to_durable_singletons_v0_1',
+          }));
           for(let index=0;index<batchTargets.length;index+=1){
-            const one=await callBatch(
-              [batchTargets[index]],
-              '_single_'+String(index+1)
-            );
+            const one=await generateSingleton(batchTargets[index],index);
             batchChecks.push(...one);
           }
         }
@@ -6257,7 +6321,7 @@ export async function runAutonomousRequirementCognition({
         check_count:checks.length,
         required_check_count:Number(verified.verification.required_check_count||0),
         batch_size:3,
-        policy:'math_check_contract_batched_repair_v0_2',
+        policy:'math_check_contract_batched_repair_v0_3_serializer_fallback',
       }));
       return {
         artifact:verified.artifact,
