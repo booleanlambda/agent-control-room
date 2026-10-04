@@ -8063,8 +8063,15 @@ export async function runAutonomousRequirementCognition({
       };
     }
 
+    const authoritativeCaseInputs=asObject(
+      packet?.qda_601_context?.next_unit?.exercise_pack?.case_data
+    );
+    const existingInputs=asObject(parsed.inputs);
     const normalized={
       ...parsed,
+      inputs:Object.keys(authoritativeCaseInputs).length
+        ?{...existingInputs,...authoritativeCaseInputs}
+        :parsed.inputs,
       assumptions:Array.isArray(parsed.assumptions)
         ?parsed.assumptions
         :parsed.assumptions===null||parsed.assumptions===undefined
@@ -8803,6 +8810,39 @@ export async function runAutonomousRequirementCognition({
             finalCandidate.stage_contract_materialization_version=
               STAGE_CONTRACT_MATERIALIZATION_VERSION;
             final={...final,parsed:finalCandidate};
+          }
+        }
+
+        // QDA quantitative parent synthesis is a presentation layer over
+        // already-verified descendants. Materialize authoritative case inputs
+        // and executable descendant checks BEFORE provenance review so a model
+        // is never asked to reconstruct deterministic verification structure.
+        if(candidateOutcome==='COMPLETE'&&qdaQuantitativeAtomicRequirement(packet,node)){
+          const preReviewMaterialization=
+            await materializeQdaQuantitativeFromVerifiedDescendants(
+              node,finalCandidate.artifact
+            );
+          if(preReviewMaterialization?.artifact){
+            finalCandidate.artifact=preReviewMaterialization.artifact;
+            finalCandidate.runtime_verified_descendant_materialization_applied=
+              preReviewMaterialization.materialized===true
+              ||preReviewMaterialization.already_materialized===true;
+            finalCandidate.runtime_verified_descendant_check_count=
+              Number(preReviewMaterialization.check_count||0);
+            final={...final,parsed:finalCandidate};
+            console.log('AAU_QDA_PRE_PROVENANCE_DESCENDANT_MATERIALIZATION',JSON.stringify({
+              agent_id:agentId,
+              intent_execution_id:intentExecutionId,
+              node_path:node.node_path,
+              check_count:Number(preReviewMaterialization.check_count||0),
+              materialized:preReviewMaterialization.materialized===true,
+              already_materialized:preReviewMaterialization.already_materialized===true,
+              authoritative_case_inputs:
+                Object.keys(asObject(
+                  packet?.qda_601_context?.next_unit?.exercise_pack?.case_data
+                )).length,
+              contract:'qda_pre_provenance_verified_descendant_materialization_v0_1',
+            }));
           }
         }
 
