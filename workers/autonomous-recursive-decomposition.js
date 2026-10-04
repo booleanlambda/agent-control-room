@@ -1212,6 +1212,10 @@ function explicitPartitionsDisjoint(a,b){
   return compared;
 }
 
+export function qdaScenarioPartitionsDisjointForProbe(a,b){
+  return explicitPartitionsDisjoint(a,b);
+}
+
 function candidateLedgerRows(suppliedContext){
   const wrapped=asObject(asObject(suppliedContext)?.expertise_candidate_ledger);
   const ledger=asObject(wrapped.value||wrapped);
@@ -9398,6 +9402,27 @@ export async function runAutonomousRequirementCognition({
         if(result.completed)return node;
         if(result.split||result.reconsider)continue;
       }
+    }
+
+    // The per-call transition cap bounds one worker invocation only. It must
+    // never become a lifecycle-fatal cognition fault while the conserved
+    // semantic epoch is still active. Durable state has already been saved;
+    // re-arm the same intent and let the systemic wake fingerprint/cycle-lock
+    // decide whether repeated continuation without material progress is truly
+    // terminal.
+    const continuationRuntime=await semanticRuntimeView();
+    if(String(continuationRuntime?.runtime_status||continuationRuntime?.status||'')==='active'){
+      const error=new Error('cognition_semantic_continuation_required:'+nodePath);
+      error.code='COGNITION_SEMANTIC_CONTINUATION_REQUIRED';
+      error.semanticRuntime=continuationRuntime;
+      error.semanticContinuation={
+        node_path:nodePath,
+        remaining_budget_units:Number(continuationRuntime?.remaining_budget_units||0),
+        transition_count:Number(continuationRuntime?.transition_count||0),
+        material_transition_count:Number(continuationRuntime?.material_transition_count||0),
+        policy:'local_transition_cap_yields_to_systemic_semantic_runtime_v0_1',
+      };
+      throw error;
     }
     throw new Error('autonomous_decomposition_transition_limit:'+nodePath);
   }
