@@ -3262,8 +3262,10 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
       String(error?.code||'')==='COGNITION_PROVENANCE_CONTINUATION_EXHAUSTED';
     const transportFailure=classifyModelTransportFailure(error);
     const providerTransient=transportFailure.failure_class==='model_transport_transient';
+    const explicitErrorCode=String(error?.code||'').trim();
     const cognitionRuntimeFault=
-      !failureDetails
+      !explicitErrorCode
+      && !failureDetails
       && !terminalSemanticRuntimeCode
       && !cognitionAdmissionDeferred
       && !cognitionProvenanceContinuationRequired
