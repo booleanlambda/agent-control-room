@@ -149,6 +149,47 @@ try {
 }
 
 try {
+  const { atomicMaterialCalculationCount } = await import('./autonomous-recursive-decomposition.js');
+  const probeArtifact={
+    calculation:{
+      cac_sensitivity:{
+        positive_shift_plus_25_percent:{
+          new_cac:'70 * 1.25 = 87.5',
+          acquisition_spend:'87.5 * 2200 = 192500',
+          output:'420000 - 250000 - 192500 = -22500',
+          delta:'abs(-22500 - 16000) = 38500',
+        },
+        negative_shift_minus_25_percent:{
+          new_cac:'70 * 0.75 = 52.5',
+          acquisition_spend:'52.5 * 2200 = 115500',
+          output:'420000 - 250000 - 115500 = 54500',
+          delta:'abs(54500 - 16000) = 38500',
+        },
+        absolute_effect:38500,
+      },
+      final_variable_ranking:[
+        {variable:'Volume',absolute_effect:84000,source:'R.002.002'},
+        {variable:'Price',absolute_effect:80000,source:'R.002.001'},
+        {variable:'Variable Cost',absolute_effect:57000,source:'R.002.002'},
+        {variable:'CAC',absolute_effect:38500,source:'Current Calculation'},
+      ],
+    },
+  };
+  const count=atomicMaterialCalculationCount(probeArtifact);
+  console.log('AAU_QDA_MATH_MATERIAL_COVERAGE_PROBE',JSON.stringify({
+    ok:count===9,
+    material_check_count:count,
+    expected:9,
+    excludes_presentation_ranking:true,
+    contract:'qda_numeric_material_leaf_coverage_v0_2',
+  }));
+} catch (error) {
+  console.error('AAU_QDA_MATH_MATERIAL_COVERAGE_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
   const { runPythonStatisticalAnalyses } = await import('./python-quant.js');
   const probe = runPythonStatisticalAnalyses([
     {
