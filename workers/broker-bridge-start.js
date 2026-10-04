@@ -463,6 +463,98 @@ try {
 
 try {
   const { materializeQda601UnitFromVerifiedChildren } = await import('./qda601-runtime.js');
+  const common=(claim,label,n)=>({
+    claim,label,
+    inputs:['source '+n],
+    assumptions:['assumption '+n],
+    formula_or_model:'model '+n,
+    calculation:String(n),
+    units:'unit '+n,
+    interpretation:'interpretation '+n,
+    sanity_check:'sanity '+n,
+    evidence:'evidence '+n,
+    self_audit:{pass_a:'pass a '+n,pass_b:'pass b '+n},
+  });
+  const child=(path,problem,artifact,checks)=>({
+    node_path:path,status:'completed',decision_type:'ATOMIC',
+    requirement_text:'Solve Problem '+problem+' of QDA601-M5-U3.',
+    result_hash:'evidence_state_probe_'+problem,
+    deterministic_math_verified:true,
+    deterministic_math_check_count:checks.length,
+    result_artifact:JSON.stringify({
+      artifact:JSON.stringify({...artifact,python_checks:checks}),
+      handoff:{conclusions:[],facts:[],unresolved:[]},
+    }),
+  });
+  const checks=(prefix,values)=>values.map((value,index)=>({
+    label:prefix+'_'+(index+1),expression:String(value),claimed_result:value,
+  }));
+  const result=materializeQda601UnitFromVerifiedChildren({
+    qda_601_context:{
+      assigned:true,status:'in_progress',
+      next_unit:{
+        type:'quantitative',
+        title:'Evidence States',
+        module_code:'QDA601-M5',
+        unit_code:'QDA601-M5-U3',
+        exercise_pack_ref:'probe_evidence_states',
+        exercise_pack:{problems:[
+          'Label each claim by evidence state.',
+          'Identify which labels require source versus formula provenance.',
+          'Rewrite the claims into a traceable evidence-state ledger.',
+        ]},
+      },
+    },
+  },{
+    authoritativeChildren:[
+      child('R.001',1,{
+        solution:[
+          common('claim one','OBSERVED',1),
+          common('claim two','FORECAST',2),
+        ],
+      },checks('p1',[1,2])),
+      child('R.002',2,{
+        inputs:{labels:['OBSERVED','CALCULATED']},
+        assumptions:['classification rule'],
+        formula_or_model:'provenance mapping',
+        calculation:{OBSERVED:'Source',CALCULATED:'Formula'},
+        units:'categorical',
+        interpretation:'provenance mapping interpretation',
+        sanity_check:'mapping is internally consistent',
+        evidence:'evidence-state taxonomy',
+        self_audit:{pass_a:'mapped labels',pass_b:'attacked mapping'},
+      },checks('p2',[1])),
+      child('R.003',3,{
+        evidence_state_ledger:[
+          common('claim one','OBSERVED',1),
+          common('claim two','FORECAST',2),
+        ],
+      },checks('p3',[1,2])),
+    ],
+  });
+  const responses=result.payload?.problem_responses||[];
+  console.log('AAU_QDA_M5U3_EVIDENCE_STATE_ROOT_PROBE',JSON.stringify({
+    ok:result.applies===true
+      &&Boolean(result.payload)
+      &&result.failures.length===0
+      &&responses.length===3
+      &&responses.every(response=>response?.inputs
+        &&typeof response.inputs==='object'
+        &&!Array.isArray(response.inputs))
+      &&responses[0]?.calculation?.source==='exact_verified_child_records'
+      &&responses[2]?.calculation?.source==='exact_verified_child_records',
+    problem_count:responses.length,
+    python_check_count:result.payload?.python_checks?.length||0,
+    failures:result.failures||[],
+  }));
+} catch (error) {
+  console.error('AAU_QDA_M5U3_EVIDENCE_STATE_ROOT_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
+  const { materializeQda601UnitFromVerifiedChildren } = await import('./qda601-runtime.js');
   const values=[12,13,13,14,15,16,17,18,19,21,24,90];
   const makeStatChild=(path,n,requirement)=>({
     node_path:path,
