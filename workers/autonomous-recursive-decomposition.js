@@ -8413,6 +8413,7 @@ export async function runAutonomousRequirementCognition({
             status:'ACCEPT',
             issue_count:0,
             quantitative_drift_guard_passed:true,
+            deterministic_provenance_guard:asObject(synthesisProvenanceReview?.deterministic_guard),
             artifact_hash:sha256(artifactText(final?.parsed?.artifact)),
             provenance_reason:clip(synthesisProvenanceReview?.reason,2200),
           };
