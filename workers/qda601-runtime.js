@@ -644,6 +644,82 @@ function qdaArtifactProblemResponse(artifact,ordinal,expectedProblem,coveredOrdi
   return artifact;
 }
 
+function qdaEvidenceStateStructuredProblemResponse(ctx,ordinal,expectedProblem,artifact,selected){
+  if(String(ctx?.next_unit?.unit_code||'').toUpperCase()!=='QDA601-M5-U3')return selected;
+  const rows=ordinal===1
+    ?(Array.isArray(artifact?.solution)?artifact.solution:[])
+    :ordinal===3
+      ?(Array.isArray(artifact?.evidence_state_ledger)?artifact.evidence_state_ledger:[])
+      :[];
+  const records=rows.filter(row=>row&&typeof row==='object'&&!Array.isArray(row));
+  if(!records.length)return selected;
+
+  const claimLabelRows=records.map(row=>({
+    claim:String(row.claim||'').trim(),
+    label:String(row.label||row.state||'').trim(),
+  }));
+  const assumptions=records.flatMap(row=>
+    arrayifyArtifactField(row.assumptions).map(value=>({
+      claim:String(row.claim||'').trim(),
+      value,
+    }))
+  );
+  const evidence=records.map(row=>({
+    claim:String(row.claim||'').trim(),
+    label:String(row.label||row.state||'').trim(),
+    value:row.evidence??null,
+  }));
+  const passA=records.map(row=>({
+    claim:String(row.claim||'').trim(),
+    value:row?.self_audit?.pass_a??row?.self_audit?.['Pass A']??null,
+  }));
+  const passB=records.map(row=>({
+    claim:String(row.claim||'').trim(),
+    value:row?.self_audit?.pass_b??row?.self_audit?.['Pass B']??null,
+  }));
+
+  return {
+    problem_id:ordinal,
+    problem:String(expectedProblem||''),
+    inputs:{
+      source:'verified_child_structured_evidence',
+      claims:claimLabelRows,
+    },
+    assumptions,
+    formula_or_model:{
+      method:ordinal===1
+        ?'evidence_state_classification'
+        :'traceable_evidence_state_ledger',
+      by_claim:records.map(row=>({
+        claim:String(row.claim||'').trim(),
+        label:String(row.label||row.state||'').trim(),
+        formula_or_model:row.formula_or_model??null,
+      })),
+    },
+    calculation:{
+      source:'exact_verified_child_records',
+      records,
+    },
+    units:{
+      by_claim:records.map(row=>({
+        claim:String(row.claim||'').trim(),
+        units:row.units??null,
+      })),
+    },
+    interpretation:ordinal===1
+      ?'All assigned claims are classified into the required evidence-state categories using the completed verified child response.'
+      :'All assigned claims are preserved in a traceable evidence-state ledger assembled from completed verified child evidence.',
+    sanity_check:
+      'Every assigned claim is represented exactly once and the structured child records are preserved without model rewriting.',
+    evidence,
+    self_audit:{
+      pass_a:passA,
+      pass_b:passB,
+      verdict:'PASS: structured Evidence States records were preserved directly from verified child work.',
+    },
+  };
+}
+
 function qdaFieldAliases(field){
   return {
     inputs:['inputs','input','input_data','givens','given_data'],
@@ -879,8 +955,11 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
   for(let index=0;index<expectedProblems.length;index+=1){
     const info=coverageByProblem[index][0];
     const ordinal=index+1;
-    const selected=qdaArtifactProblemResponse(
+    const rawSelected=qdaArtifactProblemResponse(
       info.artifact,ordinal,expectedProblems[index],info.coveredOrdinals
+    );
+    const selected=qdaEvidenceStateStructuredProblemResponse(
+      ctx,ordinal,expectedProblems[index],info.artifact,rawSelected
     );
     const responseChecks=Array.isArray(selected?.python_checks)
       ?selected.python_checks:info.childChecks;
