@@ -8145,6 +8145,10 @@ export async function runAutonomousRequirementCognition({
 
     let final=null;
     let synthesisProvenanceReview=null;
+    const deterministicEvidenceLedger=
+      !terminalStageContract.applies
+        ?deterministicEvidenceLedgerSynthesis(packet,node,childRows)
+        :null;
     const priorProvenanceContinuation=asObject(node?.decision_payload?.synthesis_provenance_pending);
     let synthesisProvenanceGuidance=clip(priorProvenanceContinuation.revision_guidance,5000);
     let provenanceContinuationRound=Math.max(0,Number(priorProvenanceContinuation.continuation_round||0));
