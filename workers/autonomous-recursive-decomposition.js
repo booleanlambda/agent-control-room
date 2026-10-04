@@ -8178,9 +8178,11 @@ export async function runAutonomousRequirementCognition({
         const durableFinal=await loadJsonPhaseCheckpoint(
           node.node_path,'FINAL_SYNTHESIS',finalSemanticIdentity
         );
-        final=durableFinal.parsed
-          ? {parsed:durableFinal.parsed,checkpoint_reused:true}
-          : await callJson([
+        final=deterministicEvidenceLedger
+          ? {parsed:deterministicEvidenceLedger.final_candidate,deterministic_exact_materialization:true}
+          : durableFinal.parsed
+            ? {parsed:durableFinal.parsed,checkpoint_reused:true}
+            : await callJson([
           {role:'system',content:[
             'You are the bound autonomous agent closing a parent requirement after all child requirements have resolved.',
             'Some children may be BLOCKED. Decide whether the parent can honestly be COMPLETE from the resolved evidence or must itself be BLOCKED.',
