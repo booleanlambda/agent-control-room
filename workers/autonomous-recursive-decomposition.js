@@ -1144,6 +1144,35 @@ function explicitPartitionValues(v){
     v?.completion_criterion,
   ].filter(Boolean).join(' ');
   const out={};
+
+  // Scenario-specific numeric partitions must be recognized before generic
+  // token-overlap rejection. QDA problems frequently repeat the full parent
+  // sentence in every child while assigning one mutually exclusive parameter
+  // value (for example elasticity ε=-0.6 vs ε=-1.0). Token-set similarity alone
+  // therefore cannot distinguish the children.
+  const scenarioSource=[
+    v?.requirement,
+    v?.completion_criterion,
+  ].filter(Boolean).join(' ');
+  const elasticityValues=new Set();
+  const elasticityPatterns=[
+    /specifically\s+for[^.;]{0,120}(?:ε|epsilon|elasticity)[^0-9+\-−–—]{0,20}([+\-−–—]?\s*\d+(?:\.\d+)?)/gi,
+    /(?:elasticity\s+scenario|scenario\s+(?:with\s+)?(?:ε|epsilon|elasticity))[^0-9+\-−–—]{0,20}([+\-−–—]?\s*\d+(?:\.\d+)?)/gi,
+  ];
+  for(const pattern of elasticityPatterns){
+    let match=null;
+    while((match=pattern.exec(scenarioSource))!==null){
+      const normalized=String(match[1]||'')
+        .replace(/[−–—]/g,'-')
+        .replace(/\s+/g,'');
+      const value=Number(normalized);
+      if(Number.isFinite(value))elasticityValues.add(value);
+    }
+  }
+  if(elasticityValues.size){
+    out.elasticity=[...elasticityValues].sort((a,b)=>a-b);
+  }
+
   const dimensions=['year','row','case','month','quarter','week','day','step','part','section'];
   for(const dimension of dimensions){
     const values=new Set();
