@@ -6173,12 +6173,28 @@ export async function runAutonomousRequirementCognition({
           const response=deepFallback
             ?await callJson(messages,Math.min(stageBudgets.atomic_execution,2600),phase+'_deep_fallback')
             :await callSerialize(messages,900,phase);
-          const batchChecks=asArray(response?.parsed?.python_checks);
+          let batchChecks=asArray(response?.parsed?.python_checks);
           if(batchChecks.length!==targetSubset.length){
             const error=new Error('qda_math_check_batch_count_mismatch');
             error.code='QDA_MATH_CHECK_BATCH_INVALID';
             throw error;
           }
+          // Coverage is per material result, not per distinct arithmetic
+          // expression. Repeated values (for example acquisition spend shown
+          // in several scenarios) are legitimate separate material leaves.
+          // Bind every generated check to its exact target path so the
+          // canonicalizer cannot collapse distinct coverage slots merely
+          // because expression/result text is identical.
+          batchChecks=batchChecks.map((check,index)=>{
+            const targetPath=text(targetSubset[index]?.path)
+              ||('material_result_'+String(index+1));
+            const originalLabel=text(check?.label)||'check';
+            return {
+              ...asObject(check),
+              label:targetPath+' :: '+originalLabel,
+              problem:targetPath,
+            };
+          });
           const batchVerification=verifyPythonMathChecksChunked(
             batchChecks,{absoluteTolerance:0.005,relativeTolerance:1e-9}
           );
@@ -6341,7 +6357,7 @@ export async function runAutonomousRequirementCognition({
         ||verification?.required_check_count
         ||0
       ),
-      policy:'math_check_contract_batched_repair_v0_2',
+      policy:'math_check_contract_batched_repair_v0_4_path_bound_coverage',
     }));
     return null;
   }
