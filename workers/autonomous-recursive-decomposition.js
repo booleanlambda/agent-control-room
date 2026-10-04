@@ -312,12 +312,39 @@ function typedArrayField(obj,key){
   }
   return {present:true,type_ok:true,value:obj[key]};
 }
-const NON_MATERIAL_CALCULATION_KEYS=/^(method|expression|formula|formula_or_model|unit|units|label|description|note|notes|explanation|step)$/i;
+// Only locally calculated numeric results create deterministic Python coverage
+// obligations. Presentation/provenance structures (for example a final ranking
+// table whose values were already verified by sibling nodes) must not inflate
+// the arithmetic coverage count.
+const NON_MATERIAL_CALCULATION_KEYS=/^(method|expression|formula|formula_or_model|unit|units|label|description|note|notes|explanation|step|source|variable|rank|ranking|final_variable_ranking)$/i;
+const CALCULATION_RESULT_NUMBER=/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
+function materialCalculationStringDescriptor(value){
+  const raw=text(value);
+  if(!raw)return null;
+  if(CALCULATION_RESULT_NUMBER.test(raw)){
+    const claimedResult=Number(raw);
+    return Number.isFinite(claimedResult)
+      ?{claimed_result:claimedResult,expression:null}:null;
+  }
+  const equality=raw.lastIndexOf('=');
+  if(equality<=0)return null;
+  const expression=raw.slice(0,equality).trim();
+  const resultRaw=raw.slice(equality+1).trim().replaceAll(',','').replace(/^\$/,'');
+  if(!CALCULATION_RESULT_NUMBER.test(resultRaw))return null;
+  // A material calculation string must actually encode arithmetic. This rejects
+  // provenance-like strings such as "R.002.002" and ordinary presentation text.
+  if(!/\d/.test(expression)||!/[+\-*\/%()]|\b(?:abs|sqrt|log|log10|exp|round)\s*\(/i.test(expression)){
+    return null;
+  }
+  const claimedResult=Number(resultRaw);
+  return Number.isFinite(claimedResult)
+    ?{claimed_result:claimedResult,expression}:null;
+}
 function materialCalculationLeafCount(value,key=''){
   if(value===null||value===undefined)return 0;
   if(NON_MATERIAL_CALCULATION_KEYS.test(String(key)))return 0;
   if(typeof value==='number')return Number.isFinite(value)?1:0;
-  if(typeof value==='string')return value.trim()?1:0;
+  if(typeof value==='string')return materialCalculationStringDescriptor(value)?1:0;
   if(typeof value==='boolean')return 0;
   if(Array.isArray(value)){
     return value.reduce((sum,item,index)=>sum+materialCalculationLeafCount(item,String(index)),0);
@@ -390,7 +417,7 @@ export function pythonChecksFromArtifact(artifact){
       :nested.length?'problem_responses':'top_level',
   };
 }
-function atomicMaterialCalculationCount(artifact){
+export function atomicMaterialCalculationCount(artifact){
   const obj=quantitativeArtifactBody(artifact);
   if(Array.isArray(obj.problem_responses)&&obj.problem_responses.length){
     return Math.max(
@@ -6036,10 +6063,13 @@ export async function runAutonomousRequirementCognition({
           return;
         }
         if(typeof value==='string'){
-          if(value.trim())materialTargets.push({
+          const descriptor=materialCalculationStringDescriptor(value);
+          if(descriptor)materialTargets.push({
             problem_index:problemIndex,
             path,
-            stated_result:value,
+            stated_result:descriptor.claimed_result,
+            deterministic_expression:descriptor.expression,
+            claimed_result:descriptor.claimed_result,
           });
           return;
         }
@@ -6165,7 +6195,25 @@ export async function runAutonomousRequirementCognition({
           }
         }
 
-        const callBatch=async(targetSubset,suffix,{deepFallback=false}={})=>{
+        const localCheckForTarget=target=>{
+          const expression=text(target?.deterministic_expression);
+          const claimedResult=target?.claimed_result;
+          if(!expression||typeof claimedResult!=='number'||!Number.isFinite(claimedResult)){
+            return null;
+          }
+          const check={
+            label:text(target?.path)+' :: deterministic calculation',
+            expression,
+            claimed_result:claimedResult,
+            problem:text(target?.path),
+          };
+          const verification=verifyPythonMathChecksChunked(
+            [check],{absoluteTolerance:0.005,relativeTolerance:1e-9}
+          );
+          return verification.ok===true&&verification.all_match===true?check:null;
+        };
+
+        const callBatch=async(targetSubset,suffix,repairFeedback=null)=>{
           const messages=[
             {role:'system',content:[
               'You are mechanically packaging deterministic Python checks for an already-written quantitative QDA calculation.',
@@ -6174,34 +6222,29 @@ export async function runAutonomousRequirementCognition({
               'Each check must contain nonempty label, safe arithmetic expression, and finite raw JSON-number claimed_result.',
               'The expression must independently reconstruct the stated material result from the supplied frozen inputs/formula. Never use the claimed result itself as a trivial constant-only expression.',
               'SAFE MATH: numeric constants, + - * / ** %, parentheses, pi/e, sqrt/log/log10/exp/abs/round only. No variables, assignments, arrays, indexing, imports, comprehensions, lambdas, attributes, sum(), or range(). Expand finite sums explicitly.',
-              'If a material_result is textual, identify the numerical result stated by that text and reconstruct it from the frozen local context.',
               'No prose outside JSON. Keep labels short and expressions minimal.',
             ].join('\n')},
             {role:'user',content:safeJson({
-              requirement:clip(text(node.requirement_text),1600),
+              requirement:clip(text(node.requirement_text),1200),
               local_problem_contexts:localContexts,
               material_results:targetSubset,
               required_output_check_count:targetSubset.length,
               repair_batch:batchOrdinal,
+              ...(repairFeedback?{prior_verifier_feedback:repairFeedback}:{}),
             })},
           ];
           const phase='req_'+node.node_path.replaceAll('.','_')
             +'_math_check_contract_batch_'+String(batchOrdinal)+suffix;
-          const response=deepFallback
-            ?await callJson(messages,Math.min(stageBudgets.atomic_execution,2600),phase+'_deep_fallback')
-            :await callSerialize(messages,900,phase);
+          // Math-check repair is a protocol packaging task. It is permanently
+          // serializer-only: no path may escalate a single check into deep
+          // cognition or a multi-thousand-token response.
+          const response=await callSerialize(messages,900,phase);
           let batchChecks=asArray(response?.parsed?.python_checks);
           if(batchChecks.length!==targetSubset.length){
             const error=new Error('qda_math_check_batch_count_mismatch');
             error.code='QDA_MATH_CHECK_BATCH_INVALID';
             throw error;
           }
-          // Coverage is per material result, not per distinct arithmetic
-          // expression. Repeated values (for example acquisition spend shown
-          // in several scenarios) are legitimate separate material leaves.
-          // Bind every generated check to its exact target path so the
-          // canonicalizer cannot collapse distinct coverage slots merely
-          // because expression/result text is identical.
           batchChecks=bindChecksToTargets(batchChecks,targetSubset);
           const batchVerification=verifyPythonMathChecksChunked(
             batchChecks,{absoluteTolerance:0.005,relativeTolerance:1e-9}
@@ -6236,28 +6279,37 @@ export async function runAutonomousRequirementCognition({
             }
           }
 
-          let one;
-          try{
-            one=await callBatch([target],'_single_'+String(index+1));
-          }catch(serializerError){
-            // Serializer mode is the preferred bounded path. If a provider
-            // still emits malformed/truncated JSON for one check, allow one
-            // larger deep fallback for that ONE result only; never regenerate
-            // the whole contract.
-            console.warn('AAU_QDA_MATH_CHECK_SINGLE_SERIALIZER_FALLBACK',JSON.stringify({
-              agent_id:agentId,
-              intent_execution_id:intentExecutionId,
-              node_path:node.node_path,
-              batch_ordinal:batchOrdinal,
-              singleton_ordinal:index+1,
-              error:clip(String(serializerError?.message||serializerError),400),
-              policy:'single_result_serializer_then_deep_v0_1',
-            }));
-            one=await callBatch(
-              [target],
-              '_single_'+String(index+1),
-              {deepFallback:true}
-            );
+          const local=localCheckForTarget(target);
+          let one=local?[local]:null;
+          if(!one){
+            try{
+              one=await callBatch([target],'_single_'+String(index+1));
+            }catch(firstError){
+              // One bounded serializer retry may use verifier feedback. Never
+              // escalate deterministic packaging into deep reasoning.
+              console.warn('AAU_QDA_MATH_CHECK_SINGLE_SERIALIZER_RETRY',JSON.stringify({
+                agent_id:agentId,
+                intent_execution_id:intentExecutionId,
+                node_path:node.node_path,
+                batch_ordinal:batchOrdinal,
+                singleton_ordinal:index+1,
+                error:clip(String(firstError?.message||firstError),400),
+                policy:'single_result_serializer_bounded_retry_v0_2_no_deep_fallback',
+              }));
+              try{
+                one=await callBatch(
+                  [target],
+                  '_single_'+String(index+1)+'_retry_2',
+                  firstError?.verification||{error:clip(String(firstError?.message||firstError),300)}
+                );
+              }catch(secondError){
+                const error=new Error('qda_math_check_singleton_bounded_repair_exhausted');
+                error.code='QDA_MATH_CHECK_SINGLETON_REPAIR_EXHAUSTED';
+                error.cause=secondError;
+                error.target_path=target?.path||null;
+                throw error;
+              }
+            }
           }
           await saveJsonPhaseCheckpoint(
             node.node_path,'MATH_CHECK_CONTRACT_REPAIR_SINGLE',singletonIdentity,
@@ -6279,7 +6331,12 @@ export async function runAutonomousRequirementCognition({
           // Serializer mode has Thinking OFF and a 900-token ceiling, which
           // prevents the former repair stage from spending thousands of tokens
           // narrating a small verification structure.
-          batchChecks=await callBatch(batchTargets,'');
+          const localBatch=batchTargets.map(localCheckForTarget);
+          if(localBatch.every(Boolean)){
+            batchChecks=localBatch;
+          }else{
+            batchChecks=await callBatch(batchTargets,'');
+          }
         }catch(error){
           if(batchTargets.length===1)throw error;
           console.warn('AAU_QDA_MATH_CHECK_BATCH_SPLIT_TO_SINGLETONS',JSON.stringify({
@@ -6345,7 +6402,7 @@ export async function runAutonomousRequirementCognition({
         check_count:checks.length,
         required_check_count:Number(verified.verification.required_check_count||0),
         batch_size:3,
-        policy:'math_check_contract_batched_repair_v0_3_serializer_fallback',
+        policy:'math_check_contract_batched_repair_v0_5_serializer_only_no_deep_fallback',
       }));
       return {
         artifact:verified.artifact,
@@ -6365,7 +6422,7 @@ export async function runAutonomousRequirementCognition({
         ||verification?.required_check_count
         ||0
       ),
-      policy:'math_check_contract_batched_repair_v0_4_path_bound_coverage',
+      policy:'math_check_contract_batched_repair_v0_5_numeric_leaf_coverage',
     }));
     return null;
   }
