@@ -6138,13 +6138,30 @@ export async function runAutonomousRequirementCognition({
         const prior=await loadJsonPhaseCheckpoint(
           node.node_path,'MATH_CHECK_CONTRACT_REPAIR_BATCH',batchIdentity
         );
+        const bindChecksToTargets=(rawChecks,targetSubset)=>
+          asArray(rawChecks).map((check,index)=>{
+            const targetPath=text(targetSubset[index]?.path)
+              ||('material_result_'+String(index+1));
+            const rawLabel=text(check?.label)||'check';
+            // Avoid stacking the same prefix when a checkpoint was already
+            // produced by the path-bound version.
+            const label=rawLabel.startsWith(targetPath+' :: ')
+              ?rawLabel:(targetPath+' :: '+rawLabel);
+            return {
+              ...asObject(check),
+              label,
+              problem:targetPath,
+            };
+          });
+
         const priorChecks=asArray(prior.parsed?.python_checks);
         if(priorChecks.length===batchTargets.length){
+          const priorBoundChecks=bindChecksToTargets(priorChecks,batchTargets);
           const priorVerification=verifyPythonMathChecksChunked(
-            priorChecks,{absoluteTolerance:0.005,relativeTolerance:1e-9}
+            priorBoundChecks,{absoluteTolerance:0.005,relativeTolerance:1e-9}
           );
           if(priorVerification.ok===true&&priorVerification.all_match===true){
-            return priorChecks;
+            return priorBoundChecks;
           }
         }
 
@@ -6185,16 +6202,7 @@ export async function runAutonomousRequirementCognition({
           // Bind every generated check to its exact target path so the
           // canonicalizer cannot collapse distinct coverage slots merely
           // because expression/result text is identical.
-          batchChecks=batchChecks.map((check,index)=>{
-            const targetPath=text(targetSubset[index]?.path)
-              ||('material_result_'+String(index+1));
-            const originalLabel=text(check?.label)||'check';
-            return {
-              ...asObject(check),
-              label:targetPath+' :: '+originalLabel,
-              problem:targetPath,
-            };
-          });
+          batchChecks=bindChecksToTargets(batchChecks,targetSubset);
           const batchVerification=verifyPythonMathChecksChunked(
             batchChecks,{absoluteTolerance:0.005,relativeTolerance:1e-9}
           );
