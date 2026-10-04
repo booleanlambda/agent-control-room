@@ -5977,13 +5977,18 @@ export async function runAutonomousRequirementCognition({
     const artifactObject=parsedStructuredArtifact(proposedArtifact);
     if(!artifactObject)return null;
 
+    const requiredCheckCount=Math.max(
+      1,
+      Number(verification?.required_check_count||0),
+      atomicMaterialCalculationCount(artifactObject)
+    );
     const repairIdentity=sha256({
       node_path:node.node_path,
       requirement:node.requirement_text,
       artifact_sha256:sha256(proposedArtifact),
       failure:errorText,
-      required_check_count:Number(verification?.required_check_count||0),
-      contract:'qda_math_check_contract_repair_v0_1',
+      required_check_count:requiredCheckCount,
+      contract:'qda_math_check_contract_repair_v0_2_batched',
     });
     const durable=await loadJsonPhaseCheckpoint(
       node.node_path,'MATH_CHECK_CONTRACT_REPAIR',repairIdentity
@@ -6007,39 +6012,225 @@ export async function runAutonomousRequirementCognition({
       &&verified.verification.all_match===true;
 
     if(!alreadyRepaired){
-      let priorFailure=verification;
-      for(let compactAttempt=1;compactAttempt<=2;compactAttempt++){
-        const response=await callJson([
-          {role:'system',content:[
-            'You are the same bound autonomous agent repairing ONLY the deterministic Python-check coverage contract for an already-written quantitative QDA answer.',
-            'Do NOT rewrite, reconsider, expand, or otherwise alter the substantive answer. Preserve its inputs, assumptions, formula_or_model, calculation, units, interpretation, sanity_check, evidence, self_audit, and conclusions exactly.',
-            'Return exactly one JSON object: {"python_checks":[{"label":"...","expression":"...","claimed_result":NUMBER}]} and nothing else.',
-            'Create one check for every DISTINCT material numerical result already present in the frozen calculation. Do not invent new substantive calculations merely to increase the count.',
-            'Every label must be nonempty. Every claimed_result must be a finite raw JSON number.',
-            'SAFE MATH EXPRESSION CONTRACT: numeric constants, + - * / ** %, parentheses, pi/e, and sqrt/log/log10/exp/abs/round only. No variables, assignments, arrays, indexing, imports, comprehensions, or prose in expressions.',
-            'If a frozen calculation states a percentage as a decimal, preserve the same numeric convention. If it states both an intermediate and final material result, give each its own check.',
-            'This repair changes verification metadata only. It must not silently correct a substantive mathematical disagreement; such disagreement must remain for the normal reasoning path.',
-          ].join('\n')},
-          {role:'user',content:safeJson({
-            requirement:node.requirement_text,
-            frozen_substantive_artifact:artifactObject,
-            verifier_feedback:priorFailure,
-            required_check_count:Number(priorFailure?.required_check_count||0),
-            prior_python_checks:compactAttempt>1?checks:[],
-            compact_repair_attempt:compactAttempt,
-          })},
-        ],Math.min(stageBudgets.atomic_execution,3500),
-        'req_'+node.node_path.replaceAll('.','_')+'_math_check_contract_repair_'+compactAttempt);
+      // Build an explicit list of the material calculation leaves that the
+      // coverage validator itself counts. This keeps the repair surface small:
+      // the model sees only the target results plus the local inputs/formula,
+      // never the entire QDA artifact.
+      const artifactBody=quantitativeArtifactBody(artifactObject);
+      const materialTargets=[];
+      const problemContexts=new Map();
 
-        checks=asArray(response?.parsed?.python_checks);
-        verified=verifyChecks(checks);
-        if(
-          verified?.verification?.required===true
-          &&verified.verification.ok===true
-          &&verified.verification.all_match===true
-        )break;
-        priorFailure=verified?.verification||priorFailure;
+      const compactJson=(value,limit=6000)=>{
+        const raw=safeJson(value);
+        return raw.length<=limit?raw:raw.slice(0,limit)+'...[truncated]';
+      };
+      const addMaterialTargets=(value,key,path,problemIndex)=>{
+        if(value===null||value===undefined)return;
+        if(NON_MATERIAL_CALCULATION_KEYS.test(String(key)))return;
+        if(typeof value==='number'){
+          if(Number.isFinite(value))materialTargets.push({
+            problem_index:problemIndex,
+            path,
+            stated_result:value,
+          });
+          return;
+        }
+        if(typeof value==='string'){
+          if(value.trim())materialTargets.push({
+            problem_index:problemIndex,
+            path,
+            stated_result:value,
+          });
+          return;
+        }
+        if(typeof value==='boolean')return;
+        if(Array.isArray(value)){
+          value.forEach((item,index)=>
+            addMaterialTargets(item,String(index),path+'['+String(index)+']',problemIndex)
+          );
+          return;
+        }
+        if(typeof value==='object'){
+          Object.entries(value).forEach(([childKey,child])=>
+            addMaterialTargets(
+              child,childKey,
+              path?path+'.'+childKey:childKey,
+              problemIndex
+            )
+          );
+        }
+      };
+
+      const responses=Array.isArray(artifactBody.problem_responses)
+        ?artifactBody.problem_responses:[];
+      if(responses.length){
+        responses.forEach((response,index)=>{
+          const body=asObject(response);
+          problemContexts.set(index,{
+            problem_id:body.problem_id??body.id??index+1,
+            inputs_json:compactJson(body.inputs),
+            formula_or_model_json:compactJson(body.formula_or_model),
+            units_json:compactJson(body.units),
+          });
+          const before=materialTargets.length;
+          addMaterialTargets(
+            body.calculation,'calculation',
+            'problem_responses['+String(index)+'].calculation',
+            index
+          );
+          if(materialTargets.length===before){
+            materialTargets.push({
+              problem_index:index,
+              path:'problem_responses['+String(index)+'].calculation',
+              stated_result:compactJson(body.calculation,3000),
+              fallback_target:true,
+            });
+          }
+        });
+      }else{
+        problemContexts.set(-1,{
+          problem_id:null,
+          inputs_json:compactJson(artifactBody.inputs),
+          formula_or_model_json:compactJson(artifactBody.formula_or_model),
+          units_json:compactJson(artifactBody.units),
+        });
+        addMaterialTargets(
+          artifactBody.calculation,'calculation','calculation',-1
+        );
+        if(!materialTargets.length){
+          materialTargets.push({
+            problem_index:-1,
+            path:'calculation',
+            stated_result:compactJson(artifactBody.calculation,3000),
+            fallback_target:true,
+          });
+        }
       }
+
+      // The validator's count is authoritative. In the rare verified-descendant
+      // case where presentation leaves are fewer than the required slots, add
+      // bounded fallback slots rather than resending the full artifact.
+      while(materialTargets.length<requiredCheckCount){
+        materialTargets.push({
+          problem_index:responses.length?0:-1,
+          path:'verification_slot_'+String(materialTargets.length+1),
+          stated_result:'Select one still-uncovered material result from the supplied local calculation context.',
+          fallback_target:true,
+        });
+      }
+      const targets=materialTargets.slice(0,requiredCheckCount);
+      checks=[];
+
+      const generateBatch=async(batchTargets,batchOrdinal)=>{
+        const contextIndexes=[...new Set(
+          batchTargets.map(target=>Number(target.problem_index))
+        )];
+        const localContexts=contextIndexes.map(index=>({
+          problem_index:index,
+          ...asObject(problemContexts.get(index)),
+        }));
+        const batchIdentity=sha256({
+          repair_identity:repairIdentity,
+          batch_ordinal:batchOrdinal,
+          target_paths:batchTargets.map(target=>target.path),
+          contract:'qda_math_check_contract_repair_batch_v0_2',
+        });
+        const prior=await loadJsonPhaseCheckpoint(
+          node.node_path,'MATH_CHECK_CONTRACT_REPAIR_BATCH',batchIdentity
+        );
+        const priorChecks=asArray(prior.parsed?.python_checks);
+        if(priorChecks.length===batchTargets.length){
+          const priorVerification=verifyPythonMathChecksChunked(
+            priorChecks,{absoluteTolerance:0.005,relativeTolerance:1e-9}
+          );
+          if(priorVerification.ok===true&&priorVerification.all_match===true){
+            return priorChecks;
+          }
+        }
+
+        const callBatch=async(targetSubset,suffix)=>{
+          const response=await callJson([
+            {role:'system',content:[
+              'You are the same bound autonomous agent repairing ONLY deterministic Python checks for an already-written quantitative QDA calculation.',
+              'Do not rewrite the answer. Do not return the artifact. Return only {"python_checks":[...]} and nothing else.',
+              'Produce EXACTLY one check for each supplied material_result target, in the same order. Do not add extra checks.',
+              'Each check must contain nonempty label, safe arithmetic expression, and finite raw JSON-number claimed_result.',
+              'The expression must independently reconstruct the stated material result from the supplied frozen inputs/formula. Never use the claimed result itself as a trivial constant-only expression.',
+              'SAFE MATH: numeric constants, + - * / ** %, parentheses, pi/e, sqrt/log/log10/exp/abs/round only. No variables, assignments, arrays, indexing, imports, comprehensions, lambdas, attributes, sum(), or range(). Expand finite sums explicitly.',
+              'If a material_result is textual, identify the numerical result stated by that text and reconstruct it from the frozen local context.',
+              'This is verification metadata repair only. If the frozen substantive mathematics is inconsistent, preserve that disagreement rather than changing the substantive answer.',
+            ].join('\n')},
+            {role:'user',content:safeJson({
+              requirement:clip(text(node.requirement_text),2400),
+              local_problem_contexts:localContexts,
+              material_results:targetSubset,
+              required_output_check_count:targetSubset.length,
+              repair_batch:batchOrdinal,
+            })},
+          ],Math.min(stageBudgets.atomic_execution,1400),
+          'req_'+node.node_path.replaceAll('.','_')
+            +'_math_check_contract_batch_'+String(batchOrdinal)+suffix);
+          const batchChecks=asArray(response?.parsed?.python_checks);
+          if(batchChecks.length!==targetSubset.length){
+            const error=new Error('qda_math_check_batch_count_mismatch');
+            error.code='QDA_MATH_CHECK_BATCH_INVALID';
+            throw error;
+          }
+          const batchVerification=verifyPythonMathChecksChunked(
+            batchChecks,{absoluteTolerance:0.005,relativeTolerance:1e-9}
+          );
+          if(batchVerification.ok!==true||batchVerification.all_match!==true){
+            const error=new Error('qda_math_check_batch_verification_failed');
+            error.code='QDA_MATH_CHECK_BATCH_INVALID';
+            error.verification=batchVerification;
+            throw error;
+          }
+          return batchChecks;
+        };
+
+        let batchChecks=[];
+        try{
+          batchChecks=await callBatch(batchTargets,'');
+        }catch(error){
+          const truncated=
+            /TRUNCATED_RESPONSE|finish_reason|length/i.test(
+              String(error?.message||error)
+            );
+          if(!truncated||batchTargets.length===1)throw error;
+          // A batch that still overflows is split locally into single-result
+          // calls. Successful singleton calls are then saved as one durable
+          // batch checkpoint, so the next wake never repeats finished repair.
+          for(let index=0;index<batchTargets.length;index+=1){
+            const one=await callBatch(
+              [batchTargets[index]],
+              '_single_'+String(index+1)
+            );
+            batchChecks.push(...one);
+          }
+        }
+
+        await saveJsonPhaseCheckpoint(
+          node.node_path,'MATH_CHECK_CONTRACT_REPAIR_BATCH',batchIdentity,
+          {python_checks:batchChecks},{
+            repaired:true,
+            batch_ordinal:batchOrdinal,
+            target_count:batchTargets.length,
+            check_count:batchChecks.length,
+            contract:'qda_math_check_contract_repair_batch_v0_2',
+          }
+        );
+        return batchChecks;
+      };
+
+      const batchSize=3;
+      let batchOrdinal=0;
+      for(let startIndex=0;startIndex<targets.length;startIndex+=batchSize){
+        batchOrdinal++;
+        const batchTargets=targets.slice(startIndex,startIndex+batchSize);
+        const batchChecks=await generateBatch(batchTargets,batchOrdinal);
+        checks.push(...batchChecks);
+      }
+      verified=verifyChecks(checks);
     }
 
     if(
@@ -6055,7 +6246,7 @@ export async function runAutonomousRequirementCognition({
             check_count:checks.length,
             required_check_count:Number(verified.verification.required_check_count||0),
             verification_engine:'python3_safe_math_v0_1',
-            contract:'qda_math_check_contract_repair_v0_1',
+            contract:'qda_math_check_contract_repair_v0_2_batched',
           }
         );
       }
@@ -6065,7 +6256,8 @@ export async function runAutonomousRequirementCognition({
         node_path:node.node_path,
         check_count:checks.length,
         required_check_count:Number(verified.verification.required_check_count||0),
-        policy:'math_check_contract_compact_repair_v0_1',
+        batch_size:3,
+        policy:'math_check_contract_batched_repair_v0_2',
       }));
       return {
         artifact:verified.artifact,
@@ -6085,11 +6277,10 @@ export async function runAutonomousRequirementCognition({
         ||verification?.required_check_count
         ||0
       ),
-      policy:'math_check_contract_compact_repair_v0_1',
+      policy:'math_check_contract_batched_repair_v0_2',
     }));
     return null;
   }
-
   async function executeAtomic(node){
     let pinnedEvidence=await loadPinnedEvidence(node.node_path);
     const atomicDurableCatalog=await loadDurableResearchCatalog(node.node_path);
