@@ -3248,7 +3248,26 @@ export async function runAutonomousRequirementCognition({
     });
 
     let verification=null;
-    for(let attempt=1;attempt<=2;attempt++){
+    const deterministicOperationalVerification=
+      verificationBoundary==='POST_SYNTHESIS_PROVENANCE'
+      &&externalVerification?.ok===true
+      &&text(externalVerification?.status).toUpperCase()==='ACCEPT'
+      &&text(externalVerification?.deterministic_provenance_guard?.contract)
+        ==='exact_completed_child_ledger_v0_1';
+
+    if(deterministicOperationalVerification){
+      verification={
+        status:'VERIFIED',
+        reason:'The runtime deterministically reconstructed the parent evidence ledger from completed child artifacts and verified zero provenance drift.',
+        observed_after:'The parent ledger is an exact structural composition of completed child evidence under exact_completed_child_ledger_v0_1.',
+        remaining_problem:'',
+        agent_authored:false,
+        operational_verification:true,
+        verification_boundary:verificationBoundary,
+        external_verification:externalVerification,
+      };
+    }else{
+      for(let attempt=1;attempt<=2;attempt++){
       try{
         const verificationResponse=await callJson([
           {role:'system',content:[
@@ -3336,6 +3355,7 @@ export async function runAutonomousRequirementCognition({
           };
           break;
         }
+      }
       }
     }
 
