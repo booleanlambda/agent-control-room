@@ -328,7 +328,16 @@ function materialCalculationStringDescriptor(value){
   }
   const equality=raw.lastIndexOf('=');
   if(equality<=0)return null;
-  const expression=raw.slice(0,equality).trim();
+  // Calculation prose often preserves a transparent derivation chain such as
+  // "((78-32)*15000)-300000 = 690000-300000 = 390000".  The safe-math
+  // verifier needs one executable arithmetic expression, not the entire chain
+  // containing equality separators.  Use the final arithmetic segment that
+  // directly produces the stated result.
+  const expressionChain=raw.slice(0,equality).trim();
+  const priorEquality=expressionChain.lastIndexOf('=');
+  const expression=(priorEquality>=0
+    ?expressionChain.slice(priorEquality+1)
+    :expressionChain).trim();
   const resultRaw=raw.slice(equality+1).trim().replaceAll(',','').replace(/^\$/,'');
   if(!CALCULATION_RESULT_NUMBER.test(resultRaw))return null;
   // A material calculation string must actually encode arithmetic. This rejects
