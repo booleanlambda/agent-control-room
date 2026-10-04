@@ -6148,6 +6148,33 @@ export async function runAutonomousRequirementCognition({
           fallback_target:true,
         });
       }
+      // Some material results are conditional numeric leaves rather than
+      // arithmetic strings. Derive deterministic safe-math expressions when
+      // the artifact contains the authoritative sibling value needed to do so.
+      // Burn is max(-operating_contribution, 0); express it using abs because
+      // min/max/conditionals are intentionally outside the safe-math grammar.
+      for(const target of materialTargets){
+        if(
+          typeof target?.stated_result==='number'
+          &&Number.isFinite(target.stated_result)
+          &&/\.burn$/i.test(text(target.path))
+          &&!text(target.deterministic_expression)
+        ){
+          const contributionPath=text(target.path).replace(/\.burn$/i,'.operating_contribution');
+          const contributionTarget=materialTargets.find(candidate=>
+            text(candidate?.path)===contributionPath
+          );
+          const contributionExpression=text(contributionTarget?.deterministic_expression);
+          if(contributionExpression){
+            target.deterministic_expression=
+              '(abs(('+contributionExpression+')) - ('+contributionExpression+')) / 2';
+            target.claimed_result=target.stated_result;
+            target.derivation_contract='qda_burn_from_operating_contribution_v0_1';
+            target.derivation_source_path=contributionPath;
+          }
+        }
+      }
+
       const targets=materialTargets.slice(0,requiredCheckCount);
       checks=[];
 
