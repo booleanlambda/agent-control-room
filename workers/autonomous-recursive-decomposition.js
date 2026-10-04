@@ -8482,7 +8482,24 @@ export async function runAutonomousRequirementCognition({
         break;
       }catch(error){
         const recoverable=error?.code==='COGNITION_RESPONSE_REJECTED'||error?.code==='NVIDIA_TIMEOUT';
-        if(!recoverable||attempt===2)throw error;
+        if(!recoverable)throw error;
+        if(attempt===2){
+          if(error?.code==='COGNITION_RESPONSE_REJECTED'){
+            return returnSynthesisFailureToAgent({
+              failureType:'synthesis_response_contract_exhausted',
+              reason:String(error?.message||error).slice(0,3000),
+              review:synthesisProvenanceReview,
+              externalVerification:{
+                kind:'synthesis_response_contract',
+                ok:false,
+                status:'REJECTED',
+                response_contract:text(error?.response_contract)||null,
+                reason:String(error?.message||error).slice(0,3000),
+              },
+            });
+          }
+          throw error;
+        }
       }
     }
 
