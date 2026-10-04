@@ -5951,6 +5951,141 @@ export async function runAutonomousRequirementCognition({
     };
   }
 
+  async function repairMathCheckCoverageContract(
+    node,proposedArtifact,verification
+  ){
+    if(
+      verification?.required!==true
+      ||(verification?.ok===true&&verification?.all_match===true)
+    )return null;
+
+    const failureClass=text(verification?.failure_class);
+    const errorText=text(verification?.error);
+    const compactRepairEligible=
+      failureClass==='input_contract'
+      &&(
+        errorText==='python_checks_required'
+        ||errorText.includes('python_checks_insufficient_material_coverage')
+        ||errorText.includes('python_checks_must_be_array')
+      );
+    if(!compactRepairEligible)return null;
+
+    const artifactObject=parsedStructuredArtifact(proposedArtifact);
+    if(!artifactObject)return null;
+
+    const repairIdentity=sha256({
+      node_path:node.node_path,
+      requirement:node.requirement_text,
+      artifact_sha256:sha256(proposedArtifact),
+      failure:errorText,
+      required_check_count:Number(verification?.required_check_count||0),
+      contract:'qda_math_check_contract_repair_v0_1',
+    });
+    const durable=await loadJsonPhaseCheckpoint(
+      node.node_path,'MATH_CHECK_CONTRACT_REPAIR',repairIdentity
+    );
+
+    const verifyChecks=checks=>{
+      if(!Array.isArray(checks)||!checks.length)return null;
+      const repairedObject={...artifactObject,python_checks:checks};
+      const repairedArtifact=safeJson(repairedObject);
+      const repairedVerification=deterministicMathVerification(
+        packet,node,repairedArtifact
+      );
+      return {artifact:repairedArtifact,verification:repairedVerification,checks};
+    };
+
+    let checks=asArray(durable.parsed?.python_checks);
+    let verified=verifyChecks(checks);
+    const alreadyRepaired=
+      verified?.verification?.required===true
+      &&verified.verification.ok===true
+      &&verified.verification.all_match===true;
+
+    if(!alreadyRepaired){
+      let priorFailure=verification;
+      for(let compactAttempt=1;compactAttempt<=2;compactAttempt++){
+        const response=await callJson([
+          {role:'system',content:[
+            'You are the same bound autonomous agent repairing ONLY the deterministic Python-check coverage contract for an already-written quantitative QDA answer.',
+            'Do NOT rewrite, reconsider, expand, or otherwise alter the substantive answer. Preserve its inputs, assumptions, formula_or_model, calculation, units, interpretation, sanity_check, evidence, self_audit, and conclusions exactly.',
+            'Return exactly one JSON object: {"python_checks":[{"label":"...","expression":"...","claimed_result":NUMBER}]} and nothing else.',
+            'Create one check for every DISTINCT material numerical result already present in the frozen calculation. Do not invent new substantive calculations merely to increase the count.',
+            'Every label must be nonempty. Every claimed_result must be a finite raw JSON number.',
+            'SAFE MATH EXPRESSION CONTRACT: numeric constants, + - * / ** %, parentheses, pi/e, and sqrt/log/log10/exp/abs/round only. No variables, assignments, arrays, indexing, imports, comprehensions, or prose in expressions.',
+            'If a frozen calculation states a percentage as a decimal, preserve the same numeric convention. If it states both an intermediate and final material result, give each its own check.',
+            'This repair changes verification metadata only. It must not silently correct a substantive mathematical disagreement; such disagreement must remain for the normal reasoning path.',
+          ].join('\n')},
+          {role:'user',content:safeJson({
+            requirement:node.requirement_text,
+            frozen_substantive_artifact:artifactObject,
+            verifier_feedback:priorFailure,
+            required_check_count:Number(priorFailure?.required_check_count||0),
+            prior_python_checks:compactAttempt>1?checks:[],
+            compact_repair_attempt:compactAttempt,
+          })},
+        ],Math.min(stageBudgets.atomic_execution,3500),
+        'req_'+node.node_path.replaceAll('.','_')+'_math_check_contract_repair_'+compactAttempt);
+
+        checks=asArray(response?.parsed?.python_checks);
+        verified=verifyChecks(checks);
+        if(
+          verified?.verification?.required===true
+          &&verified.verification.ok===true
+          &&verified.verification.all_match===true
+        )break;
+        priorFailure=verified?.verification||priorFailure;
+      }
+    }
+
+    if(
+      verified?.verification?.required===true
+      &&verified.verification.ok===true
+      &&verified.verification.all_match===true
+    ){
+      if(!durable.parsed){
+        await saveJsonPhaseCheckpoint(
+          node.node_path,'MATH_CHECK_CONTRACT_REPAIR',repairIdentity,
+          {python_checks:checks},{
+            repaired:true,
+            check_count:checks.length,
+            required_check_count:Number(verified.verification.required_check_count||0),
+            verification_engine:'python3_safe_math_v0_1',
+            contract:'qda_math_check_contract_repair_v0_1',
+          }
+        );
+      }
+      console.log('AAU_QDA_MATH_CHECK_CONTRACT_REPAIRED',JSON.stringify({
+        agent_id:agentId,
+        intent_execution_id:intentExecutionId,
+        node_path:node.node_path,
+        check_count:checks.length,
+        required_check_count:Number(verified.verification.required_check_count||0),
+        policy:'math_check_contract_compact_repair_v0_1',
+      }));
+      return {
+        artifact:verified.artifact,
+        verification:verified.verification,
+        check_count:checks.length,
+      };
+    }
+
+    console.warn('AAU_QDA_MATH_CHECK_CONTRACT_REPAIR_REJECTED',JSON.stringify({
+      agent_id:agentId,
+      intent_execution_id:intentExecutionId,
+      node_path:node.node_path,
+      error:text(verified?.verification?.error)||errorText||null,
+      check_count:checks.length,
+      required_check_count:Number(
+        verified?.verification?.required_check_count
+        ||verification?.required_check_count
+        ||0
+      ),
+      policy:'math_check_contract_compact_repair_v0_1',
+    }));
+    return null;
+  }
+
   async function executeAtomic(node){
     let pinnedEvidence=await loadPinnedEvidence(node.node_path);
     const atomicDurableCatalog=await loadDurableResearchCatalog(node.node_path);
@@ -6340,7 +6475,19 @@ export async function runAutonomousRequirementCognition({
       );
     }
 
-    const proposedMathVerification=deterministicMathVerification(packet,node,proposedArtifact);
+    let proposedMathVerification=deterministicMathVerification(packet,node,proposedArtifact);
+    if(
+      proposedMathVerification.required===true
+      &&(!proposedMathVerification.ok||!proposedMathVerification.all_match)
+    ){
+      const repairedMath=await repairMathCheckCoverageContract(
+        node,proposedArtifact,proposedMathVerification
+      );
+      if(repairedMath?.artifact){
+        proposedArtifact=repairedMath.artifact;
+        proposedMathVerification=repairedMath.verification;
+      }
+    }
     let proposedStatisticsVerification=deterministicStatisticalVerification(packet,node,proposedArtifact);
     if(
       proposedStatisticsVerification.required===true
