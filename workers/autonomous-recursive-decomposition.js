@@ -6184,6 +6184,90 @@ export async function runAutonomousRequirementCognition({
         }
       }
 
+      // If the frozen artifact already contains a safe arithmetic expression
+      // for a material leaf, distinguish a genuine numerical disagreement from
+      // a missing/invalid check-packaging contract BEFORE asking the serializer
+      // to repair coverage. A serializer must never be asked to manufacture a
+      // different expression merely to make an incorrect claimed result pass.
+      const substantiveMismatches=[];
+      for(const target of materialTargets){
+        const expression=text(target?.deterministic_expression);
+        const claimedResult=target?.claimed_result;
+        if(!expression||typeof claimedResult!=='number'||!Number.isFinite(claimedResult)){
+          continue;
+        }
+        const check={
+          label:text(target?.path)+' :: deterministic substantive check',
+          expression,
+          claimed_result:claimedResult,
+          problem:text(target?.path),
+        };
+        const observed=verifyPythonMathChecksChunked(
+          [check],{absoluteTolerance:0.005,relativeTolerance:1e-9}
+        );
+        const row=asArray(observed?.results)[0];
+        if(
+          observed?.ok===true
+          &&row?.valid===true
+          &&row?.matched===false
+          &&typeof row?.actual==='number'
+          &&Number.isFinite(row.actual)
+        ){
+          substantiveMismatches.push({
+            path:text(target?.path),
+            expression,
+            claimed_result:claimedResult,
+            actual:row.actual,
+            absolute_tolerance:row.absolute_tolerance??null,
+            relative_tolerance:row.relative_tolerance??null,
+            error_code:row.error_code??null,
+          });
+        }
+      }
+
+      if(substantiveMismatches.length){
+        const mismatchVerification={
+          required:true,
+          ok:true,
+          all_match:false,
+          all_valid:true,
+          failure_class:'numeric_mismatch',
+          error:'deterministic_material_result_mismatch',
+          check_count:substantiveMismatches.length,
+          required_check_count:requiredCheckCount,
+          results:substantiveMismatches.map((mismatch,index)=>({
+            index,
+            label:mismatch.path+' :: deterministic substantive check',
+            problem:mismatch.path,
+            valid:true,
+            matched:false,
+            actual:mismatch.actual,
+            claimed_result:mismatch.claimed_result,
+            absolute_tolerance:mismatch.absolute_tolerance,
+            relative_tolerance:mismatch.relative_tolerance,
+            error_code:mismatch.error_code,
+            expression:mismatch.expression,
+          })),
+          validation_failures:[],
+          substantive_mismatch:true,
+          contract:'qda_material_numeric_mismatch_v0_1',
+        };
+        console.warn('AAU_QDA_MATH_SUBSTANTIVE_MISMATCH_ROUTED_TO_AGENT',JSON.stringify({
+          agent_id:agentId,
+          intent_execution_id:intentExecutionId,
+          node_path:node.node_path,
+          mismatch_count:substantiveMismatches.length,
+          mismatches:substantiveMismatches.slice(0,8),
+          policy:'substantive_numeric_mismatch_precedes_serializer_repair_v0_1',
+        }));
+        return {
+          artifact:proposedArtifact,
+          verification:mismatchVerification,
+          check_count:0,
+          substantive_mismatch:true,
+        };
+      }
+
       const targets=materialTargets.slice(0,requiredCheckCount);
       checks=[];
 
