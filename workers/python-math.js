@@ -181,6 +181,52 @@ export function verifyPythonMathChecks(checks, options = {}) {
   };
 }
 
+export function calculatePythonMathExpressions(calculations){
+  if(!Array.isArray(calculations)||!calculations.length||calculations.length>MAX_CHECKS){
+    return {
+      ok:false,
+      failure_class:'input_contract',
+      error:'python_calculations_invalid',
+      calculation_count:Array.isArray(calculations)?calculations.length:0,
+      results:[],
+    };
+  }
+  const checks=calculations.map((calculation,index)=>({
+    label:String(calculation?.label||'calculation_'+String(index+1)),
+    expression:calculation?.expression,
+    // The runner always evaluates the expression before comparison. A neutral
+    // placeholder lets this path reuse the same sandboxed Python evaluator
+    // while treating Python's actual result as the authoritative output.
+    claimed_result:0,
+  }));
+  const evaluated=verifyPythonMathChecks(checks,{
+    absoluteTolerance:0,
+    relativeTolerance:0,
+  });
+  if(evaluated.ok!==true||evaluated.all_valid!==true){
+    return {
+      ok:false,
+      failure_class:evaluated.failure_class||'runtime',
+      error:evaluated.error||'python_calculation_failed',
+      calculation_count:Number(evaluated.check_count||0),
+      results:Array.isArray(evaluated.results)?evaluated.results:[],
+    };
+  }
+  return {
+    ok:true,
+    failure_class:null,
+    calculation_count:evaluated.check_count,
+    results:evaluated.results.map((row,index)=>({
+      index,
+      label:row.label,
+      expression:calculations[index]?.expression,
+      actual:row.actual,
+      valid:row.valid===true,
+      error_code:row.error_code||null,
+    })),
+  };
+}
+
 export function verifyPythonMathChecksChunked(checks, options = {}) {
   if(!Array.isArray(checks) || checks.length<=MAX_CHECKS){
     const single=verifyPythonMathChecks(checks,options);
