@@ -24,16 +24,23 @@ try {
   const cents=verifyPythonMathChecks([
     {label:'two_decimal_rounding',expression:'100 / 3',claimed_result:33.33}
   ],{absoluteTolerance:0.005,relativeTolerance:1e-9});
+  const integerCurrency=verifyPythonMathChecks([
+    {label:'integer_currency_rounding',expression:'0.44 * 329545.45',claimed_result:145000}
+  ],{absoluteTolerance:0.005,relativeTolerance:1e-9});
   const probabilityDrift=verifyPythonMathChecks([
     {label:'probability_precision_reject',expression:'0.4048191 / 0.5524091',claimed_result:0.7324815}
   ],{absoluteTolerance:0.005,relativeTolerance:1e-9});
   console.log('AAU_PYTHON_MATH_PRECISION_PROBE',JSON.stringify({
     ok:cents.ok===true
       &&cents.all_match===true
+      &&integerCurrency.ok===true
+      &&integerCurrency.all_match===true
       &&probabilityDrift.ok===true
       &&probabilityDrift.all_match===false,
     cents_actual:cents.results?.[0]?.actual??null,
     cents_tolerance:cents.results?.[0]?.absolute_tolerance??null,
+    integer_currency_actual:integerCurrency.results?.[0]?.actual??null,
+    integer_currency_tolerance:integerCurrency.results?.[0]?.absolute_tolerance??null,
     probability_actual:probabilityDrift.results?.[0]?.actual??null,
     probability_tolerance:probabilityDrift.results?.[0]?.absolute_tolerance??null,
   }));
@@ -691,12 +698,22 @@ try {
     requirement:'Solve the parent elasticity problem specifically for the elasticity scenario ε = -0.6.',
     completion_criterion:'Complete and verify only the ε = -0.6 scenario.'
   };
+  const interview={
+    requirement:"Compute EVwSI net of cost for the 'Interview study' experiment.",
+    completion_criterion:"Verify only the 'Interview study' experiment."
+  };
+  const pilot={
+    requirement:"Compute EVwSI net of cost for the 'Paid pilot' experiment.",
+    completion_criterion:"Verify only the 'Paid pilot' experiment."
+  };
   console.log('AAU_QDA_ELASTICITY_PARTITION_PROBE',JSON.stringify({
     ok:qdaScenarioPartitionsDisjointForProbe(childA,childB)===true
-      &&qdaScenarioPartitionsDisjointForProbe(childA,childSame)===false,
+      &&qdaScenarioPartitionsDisjointForProbe(childA,childSame)===false
+      &&qdaScenarioPartitionsDisjointForProbe(interview,pilot)===true,
     disjoint:qdaScenarioPartitionsDisjointForProbe(childA,childB),
     same_partition_disjoint:qdaScenarioPartitionsDisjointForProbe(childA,childSame),
-    contract:'explicit_numeric_scenario_partition_v0_1',
+    named_alternative_disjoint:qdaScenarioPartitionsDisjointForProbe(interview,pilot),
+    contract:'explicit_numeric_and_named_scenario_partition_v0_2',
   }));
 } catch (error) {
   console.error('AAU_QDA_ELASTICITY_PARTITION_PROBE',JSON.stringify({
