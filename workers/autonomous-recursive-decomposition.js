@@ -18,7 +18,11 @@ import {
   MAX_MODEL_TRANSPORT_ATTEMPTS,
   pathDepth,
 } from './semantic-runtime-controls.js';
-import { verifyPythonMathChecks, verifyPythonMathChecksChunked } from './python-math.js';
+import {
+  verifyPythonMathChecks,
+  verifyPythonMathChecksChunked,
+  calculatePythonMathExpressions,
+} from './python-math.js';
 import { runPythonStatisticalAnalysesChunked } from './python-quant.js';
 import { materializeQda601UnitFromVerifiedChildren } from './qda601-runtime.js';
 
@@ -126,6 +130,127 @@ function qdaQuantitativeAtomicRequirement(packet,node){
   if(!inheritedQdaAssignment&&!/QDA601/i.test(requirement))return false;
 
   return /(calculat|compute|compound|discount|retention|churn|present value|future value|\bPV\b|\bFV\b|\bNPV\b|rate|ratio|revenue|cost|margin|probab|scenario|optimization|cash(?:\s+flow|\s+balance|\s+inflow|\s+outflow)?|runway|break[- ]?even|python_checks?)/i.test(requirement);
+}
+
+function qdaM7U4AuthoritativePythonCalculation(packet){
+  const qda=asObject(packet?.qda_601_context);
+  const next=asObject(qda.next_unit);
+  if(text(next.unit_code).toUpperCase()!=='QDA601-M7-U4')return null;
+  const caseData=asObject(asObject(next.exercise_pack).case_data);
+  const payoffs=asObject(caseData.decision_payoffs);
+  const priorHigh=Number(caseData.prior_high);
+  const launchHigh=Number(payoffs.launch_high);
+  const launchLow=Number(payoffs.launch_low);
+  const kill=Number(payoffs.kill);
+  const tests=asArray(caseData.tests);
+  if(
+    ![priorHigh,launchHigh,launchLow,kill].every(Number.isFinite)
+    ||priorHigh<0||priorHigh>1
+    ||tests.length<1
+  )return null;
+
+  const firstPass=[
+    {label:'baseline_launch_ev',expression:`${priorHigh} * ${launchHigh} + ${1-priorHigh} * ${launchLow}`},
+  ];
+  for(const raw of tests){
+    const name=text(raw?.name);
+    const sensitivity=Number(raw?.sensitivity);
+    const specificity=Number(raw?.specificity);
+    const cost=Number(raw?.cost);
+    if(!name||![sensitivity,specificity,cost].every(Number.isFinite))return null;
+    const lowPrior=1-priorHigh;
+    const falsePositive=1-specificity;
+    const falseNegative=1-sensitivity;
+    const pPos=`${priorHigh} * ${sensitivity} + ${lowPrior} * ${falsePositive}`;
+    const pNeg=`${priorHigh} * ${falseNegative} + ${lowPrior} * ${specificity}`;
+    const key=normalizedRequirement(name).replaceAll(' ','_');
+    firstPass.push(
+      {label:key+'_p_positive',expression:pPos},
+      {label:key+'_p_negative',expression:pNeg},
+      {label:key+'_posterior_high_positive',expression:`(${priorHigh} * ${sensitivity}) / (${pPos})`},
+      {label:key+'_posterior_high_negative',expression:`(${priorHigh} * ${falseNegative}) / (${pNeg})`},
+      {label:key+'_launch_ev_positive',expression:`((${priorHigh} * ${sensitivity}) / (${pPos})) * ${launchHigh} + (1 - ((${priorHigh} * ${sensitivity}) / (${pPos}))) * ${launchLow}`},
+      {label:key+'_launch_ev_negative',expression:`((${priorHigh} * ${falseNegative}) / (${pNeg})) * ${launchHigh} + (1 - ((${priorHigh} * ${falseNegative}) / (${pNeg}))) * ${launchLow}`},
+    );
+  }
+
+  const first=calculatePythonMathExpressions(firstPass);
+  if(first.ok!==true)throw new Error('qda_m7_u4_python_first_pass_failed:'+String(first.error||'unknown'));
+  const values=Object.fromEntries(first.results.map(row=>[row.label,row.actual]));
+  const baselineLaunch=Number(values.baseline_launch_ev);
+  const baselineDecision=Math.max(kill,baselineLaunch);
+  const secondPass=[];
+
+  for(const raw of tests){
+    const name=text(raw?.name);
+    const key=normalizedRequirement(name).replaceAll(' ','_');
+    const cost=Number(raw?.cost);
+    const pPositive=Number(values[key+'_p_positive']);
+    const pNegative=Number(values[key+'_p_negative']);
+    const launchPositive=Number(values[key+'_launch_ev_positive']);
+    const launchNegative=Number(values[key+'_launch_ev_negative']);
+    const decisionPositive=Math.max(kill,launchPositive);
+    const decisionNegative=Math.max(kill,launchNegative);
+    secondPass.push(
+      {
+        label:key+'_evwsi',
+        expression:`${pPositive} * ${decisionPositive} + ${pNegative} * ${decisionNegative}`,
+      },
+      {
+        label:key+'_evsi',
+        expression:`(${pPositive} * ${decisionPositive} + ${pNegative} * ${decisionNegative}) - ${baselineDecision}`,
+      },
+      {
+        label:key+'_net_decision_value',
+        expression:`((${pPositive} * ${decisionPositive} + ${pNegative} * ${decisionNegative}) - ${baselineDecision}) - ${cost}`,
+      },
+    );
+  }
+  const second=calculatePythonMathExpressions(secondPass);
+  if(second.ok!==true)throw new Error('qda_m7_u4_python_second_pass_failed:'+String(second.error||'unknown'));
+  const derived=Object.fromEntries(second.results.map(row=>[row.label,row.actual]));
+
+  const testResults=tests.map(raw=>{
+    const name=text(raw?.name);
+    const key=normalizedRequirement(name).replaceAll(' ','_');
+    const launchPositive=Number(values[key+'_launch_ev_positive']);
+    const launchNegative=Number(values[key+'_launch_ev_negative']);
+    return {
+      name,
+      cost:Number(raw?.cost),
+      sensitivity:Number(raw?.sensitivity),
+      specificity:Number(raw?.specificity),
+      p_positive:Number(values[key+'_p_positive']),
+      p_negative:Number(values[key+'_p_negative']),
+      posterior_high_positive:Number(values[key+'_posterior_high_positive']),
+      posterior_high_negative:Number(values[key+'_posterior_high_negative']),
+      launch_ev_positive:launchPositive,
+      launch_ev_negative:launchNegative,
+      optimal_positive:launchPositive>=kill?'LAUNCH':'KILL',
+      optimal_negative:launchNegative>=kill?'LAUNCH':'KILL',
+      decision_value_positive:Math.max(kill,launchPositive),
+      decision_value_negative:Math.max(kill,launchNegative),
+      evwsi:Number(derived[key+'_evwsi']),
+      evsi:Number(derived[key+'_evsi']),
+      net_decision_value:Number(derived[key+'_net_decision_value']),
+    };
+  });
+  const ranked=[...testResults].sort((a,b)=>b.net_decision_value-a.net_decision_value);
+  return {
+    contract:'qda_m7_u4_authoritative_python_calculator_v0_1',
+    calculator:'python3_safe_math_v0_1',
+    source:'authoritative_curriculum_case_data',
+    baseline:{
+      launch_ev:baselineLaunch,
+      kill_value:kill,
+      optimal_decision:baselineLaunch>=kill?'LAUNCH':'KILL',
+      expected_value:baselineDecision,
+    },
+    tests:testResults,
+    recommended_experiment:ranked[0]?.name||null,
+    recommended_net_decision_value:ranked[0]?.net_decision_value??null,
+    numeric_authority:'runtime_python_calculation',
+  };
 }
 
 const QDA_CURRICULUM_DEPENDENCY_OVERRIDES=Object.freeze({
@@ -6672,8 +6797,12 @@ export async function runAutonomousRequirementCognition({
           inherited_completed_sibling_results:nodeContext.inherited_completed_sibling_results,
         }
       : nodeContext;
+    const authoritativePythonCalculation=qdaM7U4AuthoritativePythonCalculation(packet);
     const atomicBaseContext={
       ...atomicScopeContext,
+      ...(authoritativePythonCalculation?{
+        runtime_python_calculation:authoritativePythonCalculation,
+      }:{}),
       ...(!verifiedResultsSynthesis&&atomicDurableCatalog.length?{
         research_source_catalog:mergeResearchSourceCatalog(
           nodeContext.research_source_catalog,
@@ -6781,6 +6910,10 @@ export async function runAutonomousRequirementCognition({
               ]:[]),
               ...(qdaQuantitativeAtomicRequirement(packet,node)?[
                 'DETERMINISTIC MATH COMPANION: this is a quantitative QDA requirement. Return artifact as a real JSON object and put python_checks INSIDE that artifact object, not beside the wrapper. python_checks MUST be an array. Every check MUST be an object with label as a nonempty string, expression as a nonempty string, and claimed_result as a finite JSON number (never a quoted number, boolean, null, array, or object). Each material numerical result must have its own check.',
+                ...(authoritativePythonCalculation?[
+                  'AUTHORITATIVE PYTHON CALCULATION: supplied_context.runtime_python_calculation was computed by the runtime from the canonical curriculum case data using the sandboxed Python safe-math evaluator. Treat those numeric values as authoritative. Do not recompute, round early, or replace them with approximate mental arithmetic. Your job is to explain, structure, sanity-check, and bind those results to the requested submission fields.',
+                  'When you emit python_checks for a value already present in runtime_python_calculation, use an expression consistent with the canonical formula and set claimed_result to the supplied Python value (or a presentation-rounded value only when that rounding is explicit and within the runtime tolerance).'
+                ]:[]),
                 'SAFE MATH EXPRESSION CONTRACT: expressions may contain numeric constants, + - * / ** %, parentheses, pi/e, and safe functions sqrt/log/log10/exp/abs/round only. Do NOT use variables, assignments, sum(), range(), list/dict/tuple literals, comprehensions, lambdas, indexing, attributes, imports, or other Python syntax. Expand a finite sum explicitly with + terms.',
                 'Python verifies arithmetic only; you remain responsible for selecting the correct formula, units, assumptions, and interpretation.',
                 'Do your reasoning first. Treat a later Python disagreement as evidence that your numerical execution must be reconciled; never change the formula merely to force a match.',
