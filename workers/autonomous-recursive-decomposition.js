@@ -1209,6 +1209,25 @@ function explicitPartitionValues(v){
     out.elasticity=[...elasticityValues].sort((a,b)=>a-b);
   }
 
+  // Distinct named alternatives are also semantic partitions. Quantitative
+  // branches often repeat the same formula vocabulary while operating on
+  // different experiments/tests (for example "Interview study" vs "Paid pilot").
+  // Treat an explicitly quoted named option as a partition identity so lexical
+  // similarity cannot collapse genuinely disjoint work.
+  const namedAlternatives=new Set();
+  const quotedAlternativePattern=/['"]([^'"]{2,100})['"]/g;
+  let quotedMatch=null;
+  while((quotedMatch=quotedAlternativePattern.exec(raw))!==null){
+    const label=normalizedRequirement(quotedMatch[1]);
+    if(!label)continue;
+    if(/\b(?:study|pilot|experiment|test|scenario|option|strategy|alternative|candidate)\b/.test(label)){
+      namedAlternatives.add(label);
+    }
+  }
+  if(namedAlternatives.size){
+    out.named_alternative=[...namedAlternatives].sort();
+  }
+
   const dimensions=['year','row','case','month','quarter','week','day','step','part','section'];
   for(const dimension of dimensions){
     const values=new Set();
@@ -3044,6 +3063,84 @@ export async function runAutonomousRequirementCognition({
     ]) delete next[key];
     next.reconsider_decomposition=true;
     return next;
+  }
+
+  async function retireUnresolvedDescendantsForRouteSupersession(node,nextDecision){
+    const retired=[];
+    const preservedCompleted=[];
+    const visited=new Set();
+
+    async function walk(parentNodePath){
+      if(visited.has(parentNodePath))return;
+      visited.add(parentNodePath);
+      const refs=(await children(parentNodePath))
+        .sort((a,b)=>Number(a?.ordinal||0)-Number(b?.ordinal||0));
+      for(const ref of refs){
+        const child=await getNode(ref.node_path);
+        if(child?.status!=='ready')continue;
+        const childStatus=text(child.node_status||child.status).toLowerCase();
+
+        // Recurse before retiring the parent so the durable audit tree remains
+        // inspectable and completed work is never destroyed.
+        await walk(child.node_path);
+
+        if(childStatus==='completed'){
+          preservedCompleted.push({
+            node_path:child.node_path,
+            result_hash:child.result_hash||null,
+            requirement_hash:child.requirement_hash||null,
+          });
+          continue;
+        }
+        if(childStatus==='cancelled')continue;
+
+        await saveNode({
+          nodePath:child.node_path,
+          parentPath:parentNodePath,
+          ordinal:child.ordinal||0,
+          requirement:child.requirement_text,
+          sourceKind:child.source_kind,
+          sourceRef:child.source_ref,
+          status:'cancelled',
+          decisionType:child.decision_type??null,
+          decisionPayload:{
+            cancellation_contract:'parent_route_supersession_v0_1',
+            cancelled_by_parent_path:node.node_path,
+            superseding_decision:text(nextDecision).toUpperCase()||null,
+            prior_status:childStatus||null,
+            prior_decision_type:text(child.decision_type)||null,
+            prior_requirement_hash:child.requirement_hash||null,
+            prior_result_hash:child.result_hash||null,
+            prior_decision_payload_sha256:sha256(asObject(child.decision_payload)),
+            cancelled_at:new Date().toISOString(),
+            reusable_only_if_explicitly_rebound:false,
+          },
+          contextPayload:child.context_payload||{},
+          resultArtifact:child.result_artifact||null,
+        });
+        retired.push({
+          node_path:child.node_path,
+          prior_status:childStatus||null,
+          prior_decision_type:text(child.decision_type)||null,
+          requirement_hash:child.requirement_hash||null,
+        });
+      }
+    }
+
+    await walk(node.node_path);
+    if(retired.length){
+      console.log('AAU_AUTONOMOUS_ROUTE_SUPERSESSION_DESCENDANTS_RETIRED',JSON.stringify({
+        agent_id:agentId,
+        intent_execution_id:intentExecutionId,
+        node_path:node.node_path,
+        superseding_decision:text(nextDecision).toUpperCase()||null,
+        retired_count:retired.length,
+        retired_paths:retired.map(v=>v.node_path),
+        preserved_completed_count:preservedCompleted.length,
+        policy:'parent_route_supersession_v0_1',
+      }));
+    }
+    return {retired,preserved_completed:preservedCompleted};
   }
 
   async function retireUnresolvedDescendantsForDiscoveryRepair(node,episode){
@@ -5073,6 +5170,22 @@ export async function runAutonomousRequirementCognition({
         return {node,decision};
       }
 
+      const routeSupersession=decision==='ATOMIC'
+        ?await retireUnresolvedDescendantsForRouteSupersession(node,decision)
+        :{retired:[],preserved_completed:[]};
+      const finalDecisionPayload=routeSupersession.retired.length
+        ?{
+            ...decisionPayload,
+            route_supersession:{
+              contract:'parent_route_supersession_v0_1',
+              superseding_decision:decision,
+              retired_descendants:routeSupersession.retired,
+              preserved_completed_descendants:routeSupersession.preserved_completed,
+              applied_at:new Date().toISOString(),
+            },
+          }
+        :decisionPayload;
+
       node=await saveNode({
         nodePath:node.node_path,
         parentPath:node.parent_path??parentPathOf(node.node_path),
@@ -5082,7 +5195,7 @@ export async function runAutonomousRequirementCognition({
         sourceRef:node.source_ref,
         status:decision==='SPLIT'?'split':'executing',
         decisionType:decision,
-        decisionPayload,
+        decisionPayload:finalDecisionPayload,
         contextPayload,
         resultArtifact:node.result_artifact||null,
       });
