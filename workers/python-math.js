@@ -71,7 +71,11 @@ function claimedDecimalPlaces(value){
 }
 function precisionAwareAbsoluteTolerance(value,cap){
   const places=claimedDecimalPlaces(value);
-  if(places<=0)return Math.min(cap,1e-9);
+  // Integer formatting does not imply nanounit precision. The caller supplies
+  // the domain tolerance ceiling (for QDA currency this is typically half a
+  // cent). Preserve that ceiling for integer-valued claims so harmless display
+  // rounding cannot become a deterministic-math failure.
+  if(places<=0)return cap;
   const halfUnit=0.5*Math.pow(10,-places);
   return Math.min(cap,Math.max(1e-12,halfUnit));
 }
