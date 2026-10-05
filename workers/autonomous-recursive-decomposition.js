@@ -6857,6 +6857,10 @@ export async function runAutonomousRequirementCognition({
           full.inherited_completed_sibling_results
           ||nodeContext.inherited_completed_sibling_results
           ||[],
+        runtime_python_calculation:
+          full.runtime_python_calculation
+          ||atomicBaseContext.runtime_python_calculation
+          ||null,
       };
     };
     const atomicSemanticIdentity=sha256({
