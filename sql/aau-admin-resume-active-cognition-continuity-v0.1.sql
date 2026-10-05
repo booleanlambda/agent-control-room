@@ -204,6 +204,6 @@ begin
 
   return jsonb_build_object('status','running','agent_id',p_agent_id,'wake_request_id',v_wake_id,'trigger_type',v_trigger,'pending_chat',v_message_id is not null,'dual_agent_mode',v_dual_enabled,'reused_active_wake',v_reuse_active_wake,'admin_resume_contract','admin_resume_active_wake_reuse_v0_1');
 end;
-$function$
+$function$;
 
 commit;
