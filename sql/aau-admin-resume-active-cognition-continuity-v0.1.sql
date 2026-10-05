@@ -1,6 +1,7 @@
--- AAU admin-resume active cognition continuity v0.1
--- Prevent Start/Unpause from cancelling a healthy in-flight cognition and
--- starting a concurrent replacement against the same durable semantic tree.
+-- AAU admin-resume active cognition continuity v0.2
+-- Owner-bound liveness: Start/Unpause may reuse an in-flight cognition only
+-- when the healthy runtime worker is the exact worker that owns that wake.
+-- This file supersedes the original queue-health-only v0.1 implementation.
 begin;
 CREATE OR REPLACE FUNCTION public.aau_control_room_admin_unpause(p_agent_id uuid)
  RETURNS jsonb
@@ -18,6 +19,8 @@ declare
   v_dual_enabled boolean := false;
   v_allowlist jsonb := '[]'::jsonb;
   v_active_wake_id uuid;
+  v_active_worker_id text;
+  v_health_worker_id text;
   v_worker_activity_at timestamptz;
   v_reuse_active_wake boolean := false;
 begin
@@ -51,24 +54,26 @@ begin
   -- Preserve a genuinely live in-flight cognition. Cancelling a RUNNING wake here
   -- can leave its provider call executing while a replacement wake starts, creating
   -- concurrent writers against the same durable semantic node.
-  select q.wake_request_id
-    into v_active_wake_id
+  select q.wake_request_id,q.worker_id
+    into v_active_wake_id,v_active_worker_id
   from agent_lab.wake_queue q
   where q.agent_id=p_agent_id
     and q.status in ('claimed','running')
   order by coalesce(q.started_at,q.claimed_at,q.created_at) desc
   limit 1;
 
-  select greatest(
+  select worker_id,greatest(
            coalesce(heartbeat_at,'epoch'::timestamptz),
            coalesce(wake_ping_at,'epoch'::timestamptz)
          )
-    into v_worker_activity_at
+    into v_health_worker_id,v_worker_activity_at
   from agent_lab.runtime_worker_health
   where queue_name='aau.intent';
 
   v_reuse_active_wake :=
     v_active_wake_id is not null
+    and nullif(v_active_worker_id,'') is not null
+    and v_health_worker_id is not distinct from v_active_worker_id
     and v_worker_activity_at is not null
     and v_worker_activity_at > now()-interval '6 minutes';
 
@@ -173,20 +178,20 @@ begin
         ||jsonb_build_object(
           'resumed_at',now(),
           'resumed_by','agent_control_room_admin',
-          'admin_control_version','admin_control_v0_2',
+          'admin_control_version','admin_control_v0_3',
           'last_repair_cleared_at',now(),
           'last_repair_clear_reason','explicit_admin_unpause'
         ),
       updated_at=now()
   where agent_id=p_agent_id;
-  update agent_lab.state set state_payload=(coalesce(state_payload,'{}'::jsonb)-'paused_at'-'pause_reason'-'repair_pause_reason')||jsonb_build_object('system_paused',false,'awake',true,'sleeping',false,'wake_pending',true,'intent_pending',true,'between_cognition_ticks',false,'inactive_between_wakes',false,'wake_pending_since',now(),'intent_pending_since',now(),'admin_control_version','admin_control_v0_2'),updated_at=now() where agent_id=p_agent_id;
+  update agent_lab.state set state_payload=(coalesce(state_payload,'{}'::jsonb)-'paused_at'-'pause_reason'-'repair_pause_reason'-'failed_wake_request_id'-'wake_pending_since'-'intent_pending_since')||jsonb_build_object('system_paused',false,'awake',true,'sleeping',false,'wake_pending',true,'intent_pending',true,'between_cognition_ticks',false,'inactive_between_wakes',false,'wake_pending_since',now(),'intent_pending_since',now(),'admin_control_version','admin_control_v0_3'),updated_at=now() where agent_id=p_agent_id;
   update agent_lab.agent_existence_accounts
   set account_state='current',levy_enabled=true,next_due_at=now()+interval '1 minute',
       metadata=(coalesce(metadata,'{}'::jsonb)-'suspended_reason'-'suspended_at'-'failed_wake_request_id')
         ||jsonb_build_object(
           'resumed_at',now(),
           'resume_rule','restart_next_due_from_resume_time',
-          'admin_control_version','admin_control_v0_2'
+          'admin_control_version','admin_control_v0_3'
         ),
       updated_at=now()
   where agent_id=p_agent_id;
@@ -200,10 +205,14 @@ begin
   where agent_id=p_agent_id
     and alert_type='orphaned_autonomous_intent_exhausted'
     and status='open';
-  update agent_lab.runtime_config set metadata=coalesce(metadata,'{}'::jsonb)||jsonb_build_object('current_experimental_agent_id',p_agent_id,'current_experimental_agent_label',v_agent.internal_label,'current_runtime_mode',case when v_dual_enabled then 'dual_agent_autonomous_model_serial' else 'single_agent_autonomous_model' end,'experimental_intent_loop_state','running','experimental_intent_loop_reason',null,'global_pause',true,'admin_control_version','admin_control_v0_2','intent_timing_version','intent_timing_v0_2','minimum_time_intent_delay_minutes',5),updated_at=now() where config_id=1;
+  update agent_lab.runtime_config set metadata=coalesce(metadata,'{}'::jsonb)||jsonb_build_object('current_experimental_agent_id',p_agent_id,'current_experimental_agent_label',v_agent.internal_label,'current_runtime_mode',case when v_dual_enabled then 'dual_agent_autonomous_model_serial' else 'single_agent_autonomous_model' end,'experimental_intent_loop_state','running','experimental_intent_loop_reason',null,'global_pause',true,'admin_control_version','admin_control_v0_3','intent_timing_version','intent_timing_v0_2','minimum_time_intent_delay_minutes',5),updated_at=now() where config_id=1;
 
-  return jsonb_build_object('status','running','agent_id',p_agent_id,'wake_request_id',v_wake_id,'trigger_type',v_trigger,'pending_chat',v_message_id is not null,'dual_agent_mode',v_dual_enabled,'reused_active_wake',v_reuse_active_wake,'admin_resume_contract','admin_resume_active_wake_reuse_v0_1');
+  return jsonb_build_object('status','running','agent_id',p_agent_id,'wake_request_id',v_wake_id,'trigger_type',v_trigger,'pending_chat',v_message_id is not null,'dual_agent_mode',v_dual_enabled,'reused_active_wake',v_reuse_active_wake,'admin_resume_contract','admin_resume_owner_bound_active_wake_reuse_v0_2');
 end;
 $function$;
 
+-- AAU semantic model-call reservation/settlement v0.1
+-- Reserve worst-case semantic compute before transport, then settle to provider-observed usage.
+-- Explicit HTTP failures with no reported usage release the reservation.
+-- Timeouts / connection-loss with unknown usage settle conservatively at the full reservation.
 commit;
