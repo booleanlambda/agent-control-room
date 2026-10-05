@@ -6585,6 +6585,38 @@ export async function runAutonomousRequirementCognition({
       gate:text(node?.decision_payload?.deterministic_statistics_gate)||null,
       feedback:asObject(node?.context_payload?.deterministic_statistics_feedback),
     }:null;
+    const correctionSuppliedContext=()=>{
+      const full=asObject(atomicCognitionContext());
+      if(!mathRetryState?.required)return full;
+      const qda=asObject(full.qda_601_context);
+      return {
+        qda_601_context:{
+          program_code:qda.program_code,
+          program_version:qda.program_version,
+          next_unit:qda.next_unit,
+          hard_gates:qda.hard_gates,
+          governing_loop:qda.governing_loop,
+          required_submission_fields:qda.required_submission_fields,
+          evidence_state_labels:qda.evidence_state_labels,
+        },
+        qda_curriculum_problem_binding:
+          full.qda_curriculum_problem_binding
+          ||nodeContext.qda_curriculum_problem_binding
+          ||null,
+        dependency_context_contract:
+          full.dependency_context_contract
+          ||nodeContext.dependency_context_contract
+          ||null,
+        completed_sibling_results:
+          full.completed_sibling_results
+          ||nodeContext.completed_sibling_results
+          ||[],
+        inherited_completed_sibling_results:
+          full.inherited_completed_sibling_results
+          ||nodeContext.inherited_completed_sibling_results
+          ||[],
+      };
+    };
     const atomicSemanticIdentity=sha256({
       node_path:node.node_path,
       requirement:node.requirement_text,
@@ -6596,7 +6628,7 @@ export async function runAutonomousRequirementCognition({
       authoritative_sibling_results:siblingEvidence.map(v=>({
         path:v.path,status:v.status,decision_type:v.decision_type,result_hash:v.result_hash
       })),
-      supplied_context:atomicCognitionContext(),
+      supplied_context:correctionSuppliedContext(),
       pinned_evidence:pinnedEvidence.map(v=>({
         source_key:v.source_key,url:v.url,sha256:v.sha256,excerpt_bytes:v.excerpt_bytes
       })),
@@ -6652,15 +6684,15 @@ export async function runAutonomousRequirementCognition({
             ].join('\n')},
             {role:'user',content:safeJson({
               requirement:node.requirement_text,
-              agent_authored_discovery_state:agentDiscoveryState(node),
+              agent_authored_discovery_state:mathRetryState?.required?null:agentDiscoveryState(node),
               authoritative_completed_sibling_evidence:siblingEvidence,
-              supplied_context:atomicCognitionContext(),
+              supplied_context:correctionSuppliedContext(),
               deterministic_math_feedback:mathRetryState?.feedback||null,
               deterministic_math_retry_attempt:mathRetryState?.attempt||0,
               deterministic_statistics_feedback:statisticsRetryState?.feedback||null,
               deterministic_statistics_retry_attempt:statisticsRetryState?.attempt||0,
-              available_context_index:idx,
-              available_supplied_context_index:indexObject(atomicCognitionContext()),
+              available_context_index:mathRetryState?.required?[]:idx,
+              available_supplied_context_index:indexObject(correctionSuppliedContext()),
             })},
           ],atomicExecutionBudgetForAttempt(attempt),'req_'+node.node_path.replaceAll('.','_')+'_atomic_'+attempt);
           parsed=response?.parsed;
