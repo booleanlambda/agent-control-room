@@ -6605,6 +6605,17 @@ export async function runAutonomousRequirementCognition({
       node.node_path,'ATOMIC_EXECUTION',atomicSemanticIdentity
     );
     let parsed=durableAtomic.parsed;
+    const atomicExecutionBaseBudget=Math.max(1,Number(stageBudgets.atomic_execution||7000));
+    const atomicExecutionBudgetForAttempt=attempt=>{
+      if(!mathRetryState?.required)return atomicExecutionBaseBudget;
+      // A verifier-directed correction is still the same bounded atomic
+      // requirement. Give the bound agent enough output room to reason through
+      // the supplied numerical disagreement before considering decomposition.
+      return Math.min(
+        18000,
+        Math.max(atomicExecutionBaseBudget,attempt===1?12000:16000)
+      );
+    };
     if(!parsed){
     try{
       for(let attempt=1;attempt<=2;attempt++){
@@ -6651,7 +6662,7 @@ export async function runAutonomousRequirementCognition({
               available_context_index:idx,
               available_supplied_context_index:indexObject(atomicCognitionContext()),
             })},
-          ],stageBudgets.atomic_execution,'req_'+node.node_path.replaceAll('.','_')+'_atomic_'+attempt);
+          ],atomicExecutionBudgetForAttempt(attempt),'req_'+node.node_path.replaceAll('.','_')+'_atomic_'+attempt);
           parsed=response?.parsed;
           break;
         }catch(error){
@@ -6661,6 +6672,18 @@ export async function runAutonomousRequirementCognition({
           // the bound agent must narrow/decompose before another attempt.
           if(error?.code==='COGNITION_RESPONSE_REJECTED'
              &&String(error?.rejectionReason||'').toUpperCase()==='TRUNCATED_RESPONSE'){
+            if(mathRetryState?.required&&attempt===1){
+              console.warn('AAU_QDA_MATH_CORRECTION_TRUNCATION_RETRY',JSON.stringify({
+                agent_id:agentId,
+                intent_execution_id:intentExecutionId,
+                node_path:node.node_path,
+                deterministic_math_attempt:mathRetryState.attempt,
+                first_output_budget:atomicExecutionBudgetForAttempt(1),
+                retry_output_budget:atomicExecutionBudgetForAttempt(2),
+                policy:'math_correction_same_atomic_expanded_retry_v0_1',
+              }));
+              continue;
+            }
             throw error;
           }
           if(attempt===2)throw error;
