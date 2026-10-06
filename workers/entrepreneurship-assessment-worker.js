@@ -12,7 +12,7 @@ const pollMs=Math.max(3000,Number(process.env.AAU_ENTREPRENEURSHIP_ASSESSOR_POLL
 let timer=null,working=false;
 
 const MODELS={
-  kimi:'moonshotai/kimi-k3',
+  kimi:'kimi-k3',
   meta:'meta/llama-3.1-70b-instruct',
   nemotron:'nvidia/nemotron-3.5-lightning-30b-a3b',
 };
@@ -102,6 +102,7 @@ export function prepareEntrepreneurshipReviewInput(taskType,payload){
 }
 
 async function modelCall(model,taskType,payload){
+  const directKimi=model===MODELS.kimi;
   const system=`You are an independent AAU graduate-business-school assessor. You are NOT the learner and must not continue the learner's work. Grade only the supplied durable evidence. The standard is demanding top-university graduate-level business competence, but this is not university accreditation. Do not reward verbosity, confidence, or polished prose by itself. Penalize unsupported factual claims, arithmetic errors, shallow case reasoning, missing assumptions, failure to distinguish evidence from hypothesis, and recommendations that ignore cash/resource constraints. For CAP515, treat all four units as ONE venture case: explicitly compare venture identity, customer segment, pricing, CAC, gross-margin definition, churn/retention, discounting, LTV/CAC, revenue ramp, financing/runway and the final BUILD/REVISE/KILL decision across units. Recompute material arithmetic. Do not call CAC, general R&D, or sales expense gross-margin COGS unless directly attributable to delivering the service; distinguish gross margin from operating margin. A REVISE decision is valid when customer, regulatory or market validation is missing; never require fabricated interviews, pilots, LOIs or regulator acceptance. Evidence called verified must have traceable provenance, and agent-authored calculations are not independent market evidence. Return strict JSON only with keys: score (0..1), critical_failure (boolean), dimensions (object of 0..1 scores), strengths (array), weaknesses (array), rationale (string), remediation (array). For CAP515 dimensions MUST contain numeric conceptual_accuracy, analytical_rigor, quantitative_or_structured_reasoning, application_quality, evidence_and_assumption_discipline, self_critique_and_limits, clarity_and_epistemic_discipline. CAP515 passes only if score >=0.85, critical_failure=false, and EVERY required dimension >=0.75. A critical failure means fabricated evidence, materially unsafe/illegal advice presented as acceptable, or a fundamental contradiction that invalidates the decision.`;
   const reviewInput=prepareEntrepreneurshipReviewInput(taskType,payload);
   const user=taskType==='course'
@@ -113,12 +114,14 @@ async function modelCall(model,taskType,payload){
     try{
       const profile=getModelRuntimeProfile(model);
       const result=await modelChatCompletion({
+        provider:directKimi?'moonshot_direct':null,
         model,
         messages:[{role:'system',content:system},{role:'user',content:user}],
         maxTokens:1800,
         temperature:0,
         jsonMode:profile.supports_json_mode===true,
         enableThinking:String(model).startsWith('nvidia/nemotron')?false:null,
+        reasoningEffort:directKimi?'low':null,
         timeoutMs:180000,
         runtimeRole:'reviewer',
       });
@@ -158,6 +161,7 @@ async function modelCall(model,taskType,payload){
         latency_ms:Date.now()-begun,
         reviewAudit:reviewInput.audit,
         provider:result.provider||null,
+        usage:result.usage||null,
         runtime_contract:result.runtime_contract||null,
       };
     }catch(error){
@@ -188,7 +192,7 @@ async function gradeClaim(task){
       const result=await modelCall(model,task.task_type,task.payload);
       const assessorId=`${result.provider||'model_provider'}/${result.model}`;
       const report={...result.grade,review_model:result.model,review_provider:result.provider||null,latency_ms:result.latency_ms,
-        independent_from_bound_agent_model:true,assessment_contract:'entrepreneurship_independent_assessment_v0_1',...result.reviewAudit};
+        independent_from_bound_agent_model:true,assessment_contract:'entrepreneurship_independent_assessment_v0_2',review_usage:result.usage||null,review_token_policy:model===MODELS.kimi?'kimi_direct_low_reasoning_v0_1':'legacy_fallback_budget',...result.reviewAudit};
       if(task.task_type==='course'){
         return await rpc('aau_bridge_complete_entrepreneurship_course_assessment',{
           p_assessment_id:task.assessment_id,p_score:result.score,p_assessor_id:assessorId,p_report:report
@@ -250,5 +254,5 @@ export function startEntrepreneurshipAssessmentWorker(){
   timer=setInterval(()=>void tick(),pollMs);
   void tick();
   return {started:true,poll_ms:pollMs,models:[MODELS.kimi,MODELS.meta,MODELS.nemotron],
-    contract:'entrepreneurship_independent_assessment_v0_1'};
+    contract:'entrepreneurship_independent_assessment_v0_2'};
 }
