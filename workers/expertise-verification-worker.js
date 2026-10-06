@@ -86,7 +86,7 @@ async function checkpointVerification(run, stage, fields = {}) {
   return rpc('aau_bridge_checkpoint_expertise_verification', args);
 }
 
-async function modelCall({ model, system, user, maxTokens = null, temperature = 0, timeoutMs = null, jsonMode = false, runtimeRole = 'generic' }) {
+async function modelCall({ model, provider = null, system, user, maxTokens = null, temperature = 0, timeoutMs = null, jsonMode = false, runtimeRole = 'generic' }) {
   const runtimeContract=resolveModelRuntimeContract(model,runtimeRole);
   const messages=[{ role: 'system', content: system }, { role: 'user', content: user }];
   const resolvedMaxTokens=Math.max(
@@ -126,6 +126,7 @@ async function modelCall({ model, system, user, maxTokens = null, temperature = 
     const requestStarted=Date.now();
     try {
       const result=await modelChatCompletion({
+        provider,
         model,
         messages,
         maxTokens:resolvedMaxTokens,
@@ -418,63 +419,83 @@ function parseGrade(text) {
 
 async function gradeAnswer(run, task, answer) {
   const reference=await academicReference(run,task);
-  const system = 'You are the independent AAU expertise authenticator. You did not train the candidate. Grade only the supplied answer against the fresh task and fixed anchors. Do not reward fluency without correctness. Return exactly one JSON object and no explanation with numeric fields execution, method, security, validation, communication (0-100), string critical, numeric confidence (0-1), and boolean unsupported.';
-  const user = `DOMAIN: ${run.domain}\nTARGET: ${run.target_standard}\nSCENARIO: ${task.scenario}\nTASK: ${task.prompt}\nINDEPENDENT AAU REFERENCE ANSWER (private, not given to candidate): ${reference||'legacy_assessment_no_reference_answer'}\nGRADING ANCHORS: ${JSON.stringify(task.grading_anchors)}\nCRITICAL FAILURES: ${JSON.stringify(task.critical_failures || [])}\nCANDIDATE ANSWER:\n${answer.answer}\n\nRubric: execution/correctness 30%, method/system design 20%, security/reliability 20%, validation/evidence 15%, communication/professional judgment 15%.\nReturn one JSON object: {"execution":NN,"method":NN,"security":NN,"validation":NN,"communication":NN,"critical":"none","confidence":0.00,"unsupported":false}. Set unsupported=true for a material unsupported claim.`;
-  // authenticator_fallback_chain_v0_1: Moonshot primary with configured model-provider fallbacks.
-  const primaryAuthenticator = 'moonshotai/kimi-k3';
-  const authModels = [
+  // Direct Kimi reviewer: preserve grading evidence, eliminate repeated prose,
+  // bound paid output, and do not buy a second Kimi completion for the same task.
+  const system='Independent AAU expertise authenticator. Grade only the supplied task, answer, private reference and fixed anchors. Do not improve the answer, invent requirements, or reward fluency over correctness. Return JSON only.';
+  const reviewInput={
+    domain:run.domain,
+    standard:run.target_standard,
+    scenario:task.scenario,
+    task:task.prompt,
+    reference:reference||'legacy_assessment_no_reference_answer',
+    anchors:task.grading_anchors,
+    critical_failures:task.critical_failures||[],
+    candidate_answer:answer.answer,
+  };
+  const user='Rubric weights: execution .30, method .20, security .20, validation .15, communication .15. '
+    +'Set unsupported=true for any material unsupported claim. Use a supplied critical-failure label only when actually triggered. '
+    +'Return exactly {"execution":NN,"method":NN,"security":NN,"validation":NN,"communication":NN,"critical":"none","confidence":0.00,"unsupported":false}. INPUT='+JSON.stringify(reviewInput);
+  const primaryAuthenticator='kimi-k3';
+  const authModels=[
     primaryAuthenticator,
     'meta/muse-glimmer-30b',
     'nvidia/nemotron-3.5-lightning-30b-a3b',
     'openai/gpt-oss-20b',
-  ].filter((x, i, a) => x && a.indexOf(x) === i && x !== run.candidate_model_id);
-  let lastAuthError = null;
-  for (const model of authModels) {
-    if (isReviewerModelInBackoff(model)) {
+  ].filter((x,i,a)=>x&&a.indexOf(x)===i&&x!==run.candidate_model_id);
+  let lastAuthError=null;
+  for(const model of authModels){
+    if(isReviewerModelInBackoff(model)){
       console.warn('AAU_EXPERTISE_AUTHENTICATOR_BACKOFF_SKIP',model);
       continue;
     }
-    const maxAttempts = model === primaryAuthenticator || model === 'openai/gpt-oss-20b' ? 2 : 1;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        const result = await modelCall({
-          model, system, user,
-          maxTokens: model.startsWith('meta/') ? 2500
-            : model === 'openai/gpt-oss-20b' ? (attempt === 1 ? 1800 : 3200)
-            : model === primaryAuthenticator ? 1800 : 1200,
-          temperature: 0,
-          timeoutMs: model === primaryAuthenticator ? 65000 : model.startsWith('meta/') ? 90000 : 120000,
-          jsonMode: false,
-          runtimeRole: 'authenticator',
+    const directKimi=model===primaryAuthenticator;
+    const maxAttempts=directKimi?1:(model==='openai/gpt-oss-20b'?2:1);
+    for(let attempt=1;attempt<=maxAttempts;attempt++){
+      try{
+        const result=await modelCall({
+          provider:directKimi?'moonshot_direct':null,
+          model,system,user,
+          maxTokens:directKimi?640:model.startsWith('meta/')?2500:model==='openai/gpt-oss-20b'?(attempt===1?1800:3200):1200,
+          temperature:0,
+          timeoutMs:directKimi?120000:model.startsWith('meta/')?90000:120000,
+          jsonMode:directKimi,
+          runtimeRole:'authenticator',
         });
-        if (result.finish_reason !== 'stop') {
+        if(result.finish_reason!=='stop'){
           console.warn('AAU_EXPERTISE_AUTHENTICATOR_INCOMPLETE',JSON.stringify({
-            model,task_id:task.id,attempt,finish_reason:result.finish_reason || null,
-            response_chars:String(result.text || '').length,
+            model,provider:directKimi?'moonshot_direct':null,task_id:task.id,attempt,
+            finish_reason:result.finish_reason||null,response_chars:String(result.text||'').length,
+            usage:result.usage||null,
           }));
           lastAuthError=new Error('authenticator_incomplete_response:'+task.id+':'+model);
           continue;
         }
-        const grade = parseGrade(result.text);
-        if (grade) return { ...grade, id: task.id, verifier_model: result.model || model, verifier_requested_model: model, authenticator_fallback_used: model !== primaryAuthenticator, raw_sha256: sha256(result.text) };
-        console.warn('AAU_EXPERTISE_AUTHENTICATOR_UNUSABLE_GRADE', JSON.stringify({
-          model, task_id:task.id, attempt, raw_sha256:sha256(result.text), response_chars:result.text.length,
-          finish_reason:result.finish_reason || null,
+        const grade=parseGrade(result.text);
+        if(grade)return {
+          ...grade,id:task.id,verifier_model:result.model||model,verifier_requested_model:model,
+          verifier_provider:result.provider||(directKimi?'moonshot_direct':null),
+          authenticator_fallback_used:model!==primaryAuthenticator,raw_sha256:sha256(result.text),
+          review_usage:result.usage||null,
+          review_token_policy:directKimi?'kimi_direct_auth_compact_v0_1':'legacy_fallback_budget',
+        };
+        console.warn('AAU_EXPERTISE_AUTHENTICATOR_UNUSABLE_GRADE',JSON.stringify({
+          model,provider:directKimi?'moonshot_direct':null,task_id:task.id,attempt,
+          raw_sha256:sha256(result.text),response_chars:result.text.length,
+          finish_reason:result.finish_reason||null,usage:result.usage||null,
         }));
-        lastAuthError = new Error(`authenticator_unusable_grade:${task.id}:${model}`);
-      } catch (error) {
-        lastAuthError = error;
-        const status = Number(error?.status || 0);
-        const retryable = error?.name === 'AbortError' || status === 429 || status >= 500;
-        if (!retryable) break;
+        lastAuthError=new Error('authenticator_unusable_grade:'+task.id+':'+model);
+      }catch(error){
+        lastAuthError=error;
+        const status=Number(error?.status||0);
+        const retryable=error?.code==='MODEL_TIMEOUT'||error?.name==='AbortError'||error?.name==='TimeoutError'||status===429||status>=500;
+        if(!retryable)break;
       }
-      if (attempt < maxAttempts) await sleep(1500 * attempt);
+      if(attempt<maxAttempts)await sleep(1500*attempt);
     }
-    console.warn('AAU_EXPERTISE_AUTHENTICATOR_MODEL_FAILED', model, String(lastAuthError?.message || lastAuthError || 'unusable_grade').slice(0, 500));
+    console.warn('AAU_EXPERTISE_AUTHENTICATOR_MODEL_FAILED',model,String(lastAuthError?.message||lastAuthError||'unusable_grade').slice(0,500));
   }
-  throw lastAuthError || new Error(`authenticator_unusable_grade:${task.id}`);
+  throw lastAuthError||new Error('authenticator_unusable_grade:'+task.id);
 }
-
 async function adjudicate(run, task, answer, prior) {
   const reference=await academicReference(run,task);
   const system = 'You are the operationally distinct AAU expertise adjudicator. Re-grade a flagged assessment independently. Do not default to the prior verifier. Return exactly one JSON object and no prose.';

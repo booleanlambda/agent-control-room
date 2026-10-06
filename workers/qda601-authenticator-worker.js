@@ -10,7 +10,7 @@ const modelProviderReady=()=>{try{return modelProviderConfigStatus().ready===tru
 const executorId=`render:qda601-authenticator:${process.env.RENDER_INSTANCE_ID||process.pid}`;
 const pollMs=Math.max(3000,Number(process.env.AAU_QDA601_AUTHENTICATOR_POLL_MS||5000));
 let timer=null,working=false;
-const PRIMARY='moonshotai/kimi-k3';
+const PRIMARY='kimi-k3';
 const MODELS=[PRIMARY,'meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b','openai/gpt-oss-20b'];
 const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
 const sha256=(v)=>createHash('sha256').update(String(v??'')).digest('hex');
@@ -73,42 +73,34 @@ function normalize(raw){
 }
 
 async function callModel(model,task){
-  const system='You are the independent AAU QDA-601 authenticator. You are not the learner and must not continue or improve the submission. Grade ONLY the explicitly assigned problem requirements and the evidence/inputs supplied in the frozen unit artifact. Do not invent extra deliverables, preferred methods, unavailable data, or external parameters. Independently recompute every material numerical result that the task actually requires, and verify formulas, units, assumptions, reconciliation paths, provenance bindings, task-appropriate Python verification, and the claimed self-audit. For conceptual or causal-identification tasks, do not demand unsupported quantitative adjustments, standardized effects, propensity models, elasticities, sensitivity parameters, or bounds unless the problem explicitly asks for them and the supplied data is sufficient. Absence of an unrequested or non-identifiable computation is not a weakness; fabricating one is. When the assigned problem is conceptual, model_integrity measures conceptual/methodological integrity, identification logic, assumptions, causal restraint, and quality of the requested evidence design—not quantitative sophistication for its own sake. Do not penalize literal Python input checks when there is no material computation to verify. Inspect problem_responses[i].self_audit as the authoritative per-problem self-audit; aggregate runtime self_audit fields may be summaries and must not override fuller per-problem content. Do not merely trust labels or prose. Do not reward fluency. Do not invent missing evidence. Return strict JSON only.';
-  const user=`UNIT: ${task.unit_code}
-FROZEN_ARTIFACT_SHA256: ${task.artifact_sha256}
-
-QDA NON-COMPENSATORY STANDARD:
-- overall_score >= 0.90
-- arithmetic_accuracy >= 0.95
-- model_integrity >= 0.90
-- reconciliation_consistency >= 0.90
-- evidence_provenance = 1.00
-- material_numeric_contradictions = 0
-- self_audit_pass = true
-
-MODEL_INTEGRITY: score task-fit integrity. For quantitative/statistical units, assess the required quantitative/statistical method. For causal-identification or conceptual units, assess identification logic, confounder reasoning, causal restraint, assumptions, and the requested evidence design. Never lower this score because the artifact omits an analysis the problem did not request or the supplied inputs cannot identify. If the problem is conceptual, arithmetic_accuracy concerns correctness of any numbers actually used; it must not be reduced merely because there is no requested substantive calculation. Prefer the detailed per-problem self_audit over aggregate runtime summary placeholders.\n\nReturn exactly one JSON object with keys: overall_score, arithmetic_accuracy, model_integrity, reconciliation_consistency, evidence_provenance, material_numeric_contradictions, self_audit_pass, verdict, strengths, weaknesses, rationale, remediation. Score fields are 0..1. contradictions is a nonnegative integer. self_audit_pass is boolean.
-
-FROZEN ARTIFACT:
+  const directKimi=model===PRIMARY;
+  const system='Independent AAU QDA-601 authenticator. Grade only requested requirements against the frozen artifact and supplied evidence. Do not improve the submission or invent data, methods, or deliverables. Recompute required material numerics and verify formulas, units, assumptions, reconciliation, provenance, and task-appropriate checks. For conceptual/causal tasks, grade identification logic, confounders, assumptions, causal restraint, and requested evidence design; never demand unrequested or non-identifiable quantitative work. Prefer per-problem self_audit over aggregate summaries. Return strict JSON only.';
+  const user=`UNIT:${task.unit_code}
+SHA:${task.artifact_sha256}
+GATE: overall>=.90; arithmetic>=.95; model_integrity>=.90; reconciliation>=.90; evidence_provenance=1; contradictions=0; self_audit_pass=true.
+Return exactly one JSON object with keys overall_score, arithmetic_accuracy, model_integrity, reconciliation_consistency, evidence_provenance, material_numeric_contradictions, self_audit_pass, verdict, strengths, weaknesses, rationale, remediation. Scores 0..1. contradictions integer. Return 1-2 concise strengths, 1-2 concise weaknesses, 0-2 remediation items, and an 80-220 character rationale.
+FROZEN_ARTIFACT:
 ${task.artifact}`;
   return withReviewerModelSlot('qda601_authenticator',async()=>{
     const begun=Date.now();
     try{
       const profile=getModelRuntimeProfile(model);
       const out=await modelChatCompletion({
+        provider:directKimi?'moonshot_direct':null,
         model,messages:[{role:'system',content:system},{role:'user',content:user}],
-        maxTokens:model.startsWith('meta/')?2600:2200,temperature:0,
-        jsonMode:profile.supports_json_mode===true,
+        maxTokens:directKimi?900:model.startsWith('meta/')?2600:2200,temperature:0,
+        jsonMode:directKimi?true:profile.supports_json_mode===true,
         enableThinking:String(model).startsWith('nvidia/nemotron')?false:null,
-        timeoutMs:model===PRIMARY?65000:model.startsWith('meta/')?90000:120000,
+        timeoutMs:directKimi?120000:model.startsWith('meta/')?90000:120000,
         runtimeRole:'authenticator',
       });
       noteReviewerModelSuccess(model);
       return {content:String(out.content||out.reasoning_content||'').trim(),model:out.model_returned||model,
-        provider:out.provider||null,latency_ms:Date.now()-begun,runtime_contract:out.runtime_contract||null};
-    }catch(e){if(e?.code==='MODEL_TIMEOUT'||e?.name==='AbortError')noteReviewerModelTimeout(model);throw e;}
+        provider:out.provider||null,latency_ms:Date.now()-begun,runtime_contract:out.runtime_contract||null,
+        usage:out.usage||null};
+    }catch(e){if(e?.code==='MODEL_TIMEOUT'||e?.name==='AbortError'||e?.name==='TimeoutError')noteReviewerModelTimeout(model);throw e;}
   });
 }
-
 async function authenticate(task){
   const artifact=String(task.artifact||'');
   const actualSha=sha256(artifact);
@@ -116,7 +108,7 @@ async function authenticate(task){
   let last=null;
   for(const model of MODELS){
     if(isReviewerModelInBackoff(model)){console.warn('AAU_QDA601_AUTHENTICATOR_BACKOFF_SKIP',model);continue;}
-    const attempts=model===PRIMARY||model==='openai/gpt-oss-20b'?2:1;
+    const attempts=model===PRIMARY?1:(model==='openai/gpt-oss-20b'?2:1);
     for(let attempt=1;attempt<=attempts;attempt++){
       try{
         const out=await callModel(model,task);
@@ -125,7 +117,8 @@ async function authenticate(task){
           review_model_requested:model,authenticator_fallback_used:model!==PRIMARY,
           artifact_sha256:actualSha,frozen_file_id:task.file_id,frozen_unit_code:task.unit_code,
           independent_from_bound_agent_model:true,review_latency_ms:out.latency_ms,
-          runtime_contract:out.runtime_contract,review_contract:'qda601_independent_authenticator_v0_2'};
+          review_usage:out.usage||null,review_token_policy:model===PRIMARY?'kimi_direct_qda_compact_v0_1':'legacy_fallback_budget',
+          runtime_contract:out.runtime_contract,review_contract:'qda601_independent_authenticator_v0_3'};
         return rpc('aau_bridge_complete_qda601_authenticator_review',{
           p_review_id:task.review_id,p_executor_id:executorId,p_model_returned:out.model,
           p_score:g.score,p_verdict:g.verdict,p_report:report

@@ -43,6 +43,23 @@ export const MODEL_RUNTIME_PROFILES = Object.freeze({
     max_request_timeout_ms: 300000,
     profile_source: 'conservative_operational_floor',
   }),
+  'kimi-k3': Object.freeze({
+    provider: 'moonshot_direct',
+    declared_context_window_tokens: null,
+    context_window_tokens: null,
+    operational_context_limit_tokens: 32768,
+    max_output_tokens: 32768,
+    operational_output_limit_tokens: 4096,
+    input_safety_margin_tokens: 4096,
+    estimated_chars_per_token: 3.2,
+    // Direct Kimi may reason internally, but AAU currently has no reliable
+    // transport switch to disable that reasoning. Account for it as output.
+    supports_thinking: false,
+    reasoning_counts_against_output: true,
+    supports_json_mode: true,
+    max_request_timeout_ms: 180000,
+    profile_source: 'aau_moonshot_direct_live_probe_2026-10-06_conservative_context',
+  }),
   'moonshotai/kimi-k3': Object.freeze({
     provider: 'nvidia',
     declared_context_window_tokens: null,
