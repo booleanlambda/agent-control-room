@@ -139,10 +139,11 @@ async function sha256(text) {
   return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2,'0')).join('');
 }
 
-export async function runExperimentalModelWake() {
-  const agentId = String(process.env.AAU_MODEL_WAKE_AGENT_ID || '').trim();
-  const idempotencyKey = String(process.env.AAU_MODEL_WAKE_IDEMPOTENCY || '').trim();
-  const reason = String(process.env.AAU_MODEL_WAKE_REASON || 'fresh isolated model experimental wake').trim();
+export async function runExperimentalModelWake(options = {}) {
+  const opts = options && typeof options === 'object' ? options : {};
+  const agentId = String(opts.agentId ?? process.env.AAU_MODEL_WAKE_AGENT_ID ?? '').trim();
+  const idempotencyKey = String(opts.idempotencyKey ?? process.env.AAU_MODEL_WAKE_IDEMPOTENCY ?? '').trim();
+  const reason = String(opts.reason ?? process.env.AAU_MODEL_WAKE_REASON ?? 'fresh isolated model experimental wake').trim();
   if (!agentId) throw new Error('AAU_MODEL_WAKE_AGENT_ID is required');
   if (!idempotencyKey) throw new Error('AAU_MODEL_WAKE_IDEMPOTENCY is required');
 
