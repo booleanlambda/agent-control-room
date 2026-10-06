@@ -13,6 +13,7 @@ import {
   evidenceCeilingRequiresAgentResolution,
   mergeInheritedDependencyResults,
   classifyThresholdEvidence,
+  runtimeOwnedTerminalSynthesisChild,
   pathDepth,
 } from './semantic-runtime-controls.js';
 
@@ -99,6 +100,27 @@ test('repeated structural failure locks only unchanged material state',()=>{
   assert.equal(repeatedStructuralFailureLocked({
     repeatCount:1,currentMaterialFingerprint:'a',lockedMaterialFingerprint:'a'
   }),false);
+});
+
+test('terminal synthesis classifier preserves substantive reconciliation work',()=>{
+  assert.equal(runtimeOwnedTerminalSynthesisChild({
+    requirement:'Reconcile conflicting source values for CAC and select the canonical ledger value.'
+  }),false);
+  assert.equal(runtimeOwnedTerminalSynthesisChild({
+    requirement:'Reconcile variable definitions, units, periods, and evidence states across supplied reports.'
+  }),false);
+});
+
+test('terminal synthesis classifier owns only final reconciliation of resolved outputs',()=>{
+  assert.equal(runtimeOwnedTerminalSynthesisChild({
+    requirement:'Reconcile completed child artifacts into the final submission.'
+  }),true);
+  assert.equal(runtimeOwnedTerminalSynthesisChild({
+    requirement:'Reconcile verified sibling results into the final artifact.'
+  }),true);
+  assert.equal(runtimeOwnedTerminalSynthesisChild({
+    requirement:'Format the final submission for delivery.'
+  }),true);
 });
 
 test('path depth is only an emergency storage geometry check',()=>{

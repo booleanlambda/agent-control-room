@@ -461,6 +461,31 @@ export function retryableModelTransportError(error){
     &&classified.immediate_retryable===true;
 }
 
+export function runtimeOwnedTerminalSynthesisChild(candidate){
+  const requirement=String(candidate?.requirement??'')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+  if(!requirement)return false;
+
+  if(/^reconcile\b/.test(requirement)){
+    const padded=' '+requirement+' ';
+    const hasResolvedChild=[
+      ' completed child ',' completed children ',' completed sibling ',
+      ' resolved child ',' resolved children ',' resolved sibling ',
+      ' verified child ',' verified children ',' verified sibling ',
+      ' completed result ',' completed results ',' resolved result ',' resolved results ',
+      ' verified result ',' verified results ',' completed artifact ',' completed artifacts ',
+      ' resolved artifact ',' resolved artifacts ',' verified artifact ',' verified artifacts '
+    ].some(v=>padded.includes(v));
+    const hasFinalOutput=/\b(final|terminal|submission|submit|format|synthesi[sz]e|merge|assemble)\b/.test(requirement);
+    return hasResolvedChild&&hasFinalOutput;
+  }
+
+  return /^(synthesize|synthesise|format|submit|compile|merge|assemble|convert)\b/.test(requirement);
+}
+
 export function pathDepth(nodePath){
   const path=String(nodePath||'');
   if(path==='R')return 0;
