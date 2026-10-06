@@ -15,6 +15,77 @@ const MODELS=[PRIMARY,'meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b
 const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
 const sha256=(v)=>createHash('sha256').update(String(v??'')).digest('hex');
 
+function sameJson(a,b){
+  try{return JSON.stringify(a)===JSON.stringify(b);}catch{return false;}
+}
+function flattenedNestedArray(responses,key){
+  const out=[];
+  for(const r of responses){
+    if(r?.[key]==null)continue;
+    if(!Array.isArray(r[key]))return null;
+    out.push(...r[key]);
+  }
+  return out;
+}
+function exactByProblemMirror(top,responses,key){
+  if(!top||typeof top!=='object'||Array.isArray(top)||!Array.isArray(top.by_problem))return false;
+  if(top.by_problem.length!==responses.length)return false;
+  const byId=new Map(responses.map((r,i)=>[String(r?.problem_id??i+1),r?.[key]]));
+  return top.by_problem.every((entry,i)=>{
+    const id=String(entry?.problem??responses[i]?.problem_id??i+1);
+    return byId.has(id)&&sameJson(entry?.value,byId.get(id));
+  });
+}
+function projectQdaArtifactForReview(raw){
+  const source=String(raw||'');
+  let parsed=null;
+  try{parsed=JSON.parse(source);}catch{}
+  if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)||!Array.isArray(parsed.problem_responses)||!parsed.problem_responses.length){
+    return {text:source,contract:'raw_frozen_artifact_v0_1',dropped_keys:[],original_chars:source.length,projected_chars:source.length,projection_sha256:sha256(source)};
+  }
+  const responses=parsed.problem_responses;
+  const projected={};
+  const dropped=[];
+  const mirrorKeys=new Set(['problem','inputs','assumptions','formula_or_model','calculation','units','interpretation','sanity_check']);
+  for(const [key,value] of Object.entries(parsed)){
+    if(key==='runtime_materialization')continue;
+    if(key==='python_checks'||key==='python_analyses'){
+      const nested=flattenedNestedArray(responses,key);
+      if(nested&&sameJson(value,nested)){dropped.push(key);continue;}
+    }
+    if(mirrorKeys.has(key)&&exactByProblemMirror(value,responses,key)){dropped.push(key);continue;}
+    projected[key]=value;
+  }
+
+  const runtime=parsed.runtime_materialization;
+  if(runtime&&typeof runtime==='object'&&!Array.isArray(runtime)){
+    const provenance=parsed.verification_provenance;
+    const compact={...runtime};
+    if(provenance&&typeof provenance==='object'){
+      if(sameJson(runtime.children,provenance.children)){delete compact.children;dropped.push('runtime_materialization.children');}
+      if(sameJson(runtime.problem_coverage,provenance.problem_coverage)){delete compact.problem_coverage;dropped.push('runtime_materialization.problem_coverage');}
+      if(runtime.python_check_count===provenance.python_check_count){delete compact.python_check_count;dropped.push('runtime_materialization.python_check_count');}
+      if(runtime.python_checks_sha256===provenance.python_checks_sha256){delete compact.python_checks_sha256;dropped.push('runtime_materialization.python_checks_sha256');}
+    }
+    projected.runtime_materialization=compact;
+  }
+
+  const text=JSON.stringify(projected);
+  if(!text||text.length>=source.length){
+    return {text:source,contract:'raw_frozen_artifact_v0_1',dropped_keys:[],original_chars:source.length,projected_chars:source.length,projection_sha256:sha256(source)};
+  }
+  return {
+    text,
+    contract:'qda_review_exact_mirror_elision_v0_1',
+    dropped_keys:dropped,
+    original_chars:source.length,
+    projected_chars:text.length,
+    saved_chars:source.length-text.length,
+    reduction_ratio:Number((1-(text.length/source.length)).toFixed(4)),
+    projection_sha256:sha256(text),
+  };
+}
+
 async function rpc(name,args={}){
   const r=await fetch(`${SB}/rest/v1/rpc/${name}`,{
     method:'POST',
@@ -74,13 +145,19 @@ function normalize(raw){
 
 async function callModel(model,task){
   const directKimi=model===PRIMARY;
+  const projection=directKimi?projectQdaArtifactForReview(task.artifact):{
+    text:String(task.artifact||''),contract:'raw_frozen_artifact_v0_1',dropped_keys:[],
+    original_chars:String(task.artifact||'').length,projected_chars:String(task.artifact||'').length,
+    projection_sha256:sha256(String(task.artifact||''))
+  };
   const system='Independent AAU QDA-601 authenticator. Grade only requested requirements against the frozen artifact and supplied evidence. Do not improve the submission or invent data, methods, or deliverables. Recompute required material numerics and verify formulas, units, assumptions, reconciliation, provenance, and task-appropriate checks. For conceptual/causal tasks, grade identification logic, confounders, assumptions, causal restraint, and requested evidence design; never demand unrequested or non-identifiable quantitative work. Prefer per-problem self_audit over aggregate summaries. Return strict JSON only.';
   const user=`UNIT:${task.unit_code}
 SHA:${task.artifact_sha256}
 GATE: overall>=.90; arithmetic>=.95; model_integrity>=.90; reconciliation>=.90; evidence_provenance=1; contradictions=0; self_audit_pass=true.
 Return exactly one JSON object with keys overall_score, arithmetic_accuracy, model_integrity, reconciliation_consistency, evidence_provenance, material_numeric_contradictions, self_audit_pass, verdict, strengths, weaknesses, rationale, remediation. Scores 0..1. contradictions integer. Return 1-2 concise strengths, 1-2 concise weaknesses, 0-2 remediation items, and an 80-220 character rationale.
+PROJECTION:${projection.contract}; original SHA above; only exact duplicate mirrors may be elided.
 FROZEN_ARTIFACT:
-${task.artifact}`;
+${projection.text}`;
   return withReviewerModelSlot('qda601_authenticator',async()=>{
     const begun=Date.now();
     try{
@@ -98,7 +175,7 @@ ${task.artifact}`;
       noteReviewerModelSuccess(model);
       return {content:String(out.content||out.reasoning_content||'').trim(),model:out.model_returned||model,
         provider:out.provider||null,latency_ms:Date.now()-begun,runtime_contract:out.runtime_contract||null,
-        usage:out.usage||null};
+        usage:out.usage||null,prompt_projection:projection};
     }catch(e){if(e?.code==='MODEL_TIMEOUT'||e?.name==='AbortError'||e?.name==='TimeoutError')noteReviewerModelTimeout(model);throw e;}
   });
 }
@@ -118,8 +195,10 @@ async function authenticate(task){
           review_model_requested:model,authenticator_fallback_used:model!==PRIMARY,
           artifact_sha256:actualSha,frozen_file_id:task.file_id,frozen_unit_code:task.unit_code,
           independent_from_bound_agent_model:true,review_latency_ms:out.latency_ms,
-          review_usage:out.usage||null,review_token_policy:model===PRIMARY?'kimi_direct_qda_compact_v0_1':'legacy_fallback_budget',
-          runtime_contract:out.runtime_contract,review_contract:'qda601_independent_authenticator_v0_3'};
+          review_usage:out.usage||null,
+          review_token_policy:model===PRIMARY?'kimi_direct_qda_exact_mirror_elision_low_reasoning_v0_2':'legacy_fallback_budget',
+          prompt_projection:out.prompt_projection||null,
+          runtime_contract:out.runtime_contract,review_contract:'qda601_independent_authenticator_v0_4'};
         return rpc('aau_bridge_complete_qda601_authenticator_review',{
           p_review_id:task.review_id,p_executor_id:executorId,p_model_returned:out.model,
           p_score:g.score,p_verdict:g.verdict,p_report:report
@@ -165,5 +244,5 @@ export function startQda601AuthenticatorWorker(){
   if(!anon||!bridge||!modelProviderReady())return {started:false,reason:'required_runtime_credentials_missing'};
   timer=setInterval(()=>void tick(),pollMs);void tick();
   return {started:true,poll_ms:pollMs,authenticator:PRIMARY,fallbacks:MODELS.slice(1),
-    contract:'qda601_independent_authenticator_v0_2'};
+    contract:'qda601_independent_authenticator_v0_4'};
 }
