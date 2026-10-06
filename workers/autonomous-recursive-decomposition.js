@@ -58,6 +58,9 @@ const MIN_NODE_CONTEXT_BYTES=32000;
 const MAX_PINNED_EVIDENCE_ITEMS_IN_COGNITION=16;
 const MAX_PINNED_EVIDENCE_EXCERPT_CHARS=12000;
 const MAX_SELF_REMEDIATION_ATTEMPTS=2;
+const MAX_CHILD_AUTHORING_RECONSIDERATION_CYCLES=3;
+const MAX_STRUCTURED_SCOPE_OVERLAP_CYCLES=2;
+const MAX_CHILD_AUTHORING_EPOCH_TRANSITIONS=3;
 const CHILD_FORMULATION_DEEP_TOKENS=7000;
 const ATOMIC_EXECUTION_DEEP_TOKENS=7000;
 const ATOMIC_RECONCILIATION_DEEP_TOKENS=9000;
@@ -1528,6 +1531,120 @@ function childConvergenceValidation(parentRequirement,childRequirement,scopeRemo
     failures.push('child_does_not_materially_reduce_scope');
   return {valid:failures.length===0,failures,similarity};
 }
+
+const STRUCTURED_SCOPE_METADATA_KEYS=new Set([
+  'source','as_of','period','date','timestamp','report','report_id','id','title','name'
+]);
+
+function unwrappedContextObject(value){
+  const outer=asObject(value);
+  const inner=asObject(outer.value);
+  return Object.keys(inner).length?inner:outer;
+}
+function scopeTokenPattern(key){
+  const parts=String(key||'')
+    .split(/[_\s-]+/)
+    .map(v=>v.replace(/[.*+?^$\{\}()|[\]\\]/g,'\\function childConvergenceValidation(parentRequirement,childRequirement,scopeRemoved,completionCriterion){
+  const failures=[];
+  const scope=text(scopeRemoved);
+  const criterion=text(completionCriterion);
+  if(scope.length<12)failures.push('scope_removed_required');
+  if(criterion.length<12)failures.push('completion_criterion_required');
+  const parentNorm=normalizedRequirement(parentRequirement);
+  const childNorm=normalizedRequirement(childRequirement);
+  const similarity=requirementSimilarity(parentRequirement,childRequirement);
+  if(parentNorm===childNorm)failures.push('child_exactly_restates_parent');
+  if(similarity>=0.88 && childNorm.length>=Math.max(1,Math.floor(parentNorm.length*0.80)))
+    failures.push('child_does_not_materially_reduce_scope');
+  return {valid:failures.length===0,failures,similarity};
+}'))
+    .filter(Boolean);
+  if(!parts.length)return null;
+  return new RegExp('(^|[^a-z0-9])'+parts.join('[_\\s-]+')+'([^a-z0-9]|$)','i');
+}
+function scopeMentions(value,scope){
+  const source=String(value??'');
+  return asArray(scope).filter(key=>{
+    const pattern=scopeTokenPattern(key);
+    return pattern?pattern.test(source):false;
+  });
+}
+
+export function structuredChildScopeLedger(node,previous=[]){
+  const context=asObject(node?.context_payload);
+  const qda=unwrappedContextObject(context.qda_601_context);
+  const next=asObject(qda.next_unit);
+  const pack=asObject(next.exercise_pack);
+  const reports=asArray(pack.reports).filter(v=>Object.keys(asObject(v)).length);
+  const binding=asObject(context.qda_curriculum_problem_binding);
+  const problemOrdinal=Number(binding.problem_ordinal||0);
+  const problemText=text(asArray(pack.problems)[Math.max(0,problemOrdinal-1)]);
+  if(
+    reports.length<2
+    ||problemOrdinal<1
+    ||!/\b(variable|ledger|canonical)\b/i.test(problemText+' '+text(node?.requirement_text))
+  )return null;
+
+  const authoritative=[];
+  const seen=new Set();
+  for(const row of reports){
+    for(const key of Object.keys(asObject(row))){
+      const normalized=String(key).trim();
+      if(!normalized||STRUCTURED_SCOPE_METADATA_KEYS.has(normalized.toLowerCase())||seen.has(normalized))continue;
+      seen.add(normalized);
+      authoritative.push(normalized);
+    }
+  }
+  if(authoritative.length<2)return null;
+
+  const coveredSet=new Set();
+  for(const child of asArray(previous)){
+    const material=[
+      child?.requirement,
+      child?.requirement_text,
+      child?.scope_removed,
+      child?.completion_criterion,
+    ].filter(Boolean).join(' ');
+    for(const key of scopeMentions(material,authoritative))coveredSet.add(key);
+  }
+  const covered=authoritative.filter(key=>coveredSet.has(key));
+  const remaining=authoritative.filter(key=>!coveredSet.has(key));
+  return {
+    contract:'authoritative_structured_remaining_scope_v0_1',
+    source_contract:'qda_structured_report_scope_v0_1',
+    unit_code:text(next.unit_code)||null,
+    problem_ordinal:problemOrdinal,
+    authoritative_scope:authoritative,
+    already_covered_scope:covered,
+    remaining_scope:remaining,
+    derivation:'authoritative_scope_minus_exact_accepted_child_mentions',
+    model_authored_scope_inference:false,
+  };
+}
+
+export function childAuthoringCounterState(payload,currentEpoch){
+  const value=asObject(payload);
+  const epoch=Math.max(1,Math.floor(Number(currentEpoch)||1));
+  const storedEpoch=Math.max(0,Math.floor(Number(value.child_authoring_epoch_no)||0));
+  const legacyFailures=Math.max(0,Math.floor(Number(value.child_authoring_failure_count)||0));
+  const lifetime=Math.max(
+    legacyFailures,
+    Math.max(0,Math.floor(Number(value.child_authoring_lifetime_rejection_count)||0))
+  );
+  const epochChanged=storedEpoch>0&&storedEpoch!==epoch;
+  return {
+    epoch_no:epoch,
+    epoch_changed:epochChanged,
+    failure_count_base:storedEpoch===epoch?legacyFailures:0,
+    reconsideration_cycles_base:storedEpoch===epoch
+      ?Math.max(0,Math.floor(Number(value.child_authoring_reconsideration_cycles)||0))
+      :0,
+    epoch_transition_count_base:
+      Math.max(0,Math.floor(Number(value.child_authoring_epoch_transition_count)||0))
+      +(epochChanged?1:0),
+    lifetime_rejection_count_base:lifetime,
+  };
+}
 function boundContextPayload(payload,maxBytes=MAX_PERSISTED_CONTEXT_BYTES){
   const src=asObject(payload);
   const effectiveMaxBytes=Math.max(
@@ -2290,6 +2407,12 @@ function agentDiscoveryState(node){
     scope_removed:text(payload.scope_removed)||null,
     completion_criterion:text(payload.completion_criterion)||null,
     prior_decision_reason:text(payload.reason)||null,
+    child_authoring_scope_ledger:Object.keys(asObject(payload.child_authoring_scope_ledger)).length
+      ?asObject(payload.child_authoring_scope_ledger):null,
+    child_authoring_failure:Object.keys(asObject(payload.child_authoring_failure)).length
+      ?asObject(payload.child_authoring_failure):null,
+    child_authoring_epoch_no:Number(payload.child_authoring_epoch_no||0)||null,
+    child_authoring_reconsideration_cycles:Number(payload.child_authoring_reconsideration_cycles||0),
     source_kind:node?.source_kind||null,
     source_ref:node?.source_ref??null,
   };
@@ -5535,8 +5658,73 @@ export async function runAutonomousRequirementCognition({
     const startOrdinal=Math.max(0,...allExisting.map((child)=>Number(child?.ordinal||0)))+1;
 
     const returnChildAuthoringFailure=async({ordinal,phase,error})=>{
-      const failureCount=Math.max(0,Number(node?.decision_payload?.child_authoring_failure_count||0))+1;
+      const counter=childAuthoringCounterState(node?.decision_payload,semanticRuntime.epoch_no);
+      const rejectionReason=String(
+        error?.rejectionReason||error?.code||error?.message||'child_authoring_failed'
+      ).slice(0,300);
+      const structuredScope=structuredChildScopeLedger(node,authored.map(child=>({
+        requirement:child?.requirement_text,
+        scope_removed:child?.decision_payload?.scope_removed,
+        completion_criterion:child?.decision_payload?.completion_criterion,
+      })));
+      const failureCount=counter.failure_count_base+1;
+      const lifetimeRejections=counter.lifetime_rejection_count_base+1;
+      const reconsiderationCycles=counter.reconsideration_cycles_base+1;
+      const overlapFailure=/COGNITION_CHILD_OVERLAP|accepted_child_already_covers/i.test(rejectionReason);
+      const maxCycles=structuredScope&&overlapFailure
+        ?MAX_STRUCTURED_SCOPE_OVERLAP_CYCLES
+        :MAX_CHILD_AUTHORING_RECONSIDERATION_CYCLES;
+      const escalationRequired=
+        reconsiderationCycles>=maxCycles
+        ||counter.epoch_transition_count_base>=MAX_CHILD_AUTHORING_EPOCH_TRANSITIONS;
       const priorDiscovery=asObject(node?.decision_payload?.routing_discovery_checkpoint);
+      const decisionPayload={
+        ...(node.decision_payload||{}),
+        reconsider_decomposition:true,
+        child_authoring_epoch_no:counter.epoch_no,
+        child_authoring_failure_count:failureCount,
+        child_authoring_lifetime_rejection_count:lifetimeRejections,
+        child_authoring_reconsideration_cycles:reconsiderationCycles,
+        child_authoring_epoch_transition_count:counter.epoch_transition_count_base,
+        child_authoring_scope_ledger:structuredScope||null,
+        child_authoring_failure:{
+          version:'agent_visible_child_authoring_failure_v0_2_bounded_remaining_scope',
+          at:new Date().toISOString(),
+          ordinal,
+          phase,
+          rejection_reason:rejectionReason,
+          finish_reason:error?.finishReason||null,
+          prior_split_discovery:{
+            decision:text(priorDiscovery.decision)||'SPLIT',
+            reason:clip(priorDiscovery.reason,1600)||null,
+            context_fingerprint:text(priorDiscovery.context_fingerprint)||null,
+          },
+          structured_remaining_scope:structuredScope,
+          per_epoch_failure_count:failureCount,
+          lifetime_rejection_count:lifetimeRejections,
+          reconsideration_cycle:reconsiderationCycles,
+          reconsideration_cycle_limit:maxCycles,
+          rejected_attempt_evidence_durable:true,
+          next_action_owned_by_bound_agent:true,
+        },
+        ...(escalationRequired?{
+          child_authoring_escalation_required:true,
+          child_authoring_escalation:{
+            contract:'bounded_child_authoring_reconsideration_v0_1',
+            at:new Date().toISOString(),
+            reason:'bounded_reconsideration_limit_reached',
+            rejection_reason:rejectionReason,
+            per_epoch_failure_count:failureCount,
+            lifetime_rejection_count:lifetimeRejections,
+            reconsideration_cycles:reconsiderationCycles,
+            reconsideration_cycle_limit:maxCycles,
+            epoch_transition_count:counter.epoch_transition_count_base,
+            epoch_transition_limit:MAX_CHILD_AUTHORING_EPOCH_TRANSITIONS,
+            structured_remaining_scope:structuredScope,
+            human_or_runtime_review_required:true,
+          },
+        }:{child_authoring_escalation_required:false}),
+      };
       const reset=await saveNode({
         nodePath:node.node_path,
         parentPath:node.parent_path??parentPathOf(node.node_path),
@@ -5546,26 +5734,7 @@ export async function runAutonomousRequirementCognition({
         sourceRef:node.source_ref,
         status:'pending',
         decisionType:null,
-        decisionPayload:{
-          ...(node.decision_payload||{}),
-          reconsider_decomposition:true,
-          child_authoring_failure_count:failureCount,
-          child_authoring_failure:{
-            version:'agent_visible_child_authoring_failure_v0_1',
-            at:new Date().toISOString(),
-            ordinal,
-            phase,
-            rejection_reason:String(error?.rejectionReason||error?.code||error?.message||'child_authoring_failed').slice(0,300),
-            finish_reason:error?.finishReason||null,
-            prior_split_discovery:{
-              decision:text(priorDiscovery.decision)||'SPLIT',
-              reason:clip(priorDiscovery.reason,1600)||null,
-              context_fingerprint:text(priorDiscovery.context_fingerprint)||null,
-            },
-            rejected_attempt_evidence_durable:true,
-            next_action_owned_by_bound_agent:true,
-          },
-        },
+        decisionPayload,
         contextPayload:node.context_payload||{},
         resultArtifact:null,
       });
@@ -5576,9 +5745,22 @@ export async function runAutonomousRequirementCognition({
         node_path:node.node_path,
         ordinal,
         phase,
+        child_authoring_epoch_no:counter.epoch_no,
         child_authoring_failure_count:failureCount,
-        rejection_reason:String(error?.rejectionReason||error?.code||error?.message||'child_authoring_failed').slice(0,300),
+        child_authoring_lifetime_rejection_count:lifetimeRejections,
+        child_authoring_reconsideration_cycles:reconsiderationCycles,
+        structured_remaining_scope:structuredScope?.remaining_scope||null,
+        escalation_required:escalationRequired,
+        rejection_reason:rejectionReason,
       }));
+      if(escalationRequired){
+        const escalationError=new Error(
+          'autonomous_decomposition_child_reconsideration_limit:'+node.node_path
+        );
+        escalationError.code='COGNITION_CHILD_RECONSIDERATION_LIMIT';
+        escalationError.rejectionReason=rejectionReason;
+        throw escalationError;
+      }
       return {children:[],reconsider:true,node:reset};
     };
 
@@ -5619,6 +5801,11 @@ export async function runAutonomousRequirementCognition({
         scope_removed:c?.decision_payload?.scope_removed||null,
         completion_criterion:c?.decision_payload?.completion_criterion||null,
       }));
+      const structuredScopeLedger=structuredChildScopeLedger(node,previous);
+      const priorChildFailure=asObject(node?.decision_payload?.child_authoring_failure);
+      const priorOverlapFailure=/COGNITION_CHILD_OVERLAP|accepted_child_already_covers/i.test(
+        text(priorChildFailure.rejection_reason)
+      );
       const runtimeView=await semanticRuntimeView();
       const childPinnedEvidence=await loadPinnedEvidence(node.node_path);
       const branchEconomics=projectedBranchEconomics(node.context_payload||{},childPinnedEvidence);
@@ -5678,6 +5865,8 @@ export async function runAutonomousRequirementCognition({
                 'previously_authored_children are durable, accepted, and authoritative. Do NOT restate, paraphrase, re-research, or recreate work already assigned to any previous child.',
                 'When supplied_context.expertise_candidate_ledger is available and the parent asks for repeated candidate/proposal work, bind each child to exactly ONE canonical ledger candidate. Preserve that candidate domain verbatim in the child requirement; include its proposal_id when useful. Different canonical proposal_ids/domains are distinct work instances even when they share the same analytical framework.',
                 'Derive the NEXT child only from the parent scope that remains uncovered after subtracting previously_authored_children. If no independently executable scope remains, return DONE.',
+                'When structured_scope_ledger is present, it is authoritative runtime set subtraction from structured source data and durable accepted child coverage. Do NOT re-derive covered scope. Any CHILD must address only entries in remaining_scope and must not recreate entries in already_covered_scope.',
+                'A structured_scope_ledger is a constraint, not a runtime-authored child: YOU still decide CHILD versus DONE and author all semantic wording.',
                 'The runtime performs terminal parent synthesis automatically after all children resolve. Do NOT create a child whose sole purpose is to merge, format, summarize, reconcile, or submit the other children; return DONE instead when only terminal synthesis remains.',
                 'A CHILD must be independently completable, materially narrower than the parent, non-overlapping with accepted children, and include explicit scope removed plus a concrete completion criterion.',
                 'Do not execute or solve the child.',
@@ -5691,6 +5880,10 @@ export async function runAutonomousRequirementCognition({
                 authoritative_completed_sibling_evidence:childContextView.siblingEvidence,
                 supplied_context:childContextView.suppliedContext,
                 previously_authored_children:previous,
+                structured_scope_ledger:structuredScopeLedger,
+                formulation_mode:structuredScopeLedger
+                  ?((attempt===2||priorOverlapFailure)?'remaining_scope_correction':'remaining_scope_constrained')
+                  :'ordinary_semantic_decomposition',
                 prior_child_authoring_failure:asObject(node?.decision_payload?.child_authoring_failure),
                 provenance_revision_guidance:provenanceRevisionGuidance||null,
                 runtime_resource_constraints:{
@@ -5715,6 +5908,50 @@ export async function runAutonomousRequirementCognition({
             if(!['CHILD','DONE'].includes(candidateStatus))
               throw new Error('autonomous_decomposition_child_formulation_status_invalid:'+node.node_path);
             if(candidateStatus==='CHILD'){
+              if(structuredScopeLedger){
+                const mentioned=scopeMentions(
+                  candidate.requirement,
+                  structuredScopeLedger.authoritative_scope
+                );
+                const coveredMentioned=mentioned.filter(key=>
+                  structuredScopeLedger.already_covered_scope.includes(key)
+                );
+                const remainingMentioned=mentioned.filter(key=>
+                  structuredScopeLedger.remaining_scope.includes(key)
+                );
+                if(coveredMentioned.length){
+                  const scopeError=new Error(
+                    'autonomous_decomposition_structured_scope_overlap:'+node.node_path
+                  );
+                  scopeError.code='COGNITION_CHILD_OVERLAP';
+                  scopeError.rejectionReason=
+                    'COGNITION_CHILD_OVERLAP:covered_scope='+coveredMentioned.join(',');
+                  provenanceRevisionGuidance=
+                    'Author only from structured_scope_ledger.remaining_scope. '
+                    +'Do not include already-covered variables as child work.';
+                  throw scopeError;
+                }
+                if(structuredScopeLedger.remaining_scope.length&&remainingMentioned.length<1){
+                  const scopeError=new Error(
+                    'autonomous_decomposition_structured_scope_not_bound:'+node.node_path
+                  );
+                  scopeError.code='COGNITION_CHILD_SCOPE_UNBOUND';
+                  scopeError.rejectionReason=
+                    'COGNITION_CHILD_SCOPE_UNBOUND:remaining_scope='
+                    +structuredScopeLedger.remaining_scope.join(',');
+                  provenanceRevisionGuidance=
+                    'Bind the child explicitly to one or more entries in structured_scope_ledger.remaining_scope.';
+                  throw scopeError;
+                }
+                candidate._structured_scope_validation={
+                  contract:'authoritative_structured_remaining_scope_v0_1',
+                  authoritative_scope:structuredScopeLedger.authoritative_scope,
+                  already_covered_scope:structuredScopeLedger.already_covered_scope,
+                  remaining_scope:structuredScopeLedger.remaining_scope,
+                  candidate_mentions:mentioned,
+                  valid:true,
+                };
+              }
               const validation=childConvergenceValidation(
                 node.requirement_text,
                 candidate.requirement,
@@ -5856,6 +6093,7 @@ export async function runAutonomousRequirementCognition({
               || String(error?.message||'').startsWith('autonomous_decomposition_nonconvergent_child:')
               || String(error?.message||'').startsWith('autonomous_decomposition_child_formulation_status_invalid:')
               || error?.code==='COGNITION_CHILD_OVERLAP'
+              || error?.code==='COGNITION_CHILD_SCOPE_UNBOUND'
               || String(error?.message||'').startsWith('autonomous_decomposition_overlapping_child:')
               || String(error?.message||'').startsWith('autonomous_decomposition_child_provenance_status_invalid:')
               || String(error?.message||'').startsWith('autonomous_decomposition_child_provenance_rejected:');
@@ -5871,7 +6109,7 @@ export async function runAutonomousRequirementCognition({
       const proposalStatus=text(proposal?.status).toUpperCase();
       let parsed=null;
       if(proposalStatus==='CHILD'){
-        parsed={status:'CHILD',requirement:text(proposal.requirement),scope_removed:text(proposal.scope_removed),completion_criterion:text(proposal.completion_criterion),reason:text(proposal.reason),_convergence_validation:proposal._convergence_validation,_sibling_overlap_validation:proposal._sibling_overlap_validation,_provenance_review:proposal._provenance_review};
+        parsed={status:'CHILD',requirement:text(proposal.requirement),scope_removed:text(proposal.scope_removed),completion_criterion:text(proposal.completion_criterion),reason:text(proposal.reason),_convergence_validation:proposal._convergence_validation,_sibling_overlap_validation:proposal._sibling_overlap_validation,_structured_scope_validation:proposal._structured_scope_validation,_provenance_review:proposal._provenance_review};
       }else if(proposalStatus==='DONE'){
         parsed={status:'DONE',coverage_note:text(proposal.coverage_note)};
       }else{
@@ -5955,6 +6193,7 @@ export async function runAutonomousRequirementCognition({
           completion_criterion:clip(parsed?.completion_criterion,1600),
           convergence_similarity:Number(parsed?._convergence_validation?.similarity||0),
           sibling_overlap_validation:asObject(parsed?._sibling_overlap_validation),
+          structured_scope_validation:asObject(parsed?._structured_scope_validation),
           provenance_review:asObject(parsed?._provenance_review),
           child_proposal_checkpoint_step_key:childProposalStepKey(node,ordinal),
           child_authoring_protocol:'deep_formulation_checkpoint_then_nonthinking_serialization_v0_1',
@@ -5983,6 +6222,56 @@ export async function runAutonomousRequirementCognition({
       child.parent_path=node.node_path;
       authored.push(child);
       counters.nodes++;
+
+      const acceptedScopeLedger=structuredChildScopeLedger(node,authored.map(item=>({
+        requirement:item?.requirement_text,
+        scope_removed:item?.decision_payload?.scope_removed,
+        completion_criterion:item?.decision_payload?.completion_criterion,
+      })));
+      const acceptedCounter=childAuthoringCounterState(
+        node?.decision_payload,semanticRuntime.epoch_no
+      );
+      const acceptedPayload={...(node.decision_payload||{})};
+      if(Object.keys(asObject(acceptedPayload.child_authoring_failure)).length){
+        acceptedPayload.child_authoring_last_failure=acceptedPayload.child_authoring_failure;
+      }
+      delete acceptedPayload.child_authoring_failure;
+      delete acceptedPayload.child_authoring_escalation;
+      acceptedPayload.child_authoring_escalation_required=false;
+      acceptedPayload.reconsider_decomposition=false;
+      acceptedPayload.child_authoring_epoch_no=acceptedCounter.epoch_no;
+      acceptedPayload.child_authoring_failure_count=0;
+      acceptedPayload.child_authoring_reconsideration_cycles=0;
+      acceptedPayload.child_authoring_epoch_transition_count=0;
+      acceptedPayload.child_authoring_lifetime_rejection_count=
+        acceptedCounter.lifetime_rejection_count_base;
+      acceptedPayload.child_authoring_scope_ledger=acceptedScopeLedger||null;
+      acceptedPayload.child_authoring_last_accepted_at=new Date().toISOString();
+      node=await saveNode({
+        nodePath:node.node_path,
+        parentPath:node.parent_path??parentPathOf(node.node_path),
+        ordinal:node.ordinal||0,
+        requirement:node.requirement_text,
+        sourceKind:node.source_kind,
+        sourceRef:node.source_ref,
+        status:'split',
+        decisionType:'SPLIT',
+        decisionPayload:acceptedPayload,
+        contextPayload:node.context_payload||{},
+        resultArtifact:null,
+      });
+      node.parent_path=node.parent_path??parentPathOf(node.node_path);
+      console.log('AAU_AUTONOMOUS_CHILD_SCOPE_PROGRESS',JSON.stringify({
+        agent_id:agentId,
+        intent_execution_id:intentExecutionId,
+        node_path:node.node_path,
+        accepted_child_path:child.node_path,
+        structured_scope_contract:acceptedScopeLedger?.contract||null,
+        covered_scope:acceptedScopeLedger?.already_covered_scope||null,
+        remaining_scope:acceptedScopeLedger?.remaining_scope||null,
+        per_epoch_failure_count_reset:true,
+        lifetime_rejection_count:acceptedPayload.child_authoring_lifetime_rejection_count,
+      }));
 
     }
     throw new Error('autonomous_decomposition_child_resource_limit:'+node.node_path);
