@@ -96,16 +96,19 @@ async function repositorySnapshot(repoFullName, branch) {
 }
 
 async function modelCall(model, system, user, timeoutMs = 110000) {
+  const directKimi=model==='kimi-k3';
   return withReviewerModelSlot('architecture_conformance', async () => {
     const requestStarted=Date.now();
     try{
       const result=await modelChatCompletion({
+        provider:directKimi?'moonshot_direct':null,
         model,
         messages:[{role:'system',content:system},{role:'user',content:user}],
         maxTokens:2800,
         temperature:0,
-        jsonMode:String(model).startsWith('nvidia/nemotron'),
+        jsonMode:directKimi||String(model).startsWith('nvidia/nemotron'),
         enableThinking:String(model).startsWith('nvidia/nemotron')?false:null,
+        reasoningEffort:directKimi?'low':null,
         timeoutMs,
         runtimeRole:'reviewer',
       });
@@ -264,12 +267,12 @@ Return:
 
 VERIFIED_PASS is allowed only when every required architecture behavior/component is materially represented and an explicit agent-authored implementation manifest is present. Advisory preferences that are not architecture requirements must not cause failure. Return minimal file references; do not include full source code or long narrative.`;
 
-  const models = ['moonshotai/kimi-k3','meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b'];
+  const models = ['kimi-k3','meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b'];
   let lastError = null;
   for (const model of models) {
     if (isReviewerModelInBackoff(model)) {console.warn('AAU_CONFORMANCE_REVIEWER_BACKOFF_SKIP',model);continue;}
     try {
-      const timeoutMs = model === models[0] ? 45000 : model.startsWith('meta/') ? 60000 : 110000;
+      const timeoutMs = model === models[0] ? 120000 : model.startsWith('meta/') ? 60000 : 110000;
       const res = await modelCall(model, system, user, timeoutMs);
       return {
         result: validate(parseJsonObject(res.text)),
@@ -367,7 +370,7 @@ export function startProductArchitectureConformanceWorker() {
     executor_id:executorId,
     poll_ms:pollMs,
     version:'product_architecture_conformance_v0_1',
-    authenticator:'moonshotai/kimi-k3',
+    authenticator:'kimi-k3', authenticator_provider:'moonshot_direct',
     fallbacks:['meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b'],
   };
 }
