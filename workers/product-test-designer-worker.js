@@ -38,14 +38,17 @@ async function rpc(name, args = {}) {
 }
 
 async function modelCall(model, system, user) {
+  const directKimi=model==='kimi-k3';
   const result=await modelChatCompletion({
+    provider:directKimi?'moonshot_direct':null,
     model,
     messages:[{role:'system',content:system},{role:'user',content:user}],
     maxTokens:4200,
     temperature:0,
-    jsonMode:false,
+    jsonMode:directKimi,
     enableThinking:String(model).startsWith('nvidia/nemotron')?false:null,
-    timeoutMs:60000,
+    reasoningEffort:directKimi?'low':null,
+    timeoutMs:directKimi?120000:60000,
     runtimeRole:'planner',
   });
   return {
@@ -202,7 +205,7 @@ Return:
 If a 1000-user stress test is not relevant, set load_test.required=false and explain exactly why. Do not invent completed evidence.`;
 
   const models = [
-    'moonshotai/kimi-k3',
+    'kimi-k3',
     'meta/muse-glimmer-30b',
     'nvidia/nemotron-3.5-lightning-30b-a3b',
   ];
@@ -314,7 +317,8 @@ export function startProductTestDesignerWorker() {
     executor_id: executorId,
     poll_ms: pollMs,
     version: 'product_test_designer_v0_2',
-    authenticator: 'moonshotai/kimi-k3',
+    authenticator: 'kimi-k3',
+    authenticator_provider: 'moonshot_direct',
     fallbacks: ['meta/muse-glimmer-30b', 'nvidia/nemotron-3.5-lightning-30b-a3b'],
   };
 }
