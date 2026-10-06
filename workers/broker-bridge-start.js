@@ -183,6 +183,87 @@ try {
 
 try {
   const {
+    structuredChildScopeLedger,
+    childAuthoringCounterState,
+  } = await import('./autonomous-recursive-decomposition.js');
+  const structuredNode={
+    requirement_text:'Solve Problem 1: Create a canonical ledger with variable, value, unit, period, evidence state, source, and confidence.',
+    context_payload:{
+      qda_601_context:{value:{
+        next_unit:{
+          unit_code:'QDA601-PROBE-U1',
+          exercise_pack:{
+            reports:[
+              {source:'A',ACV:1200,CAC:92,churn_monthly:0.032,gross_margin:0.74,as_of:'2026-Q2'},
+              {source:'B',ACV:1260,CAC:78,churn_monthly:0.041,gross_margin:0.735,as_of:'2026-Q2'},
+            ],
+            problems:['Create a canonical ledger with variable, value, unit, period, evidence state, source, and confidence.'],
+          },
+        },
+      }},
+      qda_curriculum_problem_binding:{problem_ordinal:1},
+    },
+  };
+  const ledger=structuredChildScopeLedger(structuredNode,[
+    {requirement:'Resolve ACV and create its canonical ledger entry.'},
+    {requirement:'Resolve CAC and churn_monthly and create their canonical ledger entries.'},
+  ]);
+  const unstructured=structuredChildScopeLedger({
+    requirement_text:'Investigate the issue.',
+    context_payload:{}
+  },[]);
+  const legacy=childAuthoringCounterState(
+    {child_authoring_failure_count:25},7
+  );
+  const sameEpoch=childAuthoringCounterState(
+    {
+      child_authoring_epoch_no:7,
+      child_authoring_failure_count:2,
+      child_authoring_reconsideration_cycles:2,
+      child_authoring_lifetime_rejection_count:27,
+      child_authoring_epoch_transition_count:1,
+    },7
+  );
+  const nextEpoch=childAuthoringCounterState(
+    {
+      child_authoring_epoch_no:7,
+      child_authoring_failure_count:2,
+      child_authoring_reconsideration_cycles:2,
+      child_authoring_lifetime_rejection_count:27,
+      child_authoring_epoch_transition_count:1,
+    },8
+  );
+  console.log('AAU_STRUCTURED_REMAINING_SCOPE_PROBE',JSON.stringify({
+    ok:ledger?.contract==='authoritative_structured_remaining_scope_v0_1'
+      &&JSON.stringify(ledger.authoritative_scope)===JSON.stringify(['ACV','CAC','churn_monthly','gross_margin'])
+      &&JSON.stringify(ledger.already_covered_scope)===JSON.stringify(['ACV','CAC','churn_monthly'])
+      &&JSON.stringify(ledger.remaining_scope)===JSON.stringify(['gross_margin'])
+      &&unstructured===null
+      &&legacy.failure_count_base===0
+      &&legacy.lifetime_rejection_count_base===25
+      &&sameEpoch.failure_count_base===2
+      &&sameEpoch.reconsideration_cycles_base===2
+      &&nextEpoch.failure_count_base===0
+      &&nextEpoch.reconsideration_cycles_base===0
+      &&nextEpoch.epoch_transition_count_base===2,
+    authoritative_scope:ledger?.authoritative_scope||null,
+    covered_scope:ledger?.already_covered_scope||null,
+    remaining_scope:ledger?.remaining_scope||null,
+    unstructured_fallback:unstructured===null,
+    legacy_lifetime_preserved:legacy.lifetime_rejection_count_base,
+    same_epoch_failure_base:sameEpoch.failure_count_base,
+    next_epoch_failure_base:nextEpoch.failure_count_base,
+    next_epoch_transition_count:nextEpoch.epoch_transition_count_base,
+    contract:'bounded_authoritative_remaining_scope_v0_1',
+  }));
+} catch (error) {
+  console.error('AAU_STRUCTURED_REMAINING_SCOPE_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
+  const {
     runtimeOwnedTerminalSynthesisChild,
     splitDoneZeroChildRecovery,
   } = await import('./autonomous-recursive-decomposition.js');
