@@ -1117,6 +1117,19 @@ if (isEnabled('AAU_AUTONOMOUS_LIFECYCLE_ENABLED')) {
   }
 }
 
+// Moonshot fresh-agent bootstrap is intentionally fire-and-forget so the existing
+// autonomous agent lifecycle starts first and remains unaffected.
+if (isEnabled('AAU_MOONSHOT_BOOTSTRAP_ON_START')) {
+  void import('./moonshot-bootstrap-series.js')
+    .then(({ runMoonshotBootstrapSeries }) => runMoonshotBootstrapSeries())
+    .then((result) => console.log('AAU_MOONSHOT_BOOTSTRAP_RESULT', JSON.stringify(result)))
+    .catch((error) => console.error('AAU_MOONSHOT_BOOTSTRAP_FAILED', JSON.stringify({
+      error_name:error?.name || null,
+      http_status:error?.status || null,
+      message:String(error?.message || error).slice(0,3000),
+    })));
+}
+
 if (isEnabled('AAU_VERCEL_DIAGNOSTIC_ON_START')) {
   void import('./vercel-diagnostic-probe.js')
     .then(({ probeLatestVercelDeployment }) => probeLatestVercelDeployment())
