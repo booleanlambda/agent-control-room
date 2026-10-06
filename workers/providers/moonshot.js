@@ -158,7 +158,6 @@ export async function moonshotChatCompletion({
     model: resolvedModel,
     messages,
     max_tokens: resolvedMaxTokens,
-    temperature: Number.isFinite(Number(temperature)) ? Number(temperature) : 0.2,
     stream: false,
   };
 
@@ -233,6 +232,7 @@ export async function moonshotChatCompletion({
       json_mode_requested: jsonMode === true,
       provider_specific_thinking_flag_sent: false,
       aau_enable_thinking_request: enableThinking === true,
+      temperature_policy: 'provider_default_fixed_1',
     },
   };
 }
