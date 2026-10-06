@@ -4,6 +4,11 @@ import {
   nvidiaConfigStatus,
   probeNvidia,
 } from './nvidia.js';
+import {
+  moonshotChatCompletion,
+  moonshotConfigStatus,
+  probeMoonshot,
+} from './moonshot.js';
 
 const providerContext = new AsyncLocalStorage();
 
@@ -12,6 +17,11 @@ const adapters = Object.freeze({
     chatCompletion: nvidiaChatCompletion,
     configStatus: nvidiaConfigStatus,
     probe: probeNvidia,
+  }),
+  moonshot_direct: Object.freeze({
+    chatCompletion: moonshotChatCompletion,
+    configStatus: moonshotConfigStatus,
+    probe: probeMoonshot,
   }),
 });
 
