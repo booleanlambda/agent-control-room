@@ -37,14 +37,17 @@ async function rpc(name, args = {}) {
 }
 
 async function modelCall(model, system, user) {
+  const directKimi=model==='kimi-k3';
   const result=await modelChatCompletion({
+    provider:directKimi?'moonshot_direct':null,
     model,
     messages:[{role:'system',content:system},{role:'user',content:user}],
     maxTokens:4200,
     temperature:0,
-    jsonMode:false,
+    jsonMode:directKimi,
     enableThinking:String(model).startsWith('nvidia/nemotron')?false:null,
-    timeoutMs:60000,
+    reasoningEffort:directKimi?'low':null,
+    timeoutMs:directKimi?120000:60000,
     runtimeRole:'planner',
   });
   return {
@@ -152,7 +155,7 @@ Return:
 
 Only include requirements materially implied by the product and frozen test. The agent will choose how to implement them.`;
 
-  const models = ['moonshotai/kimi-k3','meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b'];
+  const models = ['kimi-k3','meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b'];
   let lastError = null;
   for (const model of models) {
     try {
@@ -246,7 +249,8 @@ export function startProductServiceArchitectWorker() {
     executor_id:executorId,
     poll_ms:pollMs,
     version:'product_service_architect_v0_1',
-    primary:'moonshotai/kimi-k3',
+    primary:'kimi-k3',
+    primary_provider:'moonshot_direct',
     fallbacks:['meta/muse-glimmer-30b','nvidia/nemotron-3.5-lightning-30b-a3b'],
   };
 }
