@@ -81,29 +81,26 @@ jobs:
                   raise SystemExit('local_classifier_end_missing')
               s=s[:local_start]+s[local_end+3:]
 
-          old="""if(authored.length<1)
-          throw new Error('autonomous_decomposition_split_requires_child:'+node.node_path);"""
-          new="""if(authored.length<1){
-          const collapsed=parsed?._runtime_terminal_synthesis_collapsed===true;
-          const recoveryError=new Error(
-            collapsed
-              ?'runtime_terminal_synthesis_collapse_zero_child_reconsider'
-              :'agent_split_done_without_child_reconsider'
-          );
-          recoveryError.code=collapsed
-            ?'RUNTIME_TERMINAL_SYNTHESIS_COLLAPSE_ZERO_CHILD'
-            :'COGNITION_SPLIT_DONE_WITHOUT_CHILD';
-          recoveryError.rejectionReason=collapsed
-            ?'terminal_synthesis_classifier_left_split_without_semantic_child'
-            :'split_decision_produced_no_semantic_child';
-          return returnChildAuthoringFailure({
-            ordinal,
-            phase:collapsed
-              ?'terminal_synthesis_collapse_zero_child'
-              :'split_done_without_child',
-            error:recoveryError,
-          });
-        }"""
+          old="if(authored.length<1)\n          throw new Error('autonomous_decomposition_split_requires_child:'+node.node_path);"
+          new=(
+              "if(authored.length<1){\n"
+              "          const collapsed=parsed?._runtime_terminal_synthesis_collapsed===true;\n"
+              "          const recoveryError=new Error(collapsed\n"
+              "            ?'runtime_terminal_synthesis_collapse_zero_child_reconsider'\n"
+              "            :'agent_split_done_without_child_reconsider');\n"
+              "          recoveryError.code=collapsed\n"
+              "            ?'RUNTIME_TERMINAL_SYNTHESIS_COLLAPSE_ZERO_CHILD'\n"
+              "            :'COGNITION_SPLIT_DONE_WITHOUT_CHILD';\n"
+              "          recoveryError.rejectionReason=collapsed\n"
+              "            ?'terminal_synthesis_classifier_left_split_without_semantic_child'\n"
+              "            :'split_decision_produced_no_semantic_child';\n"
+              "          return returnChildAuthoringFailure({\n"
+              "            ordinal,\n"
+              "            phase:collapsed?'terminal_synthesis_collapse_zero_child':'split_done_without_child',\n"
+              "            error:recoveryError,\n"
+              "          });\n"
+              "        }"
+          )
           if old in s:
               s=s.replace(old,new,1)
           elif 'runtime_terminal_synthesis_collapse_zero_child_reconsider' not in s:
