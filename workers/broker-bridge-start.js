@@ -875,6 +875,22 @@ try {
   }));
 }
 
+// one_shot_kimi_runtime_fault_review_v0_1
+if (isEnabled('AAU_KIMI_RUNTIME_FAULT_REVIEW')) {
+  try {
+    const { reviewSilasRuntimeFaultWithKimi } = await import('./kimi-runtime-fault-review.js');
+    const result = await reviewSilasRuntimeFaultWithKimi();
+    console.log('AAU_KIMI_RUNTIME_FAULT_REVIEW_RESULT', JSON.stringify(result));
+  } catch (error) {
+    console.error('AAU_KIMI_RUNTIME_FAULT_REVIEW_FAILED', JSON.stringify({
+      error_name:error?.name||null,
+      code:error?.code||null,
+      status:error?.status||null,
+      message:String(error?.message||error).slice(0,1600)
+    }));
+  }
+}
+
 // one_shot_expertise_runtime_repair_v0_1
 if (isEnabled('AAU_EXPERTISE_RUNTIME_PATCH')) {
   try {
