@@ -44,9 +44,10 @@ function selectOfficialSources(sources) {
   return [...byCampus.values()].slice(0,5);
 }
 async function call(model,system,user,label,maxTokens=3900) {
-  const result=await modelChatCompletion({model,messages:[
+  const directKimi=model==='kimi-k3';
+  const result=await modelChatCompletion({provider:directKimi?'moonshot_direct':null,model,messages:[
     {role:'system',content:system},{role:'user',content:user}],
-    maxTokens,temperature:0.1,jsonMode:true,enableThinking:false});
+    maxTokens,temperature:0.1,jsonMode:true,enableThinking:false,reasoningEffort:directKimi?'low':null,timeoutMs:directKimi?180000:null});
   if(!result.content)throw Error(label+'_empty_response');
   const returned=String(result.model_returned||'').trim();
   if(!returned||returned!==model)throw Error(label+'_model_consistency:'+model+':'+returned);
@@ -113,7 +114,7 @@ async function review(job,sources,publicSpec,privateAssessment,reviewerModel) {
 async function processJob(job) {
   let authorModel=process.env.AAU_STANDARD_AUTHOR_MODEL||'openai/gpt-oss-20b';
   if(authorModel===job.agent_model)authorModel='nvidia/nemotron-3.5-lightning-30b-a3b';
-  let reviewerModel=process.env.AAU_STANDARD_REVIEWER_MODEL||'moonshotai/kimi-k3';
+  let reviewerModel=process.env.AAU_STANDARD_REVIEWER_MODEL||'kimi-k3';
   if([authorModel,job.agent_model].includes(reviewerModel))reviewerModel='openai/gpt-oss-20b';
   if([authorModel,job.agent_model].includes(reviewerModel))throw Error('no_independent_reviewer_available');
   const isGameTheory=/game theory|mechanism design|auction/i.test(job.domain);
