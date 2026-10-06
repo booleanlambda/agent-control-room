@@ -91,6 +91,7 @@ ${task.artifact}`;
         maxTokens:directKimi?900:model.startsWith('meta/')?2600:2200,temperature:0,
         jsonMode:directKimi?true:profile.supports_json_mode===true,
         enableThinking:String(model).startsWith('nvidia/nemotron')?false:null,
+        reasoningEffort:directKimi?'low':null,
         timeoutMs:directKimi?120000:model.startsWith('meta/')?90000:120000,
         runtimeRole:'authenticator',
       });

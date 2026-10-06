@@ -459,6 +459,7 @@ async function gradeAnswer(run, task, answer) {
           temperature:0,
           timeoutMs:directKimi?120000:model.startsWith('meta/')?90000:120000,
           jsonMode:directKimi,
+          reasoningEffort:directKimi?'low':null,
           runtimeRole:'authenticator',
         });
         if(result.finish_reason!=='stop'){

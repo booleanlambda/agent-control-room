@@ -32,6 +32,7 @@ async function one(){
       temperature:0,
       jsonMode:true,
       enableThinking:false,
+      reasoningEffort:'low',
       timeoutMs:120000,
       runtimeRole:'authenticator',
     });
@@ -91,7 +92,7 @@ export async function probeAuthenticatorIoTimeout(){
   }
   console.log('AAU_AUTH_IO_TEST_BEGIN',JSON.stringify({
     synthetic:true,source_records_accessed:false,provider:PROVIDER,model:MODEL,
-    input_chars:system.length+user.length,output_cap:OUTPUT_CAP,paid_request_count:1
+    input_chars:system.length+user.length,output_cap:OUTPUT_CAP,reasoning_effort:'low',paid_request_count:1
   }));
   const result=await one();
   console.log('AAU_AUTH_IO_TEST_RESULT',JSON.stringify(result));

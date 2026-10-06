@@ -139,6 +139,7 @@ export async function moonshotChatCompletion({
   temperature = 0.2,
   jsonMode = null,
   enableThinking = null,
+  reasoningEffort = null,
   timeoutMs = null,
 } = {}) {
   const config = resolveConfig();
@@ -162,6 +163,19 @@ export async function moonshotChatCompletion({
   };
 
   if (jsonMode === true) requestBody.response_format = { type: 'json_object' };
+
+  // Kimi K3 always reasons. The supported cost/latency control is the
+  // top-level reasoning_effort field: low, high, or max (provider default max).
+  const normalizedReasoningEffort = clean(reasoningEffort).toLowerCase();
+  if (/^kimi-k3(?:$|[-_])/i.test(resolvedModel) && normalizedReasoningEffort) {
+    if (!['low','high','max'].includes(normalizedReasoningEffort)) {
+      const error = new Error('moonshot_invalid_reasoning_effort');
+      error.code = 'MODEL_REQUEST_INVALID';
+      error.provider = 'moonshot_direct';
+      throw error;
+    }
+    requestBody.reasoning_effort = normalizedReasoningEffort;
+  }
 
   const resolvedTimeoutMs = resolveTimeoutMs(timeoutMs);
   let result = await requestJson(config.endpoint, {
@@ -232,6 +246,8 @@ export async function moonshotChatCompletion({
       json_mode_requested: jsonMode === true,
       provider_specific_thinking_flag_sent: false,
       aau_enable_thinking_request: enableThinking === true,
+      reasoning_effort: requestBody.reasoning_effort || null,
+      reasoning_effort_policy: requestBody.reasoning_effort ? 'explicit_k3' : 'provider_default',
       temperature_policy: 'provider_default_fixed_1',
     },
   };

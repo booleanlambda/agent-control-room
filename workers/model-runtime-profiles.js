@@ -54,7 +54,10 @@ export const MODEL_RUNTIME_PROFILES = Object.freeze({
     estimated_chars_per_token: 3.2,
     // Direct Kimi may reason internally, but AAU currently has no reliable
     // transport switch to disable that reasoning. Account for it as output.
-    supports_thinking: false,
+    supports_thinking: true,
+    reasoning_efforts: Object.freeze(['low','high','max']),
+    default_reasoning_effort: 'max',
+    reviewer_reasoning_effort: 'low',
     reasoning_counts_against_output: true,
     supports_json_mode: true,
     max_request_timeout_ms: 180000,
