@@ -77,7 +77,14 @@ const asArray=(v)=>Array.isArray(v)?v:[];
 function text(v){return String(v??'').trim();}
 function bytes(v){try{return Buffer.byteLength(typeof v==='string'?v:JSON.stringify(v));}catch{return 0;}}
 function clip(s,n){const v=String(s??'');return v.length<=n?v:v.slice(0,n);}
-function safeJson(v){try{return JSON.stringify(v);}catch{return '{}';}}
+function safeJson(v){
+  try{
+    const serialized=JSON.stringify(v);
+    return typeof serialized==='string'?serialized:'null';
+  }catch{
+    return '{}';
+  }
+}
 
 const QDA_STATISTICAL_UNIT_CODES=new Set([
   'QDA601-M4-U1',
@@ -525,10 +532,53 @@ export function pythonChecksFromArtifact(artifact){
     }
   }
 
+  // Agent-authored structured artifacts sometimes wrap one bounded calculation
+  // under a semantic key (for example interview_study_evwsi_calculation).
+  // The Python checks remain authoritative even when they are one or more
+  // object levels below the artifact root. Traverse only the artifact object,
+  // bounded by depth, and fail closed if a discovered python_checks field is
+  // not an array.
+  const deep=[];
+  let deepTypeError=null;
+  const walk=(value,path,depth)=>{
+    if(deepTypeError||depth>6||value===null||value===undefined)return;
+    if(Array.isArray(value)){
+      value.forEach((item,index)=>walk(item,path+'['+String(index)+']',depth+1));
+      return;
+    }
+    if(typeof value!=='object')return;
+    for(const [key,child] of Object.entries(value)){
+      const childPath=path?path+'.'+key:key;
+      if(key==='python_checks'){
+        if(!Array.isArray(child)){
+          deepTypeError={
+            present:true,type_ok:false,value:[],
+            error:childPath+'_must_be_array',
+            actual_type:child===null?'null':typeof child,
+          };
+          return;
+        }
+        for(const check of child){
+          deep.push({
+            ...asObject(check),
+            problem:typeof check?.problem==='string'
+              ?check.problem
+              :(path||'nested_artifact'),
+          });
+        }
+        continue;
+      }
+      if(key==='problem_responses')continue;
+      walk(child,childPath,depth+1);
+    }
+  };
+  walk(obj,'',0);
+  if(deepTypeError)return deepTypeError;
+
   // Some QDA artifacts are already canonicalized and therefore contain the
-  // same checks both at top level and inside problem_responses. Preserve one
-  // exact instance of each check so verification coverage is not inflated.
-  const combined=[...direct.value,...nested];
+  // same checks at multiple levels. Preserve one exact instance of each check
+  // so verification coverage is not inflated.
+  const combined=[...direct.value,...nested,...deep];
   const seen=new Set();
   const value=[];
   for(const check of combined){
@@ -542,13 +592,16 @@ export function pythonChecksFromArtifact(artifact){
     seen.add(fingerprint);
     value.push(check);
   }
+  const sources=[
+    direct.value.length?'top_level':null,
+    nested.length?'problem_responses':null,
+    deep.length?'nested_artifact':null,
+  ].filter(Boolean);
   return {
-    present:direct.present||nested.length>0,
+    present:sources.length>0,
     type_ok:true,
     value,
-    source:direct.value.length&&nested.length
-      ?'top_level_and_problem_responses'
-      :nested.length?'problem_responses':'top_level',
+    source:sources.join('_and_')||'top_level',
   };
 }
 export function atomicMaterialCalculationCount(artifact){
