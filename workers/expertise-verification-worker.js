@@ -86,7 +86,7 @@ async function checkpointVerification(run, stage, fields = {}) {
   return rpc('aau_bridge_checkpoint_expertise_verification', args);
 }
 
-async function modelCall({ model, provider = null, system, user, maxTokens = null, temperature = 0, timeoutMs = null, jsonMode = false, runtimeRole = 'generic' }) {
+async function modelCall({ model, provider = null, system, user, maxTokens = null, temperature = 0, timeoutMs = null, jsonMode = false, reasoningEffort: requestedReasoningEffort = null, runtimeRole = 'generic' }) {
   const runtimeContract=resolveModelRuntimeContract(model,runtimeRole);
   const messages=[{ role: 'system', content: system }, { role: 'user', content: user }];
   const resolvedMaxTokens=Math.max(
@@ -114,12 +114,13 @@ async function modelCall({ model, provider = null, system, user, maxTokens = nul
        modelName==='z-ai/glm-5.3'
     || modelName.startsWith('nvidia/nemotron')
     || modelName==='deepseek-ai/deepseek-v4-flash-0731';
-  const reasoningEffort=
+  const defaultReasoningEffort=
        modelName==='meta/muse-glimmer-30b'
     || modelName==='openai/gpt-oss-20b'
     || modelName==='deepseek-ai/deepseek-v4-flash-0731'
       ? 'low'
       : null;
+  const reasoningEffort=requestedReasoningEffort||defaultReasoningEffort;
   const effectiveTemperature=modelName==='meta/muse-glimmer-30b' ? 0.95 : temperature;
 
   return withReviewerModelSlot('expertise_verification', async () => {
@@ -477,7 +478,7 @@ async function gradeAnswer(run, task, answer) {
           verifier_provider:result.provider||(directKimi?'moonshot_direct':null),
           authenticator_fallback_used:model!==primaryAuthenticator,raw_sha256:sha256(result.text),
           review_usage:result.usage||null,
-          review_token_policy:directKimi?'kimi_direct_auth_compact_v0_1':'legacy_fallback_budget',
+          review_token_policy:directKimi?'kimi_direct_auth_compact_low_reasoning_v0_2':'legacy_fallback_budget',
         };
         console.warn('AAU_EXPERTISE_AUTHENTICATOR_UNUSABLE_GRADE',JSON.stringify({
           model,provider:directKimi?'moonshot_direct':null,task_id:task.id,attempt,
