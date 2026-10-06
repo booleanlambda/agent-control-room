@@ -1052,6 +1052,16 @@ if (isEnabled('AAU_AGENT_FILE_VISION_ENABLED')) {
 // Open the health endpoint before any optional startup cognition can block on a model/provider.
 await import('./broker-bridge-envcheck.js');
 
+try {
+  const { moonshotConfigStatus } = await import('./providers/moonshot.js');
+  console.log('AAU_MOONSHOT_DIRECT_CONFIG', JSON.stringify(moonshotConfigStatus()));
+} catch (error) {
+  console.warn('AAU_MOONSHOT_DIRECT_CONFIG_FAILED', JSON.stringify({
+    error_name:error?.name || null,
+    message:String(error?.message || error).slice(0,800),
+  }));
+}
+
 const modelWakeEnabled = isEnabled('AAU_MODEL_WAKE_ON_START');
 if (modelWakeEnabled) {
   try {
