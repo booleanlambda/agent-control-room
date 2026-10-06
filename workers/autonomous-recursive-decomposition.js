@@ -1541,23 +1541,14 @@ function unwrappedContextObject(value){
   const inner=asObject(outer.value);
   return Object.keys(inner).length?inner:outer;
 }
+function regexEscape(value){
+  const specials='\\^$.*+?()[]{}|';
+  return [...String(value??'')].map(ch=>specials.includes(ch)?'\\\\'+ch:ch).join('');
+}
 function scopeTokenPattern(key){
   const parts=String(key||'')
     .split(/[_\s-]+/)
-    .map(v=>v.replace(/[.*+?^$\{\}()|[\]\\]/g,'\\function childConvergenceValidation(parentRequirement,childRequirement,scopeRemoved,completionCriterion){
-  const failures=[];
-  const scope=text(scopeRemoved);
-  const criterion=text(completionCriterion);
-  if(scope.length<12)failures.push('scope_removed_required');
-  if(criterion.length<12)failures.push('completion_criterion_required');
-  const parentNorm=normalizedRequirement(parentRequirement);
-  const childNorm=normalizedRequirement(childRequirement);
-  const similarity=requirementSimilarity(parentRequirement,childRequirement);
-  if(parentNorm===childNorm)failures.push('child_exactly_restates_parent');
-  if(similarity>=0.88 && childNorm.length>=Math.max(1,Math.floor(parentNorm.length*0.80)))
-    failures.push('child_does_not_materially_reduce_scope');
-  return {valid:failures.length===0,failures,similarity};
-}'))
+    .map(regexEscape)
     .filter(Boolean);
   if(!parts.length)return null;
   return new RegExp('(^|[^a-z0-9])'+parts.join('[_\\s-]+')+'([^a-z0-9]|$)','i');
