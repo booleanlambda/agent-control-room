@@ -182,6 +182,46 @@ try {
 }
 
 try {
+  const { runtimeOwnedTerminalSynthesisChild } = await import('./autonomous-recursive-decomposition.js');
+  const cases=[
+    {
+      name:'substantive_source_reconciliation',
+      requirement:'Reconcile conflicting source values and definitions for the variable before calculating the result.',
+      expected:false,
+    },
+    {
+      name:'substantive_evidence_reconciliation',
+      requirement:'Reconcile contradictory evidence, units, and forecast periods to determine the supported value.',
+      expected:false,
+    },
+    {
+      name:'terminal_child_result_reconciliation',
+      requirement:'Reconcile the completed child results into the final submission.',
+      expected:true,
+    },
+    {
+      name:'terminal_synthesis',
+      requirement:'Synthesize the resolved child artifacts into the final answer.',
+      expected:true,
+    },
+  ];
+  const outcomes=cases.map(test=>({
+    name:test.name,
+    expected:test.expected,
+    actual:runtimeOwnedTerminalSynthesisChild({requirement:test.requirement}),
+  }));
+  console.log('AAU_TERMINAL_SYNTHESIS_CLASSIFIER_PROBE',JSON.stringify({
+    ok:outcomes.every(v=>v.actual===v.expected),
+    outcomes,
+    contract:'runtime_owned_terminal_synthesis_classifier_v0_3',
+  }));
+} catch (error) {
+  console.error('AAU_TERMINAL_SYNTHESIS_CLASSIFIER_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
   const { atomicMaterialCalculationCount } = await import('./autonomous-recursive-decomposition.js');
   const probeArtifact={
     calculation:{
