@@ -16,6 +16,7 @@ import {
   mergeInheritedDependencyResults,
   THRESHOLD_EVIDENCE_POLICY,
   MAX_MODEL_TRANSPORT_ATTEMPTS,
+  runtimeOwnedTerminalSynthesisChild,
   pathDepth,
 } from './semantic-runtime-controls.js';
 import {
@@ -1997,13 +1998,6 @@ function stageContractForRequirement(packet,requirement,nodePath=null){
   };
 }
 
-function runtimeOwnedTerminalSynthesisChild(candidate){
-  const requirement=normalizedRequirement(candidate?.requirement);
-  if(!requirement)return false;
-  // Terminal synthesis is a runtime phase. A decomposition child may gather or
-  // validate evidence, but it must not exist solely to format/merge/submit it.
-  return /^(synthesize|synthesise|format|submit|compile|merge|reconcile|assemble|convert)\b/.test(requirement);
-}
 
 function validateStageContractArtifact(contractDefinition,artifactText){
   const definition=asObject(contractDefinition);
@@ -5848,8 +5842,23 @@ export async function runAutonomousRequirementCognition({
 
       const status=text(parsed?.status).toUpperCase();
       if(status==='DONE'){
-        if(authored.length<1)
-          throw new Error('autonomous_decomposition_split_requires_child:'+node.node_path);
+        if(authored.length<1){
+          const collapsed=parsed?._runtime_terminal_synthesis_collapsed===true;
+          const recoveryError=new Error(collapsed
+            ?'runtime_terminal_synthesis_collapse_zero_child_reconsider'
+            :'agent_split_done_without_child_reconsider');
+          recoveryError.code=collapsed
+            ?'RUNTIME_TERMINAL_SYNTHESIS_COLLAPSE_ZERO_CHILD'
+            :'COGNITION_SPLIT_DONE_WITHOUT_CHILD';
+          recoveryError.rejectionReason=collapsed
+            ?'terminal_synthesis_classifier_left_split_without_semantic_child'
+            :'split_decision_produced_no_semantic_child';
+          return returnChildAuthoringFailure({
+            ordinal,
+            phase:collapsed?'terminal_synthesis_collapse_zero_child':'split_done_without_child',
+            error:recoveryError,
+          });
+        }
         await saveNode({
           nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
           requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
