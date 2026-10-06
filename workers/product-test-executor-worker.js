@@ -40,13 +40,16 @@ async function rpc(name, args = {}) {
 }
 
 async function modelCall(model, system, user, maxTokens = 3200, timeoutMs = 150000, runtimeRole = 'reviewer') {
+  const directKimi=model==='kimi-k3';
   const result=await modelChatCompletion({
+    provider:directKimi?'moonshot_direct':null,
     model,
     messages:[{role:'system',content:system},{role:'user',content:user}],
     maxTokens,
     temperature:0,
-    jsonMode:false,
+    jsonMode:directKimi,
     enableThinking:String(model).startsWith('nvidia/nemotron')?false:null,
+    reasoningEffort:directKimi?'low':null,
     timeoutMs,
     runtimeRole,
   });
@@ -68,7 +71,7 @@ function parseJsonObject(text) {
 }
 
 async function modelWithFallback(system, user, maxTokens, validate = null, phase = 'unspecified') {
-  const models = ['moonshotai/kimi-k3', 'meta/muse-glimmer-30b', 'nvidia/nemotron-3.5-lightning-30b-a3b'];
+  const models = ['kimi-k3', 'meta/muse-glimmer-30b', 'nvidia/nemotron-3.5-lightning-30b-a3b'];
   let lastError = null;
   const accept = (raw) => {
     const parsed = parseJsonObject(raw);
@@ -701,7 +704,8 @@ export function startProductTestExecutorWorker() {
     version: 'product_test_executor_v0_5_load_timeout_provenance',
     max_virtual_users: 1000,
     same_origin_only: true,
-    authenticator: 'moonshotai/kimi-k3',
+    authenticator: 'kimi-k3',
+    authenticator_provider: 'moonshot_direct',
     fallbacks: ['meta/muse-glimmer-30b', 'nvidia/nemotron-3.5-lightning-30b-a3b'],
   };
 }
