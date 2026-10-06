@@ -2,7 +2,7 @@ name: Repair Zero-Child Runtime
 
 on:
   push:
-    branches: [main]
+    branches: [fix/zero-child-runtime]
     paths:
       - '.github/workflows/repair-expertise-verifier-runtime.yml'
 
@@ -172,6 +172,6 @@ jobs:
           git add workers/semantic-runtime-controls.js workers/semantic-runtime-controls.test.js workers/autonomous-recursive-decomposition.js
           git diff --cached --quiet && exit 0
           git commit -m 'fix: preserve substantive reconciliation children'
-          git push
+          git push origin HEAD:fix/zero-child-runtime
 
 # zero-child upstream repair v1
