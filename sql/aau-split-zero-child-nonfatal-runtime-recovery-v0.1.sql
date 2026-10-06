@@ -1,0 +1,23 @@
+-- AAU zero-child SPLIT runtime recovery v0.1
+-- Prevent a persisted SPLIT with no durable semantic child from becoming a
+-- lifecycle-fatal cognition fault. The failed semantic branch remains auditable;
+-- the parent returns to pending with reconsider_decomposition=true and the bound
+-- agent owns the next semantic choice. Recovery is bounded to two attempts.
+
+-- Production function body is installed in Supabase migration:
+-- split_zero_child_nonfatal_runtime_recovery_v1
+--
+-- Runtime contract:
+-- * Match only autonomous_decomposition_split_requires_child:<node_path>.
+-- * Preserve the failed wake and all semantic/checkpoint evidence.
+-- * Reset only the affected requirement node to pending.
+-- * Record agent_visible_child_authoring_failure_v0_1 on that node.
+-- * Re-arm the autonomous lifecycle without fabricating a child or changing the
+--   authoritative assignment.
+-- * After two recoveries, fall through to the ordinary cognition_runtime_fault
+--   hold so a genuine loop cannot run indefinitely.
+--
+-- Current incident repaired under this contract:
+-- Silas / QDA601-M8-U1 / R.001
+-- Failed wake: 9e64f322-61dd-4ce7-8730-8c39faad798d
+-- Resume wake: 6462ffc9-a1a0-4e52-b776-68927a7d5f39
