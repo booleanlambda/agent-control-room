@@ -77,7 +77,7 @@ const asArray=(v)=>Array.isArray(v)?v:[];
 function text(v){return String(v??'').trim();}
 function bytes(v){try{return Buffer.byteLength(typeof v==='string'?v:JSON.stringify(v));}catch{return 0;}}
 function clip(s,n){const v=String(s??'');return v.length<=n?v:v.slice(0,n);}
-function safeJson(v){
+export function safeJson(v){
   try{
     const serialized=JSON.stringify(v);
     return typeof serialized==='string'?serialized:'null';
@@ -3989,10 +3989,14 @@ export async function runAutonomousRequirementCognition({
 
   async function decide(node,{forceReconsider=false,branchDepth=0,singleChildRefinements=0}={}){
     const canonicalCandidateLedger=await loadExpertiseCandidateLedger();
+    const routingPythonCalculation=qdaM7U4AuthoritativePythonCalculation(packet);
     let contextPayload={
       ...asObject(node.context_payload),
       ...lifecycleStageContractContext(packet),
       ...expertiseCandidateLedgerContext(canonicalCandidateLedger),
+      ...(routingPythonCalculation?{
+        runtime_python_calculation:routingPythonCalculation,
+      }:{}),
     };
     let pinnedEvidence=await loadPinnedEvidence(node.node_path);
     const durableResearchCatalog=await loadDurableResearchCatalog(node.node_path);
@@ -4269,6 +4273,9 @@ export async function runAutonomousRequirementCognition({
                   : atomicUnavailable
                     ? 'ATOMIC execution admission is mechanically unavailable for this node after a prior rejected bounded execution. Choose another available semantic action; do not repeat the rejected execution unchanged.'
                     : 'ATOMIC is semantically available if you judge the requirement genuinely bounded.',
+                routingPythonCalculation
+                  ? 'AUTHORITATIVE PYTHON ROUTING EVIDENCE: supplied_context.runtime_python_calculation already contains the deterministic numeric solution for this QDA value-of-information case. Do not SPLIT merely to protect arithmetic precision, recompute intermediate values, or avoid rounding. Prefer ATOMIC when the remaining work is only to select, explain, structure, sanity-check, or bind these already-computed values. SPLIT remains valid only for genuinely independent semantic scope.'
+                  : null,
                 'RESOURCE ADVISORY ONLY: '+Number(runtimeView?.remaining_budget_units||0)+' units remain. Current execution admission can support '+availableChildCapacity+' child branch(es), priced at approximately '+branchEconomics.expected_child_lifecycle_units+' units each while protecting '+branchEconomics.completion_reserve_units+' units for completion. Do not change your semantic routing judgment merely to fit this resource snapshot; the runtime handles admission separately.',
                 storageDepthAvailable
                   ? 'Tree depth is not the ordinary stopping rule. If SPLIT is semantically correct, choose SPLIT; runtime admission will separately determine how many children can be started now.'
