@@ -2018,6 +2018,26 @@ export function runtimeOwnedTerminalSynthesisChild(candidate){
   return /^(synthesize|synthesise|format|submit|compile|merge|assemble|convert)\b/.test(requirement);
 }
 
+export function splitDoneZeroChildRecovery(parsed,authoredCount=0){
+  const status=String(parsed?.status??'').trim().toUpperCase();
+  if(status!=='DONE'||Number(authoredCount)>0)return null;
+  const collapsed=parsed?._runtime_terminal_synthesis_collapsed===true;
+  return {
+    code:collapsed
+      ?'RUNTIME_TERMINAL_SYNTHESIS_COLLAPSE_ZERO_CHILD'
+      :'COGNITION_SPLIT_DONE_WITHOUT_CHILD',
+    message:collapsed
+      ?'runtime_terminal_synthesis_collapse_zero_child_reconsider'
+      :'agent_split_done_without_child_reconsider',
+    rejection_reason:collapsed
+      ?'terminal_synthesis_classifier_left_split_without_semantic_child'
+      :'split_decision_produced_no_semantic_child',
+    phase:collapsed
+      ?'terminal_synthesis_collapse_zero_child'
+      :'split_done_without_child',
+  };
+}
+
 function validateStageContractArtifact(contractDefinition,artifactText){
   const definition=asObject(contractDefinition);
   let artifact=null;
@@ -5861,24 +5881,14 @@ export async function runAutonomousRequirementCognition({
 
       const status=text(parsed?.status).toUpperCase();
       if(status==='DONE'){
-        if(authored.length<1){
-          const collapsed=parsed?._runtime_terminal_synthesis_collapsed===true;
-          const recoveryError=new Error(
-            collapsed
-              ?'runtime_terminal_synthesis_collapse_zero_child_reconsider'
-              :'agent_split_done_without_child_reconsider'
-          );
-          recoveryError.code=collapsed
-            ?'RUNTIME_TERMINAL_SYNTHESIS_COLLAPSE_ZERO_CHILD'
-            :'COGNITION_SPLIT_DONE_WITHOUT_CHILD';
-          recoveryError.rejectionReason=collapsed
-            ?'terminal_synthesis_classifier_left_split_without_semantic_child'
-            :'split_decision_produced_no_semantic_child';
+        const zeroChildRecovery=splitDoneZeroChildRecovery(parsed,authored.length);
+        if(zeroChildRecovery){
+          const recoveryError=new Error(zeroChildRecovery.message);
+          recoveryError.code=zeroChildRecovery.code;
+          recoveryError.rejectionReason=zeroChildRecovery.rejection_reason;
           return returnChildAuthoringFailure({
             ordinal,
-            phase:collapsed
-              ?'terminal_synthesis_collapse_zero_child'
-              :'split_done_without_child',
+            phase:zeroChildRecovery.phase,
             error:recoveryError,
           });
         }
