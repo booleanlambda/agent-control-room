@@ -71,3 +71,89 @@ export async function reviewSilasRuntimeFaultWithKimi(){
     raw:parsed?null:String(result.content||'').slice(0,4000),
   };
 }
+
+
+const childOverlapPacket={
+  incident:{
+    agent_label:'Silas',
+    qda_unit:'QDA601-M8-U1',
+    node_path:'R.001',
+    parent_requirement:'Create a canonical ledger with variable, value, unit, period, evidence state, source, and confidence.',
+    accepted_children:[
+      {node_path:'R.001.001',scope:'ACV',status:'pending'},
+      {node_path:'R.001.002',scope:'CAC + churn_monthly',status:'pending'},
+    ],
+    authoritative_parent_variables:['CAC','ACV','churn_monthly','gross_margin'],
+    uncovered_variable:'gross_margin',
+    latest_rejection:{
+      ordinal:3,
+      reason:'COGNITION_CHILD_OVERLAP',
+      similarity:0.9054054054054054,
+      rejection_threshold:0.78,
+      overlaps_sibling_ordinal:2,
+    },
+    child_authoring_failure_count:25,
+  },
+  observed_behavior:[
+    'The overlap guard correctly rejects materially duplicated child requirements.',
+    'After rejection, the runtime tells the bound model to treat the overlapping sibling as already assigned and to author only uncovered parent scope or return DONE.',
+    'Despite that prose guidance, subsequent fresh discovery/formulation cycles keep proposing an overlapping ordinal-3 child.',
+    'The model is spending roughly 14k-15k provider tokens per formulation attempt, plus discovery calls, without creating new semantic coverage.',
+    'The current runtime tracks accepted siblings but does not expose an authoritative machine-readable remaining-scope set derived from the parent task and accepted child scopes.',
+    'QDA601-M8-U1 Problem 1 explicitly supplies four variables in its authoritative exercise-pack reports: CAC, ACV, churn_monthly, gross_margin.',
+  ],
+  proposed_fix:{
+    principle:'Preserve agent ownership of semantic decomposition while making already-covered scope explicit and bounded.',
+    changes:[
+      'Maintain a deterministic remaining-scope ledger for structured parent tasks: authoritative parent scope minus accepted child scope.',
+      'For the next formulation call, provide machine-readable already_covered_scope and remaining_scope. For this incident remaining_scope=[gross_margin].',
+      'The model still chooses CHILD or DONE and authors the child wording; the runtime does not fabricate the semantic child.',
+      'After an overlap rejection, allow one corrected formulation attempt against the explicit remaining scope. If it still overlaps, return the parent to reconsider_decomposition instead of starting another broad loop.',
+      'Reset child_authoring_failure_count after a child is accepted or a new semantic epoch begins; keep lifetime rejection evidence separately.',
+      'Do not lower the 0.78 overlap threshold merely to force progress.'
+    ]
+  },
+  constraints:[
+    'Do not solve the QDA exercise.',
+    'Do not recommend fabricating a child or hard-coding gross_margin as a special-case answer.',
+    'The runtime may derive set subtraction only from authoritative structured task scope and already accepted child coverage.',
+    'Bound-agent model must retain the semantic decision to author a child or declare DONE.',
+    'Prefer a systemic fix that generalizes beyond this one unit.',
+    'Assess whether failure-count reset is safe and how it should be bounded.'
+  ]
+};
+
+export async function reviewSilasChildOverlapFixWithKimi(){
+  const system=[
+    'You are an independent AAU runtime adjudicator reviewing a proposed control-flow repair.',
+    'Evaluate whether the proposed fix preserves agent autonomy while preventing repeated duplicate child authoring.',
+    'Use only the supplied packet. Do not modify state or solve the underlying exercise.',
+    'Return strict JSON only with keys verdict, root_cause, proposed_fix_assessment, required_changes, failure_counter_policy, regression_tests, confidence.',
+    'verdict must be APPROVE, APPROVE_WITH_CHANGES, or REJECT.',
+    'required_changes and regression_tests must be concise arrays.'
+  ].join(' ');
+  const started=Date.now();
+  const result=await modelChatCompletion({
+    provider:'moonshot_direct',
+    model:'kimi-k3',
+    messages:[{role:'system',content:system},{role:'user',content:JSON.stringify(childOverlapPacket)}],
+    maxTokens:1000,
+    temperature:0,
+    jsonMode:true,
+    reasoningEffort:'low',
+    timeoutMs:120000,
+    runtimeRole:'adjudicator',
+  });
+  let parsed=null;
+  try{parsed=JSON.parse(String(result.content||''));}catch{}
+  return {
+    ok:result.finish_reason==='stop'&&!!parsed,
+    model:result.model_returned||'kimi-k3',
+    provider:result.provider||'moonshot_direct',
+    finish_reason:result.finish_reason||null,
+    latency_ms:Date.now()-started,
+    usage:result.usage||null,
+    review:parsed,
+    raw:parsed?null:String(result.content||'').slice(0,5000),
+  };
+}
