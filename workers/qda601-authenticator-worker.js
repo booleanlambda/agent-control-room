@@ -150,6 +150,7 @@ async function callModel(model,task){
     original_chars:String(task.artifact||'').length,projected_chars:String(task.artifact||'').length,
     projection_sha256:sha256(String(task.artifact||''))
   };
+  const {text:_projectionText,...projectionMeta}=projection;
   const system='Independent AAU QDA-601 authenticator. Grade only requested requirements against the frozen artifact and supplied evidence. Do not improve the submission or invent data, methods, or deliverables. Recompute required material numerics and verify formulas, units, assumptions, reconciliation, provenance, and task-appropriate checks. For conceptual/causal tasks, grade identification logic, confounders, assumptions, causal restraint, and requested evidence design; never demand unrequested or non-identifiable quantitative work. Prefer per-problem self_audit over aggregate summaries. Return strict JSON only.';
   const user=`UNIT:${task.unit_code}
 SHA:${task.artifact_sha256}
@@ -175,7 +176,7 @@ ${projection.text}`;
       noteReviewerModelSuccess(model);
       return {content:String(out.content||out.reasoning_content||'').trim(),model:out.model_returned||model,
         provider:out.provider||null,latency_ms:Date.now()-begun,runtime_contract:out.runtime_contract||null,
-        usage:out.usage||null,prompt_projection:projection};
+        usage:out.usage||null,prompt_projection:projectionMeta};
     }catch(e){if(e?.code==='MODEL_TIMEOUT'||e?.name==='AbortError'||e?.name==='TimeoutError')noteReviewerModelTimeout(model);throw e;}
   });
 }
