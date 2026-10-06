@@ -1149,12 +1149,15 @@ try {
   console.error('AAU_KNOWLEDGE_SOURCE_REFRESH_START_FAILED',String(error?.message||error).slice(0,500));
 }
 
-// One small synthetic reviewer-endpoint request, never an agent verdict or job replay.
-try {
-  const { startReviewerEndpointSmoke } = await import('./reviewer-endpoint-smoke.js');
-  console.log('AAU_REVIEWER_ENDPOINT_SMOKE_STARTED', JSON.stringify(startReviewerEndpointSmoke()));
-} catch(error) {
-  console.error('AAU_REVIEWER_ENDPOINT_SMOKE_START_FAILED',String(error?.message||error).slice(0,250));
+// Reviewer endpoint smoke is opt-in. A model call on every broker restart wastes
+// paid reviewer tokens and historically blocked on the legacy hosted Kimi route.
+if (isEnabled('AAU_REVIEWER_ENDPOINT_SMOKE')) {
+  try {
+    const { startReviewerEndpointSmoke } = await import('./reviewer-endpoint-smoke.js');
+    console.log('AAU_REVIEWER_ENDPOINT_SMOKE_STARTED', JSON.stringify(startReviewerEndpointSmoke()));
+  } catch(error) {
+    console.error('AAU_REVIEWER_ENDPOINT_SMOKE_START_FAILED',String(error?.message||error).slice(0,250));
+  }
 }
 
 await import('./broker-bridge-envcheck.js');
