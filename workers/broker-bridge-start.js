@@ -116,6 +116,7 @@ try {
   const {
     pythonChecksFromArtifact,
     qdaDirectAtomicArtifactCandidate,
+    safeJson,
   } = await import('./autonomous-recursive-decomposition.js');
   const { verifyPythonMathChecks } = await import('./python-math.js');
   const artifact={
@@ -134,6 +135,20 @@ try {
     python_checks:[{label:'wrapperless',expression:'0.6 + 0.4',claimed_result:1}],
   };
   const direct=qdaDirectAtomicArtifactCandidate(wrapperless);
+  const semanticWrapped={
+    interview_study_evwsi_calculation:{
+      evwsi:145000,
+      python_checks:[{
+        label:'semantic_nested',
+        expression:'0.44 * 329545.4545454545',
+        claimed_result:145000
+      }]
+    }
+  };
+  const semanticField=pythonChecksFromArtifact(semanticWrapped);
+  const semanticVerification=verifyPythonMathChecks(
+    semanticField.value,{absoluteTolerance:0.005,relativeTolerance:1e-9}
+  );
   console.log('AAU_QDA601_NESTED_PYTHON_CHECKS_PROBE',JSON.stringify({
     ok:field.type_ok===true
       &&field.value.length===3
@@ -142,11 +157,22 @@ try {
       &&verification.all_match===true
       &&direct===wrapperless
       &&Array.isArray(direct.python_checks)
-      &&direct.python_checks.length===1,
+      &&direct.python_checks.length===1
+      &&semanticField.type_ok===true
+      &&semanticField.value.length===1
+      &&semanticField.source==='nested_artifact'
+      &&semanticVerification.ok===true
+      &&semanticVerification.all_match===true
+      &&safeJson(undefined)==='null',
     source:field.source||null,
     check_count:field.value.length,
+    semantic_source:semanticField.source||null,
+    semantic_check_count:semanticField.value.length,
     verifier_ok:verification.ok===true,
+    semantic_verifier_ok:semanticVerification.ok===true,
     all_match:verification.all_match===true,
+    semantic_all_match:semanticVerification.all_match===true,
+    safe_json_undefined:safeJson(undefined),
     wrapperless_direct_ok:direct===wrapperless,
   }));
 } catch (error) {
