@@ -59,6 +59,8 @@ async function one(){
       completion_tokens:completionTokens,
       total_tokens:Number.isFinite(Number(promptTokens))&&Number.isFinite(Number(completionTokens))
         ? Number(promptTokens)+Number(completionTokens):null,
+      usage_details:result.usage||null,
+      cached_prompt_tokens:result.usage?.prompt_tokens_details?.cached_tokens??null,
       output_budget_utilization:Number.isFinite(Number(completionTokens))
         ? Number((Number(completionTokens)/OUTPUT_CAP).toFixed(4)):null,
       finish_reason:finish,
@@ -108,6 +110,8 @@ export async function probeAuthenticatorIoTimeout(){
       prompt_tokens:result.prompt_tokens??null,
       completion_tokens:result.completion_tokens??null,
       total_tokens:result.total_tokens??null,
+      cached_prompt_tokens:result.cached_prompt_tokens??null,
+      usage_details:result.usage_details??null,
       output_budget_utilization:result.output_budget_utilization??null,
       error_code:result.error_code||null,
     },
