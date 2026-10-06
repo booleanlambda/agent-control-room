@@ -182,7 +182,10 @@ try {
 }
 
 try {
-  const { runtimeOwnedTerminalSynthesisChild } = await import('./autonomous-recursive-decomposition.js');
+  const {
+    runtimeOwnedTerminalSynthesisChild,
+    splitDoneZeroChildRecovery,
+  } = await import('./autonomous-recursive-decomposition.js');
   const cases=[
     {
       name:'substantive_source_reconciliation',
@@ -210,10 +213,23 @@ try {
     expected:test.expected,
     actual:runtimeOwnedTerminalSynthesisChild({requirement:test.requirement}),
   }));
+  const collapsedRecovery=splitDoneZeroChildRecovery(
+    {status:'DONE',_runtime_terminal_synthesis_collapsed:true},0
+  );
+  const plainRecovery=splitDoneZeroChildRecovery({status:'DONE'},0);
+  const nonRecovery=splitDoneZeroChildRecovery({status:'DONE'},1);
   console.log('AAU_TERMINAL_SYNTHESIS_CLASSIFIER_PROBE',JSON.stringify({
-    ok:outcomes.every(v=>v.actual===v.expected),
+    ok:outcomes.every(v=>v.actual===v.expected)
+      &&collapsedRecovery?.code==='RUNTIME_TERMINAL_SYNTHESIS_COLLAPSE_ZERO_CHILD'
+      &&plainRecovery?.code==='COGNITION_SPLIT_DONE_WITHOUT_CHILD'
+      &&nonRecovery===null,
     outcomes,
-    contract:'runtime_owned_terminal_synthesis_classifier_v0_3',
+    zero_child_invariant:{
+      collapsed_code:collapsedRecovery?.code||null,
+      plain_code:plainRecovery?.code||null,
+      authored_child_done_returns_null:nonRecovery===null,
+    },
+    contract:'runtime_owned_terminal_synthesis_classifier_v0_4',
   }));
 } catch (error) {
   console.error('AAU_TERMINAL_SYNTHESIS_CLASSIFIER_PROBE',JSON.stringify({
