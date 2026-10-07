@@ -267,6 +267,57 @@ try {
 }
 
 try {
+  const { qdaM9U3AuthoritativePythonSimulation } = await import('./autonomous-recursive-decomposition.js');
+  const result=qdaM9U3AuthoritativePythonSimulation({
+    qda_601_context:{
+      next_unit:{
+        unit_code:'QDA601-M9-U3',
+        exercise_pack:{
+          distributions:{
+            monthly_volume:{type:'triangular',min:7000,mode:10000,max:14000},
+            price:{type:'triangular',min:65,mode:72,max:78},
+            variable_cost:{type:'triangular',min:29,mode:34,max:41},
+            fixed_cost:{type:'fixed',value:310000},
+          },
+        },
+      },
+    },
+  });
+  const claims=result?.python_analysis_template?.claims||{};
+  console.log('AAU_QDA_M9_U3_EARLY_PYTHON_PROBE',JSON.stringify({
+    ok:result?.contract==='qda_m9_u3_early_python_simulation_v0_1'
+      &&result?.simulation?.draws===10000
+      &&result?.simulation?.seed===601903
+      &&Number.isFinite(result?.simulation?.mean)
+      &&Number.isFinite(result?.simulation?.median)
+      &&Number.isFinite(result?.simulation?.p10)
+      &&Number.isFinite(result?.simulation?.p90)
+      &&Number.isFinite(result?.simulation?.probability_below_zero)
+      &&result?.corner_sanity_checks?.worst===-142000
+      &&result?.corner_sanity_checks?.mode===70000
+      &&result?.corner_sanity_checks?.best===376000
+      &&claims.mean===result?.simulation?.mean
+      &&claims.median===result?.simulation?.median
+      &&claims.p10===result?.simulation?.p10
+      &&claims.p90===result?.simulation?.p90
+      &&claims.probability_below_zero===result?.simulation?.probability_below_zero,
+    draws:result?.simulation?.draws??null,
+    seed:result?.simulation?.seed??null,
+    mean:result?.simulation?.mean??null,
+    median:result?.simulation?.median??null,
+    p10:result?.simulation?.p10??null,
+    p90:result?.simulation?.p90??null,
+    probability_below_zero:result?.simulation?.probability_below_zero??null,
+    corners:result?.corner_sanity_checks||null,
+    contract:result?.contract||null,
+  }));
+} catch (error) {
+  console.error('AAU_QDA_M9_U3_EARLY_PYTHON_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
   const {
     structuredChildScopeLedger,
     childAuthoringCounterState,

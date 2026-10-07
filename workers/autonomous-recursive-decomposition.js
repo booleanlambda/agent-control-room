@@ -309,6 +309,152 @@ function qdaM7U4AuthoritativePythonCalculation(packet){
   };
 }
 
+export function qdaM9U3AuthoritativePythonSimulation(packet){
+  const qda=asObject(packet?.qda_601_context);
+  const next=asObject(qda.next_unit);
+  if(text(next.unit_code).toUpperCase()!=='QDA601-M9-U3')return null;
+  const exercisePack=asObject(next.exercise_pack);
+  const distributions=asObject(exercisePack.distributions);
+  const volume=asObject(distributions.monthly_volume);
+  const price=asObject(distributions.price);
+  const variableCost=asObject(distributions.variable_cost);
+  const fixedCost=asObject(distributions.fixed_cost);
+  const triangularValid=value=>
+    text(value.type).toLowerCase()==='triangular'
+    &&[value.min,value.mode,value.max].every(v=>Number.isFinite(Number(v)))
+    &&Number(value.min)<=Number(value.mode)
+    &&Number(value.mode)<=Number(value.max);
+  if(
+    !triangularValid(volume)
+    ||!triangularValid(price)
+    ||!triangularValid(variableCost)
+    ||text(fixedCost.type).toLowerCase()!=='fixed'
+    ||!Number.isFinite(Number(fixedCost.value))
+  )return null;
+
+  const draws=10000;
+  const seed=601903;
+  const spec={
+    expression:'monthly_volume * (price - variable_cost) - fixed_cost',
+    distributions:{
+      monthly_volume:{
+        type:'triangular',
+        min:Number(volume.min),mode:Number(volume.mode),max:Number(volume.max),
+      },
+      price:{
+        type:'triangular',
+        min:Number(price.min),mode:Number(price.mode),max:Number(price.max),
+      },
+      variable_cost:{
+        type:'triangular',
+        min:Number(variableCost.min),mode:Number(variableCost.mode),max:Number(variableCost.max),
+      },
+      fixed_cost:{type:'fixed',value:Number(fixedCost.value)},
+    },
+    draws,
+    seed,
+  };
+  // Claims deliberately bind only deterministic procedure metadata here. The
+  // Python engine still returns the full simulation result, which becomes
+  // authoritative routing evidence before any deep-model expansion.
+  const execution=runPythonStatisticalAnalysesChunked([{
+    id:'qda_m9_u3_profit_simulation',
+    analysis:'monte_carlo_expression',
+    spec,
+    claims:{draws,seed},
+  }],{timeoutMs:12000,absoluteTolerance:1e-12,relativeTolerance:1e-12});
+  const row=asArray(execution?.analyses)[0];
+  const result=asObject(row?.result);
+  const requiredResultKeys=[
+    'draws','seed','mean','median','p10','p90','probability_below_zero','min','max'
+  ];
+  if(
+    execution?.ok!==true
+    ||execution?.all_claims_match!==true
+    ||requiredResultKeys.some(key=>!Number.isFinite(Number(result[key])))
+  ){
+    throw new Error(
+      'qda_m9_u3_early_python_simulation_failed:'
+      +String(execution?.error||'invalid_result_contract')
+    );
+  }
+
+  const cornerExecution=calculatePythonMathExpressions([
+    {
+      label:'worst_corner_profit',
+      expression:`${Number(volume.min)} * (${Number(price.min)} - ${Number(variableCost.max)}) - ${Number(fixedCost.value)}`,
+    },
+    {
+      label:'mode_corner_profit',
+      expression:`${Number(volume.mode)} * (${Number(price.mode)} - ${Number(variableCost.mode)}) - ${Number(fixedCost.value)}`,
+    },
+    {
+      label:'best_corner_profit',
+      expression:`${Number(volume.max)} * (${Number(price.max)} - ${Number(variableCost.min)}) - ${Number(fixedCost.value)}`,
+    },
+  ]);
+  if(cornerExecution?.ok!==true)
+    throw new Error('qda_m9_u3_early_python_corner_checks_failed');
+
+  const cornerValues=Object.fromEntries(
+    asArray(cornerExecution.results).map(item=>[text(item.label),Number(item.actual)])
+  );
+  if(
+    !['worst_corner_profit','mode_corner_profit','best_corner_profit']
+      .every(key=>Number.isFinite(cornerValues[key]))
+  )throw new Error('qda_m9_u3_early_python_corner_contract_invalid');
+
+  return {
+    contract:'qda_m9_u3_early_python_simulation_v0_1',
+    calculator:'aau_quantitative_python_v0_1',
+    source:'authoritative_curriculum_exercise_pack',
+    numeric_authority:'runtime_python_calculation',
+    method:'fixed_seed_monte_carlo',
+    procedure:{
+      draws,
+      seed,
+      expression:spec.expression,
+      distributions:spec.distributions,
+    },
+    simulation:{
+      draws:Number(result.draws),
+      seed:Number(result.seed),
+      mean:Number(result.mean),
+      median:Number(result.median),
+      p10:Number(result.p10),
+      p90:Number(result.p90),
+      probability_below_zero:Number(result.probability_below_zero),
+      min:Number(result.min),
+      max:Number(result.max),
+    },
+    python_analysis_template:{
+      id:'qda_m9_u3_profit_simulation',
+      analysis:'monte_carlo_expression',
+      spec,
+      claims:{
+        draws:Number(result.draws),
+        seed:Number(result.seed),
+        mean:Number(result.mean),
+        median:Number(result.median),
+        p10:Number(result.p10),
+        p90:Number(result.p90),
+        probability_below_zero:Number(result.probability_below_zero),
+      },
+    },
+    corner_sanity_checks:{
+      worst:Number(cornerValues.worst_corner_profit),
+      mode:Number(cornerValues.mode_corner_profit),
+      best:Number(cornerValues.best_corner_profit),
+      interpretation_guard:'Corner outcomes are deterministic boundary checks, not probability quantiles.',
+    },
+  };
+}
+
+function qdaAuthoritativePythonRoutingCalculation(packet){
+  return qdaM7U4AuthoritativePythonCalculation(packet)
+    ||qdaM9U3AuthoritativePythonSimulation(packet);
+}
+
 const QDA_CURRICULUM_DEPENDENCY_OVERRIDES=Object.freeze({
   'QDA601-M2-U2':Object.freeze({2:[1],3:[1,2]}),
   'QDA601-M2-U3':Object.freeze({2:[1],3:[1,2]}),
@@ -4392,7 +4538,7 @@ export async function runAutonomousRequirementCognition({
 
   async function decide(node,{forceReconsider=false,branchDepth=0,singleChildRefinements=0}={}){
     const canonicalCandidateLedger=await loadExpertiseCandidateLedger();
-    const routingPythonCalculation=qdaM7U4AuthoritativePythonCalculation(packet);
+    const routingPythonCalculation=qdaAuthoritativePythonRoutingCalculation(packet);
     let contextPayload={
       ...asObject(node.context_payload),
       ...lifecycleStageContractContext(packet),
@@ -4710,7 +4856,7 @@ export async function runAutonomousRequirementCognition({
                     ? 'ATOMIC execution admission is mechanically unavailable for this node after a prior rejected bounded execution. Choose another available semantic action; do not repeat the rejected execution unchanged.'
                     : 'ATOMIC is semantically available if you judge the requirement genuinely bounded.',
                 routingPythonCalculation
-                  ? 'AUTHORITATIVE PYTHON ROUTING EVIDENCE: supplied_context.runtime_python_calculation already contains the deterministic numeric solution for this QDA value-of-information case. Do not SPLIT merely to protect arithmetic precision, recompute intermediate values, or avoid rounding. Prefer ATOMIC when the remaining work is only to select, explain, structure, sanity-check, or bind these already-computed values. SPLIT remains valid only for genuinely independent semantic scope.'
+                  ? 'AUTHORITATIVE PYTHON ROUTING EVIDENCE: supplied_context.runtime_python_calculation already contains deterministic Python output computed from the canonical QDA case data before deep reasoning. Do not SPLIT merely to perform or protect computation already represented there. Prefer ATOMIC when the remaining work is interpretation, assumptions, structure, sanity-checking, or evidence binding. SPLIT remains valid only for genuinely independent semantic scope.'
                   : null,
                 'RESOURCE ADVISORY ONLY: '+Number(runtimeView?.remaining_budget_units||0)+' units remain. Current execution admission can support '+availableChildCapacity+' child branch(es), priced at approximately '+branchEconomics.expected_child_lifecycle_units+' units each while protecting '+branchEconomics.completion_reserve_units+' units for completion. Do not change your semantic routing judgment merely to fit this resource snapshot; the runtime handles admission separately.',
                 storageDepthAvailable
@@ -7584,7 +7730,7 @@ export async function runAutonomousRequirementCognition({
           inherited_completed_sibling_results:nodeContext.inherited_completed_sibling_results,
         }
       : nodeContext;
-    const authoritativePythonCalculation=qdaM7U4AuthoritativePythonCalculation(packet);
+    const authoritativePythonCalculation=qdaAuthoritativePythonRoutingCalculation(packet);
     const atomicBaseContext={
       ...atomicScopeContext,
       ...(authoritativePythonCalculation?{
@@ -7711,7 +7857,11 @@ export async function runAutonomousRequirementCognition({
                 'If deterministic_math_feedback is present, this is a fresh correction attempt. Inspect that feedback explicitly and return NEW python_checks; do not repeat or reuse an earlier artifact.'
               ]:[]),
               ...(qdaStatisticalAtomicRequirement(packet,node)?[
-                'QUANTITATIVE PYTHON STATISTICS COMPANION: choose the statistical method yourself, state why it is appropriate, state assumptions/limitations, then return artifact as a real JSON object containing python_analyses INSIDE that artifact object, not beside the wrapper.',
+                'QUANTITATIVE PYTHON STATISTICS COMPANION: choose the statistical method yourself unless supplied_context.runtime_python_calculation binds a curriculum-prescribed method already executed by Python. State why the method is appropriate, state assumptions/limitations, then return artifact as a real JSON object containing python_analyses INSIDE that artifact object, not beside the wrapper.',
+                ...(authoritativePythonCalculation?[
+                  'EARLY PYTHON EXECUTION: supplied_context.runtime_python_calculation was computed before this deep reasoning pass from canonical curriculum inputs. Treat its numerical output as authoritative execution evidence. Do not decompose merely to recompute those values.',
+                  'When runtime_python_calculation.python_analysis_template is present, preserve its analysis, spec, seed/draw count, and numerical claims exactly in your python_analyses unless the requirement genuinely demands a different statistical method. Your responsibility is assumptions, interpretation, sanity checks, limitations, and decision relevance.'
+                ]:[]),
                 'Each python_analyses item must contain id, analysis, spec, and claims. claims are YOUR numerical/statistical conclusions keyed to result fields (for example mean, median, r, ci_low, ci_high, t, p_two_sided). Python recomputes them independently.',
                 'Allowed analyses include describe, pearson_correlation, simple_linear_regression, proportion_ci, difference_proportions_ci, mean_ci, one_sample_t, welch_t, coefficient_t, bootstrap_ci, and monte_carlo_expression.',
                 'Python owns numerical execution only. You own method selection, assumptions, causal limits, interpretation, and decision relevance. A p-value or correlation is not a causal conclusion.',
