@@ -3337,6 +3337,9 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
       String(error?.code||'')==='COGNITION_CHILD_RECONSIDERATION_LIMIT';
     const cognitionResponseRejected=
       String(error?.code||'')==='COGNITION_RESPONSE_REJECTED';
+    const packetModelBindingFault=
+      message==='intent_packet_model_or_provider_missing'
+      ||message.startsWith('model_consistency_breach:');
     const postCommitAncillaryFailure=Boolean(appliedCommit);
     const transportFailure=classifyModelTransportFailure(error);
     const providerTransient=transportFailure.failure_class==='model_transport_transient';
@@ -3344,6 +3347,7 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
     const cognitionRuntimeFault=
       deepCheckpointIntegrityFault
       ||childReconsiderationLimit
+      ||packetModelBindingFault
       ||(
         !explicitErrorCode
         && !failureDetails
@@ -3488,6 +3492,7 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
       deep_checkpoint_integrity_fault:deepCheckpointIntegrityFault,
       child_reconsideration_limit:childReconsiderationLimit,
       cognition_response_rejected:cognitionResponseRejected,
+      packet_model_binding_fault:packetModelBindingFault,
       post_commit_ancillary_failure:postCommitAncillaryFailure,
       cognition_runtime_fault:cognitionRuntimeFault,
       provider_transient:providerTransient,
