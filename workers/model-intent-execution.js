@@ -1675,12 +1675,27 @@ async function callWithCognitionIntegrity(call, audit = null) {
       const rejectionReason = finishReason === 'length'
         ? 'TRUNCATED_RESPONSE'
         : !content.trim() ? 'EMPTY_RESPONSE' : 'INCOMPLETE_RESPONSE';
-      await recordRejectedCognition(audit, {
-        rejectionReason,finishReason,elapsedMs:Date.now()-started,
-        outputChars:content.length,
-        outputSha256:content ? sha256(content) : null,
-        usage:result?.usage || {},
-      });
+      const atomicContinuationEligible=
+        rejectionReason==='TRUNCATED_RESPONSE'
+        &&/_atomic_(?:\d+|continuation_\d+)$/.test(String(audit?.phase||''));
+      if(atomicContinuationEligible){
+        console.warn('AAU_COGNITION_TRUNCATION_CONTINUATION_ELIGIBLE',JSON.stringify({
+          agent_id:audit?.agentId||null,
+          execution_id:audit?.executionId?String(audit.executionId):null,
+          phase:audit?.phase||null,
+          finish_reason:finishReason,
+          output_chars:content.length,
+          output_sha256:content?sha256(content):null,
+          continuation_eligibility:'DURABLE_ATOMIC_PARTIAL',
+        }));
+      }else{
+        await recordRejectedCognition(audit, {
+          rejectionReason,finishReason,elapsedMs:Date.now()-started,
+          outputChars:content.length,
+          outputSha256:content ? sha256(content) : null,
+          usage:result?.usage || {},
+        });
+      }
       const error = new Error('cognition_response_rejected:'+rejectionReason);
       error.code='COGNITION_RESPONSE_REJECTED';
       error.rejectionReason=rejectionReason;
@@ -1691,6 +1706,11 @@ async function callWithCognitionIntegrity(call, audit = null) {
         ? Math.max(0,Math.floor(Number(result.usage.total_tokens)))
         : null;
       error.providerUsageKnown=Boolean(result?.usage&&typeof result.usage==='object');
+      if(atomicContinuationEligible){
+        error.continuationEligible=true;
+        error.partialContent=content;
+        error.partialOutputSha256=content?sha256(content):null;
+      }
       throw error;
     }
     return result;

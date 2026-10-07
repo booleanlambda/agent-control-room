@@ -318,6 +318,36 @@ try {
 }
 
 try {
+  const { atomicTruncationContinuationState } = await import('./autonomous-recursive-decomposition.js');
+  const eligible=atomicTruncationContinuationState({
+    code:'COGNITION_RESPONSE_REJECTED',
+    rejectionReason:'TRUNCATED_RESPONSE',
+    continuationEligible:true,
+    partialContent:'{"status":"COMPLETE","artifact":{"partial":true',
+    partialOutputSha256:'probe-sha',
+  });
+  const rejected=atomicTruncationContinuationState({
+    code:'COGNITION_RESPONSE_REJECTED',
+    rejectionReason:'TRUNCATED_RESPONSE',
+    continuationEligible:false,
+    partialContent:'partial',
+  });
+  console.log('AAU_ATOMIC_TRUNCATION_CONTINUATION_PROBE',JSON.stringify({
+    ok:eligible.eligible===true
+      &&eligible.partial_content.includes('"status":"COMPLETE"')
+      &&eligible.partial_output_sha256==='probe-sha'
+      &&rejected.eligible===false,
+    eligible:eligible.eligible,
+    rejected:rejected.eligible,
+    contract:eligible.contract,
+  }));
+} catch (error) {
+  console.error('AAU_ATOMIC_TRUNCATION_CONTINUATION_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
   const {
     structuredChildScopeLedger,
     childAuthoringCounterState,

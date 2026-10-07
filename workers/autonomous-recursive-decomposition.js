@@ -124,6 +124,22 @@ export function discoveryLoopGuardState(priorPayload,currentFingerprint,{freshDi
     contract:'bounded_discovery_loop_guard_v0_1',
   };
 }
+export function atomicTruncationContinuationState(error){
+  const rejection=text(error?.rejectionReason).toUpperCase();
+  const partial=typeof error?.partialContent==='string'?error.partialContent:'';
+  const eligible=
+    error?.code==='COGNITION_RESPONSE_REJECTED'
+    &&rejection==='TRUNCATED_RESPONSE'
+    &&error?.continuationEligible===true
+    &&partial.trim().length>0;
+  return {
+    eligible,
+    rejection_reason:rejection||null,
+    partial_content:eligible?partial:null,
+    partial_output_sha256:eligible?(text(error?.partialOutputSha256)||null):null,
+    contract:'atomic_truncation_continuation_v0_1',
+  };
+}
 function bytes(v){try{return Buffer.byteLength(typeof v==='string'?v:JSON.stringify(v));}catch{return 0;}}
 function clip(s,n){const v=String(s??'');return v.length<=n?v:v.slice(0,n);}
 export function safeJson(v){
@@ -7815,6 +7831,9 @@ export async function runAutonomousRequirementCognition({
     const durableAtomic=await loadJsonPhaseCheckpoint(
       node.node_path,'ATOMIC_EXECUTION',atomicSemanticIdentity
     );
+    const durableAtomicPartial=await loadJsonPhaseCheckpoint(
+      node.node_path,'ATOMIC_TRUNCATION_PARTIAL',atomicSemanticIdentity
+    );
     let parsed=durableAtomic.parsed;
     const atomicExecutionBaseBudget=Math.max(1,Number(stageBudgets.atomic_execution||7000));
     const atomicExecutionBudgetForAttempt=attempt=>{
@@ -7827,6 +7846,42 @@ export async function runAutonomousRequirementCognition({
         Math.max(atomicExecutionBaseBudget,attempt===1?12000:16000)
       );
     };
+    const continueAtomicFromDurablePartial=async partial=>{
+      const fragment=text(partial?.partial_content);
+      if(!fragment)
+        throw new Error('atomic_truncation_partial_missing:'+node.node_path);
+      const response=await callJson([
+        {role:'system',content:[
+          'You are continuing YOUR SAME bounded ATOMIC answer after the provider stopped only because the output limit was reached.',
+          'Do not redo discovery, change the route, or restart the reasoning from scratch.',
+          'The durable_partial_output below is your own incomplete prior response. Preserve all correct substantive content already present, finish only what is missing, and return ONE COMPLETE replacement JSON object.',
+          'The final object must satisfy the original atomic protocol: {"status":"COMPLETE|NEED_CONTEXT|SPLIT","reason":"when needed","artifact":...,"handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
+          'A partial or malformed JSON object is not acceptable as final. Be concise enough to close the schema within this response.',
+          'When the requirement is quantitative/statistical, preserve the required python_checks/python_analyses and all material verified results.',
+        ].join('\n')},
+        {role:'user',content:safeJson({
+          requirement:node.requirement_text,
+          durable_partial_output:fragment,
+          authoritative_completed_sibling_evidence:siblingEvidence,
+          supplied_context:correctionSuppliedContext(),
+          continuation_contract:'atomic_truncation_continuation_v0_1',
+        })},
+      ],Math.min(16000,Math.max(10000,atomicExecutionBudgetForAttempt(2))),
+      'req_'+node.node_path.replaceAll('.','_')+'_atomic_continuation_1');
+      return response?.parsed;
+    };
+
+    if(!parsed&&durableAtomicPartial.parsed){
+      parsed=await continueAtomicFromDurablePartial(durableAtomicPartial.parsed);
+      console.log('AAU_ATOMIC_TRUNCATION_CONTINUATION_RESUMED',JSON.stringify({
+        agent_id:agentId,
+        intent_execution_id:intentExecutionId,
+        node_path:node.node_path,
+        partial_output_sha256:text(durableAtomicPartial.parsed.partial_output_sha256)||null,
+        checkpoint_reused:true,
+        policy:'durable_partial_resume_before_atomic_replay_v0_1',
+      }));
+    }
     if(!parsed){
     try{
       for(let attempt=1;attempt<=2;attempt++){
@@ -7885,24 +7940,42 @@ export async function runAutonomousRequirementCognition({
           parsed=response?.parsed;
           break;
         }catch(error){
-          // Bounded continuation invariant: a length-truncated candidate is
-          // durable rejected-attempt evidence, never a cue to replay the same
-          // oversized atomic request. Return semantic control immediately so
-          // the bound agent must narrow/decompose before another attempt.
+          const truncation=atomicTruncationContinuationState(error);
+          if(truncation.eligible){
+            if(!durableAtomicPartial.parsed){
+              await saveJsonPhaseCheckpoint(
+                node.node_path,'ATOMIC_TRUNCATION_PARTIAL',atomicSemanticIdentity,{
+                  contract:truncation.contract,
+                  partial_content:truncation.partial_content,
+                  partial_output_sha256:truncation.partial_output_sha256,
+                  finish_reason:'length',
+                  schema_complete:false,
+                  final_eligible:false,
+                  captured_at:new Date().toISOString(),
+                },{
+                  continuation_required:true,
+                  final_eligible:false,
+                  source_phase:'ATOMIC_EXECUTION',
+                  policy:'durable_partial_not_final_v0_1',
+                }
+              );
+            }
+            console.warn('AAU_ATOMIC_TRUNCATION_CHECKPOINTED',JSON.stringify({
+              agent_id:agentId,
+              intent_execution_id:intentExecutionId,
+              node_path:node.node_path,
+              partial_output_sha256:truncation.partial_output_sha256,
+              original_attempt:attempt,
+              policy:'atomic_truncation_continuation_v0_1',
+            }));
+            parsed=await continueAtomicFromDurablePartial({
+              partial_content:truncation.partial_content,
+              partial_output_sha256:truncation.partial_output_sha256,
+            });
+            break;
+          }
           if(error?.code==='COGNITION_RESPONSE_REJECTED'
              &&String(error?.rejectionReason||'').toUpperCase()==='TRUNCATED_RESPONSE'){
-            if(mathRetryState?.required&&attempt===1){
-              console.warn('AAU_QDA_MATH_CORRECTION_TRUNCATION_RETRY',JSON.stringify({
-                agent_id:agentId,
-                intent_execution_id:intentExecutionId,
-                node_path:node.node_path,
-                deterministic_math_attempt:mathRetryState.attempt,
-                first_output_budget:atomicExecutionBudgetForAttempt(1),
-                retry_output_budget:atomicExecutionBudgetForAttempt(2),
-                policy:'math_correction_same_atomic_expanded_retry_v0_1',
-              }));
-              continue;
-            }
             throw error;
           }
           if(attempt===2)throw error;
@@ -7922,6 +7995,9 @@ export async function runAutonomousRequirementCognition({
             prior_atomic_rejection:String(error?.rejectionReason||error?.code||'incomplete'),
             reconsider_decomposition:true,
             atomic_execution_failures:atomicExecutionFailures,
+            atomic_truncation_continuation_attempted:
+              durableAtomicPartial.parsed?true
+              :String(error?.rejectionReason||'').toUpperCase()==='TRUNCATED_RESPONSE',
             atomic_unavailable:atomicExecutionFailures>=MAX_ATOMIC_EXECUTION_FAILURES,
           },
           contextPayload:node.context_payload||{},resultArtifact:null,
