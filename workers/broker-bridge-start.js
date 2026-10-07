@@ -222,6 +222,35 @@ try {
       completion_criterion:'Complete CAC and churn_monthly only.'
     },
   ]);
+  const statementNode={
+    requirement_text:'Solve Problem 1: Identify value conflicts versus definition/period conflicts.',
+    context_payload:{
+      qda_601_context:{value:{
+        next_unit:{
+          unit_code:'QDA601-PROBE-U2',
+          exercise_pack:{
+            statements:[
+              'Marketing: CAC=$80 = spend/new logos.',
+              'Finance: CAC=$112 including sales payroll.',
+              'Sales: ACV=$18k annual contracted value.',
+              'Billing: average recognized revenue/customer=$1.3k monthly.',
+              'Board: monthly churn=2.5%.',
+              'CS dashboard: quarterly churn=8.0%.',
+              'Finance: gross margin=76% excluding support payroll.',
+              'Ops: gross margin=68% including support payroll.'
+            ],
+            problems:['Identify value conflicts versus definition/period conflicts.']
+          }
+        }
+      }},
+      qda_curriculum_problem_binding:{problem_ordinal:1}
+    }
+  };
+  const statementLedger=structuredChildScopeLedger(statementNode,[
+    {node_path:'R.001.001',requirement:'Analyze the conflict between Marketing CAC and Finance CAC.'},
+    {node_path:'R.001.002',requirement:'Analyze Sales ACV versus Billing recognized revenue/customer.'},
+    {node_path:'R.001.003',requirement:'Analyze Board monthly churn versus CS dashboard quarterly churn.'}
+  ]);
   const unstructured=structuredChildScopeLedger({
     requirement_text:'Investigate the issue.',
     context_payload:{}
@@ -275,10 +304,16 @@ try {
     },8
   );
   console.log('AAU_STRUCTURED_REMAINING_SCOPE_PROBE',JSON.stringify({
-    ok:ledger?.contract==='authoritative_structured_remaining_scope_v0_2_owned_scope_only'
+    ok:ledger?.contract==='authoritative_structured_remaining_scope_v0_3_owned_scope_only'
       &&JSON.stringify(ledger.authoritative_scope)===JSON.stringify(['ACV','CAC','churn_monthly','gross_margin'])
       &&JSON.stringify(ledger.already_covered_scope)===JSON.stringify(['ACV','CAC','churn_monthly'])
       &&JSON.stringify(ledger.remaining_scope)===JSON.stringify(['gross_margin'])
+      &&statementLedger?.contract==='authoritative_structured_remaining_scope_v0_3_owned_scope_only'
+      &&statementLedger?.scope_kind==='statement_set'
+      &&JSON.stringify(statementLedger.already_covered_scope)===JSON.stringify(['S1','S2','S3','S4','S5','S6'])
+      &&JSON.stringify(statementLedger.remaining_scope)===JSON.stringify(['S7','S8'])
+      &&statementLedger.remaining_scope_items?.[0]?.statement?.includes('Finance: gross margin')
+      &&statementLedger.remaining_scope_items?.[1]?.statement?.includes('Ops: gross margin')
       &&unstructured===null
       &&legacy.failure_count_base===0
       &&legacy.lifetime_rejection_count_base===25
@@ -304,6 +339,10 @@ try {
     authoritative_scope:ledger?.authoritative_scope||null,
     covered_scope:ledger?.already_covered_scope||null,
     remaining_scope:ledger?.remaining_scope||null,
+    statement_scope_kind:statementLedger?.scope_kind||null,
+    statement_covered_scope:statementLedger?.already_covered_scope||null,
+    statement_remaining_scope:statementLedger?.remaining_scope||null,
+    statement_remaining_items:statementLedger?.remaining_scope_items||null,
     unstructured_fallback:unstructured===null,
     legacy_lifetime_preserved:legacy.lifetime_rejection_count_base,
     same_epoch_failure_base:sameEpoch.failure_count_base,
@@ -320,7 +359,7 @@ try {
     budget_continue_action:budgetContinue,
     split_parent_retry_attempts:[splitRetryOne.attempt,splitRetryTwo.attempt],
     split_parent_retry_exhausted:splitRetryTwo.exhausted,
-    contract:'cognition_transition_invariants_v0_1',
+    contract:'cognition_transition_invariants_v0_2_statement_scope',
   }));
 } catch (error) {
   console.error('AAU_STRUCTURED_REMAINING_SCOPE_PROBE',JSON.stringify({
