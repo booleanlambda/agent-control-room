@@ -12,6 +12,10 @@ import {
   durableSiblingInspection,
   retryableModelTransportError,
   modelTransportRetryPolicy,
+  semanticModelBudgetClass,
+  semanticFinalizationReserveUnits,
+  semanticBudgetBucketPolicy,
+  SEMANTIC_BUDGET_BUCKET_CONTRACT,
   autonomousEvidenceWindowDecision,
   evidenceCeilingRequiresAgentResolution,
   mergeInheritedDependencyResults,
@@ -3112,6 +3116,38 @@ export async function runAutonomousRequirementCognition({
   const idx=contextIndex(packet);
   const counters={nodes:0,model_calls:0,context_requests:0};
   const semanticRuntime={...semanticRuntimeConfig(agentRuntimeContract)};
+  const projectedFinalizationUnits=
+    modelCallCostUnits({
+      estimatedInputTokens:MAX_DEEP_MODEL_CONTEXT_TOKENS,
+      requestedOutputTokens:stageBudgets.atomic_reconciliation,
+      quantumTokens:semanticRuntime.quantum_tokens,
+    })
+    +modelCallCostUnits({
+      estimatedInputTokens:MAX_DEEP_MODEL_CONTEXT_TOKENS,
+      requestedOutputTokens:stageBudgets.synthesis_final,
+      quantumTokens:semanticRuntime.quantum_tokens,
+    })
+    +modelCallCostUnits({
+      estimatedInputTokens:MAX_DEEP_MODEL_CONTEXT_TOKENS,
+      requestedOutputTokens:stageBudgets.synthesis_provenance_review,
+      quantumTokens:semanticRuntime.quantum_tokens,
+    })
+    +modelCallCostUnits({
+      estimatedInputTokens:2500,
+      requestedOutputTokens:900,
+      quantumTokens:semanticRuntime.quantum_tokens,
+    })
+    +6; // terminal checkpoint / transition margin
+  semanticRuntime.finalization_reserve_units=semanticFinalizationReserveUnits({
+    initialBudgetUnits:semanticRuntime.initial_budget_units,
+    safetyReserveUnits:semanticRuntime.safety_reserve_units,
+    projectedFinalizationUnits,
+  });
+  semanticRuntime.budget_bucket_limits=semanticBudgetBucketPolicy({
+    initialBudgetUnits:semanticRuntime.initial_budget_units,
+    finalizationReserveUnits:semanticRuntime.finalization_reserve_units,
+    bucket:'reasoning',
+  }).limits;
 
   async function semanticRuntimeRpc(action,args={}){
     return rpc('aau_bridge_cognition_assignment_runtime_v0_2',{
@@ -3150,6 +3186,10 @@ export async function runAutonomousRequirementCognition({
         budget_derivation:'model_operational_context_x8_or_explicit_override',
         model_operational_context_limit_tokens:
           agentRuntimeContract.operational_context_limit_tokens||null,
+        semantic_budget_contract:SEMANTIC_BUDGET_BUCKET_CONTRACT,
+        finalization_reserve_units:semanticRuntime.finalization_reserve_units,
+        semantic_budget_bucket_limits:semanticRuntime.budget_bucket_limits,
+        projected_finalization_units:projectedFinalizationUnits,
         source_wake_request_id:intentExecutionId,
       },
     });
@@ -3253,6 +3293,72 @@ export async function runAutonomousRequirementCognition({
     return row;
   }
 
+  function semanticEventBudgetClass(eventKind,metadata={}){
+    const phase=text(metadata?.phase).toLowerCase();
+    if(/(?:synthesis_final|synthesis_provenance|stage_contract_materialize|terminal_synthesis|terminal_reconciliation|finalize|finalization|root_completion)/.test(phase)){
+      return {bucket:'finalization',finalization_eligible:true};
+    }
+    if(/(?:provenance|verify|verification|reconciliation|audit|review|math_check_contract|python_check)/.test(phase)){
+      return {bucket:'verification',finalization_eligible:false};
+    }
+    if(String(eventKind||'')==='context_acquisition'){
+      return {bucket:'reasoning',finalization_eligible:false};
+    }
+    return {bucket:'orchestration',finalization_eligible:false};
+  }
+
+  async function semanticBudgetAdmission({
+    eventKey,bucket,requestUnits,finalizationEligible=false,
+  }){
+    const policy=semanticBudgetBucketPolicy({
+      initialBudgetUnits:semanticRuntime.initial_budget_units,
+      finalizationReserveUnits:semanticRuntime.finalization_reserve_units,
+      bucket,
+    });
+    const row=await rpc('aau_bridge_semantic_budget_admission_v0_1',{
+      p_agent_id:agentId,
+      p_wake_request_id:intentExecutionId,
+      p_assignment_key:assignmentKey,
+      p_model:model,
+      p_epoch_no:semanticRuntime.epoch_no,
+      p_event_key:eventKey,
+      p_budget_bucket:policy.bucket,
+      p_request_units:Math.max(1,Math.floor(Number(requestUnits)||1)),
+      p_finalization_reserve_units:semanticRuntime.finalization_reserve_units,
+    });
+    if(row?.status!=='ready')
+      throw new Error('semantic_budget_admission_unavailable:'+policy.bucket);
+    if(row.admitted!==true){
+      if(row.reason==='total_budget_exhausted'){
+        const terminal=await closeSemanticRuntime('budget_exhausted',{
+          reason:'semantic_budget_total_exhausted',
+          budget_bucket:policy.bucket,
+          requested_units:Math.max(1,Math.floor(Number(requestUnits)||1)),
+          finalization_reserve_units:semanticRuntime.finalization_reserve_units,
+          bucket_spent_units:Number(row.bucket_spent_units||0),
+          bucket_limit_units:Number(row.bucket_limit_units||policy.bucket_limit_units),
+          semantic_state_preserved:true,
+        });
+        const error=new Error(
+          'semantic_runtime_budget_exhausted:'+policy.bucket
+          +':remaining='+String(row.remaining_budget_units??0)
+        );
+        error.code='SEMANTIC_BUDGET_EXHAUSTED';
+        error.semanticRuntime=terminal;
+        error.budgetAdmission=row;
+        throw error;
+      }
+      const error=new Error(
+        'semantic_budget_bucket_exhausted:'+policy.bucket+':'+String(row.reason||'denied')
+      );
+      error.code='SEMANTIC_BUDGET_BUCKET_EXHAUSTED';
+      error.semanticRuntime=row;
+      error.budgetAdmission=row;
+      throw error;
+    }
+    return {row,policy,finalizationEligible:Boolean(finalizationEligible)};
+  }
+
   async function chargeSemanticRuntime({
     eventKind,materialKey,nodePath=null,costUnits,eventFingerprint=null,metadata={}
   }){
@@ -3270,10 +3376,23 @@ export async function runAutonomousRequirementCognition({
       material_key:String(materialKey||''),
       metadata,
     });
+    const units=Math.max(1,Math.floor(Number(costUnits)||1));
+    const budgetClass=semanticEventBudgetClass(eventKind,metadata);
+    const admission=await semanticBudgetAdmission({
+      eventKey,bucket:budgetClass.bucket,requestUnits:units,
+      finalizationEligible:budgetClass.finalization_eligible,
+    });
+    const budgetMetadata={
+      ...asObject(metadata),
+      budget_contract:SEMANTIC_BUDGET_BUCKET_CONTRACT,
+      budget_bucket:admission.policy.bucket,
+      bucket_limit_units:admission.policy.bucket_limit_units,
+      finalization_reserve_units:semanticRuntime.finalization_reserve_units,
+      finalization_eligible:budgetClass.finalization_eligible,
+    };
     const row=await semanticRuntimeRpc('charge',{
       eventKey,eventKind,eventFingerprint:fingerprint,
-      costUnits:Math.max(1,Math.floor(Number(costUnits)||1)),
-      nodePath,metadata,
+      costUnits:units,nodePath,metadata:budgetMetadata,
     });
     if(row?.status!=='ready')throw new Error('semantic_runtime_charge_failed');
     semanticRuntimeSnapshot=row;
@@ -3288,7 +3407,7 @@ export async function runAutonomousRequirementCognition({
       error.semanticEvent={eventKind,materialKey,nodePath};
       throw error;
     }
-    return row;
+    return {...row,budget_bucket:admission.policy.bucket};
   }
 
   function agentModelContextView(rawPayload,pinnedEvidence,outputTokens){
@@ -4772,11 +4891,24 @@ export async function runAutonomousRequirementCognition({
       assignment_key:assignmentKey,epoch_no:semanticRuntime.epoch_no,
       phase,attempt,fingerprint,
     }).slice(0,64);
+    const budgetClass=semanticModelBudgetClass({phase,kind,attempt});
+    const admission=await semanticBudgetAdmission({
+      eventKey,bucket:budgetClass.bucket,requestUnits:reservedUnits,
+      finalizationEligible:budgetClass.finalization_eligible,
+    });
     const row=await rpc('aau_bridge_reserve_semantic_model_call_v0_1',{
       p_agent_id:agentId,p_wake_request_id:intentExecutionId,
       p_assignment_key:assignmentKey,p_model:model,p_epoch_no:semanticRuntime.epoch_no,
       p_event_key:eventKey,p_event_fingerprint:fingerprint,p_reserved_units:reservedUnits,
-      p_metadata:{phase,kind,transport_attempt:attempt,estimated_input_tokens:estimatedInput,requested_output_tokens:maxTokens},
+      p_metadata:{
+        phase,kind,transport_attempt:attempt,estimated_input_tokens:estimatedInput,
+        requested_output_tokens:maxTokens,
+        budget_contract:SEMANTIC_BUDGET_BUCKET_CONTRACT,
+        budget_bucket:admission.policy.bucket,
+        bucket_limit_units:admission.policy.bucket_limit_units,
+        finalization_reserve_units:semanticRuntime.finalization_reserve_units,
+        finalization_eligible:budgetClass.finalization_eligible,
+      },
     });
     if(row?.status!=='ready')throw new Error('autonomous_decomposition_model_call_reservation_failed:'+phase);
     semanticRuntimeSnapshot=row;
@@ -4786,7 +4918,14 @@ export async function runAutonomousRequirementCognition({
       error.semanticEvent={eventKind:'model_call_reservation',materialKey:eventKey,nodePath:null};
       throw error;
     }
-    return {reservationEventId:row.reservation_event_id,reservedUnits:Number(row.reserved_units||reservedUnits),estimatedInput,phase,kind,attempt};
+    return {
+      reservationEventId:row.reservation_event_id,
+      reservedUnits:Number(row.reserved_units||reservedUnits),
+      estimatedInput,phase,kind,attempt,
+      budgetBucket:admission.policy.bucket,
+      bucketLimitUnits:admission.policy.bucket_limit_units,
+      finalizationEligible:budgetClass.finalization_eligible,
+    };
   }
 
   function providerUsageSettlement(response,error,reservation){
@@ -4818,7 +4957,18 @@ export async function runAutonomousRequirementCognition({
       p_reservation_event_id:reservation.reservationEventId,p_settled_units:settlement.settledUnits,
       p_settlement_reason:settlement.reason,p_provider_status_code:settlement.providerStatus,
       p_provider_total_tokens:settlement.providerTotalTokens,
-      p_metadata:{phase:reservation.phase,kind:reservation.kind,transport_attempt:reservation.attempt,estimated_input_tokens:reservation.estimatedInput,reserved_units:reservation.reservedUnits,settlement_capped_to_reservation:settlement.settlementCapped,error_code:error?String(error?.code||error?.cause?.code||'').slice(0,120):null,error_message:error?String(error?.message||error).slice(0,500):null},
+      p_metadata:{
+        phase:reservation.phase,kind:reservation.kind,transport_attempt:reservation.attempt,
+        estimated_input_tokens:reservation.estimatedInput,reserved_units:reservation.reservedUnits,
+        settlement_capped_to_reservation:settlement.settlementCapped,
+        budget_contract:SEMANTIC_BUDGET_BUCKET_CONTRACT,
+        budget_bucket:reservation.budgetBucket||'reasoning',
+        bucket_limit_units:Number(reservation.bucketLimitUnits||0),
+        finalization_reserve_units:semanticRuntime.finalization_reserve_units,
+        finalization_eligible:Boolean(reservation.finalizationEligible),
+        error_code:error?String(error?.code||error?.cause?.code||'').slice(0,120):null,
+        error_message:error?String(error?.message||error).slice(0,500):null,
+      },
     });
     if(row?.status!=='ready'){
       const e=new Error('autonomous_decomposition_model_call_settlement_failed:'+reservation.phase);
@@ -11985,6 +12135,10 @@ export async function runAutonomousRequirementCognition({
       model_calls:counters.model_calls,
       context_requests:counters.context_requests,
       convergence_policy:'conserved_work_budget_v0_2_with_emergency_storage_depth_only',
+      semantic_budget_contract:SEMANTIC_BUDGET_BUCKET_CONTRACT,
+      finalization_reserve_units:semanticRuntime.finalization_reserve_units,
+      semantic_budget_bucket_limits:semanticRuntime.budget_bucket_limits,
+      projected_finalization_units:projectedFinalizationUnits,
       cognitive_continuity_policy:'agent_discovery_restore_and_reconcile_v0_1',
       routing_protocol:'deep_discovery_then_commit_v0_1',
       decomposition_authored_by_bound_agent:true,

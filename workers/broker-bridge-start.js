@@ -475,6 +475,72 @@ try {
 }
 
 try {
+  const {
+    semanticModelBudgetClass,
+    semanticFinalizationReserveUnits,
+    semanticBudgetBucketPolicy,
+    semanticBudgetAdmission,
+  } = await import('./semantic-runtime-controls.js');
+  const reserve=semanticFinalizationReserveUnits({
+    initialBudgetUnits:300,safetyReserveUnits:12,projectedFinalizationUnits:72,
+  });
+  const policy=semanticBudgetBucketPolicy({
+    initialBudgetUnits:300,finalizationReserveUnits:reserve,bucket:'reasoning',
+  });
+  const limits=policy.limits;
+  const workingSum=
+    limits.reasoning+limits.verification+limits.orchestration+limits.transport_retry;
+  const orchestrationBlocked=semanticBudgetAdmission({
+    remainingBudgetUnits:reserve+25,requestUnits:1,
+    bucketSpentUnits:limits.orchestration,bucketLimitUnits:limits.orchestration,
+    finalizationReserveUnits:reserve,finalizationEligible:false,
+  });
+  const reserveProtected=semanticBudgetAdmission({
+    remainingBudgetUnits:reserve+1,requestUnits:2,
+    bucketSpentUnits:0,bucketLimitUnits:limits.reasoning,
+    finalizationReserveUnits:reserve,finalizationEligible:false,
+  });
+  const finalizationAllowed=semanticBudgetAdmission({
+    remainingBudgetUnits:reserve,requestUnits:Math.max(1,Math.floor(reserve/2)),
+    bucketSpentUnits:0,bucketLimitUnits:limits.finalization,
+    finalizationReserveUnits:reserve,finalizationEligible:true,
+  });
+  const terminalRetry=semanticModelBudgetClass({
+    phase:'req_R_synthesis_final_transport_retry_2',
+    kind:'deep_json',attempt:2,
+  });
+  const ordinaryRetry=semanticModelBudgetClass({
+    phase:'req_R_001_atomic_1_transport_retry_2',
+    kind:'deep_json',attempt:2,
+  });
+  console.log('AAU_SEMANTIC_BUDGET_BUCKET_PROBE',JSON.stringify({
+    ok:reserve===72
+      &&workingSum===300-reserve
+      &&limits.finalization===reserve
+      &&orchestrationBlocked.admitted===false
+      &&orchestrationBlocked.reason==='bucket_limit_exhausted'
+      &&reserveProtected.admitted===false
+      &&reserveProtected.reason==='finalization_reserve_protected'
+      &&finalizationAllowed.admitted===true
+      &&terminalRetry.bucket==='finalization'
+      &&ordinaryRetry.bucket==='transport_retry',
+    reserve,
+    limits,
+    working_sum:workingSum,
+    orchestration_exhausted_reason:orchestrationBlocked.reason,
+    reserve_protection_reason:reserveProtected.reason,
+    finalization_admitted:finalizationAllowed.admitted,
+    terminal_retry_bucket:terminalRetry.bucket,
+    ordinary_retry_bucket:ordinaryRetry.bucket,
+    contract:policy.contract,
+  }));
+} catch (error) {
+  console.error('AAU_SEMANTIC_BUDGET_BUCKET_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
   const { deepContextCapForProbe } = await import('./autonomous-recursive-decomposition.js');
   const huge='x'.repeat(180000);
   const reduced=deepContextCapForProbe({

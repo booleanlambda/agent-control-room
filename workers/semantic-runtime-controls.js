@@ -536,12 +536,15 @@ export function semanticBudgetBucketPolicy({
   const initial=Math.max(1,Math.floor(Number(initialBudgetUnits)||1));
   const reserve=Math.max(0,Math.min(initial,Math.floor(Number(finalizationReserveUnits)||0)));
   const spendable=Math.max(0,initial-reserve);
-  const reasoning=Math.floor(spendable*0.70);
   const verification=Math.floor(spendable*0.20);
-  const orchestration=Math.max(0,spendable-reasoning-verification);
+  const orchestration=Math.floor(spendable*0.10);
+  const transportRetry=Math.floor(spendable*0.08);
+  const reasoning=Math.max(
+    0,spendable-verification-orchestration-transportRetry
+  );
   const limits={
     reasoning,verification,orchestration,
-    transport_retry:Math.floor(spendable*0.08),
+    transport_retry:transportRetry,
     finalization:reserve,
   };
   const normalized=Object.prototype.hasOwnProperty.call(limits,bucket)?bucket:'reasoning';
