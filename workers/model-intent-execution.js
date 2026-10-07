@@ -3427,6 +3427,21 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
             error:String(holdError?.message||holdError).slice(0,800),
           }));
         });
+      } else if(cognitionResponseRejected){
+        await rpc('aau_bridge_handle_cognition_response_rejection_v0_1',{
+          p_intent_execution_id:requestedIntentExecutionId,
+          p_error:message,
+          p_state:{
+            code:String(error?.code||'COGNITION_RESPONSE_REJECTED'),
+            rejection_reason:error?.rejectionReason||null,
+            finish_reason:error?.finishReason||null,
+          },
+        }).catch((recoveryError)=>{
+          console.error('AAU_COGNITION_RESPONSE_REJECTION_RECOVERY_FAILED',JSON.stringify({
+            intent_execution_id:requestedIntentExecutionId,
+            error:String(recoveryError?.message||recoveryError).slice(0,800),
+          }));
+        });
       } else if (providerTransient) {
         await rpc('aau_bridge_fail_model_transport_transient_v0_1',{
           p_intent_execution_id:requestedIntentExecutionId,
