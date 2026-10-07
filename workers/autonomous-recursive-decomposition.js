@@ -1736,7 +1736,9 @@ export function existingSplitContinuationState(node,childRows=[]){
   const agentFinalized=Boolean(node?.decision_payload?.children_authored);
   return {
     contract:'existing_agent_split_continuation_v0_1',
-    available:active.length>0&&(agentFinalized||scopeComplete),
+    available:active.length>0&&(
+      scopeLedger?scopeComplete:agentFinalized
+    ),
     child_count:active.length,
     child_paths:active.map(child=>text(child?.node_path)).filter(Boolean),
     child_statuses:active.map(child=>({
