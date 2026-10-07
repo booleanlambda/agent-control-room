@@ -426,6 +426,41 @@ try {
 }
 
 try {
+  const { qdaVerifiedPythonChecksFromArtifact } = await import('./qda601-runtime.js');
+  const artifact={
+    python_checks:[
+      {label:'top_1',expression:'1+1',claimed_result:2},
+      {label:'top_2',expression:'2+2',claimed_result:4},
+      {label:'top_3',expression:'3+3',claimed_result:6},
+      {label:'top_4',expression:'4+4',claimed_result:8},
+    ],
+    reconciliation:{
+      python_checks:[
+        {label:'nested_1',expression:'5+5',claimed_result:10},
+        {label:'nested_2',expression:'6+6',claimed_result:12},
+        {label:'nested_3',expression:'7+7',claimed_result:14},
+        {label:'nested_4',expression:'8+8',claimed_result:16},
+      ]
+    }
+  };
+  const field=qdaVerifiedPythonChecksFromArtifact(artifact);
+  console.log('AAU_QDA_VERIFIED_CHECK_EXTRACTION_PROBE',JSON.stringify({
+    ok:field.type_ok===true
+      &&field.value.length===8
+      &&String(field.source).includes('top_level')
+      &&String(field.source).includes('nested_artifact'),
+    check_count:field.value.length,
+    source:field.source,
+    expected:8,
+    contract:'qda_verified_python_check_extraction_v0_1',
+  }));
+} catch (error) {
+  console.error('AAU_QDA_VERIFIED_CHECK_EXTRACTION_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
   const { runPythonStatisticalAnalyses } = await import('./python-quant.js');
   const probe = runPythonStatisticalAnalyses([
     {
