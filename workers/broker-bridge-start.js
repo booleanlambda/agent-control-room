@@ -1487,7 +1487,7 @@ if (isEnabled('AAU_REVIEWER_ENDPOINT_SMOKE')) {
 
 await import('./broker-bridge-envcheck.js');
 
-if (isEnabled('AAU_KIMI_LATENCY_REVIEW') || process.env.RENDER_SERVICE_ID === 'srv-dajkd5p594qs73chs46g') {
+if (isEnabled('AAU_KIMI_LATENCY_REVIEW')) {
   // Read-only one-shot Kimi review of observed cognition latency. No agent mutation.
   void import('./kimi-cognition-latency-review.js')
     .then(({runKimiCognitionLatencyReview})=>runKimiCognitionLatencyReview())
