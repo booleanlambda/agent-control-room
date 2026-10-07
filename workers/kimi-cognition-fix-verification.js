@@ -14,6 +14,7 @@ export async function runKimiCognitionFixVerification(){
   const lifecycle=read('workers/model-autonomous-lifecycle.js');
   const boundedSql=read('sql/aau-bounded-cognition-failure-lanes-v0.1.sql');
   const orphanSql=read('sql/aau-recursive-cognition-orphan-recovery-v0.4.sql');
+  const staleDeliverySql=read('sql/aau-prebegin-stale-delivery-v0.2.sql');
 
   const findings=[
     'split_parent_fail_closed_synchronous_infinite_recursion',
@@ -49,6 +50,7 @@ export async function runKimiCognitionFixVerification(){
       execution_failure_classification:excerpt(execution,'const cognitionResponseRejected=',1500,9500),
       lifecycle_disposition:excerpt(lifecycle,'async function handleIntent',800,10500),
       bounded_failure_lanes:boundedSql,
+      prebegin_stale_delivery:staleDeliverySql,
       orphan_recovery_identity:excerpt(orphanSql,'source_wake_request_id=r.wake_request_id',1200,4500),
     }
   };
