@@ -10605,7 +10605,9 @@ export async function runAutonomousRequirementCognition({
         accumulator_hash:Object.keys(asObject(priorPayload.synthesis_accumulator)).length
           ?sha256(priorPayload.synthesis_accumulator):null,
         preserved_children:true,
-        preserved_accumulator:true,
+        preserved_accumulator:
+          Object.keys(asObject(priorPayload.synthesis_accumulator)).length>0,
+        accumulator_reconstructible_from_durable_children:true,
         recovery_policy:'return_to_bound_agent_REMEDIATE_decision',
         failed_at:new Date().toISOString(),
       };
