@@ -600,7 +600,52 @@ function qdaChildProblemOrdinals(ctx,child,artifact,expectedProblems){
     .filter(ordinal=>ordinal>=1&&ordinal<=expectedProblems.length);
   if(explicit.length)return {ordinals:explicit,unit_mismatch:false};
 
+  // Remediation may intentionally collapse the whole authoritative exercise
+  // pack into one atomic child. Treat an explicit full-set claim as coverage
+  // only when its cardinality matches the current exercise pack exactly.
+  const numberWords={one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10};
+  const fullSetNumeric=requirement.match(/\b(?:all\s+)?(?:the\s+)?(\d+)\s+assigned\s+(?:problems|questions|items)\b/i);
+  const fullSetWord=requirement.match(/\b(?:all\s+)?(?:the\s+)?(one|two|three|four|five|six|seven|eight|nine|ten)\s+assigned\s+(?:problems|questions|items)\b/i);
+  if(
+    (fullSetNumeric&&Number(fullSetNumeric[1])===expectedProblems.length)
+    ||(fullSetWord&&numberWords[String(fullSetWord[1]).toLowerCase()]===expectedProblems.length)
+    ||(/\b(?:solve|answer|complete|execute|cover)(?:\s+the)?\s+all\s+assigned\s+(?:problems|questions|items)\b/i.test(requirement))
+  ){
+    return {
+      ordinals:expectedProblems.map((_,index)=>index+1),
+      unit_mismatch:false,
+    };
+  }
+
   const inferred=[];
+
+  // Structured remediation artifacts often encode coverage as problem_N keys
+  // inside calculation/result objects instead of a problem_responses array.
+  // These labels are deterministic evidence of which assigned problems the
+  // child actually materialized.
+  const artifactOrdinals=new Set();
+  const scanProblemKeys=(value,depth=0)=>{
+    if(depth>5||value===null||value===undefined)return;
+    if(Array.isArray(value)){
+      value.forEach(item=>scanProblemKeys(item,depth+1));
+      return;
+    }
+    if(typeof value!=='object')return;
+    for(const [key,childValue] of Object.entries(value)){
+      const normalized=String(key||'').toLowerCase().replace(/[^a-z0-9]+/g,'_');
+      const match=normalized.match(/^(?:problem|question|item|q)_*0*(\d+)(?:_|$)/);
+      if(match){
+        const ordinal=Number(match[1]);
+        if(Number.isInteger(ordinal)&&ordinal>=1&&ordinal<=expectedProblems.length){
+          artifactOrdinals.add(ordinal);
+        }
+      }
+      scanProblemKeys(childValue,depth+1);
+    }
+  };
+  scanProblemKeys(artifact);
+  inferred.push(...artifactOrdinals);
+
   const artifactResponses=Array.isArray(artifact?.problem_responses)?artifact.problem_responses:[];
   for(let index=0;index<expectedProblems.length;index+=1){
     const expected=String(expectedProblems[index]||'').replace(/\s+/g,' ').trim();
