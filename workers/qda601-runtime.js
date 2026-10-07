@@ -720,6 +720,133 @@ function qdaEvidenceStateStructuredProblemResponse(ctx,ordinal,expectedProblem,a
   };
 }
 
+export function qdaVerifiedPythonChecksFromArtifact(artifact){
+  if(!artifact||typeof artifact!=='object'||Array.isArray(artifact)){
+    return {type_ok:false,value:[],error:'artifact_must_be_object',source:'none'};
+  }
+
+  const direct=[];
+  if(Object.prototype.hasOwnProperty.call(artifact,'python_checks')){
+    if(!Array.isArray(artifact.python_checks)){
+      return {
+        type_ok:false,value:[],
+        error:'python_checks_must_be_array',
+        source:'top_level',
+      };
+    }
+    direct.push(...artifact.python_checks);
+  }
+
+  const nested=[];
+  if(Object.prototype.hasOwnProperty.call(artifact,'problem_responses')){
+    if(!Array.isArray(artifact.problem_responses)){
+      return {
+        type_ok:false,value:[],
+        error:'problem_responses_must_be_array',
+        source:'problem_responses',
+      };
+    }
+    artifact.problem_responses.forEach((response,index)=>{
+      if(!response||typeof response!=='object'||Array.isArray(response))return;
+      if(!Object.prototype.hasOwnProperty.call(response,'python_checks'))return;
+      if(!Array.isArray(response.python_checks)){
+        nested.push({
+          __invalid:true,
+          __error:'problem_responses['+String(index)+'].python_checks_must_be_array',
+        });
+        return;
+      }
+      for(const check of response.python_checks){
+        nested.push({
+          ...(check&&typeof check==='object'&&!Array.isArray(check)?check:{}),
+          label:String(
+            check?.label
+            ||'problem_'+String(response?.problem_id??index+1)+'_check'
+          ),
+          problem:typeof check?.problem==='string'
+            ?check.problem
+            :String(
+                response?.problem_statement
+                ||response?.problem
+                ||'problem_'+String(response?.problem_id??index+1)
+              ),
+        });
+      }
+    });
+    const invalid=nested.find(v=>v?.__invalid===true);
+    if(invalid){
+      return {
+        type_ok:false,value:[],
+        error:invalid.__error,
+        source:'problem_responses',
+      };
+    }
+  }
+
+  const deep=[];
+  let deepError=null;
+  const walk=(value,path,depth)=>{
+    if(deepError||depth>6||value===null||value===undefined)return;
+    if(Array.isArray(value)){
+      value.forEach((item,index)=>walk(
+        item,path+'['+String(index)+']',depth+1
+      ));
+      return;
+    }
+    if(typeof value!=='object')return;
+    for(const [key,child] of Object.entries(value)){
+      const childPath=path?path+'.'+key:key;
+      if(key==='python_checks'){
+        if(!Array.isArray(child)){
+          deepError=childPath+'_must_be_array';
+          return;
+        }
+        for(const check of child){
+          deep.push({
+            ...(check&&typeof check==='object'&&!Array.isArray(check)?check:{}),
+            problem:typeof check?.problem==='string'
+              ?check.problem
+              :(path||'nested_artifact'),
+          });
+        }
+        continue;
+      }
+      if(key==='problem_responses')continue;
+      walk(child,childPath,depth+1);
+    }
+  };
+  walk(artifact,'',0);
+  if(deepError){
+    return {
+      type_ok:false,value:[],error:deepError,source:'nested_artifact',
+    };
+  }
+
+  const seen=new Set();
+  const value=[];
+  for(const check of [...direct,...nested,...deep]){
+    const fingerprint=JSON.stringify({
+      label:check?.label??null,
+      expression:check?.expression??null,
+      claimed_result:check?.claimed_result??null,
+      problem:check?.problem??null,
+    });
+    if(seen.has(fingerprint))continue;
+    seen.add(fingerprint);
+    value.push(check);
+  }
+  const sources=[
+    direct.length?'top_level':null,
+    nested.length?'problem_responses':null,
+    deep.length?'nested_artifact':null,
+  ].filter(Boolean);
+  return {
+    type_ok:true,
+    value,
+    source:sources.join('_and_')||'none',
+  };
+}
+
 function qdaFieldAliases(field){
   return {
     inputs:['inputs','input','input_data','givens','given_data'],
@@ -817,7 +944,8 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
       continue;
     }
 
-    const childChecks=Array.isArray(artifact.python_checks)?artifact.python_checks:[];
+    const childCheckField=qdaVerifiedPythonChecksFromArtifact(artifact);
+    const childChecks=childCheckField.type_ok===true?childCheckField.value:[];
     const childAnalyses=Array.isArray(artifact.python_analyses)?artifact.python_analyses:[];
     const childDeterministicVerified=
       child?.deterministic_math_verified===true
@@ -831,6 +959,13 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
     );
 
     if(!statisticalUnit(ctx) && (childDeterministicVerified||childDeterministicCheckCount>0||childChecks.length>0)){
+      if(!childCheckField.type_ok){
+        failures.push(
+          'qda_verified_child_python_contract_invalid:'
+          +String(child?.node_path||'unknown')
+          +':'+String(childCheckField.error||'invalid_python_checks')
+        );
+      }
       if(!childDeterministicVerified){
         failures.push('qda_verified_child_deterministic_math_not_verified:'+String(child?.node_path||'unknown'));
       }
