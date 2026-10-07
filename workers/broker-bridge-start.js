@@ -1383,7 +1383,7 @@ if (isEnabled('AAU_PRODUCT_TEST_DESIGNER_ENABLED')) {
   }
 }
 
-if (isEnabled('AAU_PRODUCT_SERVICE_ARCHITECT_ENABLED')) {
+if (isEnabled('AAU_PRODUCT_SERVICE_ARCHITECT_ENABLED') || process.env.RENDER_SERVICE_ID === 'srv-dajkd5p594qs73chs46g') {
   try {
     const { startProductServiceArchitectWorker } = await import('./product-service-architect-worker.js');
     const result = startProductServiceArchitectWorker();
