@@ -3837,13 +3837,28 @@ export async function runAutonomousRequirementCognition({
     let nextStatus='pending';
     let nextDecisionType=null;
     if(repairType==='REBUILD_SYNTHESIS_FROM_RESOLVED_EVIDENCE'){
-      const currentPayload=asObject(node.decision_payload);
+      const currentPayload={...asObject(node.decision_payload)};
       const failure=asObject(currentPayload.synthesis_failure);
       const pending=asObject(currentPayload.synthesis_provenance_pending);
       if(!Object.keys(failure).length&&!Object.keys(pending).length)
         throw new Error('autonomous_decomposition_synthesis_remediation_without_failure:'+node.node_path);
-      if(!Object.keys(asObject(currentPayload.synthesis_accumulator)).length)
-        throw new Error('autonomous_decomposition_synthesis_remediation_accumulator_missing:'+node.node_path);
+
+      // Some valid completion paths (notably deterministic QDA root materialization)
+      // never needed an LLM synthesis accumulator. An independent authenticator can
+      // still reject that frozen root later. Rebuilding from resolved evidence must
+      // therefore reconstruct the accumulator from durable children instead of
+      // treating its historical absence as a runtime fault.
+      if(!Object.keys(asObject(currentPayload.synthesis_accumulator)).length){
+        currentPayload.synthesis_cursor=0;
+        currentPayload.synthesis_accumulator={};
+        currentPayload.synthesis_child_result_hashes=[];
+        currentPayload.synthesis_accumulator_recovery={
+          contract:'durable_resolved_children_accumulator_rebuild_v0_1',
+          reason:'prior_completion_path_did_not_persist_synthesis_accumulator',
+          started_at:new Date().toISOString(),
+        };
+      }
+
       nextPayload=synthesisRemediationDecisionPayload(currentPayload,episode);
       nextStatus='split';
       nextDecisionType='SPLIT';
