@@ -5882,9 +5882,17 @@ export async function runAutonomousRequirementCognition({
         scope_removed:child?.decision_payload?.scope_removed,
         completion_criterion:child?.decision_payload?.completion_criterion,
       })));
-      const failureCount=counter.failure_count_base+1;
+      const priorFailure=asObject(node?.decision_payload?.child_authoring_failure);
+      const priorStructuredScope=asObject(priorFailure.structured_remaining_scope);
+      const scopeContextImproved=Boolean(
+        structuredScope
+        &&structuredScope.contract
+        &&Object.keys(priorStructuredScope).length===0
+      );
+      const failureCount=(scopeContextImproved?0:counter.failure_count_base)+1;
       const lifetimeRejections=counter.lifetime_rejection_count_base+1;
-      const reconsiderationCycles=counter.reconsideration_cycles_base+1;
+      const reconsiderationCycles=
+        (scopeContextImproved?0:counter.reconsideration_cycles_base)+1;
       const overlapFailure=/COGNITION_CHILD_OVERLAP|accepted_child_already_covers/i.test(rejectionReason);
       const maxCycles=structuredScope&&overlapFailure
         ?MAX_STRUCTURED_SCOPE_OVERLAP_CYCLES
@@ -5915,6 +5923,7 @@ export async function runAutonomousRequirementCognition({
             context_fingerprint:text(priorDiscovery.context_fingerprint)||null,
           },
           structured_remaining_scope:structuredScope,
+          retry_budget_reset_by_new_authoritative_scope:scopeContextImproved,
           per_epoch_failure_count:failureCount,
           lifetime_rejection_count:lifetimeRejections,
           reconsideration_cycle:reconsiderationCycles,
@@ -5965,6 +5974,7 @@ export async function runAutonomousRequirementCognition({
         child_authoring_lifetime_rejection_count:lifetimeRejections,
         child_authoring_reconsideration_cycles:reconsiderationCycles,
         structured_remaining_scope:structuredScope?.remaining_scope||null,
+        retry_budget_reset_by_new_authoritative_scope:scopeContextImproved,
         escalation_required:escalationRequired,
         rejection_reason:rejectionReason,
       }));
