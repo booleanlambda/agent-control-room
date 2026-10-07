@@ -2,51 +2,31 @@ import fs from 'node:fs';
 import { modelChatCompletion } from './providers/model-provider.js';
 
 const read=(relative)=>fs.readFileSync(new URL('../'+relative,import.meta.url),'utf8');
-const excerpt=(source,needle,before=1800,after=7000)=>{
+const excerpt=(source,needle,before=1200,after=5200)=>{
   const index=source.indexOf(needle);
   if(index<0)return 'MISSING:'+needle;
   return source.slice(Math.max(0,index-before),Math.min(source.length,index+after));
 };
 
 export async function runKimiCognitionFinalClosure(){
-  const cognition=read('workers/autonomous-recursive-decomposition.js');
-  const execution=read('workers/model-intent-execution.js');
   const lifecycle=read('workers/model-autonomous-lifecycle.js');
-  const bounded=read('sql/aau-bounded-cognition-failure-lanes-v0.1.sql');
+  const resetSql=read('sql/aau-bounded-prebegin-reset-fallback-v0.1.sql');
   const packet={
-    task:'Close the three residual P2 items from your immediately prior post-fix audit.',
+    task:'Verify the final residual P2 from your prior audit: P2-PREBEGIN-FALLBACK-UNBOUNDED.',
+    prior_problem:
+      'If aau_bridge_handle_prebegin_failure_v0_1 itself was unavailable, lifecycle fell back to reset_autonomous_*_arm without consuming a durable retry counter, allowing a loop under partial-deploy skew.',
     required_invariant:
-      'Every retry mutates durable identity, consumes a bounded durable counter, or terminates in explicit recovery. Committed cognition is never replayed.',
-    residuals:[
-      'split_parent verification recursion was PARTIAL only because the consuming call site was omitted.',
-      'QDA verified-child materialization classification was PARTIAL only because the producer call site was omitted.',
-      'pre-begin recovery-handler RPC failure still had a generic reset-arm fallback.'
-    ],
+      'The fallback itself must consume a bounded durable retry counter or terminate explicitly; it must never resurrect active/terminal work.',
     source:{
-      split_parent_consumer:excerpt(
-        cognition,'AAU_QDA_SPLIT_PARENT_DETERMINISTIC_COMPLETION_BLOCKED',5000,7500
-      ),
-      split_parent_retry_helper:excerpt(
-        cognition,'export function splitParentVerificationRetryState',800,2600
-      ),
-      qda_materialization_producer:excerpt(
-        execution,'qda601_verified_child_materialization_blocked',2600,4300
-      ),
-      response_rejection_consumer:excerpt(
-        execution,'const cognitionResponseRejected=',1000,6500
-      ),
-      prebegin_lifecycle:excerpt(
-        lifecycle,'const preBeginFailure=',800,5200
-      ),
-      bounded_prebegin_sql:bounded
+      lifecycle_fallback:excerpt(lifecycle,'if(!preBeginHandled)',900,4200),
+      bounded_reset_fallback_sql:resetSql
     }
   };
   const system=[
     'You are Kimi K3, independent AAU runtime auditor.',
-    'Verify ONLY these three residual P2 items; do not reopen already-closed findings.',
-    'Classify each CLOSED, PARTIAL, or OPEN using exact reachable control flow.',
-    'For the pre-begin handler-RPC-failure fallback, distinguish a theoretical recovery-RPC outage from an actual unbounded cognition retry loop.',
-    'Return strict compact JSON only with keys release_gate, residual_status, remaining_p1, remaining_p2, confidence.',
+    'Verify only the single residual P2. Do not reopen previously closed findings.',
+    'Classify CLOSED, PARTIAL, or OPEN using supplied reachable control flow.',
+    'Return strict compact JSON only with keys release_gate, status, evidence, remaining_p1, remaining_p2, confidence.',
     'release_gate is GO, GO_WITH_FIXES, or BLOCK.'
   ].join(' ');
   const result=await modelChatCompletion({
@@ -56,11 +36,11 @@ export async function runKimiCognitionFinalClosure(){
       {role:'system',content:system},
       {role:'user',content:JSON.stringify(packet)}
     ],
-    maxTokens:1400,
+    maxTokens:800,
     temperature:0,
     jsonMode:true,
     reasoningEffort:'low',
-    timeoutMs:240000,
+    timeoutMs:180000,
     runtimeRole:'adjudicator',
   });
   let review=null;
@@ -70,6 +50,6 @@ export async function runKimiCognitionFinalClosure(){
     finish_reason:result.finish_reason||null,
     usage:result.usage||null,
     review,
-    raw:review?null:String(result.content||'').slice(0,8000)
+    raw:review?null:String(result.content||'').slice(0,5000)
   };
 }
