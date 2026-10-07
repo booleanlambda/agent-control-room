@@ -365,7 +365,10 @@ function parseDecision(text) {
       if (value && typeof value === 'object' && typeof value.selected_action === 'string') return value;
     } catch {}
   }
-  throw new Error('model_did_not_return_valid_decision_json');
+  const error=new Error('model_did_not_return_valid_decision_json');
+  error.code='COGNITION_RESPONSE_REJECTED';
+  error.rejectionReason='MALFORMED_DECISION_JSON';
+  throw error;
 }
 
 function sanitizeNextIntents(value) {
