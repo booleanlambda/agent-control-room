@@ -58,6 +58,10 @@ const MAX_NODE_RPC_BODY_BYTES=220000;
 const MIN_NODE_CONTEXT_BYTES=32000;
 const MAX_PINNED_EVIDENCE_ITEMS_IN_COGNITION=16;
 const MAX_PINNED_EVIDENCE_EXCERPT_CHARS=12000;
+const MAX_DEEP_MODEL_CONTEXT_TOKENS=18000;
+const MAX_DEEP_MODEL_CONTEXT_BYTES=65536;
+const MAX_DEEP_SIBLING_TOKENS=3500;
+const MAX_DEEP_PINNED_TOKENS=3500;
 const MAX_SELF_REMEDIATION_ATTEMPTS=2;
 const MAX_CHILD_AUTHORING_RECONSIDERATION_CYCLES=3;
 const MAX_STRUCTURED_SCOPE_OVERLAP_CYCLES=2;
@@ -1272,79 +1276,315 @@ function compactSiblingEvidenceForModel(rows,maxTokens,contract){
     evidence_scope:v.evidence_scope||null,
   }));
 }
-function boundContextForModel(payload,maxTokens,contract){
+const DEEP_CONTEXT_CRITICAL_KEYS=new Set([
+  'qda_601_context',
+  'qda_curriculum_problem_binding',
+  'runtime_python_calculation',
+  'deterministic_math_feedback',
+  'deterministic_statistics_feedback',
+  'dependency_context_contract',
+  'expertise_candidate_ledger',
+  'expertise_viability_proposal_v0_1',
+  'suspended_lifecycle_stage',
+  'entrepreneurship_masters',
+  'agent',
+]);
+
+function compactQdaContextForModel(value){
+  const wrapped=asObject(value);
+  const source=wrapped.available===true&&wrapped.value&&typeof wrapped.value==='object'
+    ?asObject(wrapped.value)
+    :wrapped;
+  if(!Object.keys(source).length)return value;
+  const compact={
+    contract:source.contract||null,
+    assigned:source.assigned===true,
+    program_code:source.program_code||null,
+    program_version:source.program_version||null,
+    title:source.title||null,
+    status:source.status||null,
+    blocking_stage4:source.blocking_stage4===true,
+    source_artifact:source.source_artifact||null,
+    exercise_bank_artifact:source.exercise_bank_artifact||null,
+    total_units:Number(source.total_units||0)||null,
+    completed_units:Number(source.completed_units||0),
+    remaining_units:Number(source.remaining_units||0),
+    next_unit:source.next_unit||null,
+    final_submission:source.final_submission||null,
+    hard_gates:source.hard_gates||null,
+    overall_pass_floor:source.overall_pass_floor??null,
+    assessment_weighting:source.assessment_weighting||null,
+    evidence_state_labels:source.evidence_state_labels||null,
+    required_submission_fields:source.required_submission_fields||null,
+    governing_loop:source.governing_loop||null,
+    remediation:source.remediation||null,
+    progression_cursor:source.progression_cursor?{
+      source:source.progression_cursor.source||null,
+      completed_index:source.progression_cursor.completed_index??null,
+      pending_index:source.progression_cursor.pending_index??null,
+      remediation_index:source.progression_cursor.remediation_index??null,
+      remediation_unit:source.progression_cursor.remediation_unit||null,
+      preserved_valid_units:asArray(source.progression_cursor.preserved_valid_units),
+      effective_completed_units:asArray(source.progression_cursor.effective_completed_units),
+    }:null,
+    operating_rules:asArray(source.operating_rules).map(v=>clip(text(v),1200)).slice(0,12),
+  };
+  return wrapped.available===true&&wrapped.value&&typeof wrapped.value==='object'
+    ?{available:true,value:compact,source:wrapped.source||'qda_601_context'}
+    :compact;
+}
+
+function modelContextCriticalProjection(key,value){
+  if(key==='qda_601_context')return compactQdaContextForModel(value);
+  if(key==='agent'){
+    const agent=asObject(value);
+    const records=asObject(agent.competency_verification_records);
+    if(Object.keys(records).length){
+      return {
+        ...agent,
+        competency_verification_records:{
+          ...records,
+          verified_competencies:asArray(records.verified_competencies).slice(0,18),
+          capstone_transfer_principles:asArray(records.capstone_transfer_principles).slice(0,12),
+        },
+      };
+    }
+  }
+  if(key==='entrepreneurship_masters'){
+    const masters=asObject(value);
+    return {
+      available:masters.available===true,
+      status:masters.status||null,
+      courses:asArray(masters.courses).map(course=>({
+        course_code:course?.course_code||null,
+        title:course?.title||null,
+        category:course?.category||null,
+        learning_objectives:asArray(course?.learning_objectives).slice(0,8),
+      })).slice(0,20),
+      capstone:masters.capstone||null,
+      verification:masters.verification||null,
+      source:masters.source||null,
+    };
+  }
+  return value;
+}
+
+function durableContextReference(path,value){
+  return {
+    path,
+    bytes:bytes(value),
+    kind:Array.isArray(value)?'array':typeof value,
+    retrievable_via_context_request:true,
+    source:'durable_node_or_authoritative_packet',
+  };
+}
+
+export function deepContextCapForProbe(payload,contract={
+  model_id:'probe-model',
+  estimated_chars_per_token:3.2,
+  operational_context_limit_tokens:114688,
+}){
+  return boundContextForModel(
+    payload,
+    MAX_DEEP_MODEL_CONTEXT_TOKENS,
+    contract,
+    MAX_DEEP_MODEL_CONTEXT_BYTES
+  );
+}
+
+function boundContextForModel(
+  payload,maxTokens,contract,maxBytes=MAX_DEEP_MODEL_CONTEXT_BYTES
+){
   const src=asObject(payload);
-  const budget=Math.max(1000,Math.floor(Number(maxTokens)||1000));
-  if(estimatedTokens(src,contract)<=budget){
+  const budget=Math.max(
+    1000,
+    Math.min(
+      MAX_DEEP_MODEL_CONTEXT_TOKENS,
+      Math.floor(Number(maxTokens)||1000)
+    )
+  );
+  const byteBudget=Math.max(
+    12000,
+    Math.min(MAX_DEEP_MODEL_CONTEXT_BYTES,Math.floor(Number(maxBytes)||MAX_DEEP_MODEL_CONTEXT_BYTES))
+  );
+  const originalTokens=estimatedTokens(src,contract);
+  const originalBytes=bytes(src);
+  const withinBudget=value=>
+    estimatedTokens(value,contract)<=budget&&bytes(value)<=byteBudget;
+
+  if(withinBudget(src)){
     return {
       ...src,
+      _deep_context_reduction_manifest:{
+        contract:'hard_bounded_deep_context_v0_1',
+        compacted:false,
+        original_tokens:originalTokens,
+        original_bytes:originalBytes,
+        final_tokens:originalTokens,
+        final_bytes:originalBytes,
+        token_cap:budget,
+        byte_cap:byteBudget,
+        retained_critical_keys:Object.keys(src).filter(key=>DEEP_CONTEXT_CRITICAL_KEYS.has(key)),
+        externalized_paths:[],
+        retrieval_rule:'Use context_requests with an exact durable path when an externalized value becomes necessary.',
+      },
       _model_context_budget:{
-        version:'model_profile_token_context_v0_1',
+        version:'model_profile_token_context_v0_2_hard_latency_cap',
         model_id:contract?.model_id||null,
         max_tokens:budget,
-        estimated_tokens:estimatedTokens(src,contract),
+        max_bytes:byteBudget,
+        estimated_tokens:originalTokens,
         compacted:false,
       },
     };
   }
+
   const out={};
   const evicted=[];
-  const researchRound=(key)=>{
-    const match=String(key).match(/^external_research(?:_round_)?(\d+)$/);
-    return match?Number(match[1]):0;
+  const externalized=[];
+  const retainedCritical=[];
+  const criticalReferenced=[];
+  const fits=(candidate)=>withinBudget(candidate);
+  const addReference=(path,value,reason)=>{
+    const ref=durableContextReference(path,value);
+    externalized.push({...ref,reason});
+    evicted.push({path,reason,bytes:ref.bytes});
   };
-  const fits=(candidate)=>estimatedTokens(candidate,contract)<=budget;
+  const tryAdd=(key,value,{critical=false,projection=null}={})=>{
+    const candidateValue=projection??value;
+    if(fits({...out,[key]:candidateValue})){
+      out[key]=candidateValue;
+      if(critical)retainedCritical.push(key);
+      return true;
+    }
+    if(critical){
+      const ref={_durable_context_ref:durableContextReference(key,value)};
+      if(fits({...out,[key]:ref})){
+        out[key]=ref;
+        criticalReferenced.push(key);
+        addReference(key,value,'critical_value_externalized_after_projection_exceeded_cap');
+        return true;
+      }
+    }
+    addReference(key,value,critical?'critical_value_exceeded_cap':'deep_context_latency_cap');
+    return false;
+  };
+
+  // Required contracts and deterministic verification context always get first claim.
+  for(const key of Object.keys(src)){
+    if(!DEEP_CONTEXT_CRITICAL_KEYS.has(key))continue;
+    tryAdd(key,src[key],{
+      critical:true,
+      projection:modelContextCriticalProjection(key,src[key]),
+    });
+  }
 
   const catalog=asArray(src.research_source_catalog);
   if(catalog.length){
     let compact=compactResearchCatalogForModel(catalog,'full');
     if(!fits({...out,research_source_catalog:compact}))
       compact=compactResearchCatalogForModel(catalog,'minimal');
-    if(fits({...out,research_source_catalog:compact}))out.research_source_catalog=compact;
-    else evicted.push({path:'research_source_catalog',reason:'model_token_budget',items:catalog.length});
+    if(!tryAdd('research_source_catalog',catalog,{projection:compact}))
+      addReference('research_source_catalog',catalog,'research_catalog_externalized');
   }
 
   for(const key of ['completed_sibling_results','inherited_completed_sibling_results']){
     if(!src[key])continue;
-    const candidate={...out,[key]:src[key]};
-    if(fits(candidate))out[key]=src[key];
-    else evicted.push({path:key,reason:'model_token_budget'});
+    const compact=compactSiblingEvidenceForModel(
+      src[key],
+      Math.min(MAX_DEEP_SIBLING_TOKENS,Math.max(700,Math.floor(budget*0.20))),
+      contract
+    );
+    tryAdd(key,src[key],{projection:compact});
   }
 
+  const researchRound=(key)=>{
+    const match=String(key).match(/^external_research(?:_round_)?(\d+)$/);
+    return match?Number(match[1]):0;
+  };
   const researchEntries=Object.entries(src)
     .filter(([key])=>key.startsWith('external_research'))
     .sort((a,b)=>researchRound(b[0])-researchRound(a[0]));
   for(const [key,value] of researchEntries){
-    const remaining=Math.max(600,budget-estimatedTokens(out,contract)-128);
+    const remaining=Math.max(
+      500,
+      Math.min(3000,budget-estimatedTokens(out,contract)-256)
+    );
     const compact=compactResearchRoundForModel(value,remaining,contract);
-    if(fits({...out,[key]:compact}))out[key]=compact;
-    else evicted.push({path:key,reason:'model_token_budget'});
+    tryAdd(key,value,{projection:compact});
   }
 
-  const priorityExcluded=new Set([
-    'research_source_catalog','completed_sibling_results','inherited_completed_sibling_results',
+  const excluded=new Set([
+    ...DEEP_CONTEXT_CRITICAL_KEYS,
+    'research_source_catalog',
+    'completed_sibling_results',
+    'inherited_completed_sibling_results',
     ...researchEntries.map(([key])=>key),
-    '_context_evicted','_context_budget','_model_context_budget'
+    '_context_evicted','_context_budget','_model_context_budget',
+    '_deep_context_reduction_manifest',
   ]);
-  const other=Object.entries(src).filter(([key])=>!priorityExcluded.has(key)).reverse();
-  for(const [key,value] of other){
-    if(fits({...out,[key]:value}))out[key]=value;
-    else evicted.push({path:key,reason:'model_token_budget'});
-  }
+  const other=Object.entries(src)
+    .filter(([key])=>!excluded.has(key))
+    .sort((a,b)=>bytes(a[1])-bytes(b[1]));
+  for(const [key,value] of other)tryAdd(key,value);
 
-  out._model_context_evicted=evicted.slice(0,60);
+  const manifest={
+    contract:'hard_bounded_deep_context_v0_1',
+    compacted:true,
+    original_tokens:originalTokens,
+    original_bytes:originalBytes,
+    token_cap:budget,
+    byte_cap:byteBudget,
+    retained_critical_keys:[...new Set(retainedCritical)],
+    critical_keys_externalized:[...new Set(criticalReferenced)],
+    externalized_paths:externalized.slice(0,60),
+    externalized_count:externalized.length,
+    retrieval_rule:'Use context_requests with an exact durable path when an externalized value becomes necessary.',
+    invariants:{
+      active_requirement_outside_supplied_context:true,
+      completed_sibling_evidence_separately_bounded:true,
+      pinned_research_evidence_separately_bounded:true,
+      deterministic_verification_context_prioritized:true,
+      authoritative_packet_remains_durable:true,
+    },
+  };
+  if(fits({...out,_deep_context_reduction_manifest:manifest}))
+    out._deep_context_reduction_manifest=manifest;
+
+  const finalTokens=estimatedTokens(out,contract);
+  const finalBytes=bytes(out);
   out._model_context_budget={
-    version:'model_profile_token_context_v0_1',
+    version:'model_profile_token_context_v0_2_hard_latency_cap',
     model_id:contract?.model_id||null,
     operational_context_limit_tokens:contract?.operational_context_limit_tokens||null,
     max_tokens:budget,
-    estimated_tokens:estimatedTokens(out,contract),
+    max_bytes:byteBudget,
+    estimated_tokens:finalTokens,
+    estimated_bytes:finalBytes,
     compacted:true,
     evicted_count:evicted.length,
     source_catalog_items:asArray(out.research_source_catalog).length,
   };
+
+  // Metadata itself must never push the context over the hard byte cap.
+  while(bytes(out)>byteBudget){
+    if(out._deep_context_reduction_manifest?.externalized_paths?.length){
+      out._deep_context_reduction_manifest.externalized_paths.pop();
+      continue;
+    }
+    if(out._model_context_budget){
+      delete out._model_context_budget;
+      continue;
+    }
+    if(out._deep_context_reduction_manifest){
+      delete out._deep_context_reduction_manifest;
+      continue;
+    }
+    break;
+  }
   return out;
 }
+
 function withoutDuplicatedSiblingContext(payload){
   const out={...asObject(payload)};
   delete out.completed_sibling_results;
@@ -3052,11 +3292,24 @@ export async function runAutonomousRequirementCognition({
   }
 
   function agentModelContextView(rawPayload,pinnedEvidence,outputTokens){
-    const safeInputTokens=modelInputBudgetTokens(agentRuntimeContract,outputTokens);
-    const fixedReserveTokens=Math.max(2500,Math.min(16000,Math.floor(safeInputTokens*0.18)));
+    const providerSafeInputTokens=modelInputBudgetTokens(agentRuntimeContract,outputTokens);
+    const safeInputTokens=Math.min(
+      providerSafeInputTokens,
+      MAX_DEEP_MODEL_CONTEXT_TOKENS
+    );
+    const fixedReserveTokens=Math.max(
+      2200,
+      Math.min(4200,Math.floor(safeInputTokens*0.20))
+    );
     const rawSibling=authoritativeSiblingEvidence(rawPayload);
-    const siblingBudget=Math.max(700,Math.floor(safeInputTokens*0.12));
-    const pinnedBudget=Math.max(700,Math.floor(safeInputTokens*0.22));
+    const siblingBudget=Math.max(
+      700,
+      Math.min(MAX_DEEP_SIBLING_TOKENS,Math.floor(safeInputTokens*0.20))
+    );
+    const pinnedBudget=Math.max(
+      700,
+      Math.min(MAX_DEEP_PINNED_TOKENS,Math.floor(safeInputTokens*0.20))
+    );
     const siblingEvidence=compactSiblingEvidenceForModel(
       rawSibling,siblingBudget,agentRuntimeContract
     );
@@ -3067,37 +3320,95 @@ export async function runAutonomousRequirementCognition({
       estimatedTokens(siblingEvidence,agentRuntimeContract)
       +estimatedTokens(pinned,agentRuntimeContract);
     const contextBudget=Math.max(
-      1000,
+      3000,
       safeInputTokens-fixedReserveTokens-usedByEvidence
+    );
+    const evidenceBytes=bytes({siblingEvidence,pinned});
+    const contextByteBudget=Math.max(
+      16000,
+      MAX_DEEP_MODEL_CONTEXT_BYTES-Math.min(
+        Math.floor(MAX_DEEP_MODEL_CONTEXT_BYTES*0.55),
+        evidenceBytes
+      )-4096
     );
     const bounded=boundContextForModel(
       withoutDuplicatedSiblingContext(rawPayload),
       contextBudget,
-      agentRuntimeContract
+      agentRuntimeContract,
+      contextByteBudget
     );
-    const suppliedContext={
+    let suppliedContext={
       ...bounded,
       ...(pinned.length?{pinned_research_evidence:pinned}:{}),
     };
+    // If evidence insertion breaches the total model-facing cap, pin metadata
+    // rather than excerpts; full pinned receipts remain durable and retrievable.
+    if(bytes({suppliedContext,siblingEvidence})>MAX_DEEP_MODEL_CONTEXT_BYTES){
+      const pinnedMetadata=asArray(pinned).map(v=>({
+        evidence_id:v.evidence_id||null,
+        source_key:v.source_key||null,
+        source_id:v.source_id||null,
+        url:v.url||null,
+        sha256:v.sha256||null,
+        audit_batch_id:v.audit_batch_id||null,
+        durable_pinned:true,
+        excerpt_externalized:true,
+      }));
+      suppliedContext={
+        ...bounded,
+        ...(pinnedMetadata.length?{pinned_research_evidence:pinnedMetadata}:{}),
+      };
+    }
+    const totalModelContextBytes=bytes({suppliedContext,siblingEvidence});
+    if(totalModelContextBytes>MAX_DEEP_MODEL_CONTEXT_BYTES){
+      const error=new Error(
+        'deep_model_context_hard_cap_exceeded:bytes='+totalModelContextBytes
+        +':limit='+MAX_DEEP_MODEL_CONTEXT_BYTES
+      );
+      error.code='DEEP_MODEL_CONTEXT_HARD_CAP_EXCEEDED';
+      throw error;
+    }
+    const manifest=asObject(suppliedContext._deep_context_reduction_manifest);
+    if(manifest.compacted===true){
+      console.log('AAU_DEEP_MODEL_CONTEXT_REDUCED',JSON.stringify({
+        agent_id:agentId,
+        intent_execution_id:intentExecutionId,
+        original_bytes:Number(manifest.original_bytes||0),
+        model_context_bytes:totalModelContextBytes,
+        original_tokens:Number(manifest.original_tokens||0),
+        supplied_tokens:estimatedTokens(suppliedContext,agentRuntimeContract),
+        sibling_tokens:estimatedTokens(siblingEvidence,agentRuntimeContract),
+        token_cap:MAX_DEEP_MODEL_CONTEXT_TOKENS,
+        byte_cap:MAX_DEEP_MODEL_CONTEXT_BYTES,
+        retained_critical_keys:asArray(manifest.retained_critical_keys),
+        critical_keys_externalized:asArray(manifest.critical_keys_externalized),
+        externalized_count:Number(manifest.externalized_count||0),
+        contract:'hard_bounded_deep_context_v0_1',
+      }));
+    }
     return {
       suppliedContext,
       siblingEvidence,
       safeInputTokens,
+      providerSafeInputTokens,
       fixedReserveTokens,
       contextBudget,
+      hardContextTokenCap:MAX_DEEP_MODEL_CONTEXT_TOKENS,
+      hardContextByteCap:MAX_DEEP_MODEL_CONTEXT_BYTES,
+      totalModelContextBytes,
       estimatedSuppliedTokens:estimatedTokens(suppliedContext,agentRuntimeContract),
       estimatedSiblingTokens:estimatedTokens(siblingEvidence,agentRuntimeContract),
-      estimatedPinnedTokens:estimatedTokens(pinned,agentRuntimeContract),
+      estimatedPinnedTokens:estimatedTokens(
+        suppliedContext.pinned_research_evidence||[],agentRuntimeContract
+      ),
     };
   }
 
   function boundInMemoryContext(rawPayload,pinnedEvidence,outputTokens){
-    const view=agentModelContextView(rawPayload,pinnedEvidence,outputTokens);
-    return boundContextForModel(
-      rawPayload,
-      Math.max(1000,view.contextBudget+view.estimatedSiblingTokens),
-      agentRuntimeContract
-    );
+    // Durable/node state is not the model packet. Preserve the richer bounded
+    // state here; agentModelContextView performs the hard latency reduction only
+    // at the inference boundary.
+    return boundContextPayload(rawPayload,MAX_PERSISTED_CONTEXT_BYTES);
   }
 
   function projectedModelCallEconomics(rawPayload,pinnedEvidence,outputTokens){
@@ -11691,7 +12002,7 @@ export async function runAutonomousRequirementCognition({
       atomic_reconciliation_budget_policy:'dedicated_deep_budget_v0_1_5000',
       synthesis_merge_budget_policy:'dedicated_deep_budget_v0_1_6000_with_bounded_retry',
       synthesis_final_budget_policy:'dedicated_deep_budget_v0_1_7000_with_bounded_retry',
-      model_context_policy:'model_profile_token_context_v0_2_in_memory_model_view_durable_catalog_rehydration',
+      model_context_policy:'hard_bounded_deep_context_v0_1_18k_tokens_64kb_with_durable_reference_rehydration',
       model_runtime_contract_version:'model_runtime_profiles_v0_2',
       model_runtime_variables:{
         context_window_tokens:agentRuntimeContract.context_window_tokens??null,

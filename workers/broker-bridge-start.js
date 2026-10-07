@@ -390,6 +390,58 @@ try {
 }
 
 try {
+  const { deepContextCapForProbe } = await import('./autonomous-recursive-decomposition.js');
+  const huge='x'.repeat(180000);
+  const reduced=deepContextCapForProbe({
+    qda_601_context:{
+      assigned:true,
+      status:'in_progress',
+      blocking_stage4:true,
+      next_unit:{
+        unit_code:'QDA601-M9-U3',
+        exercise_pack_ref:'curriculum/qda601-exercise-packs-v0.1.json#QDA601-M9-U3',
+        exercise_pack:{
+          external_research:false,
+          problems:['p1','p2','p3'],
+          distributions:{fixed_cost:{type:'fixed',value:310000}},
+        },
+      },
+      required_submission_fields:['inputs','assumptions','calculation','interpretation'],
+      governing_loop:['solve','audit','verify'],
+    },
+    runtime_python_calculation:{
+      contract:'probe_python_evidence',
+      simulation:{mean:72446.49,p10:-9381.75,p90:161520.9},
+    },
+    deterministic_statistics_feedback:{verified:true,analysis_count:1},
+    old_historical_blob:huge,
+    another_large_blob:huge,
+  });
+  const manifest=reduced?._deep_context_reduction_manifest||{};
+  const serializedBytes=Buffer.byteLength(JSON.stringify(reduced));
+  console.log('AAU_DEEP_CONTEXT_HARD_CAP_PROBE',JSON.stringify({
+    ok:serializedBytes<=65536
+      &&reduced?.qda_601_context?.next_unit?.unit_code==='QDA601-M9-U3'
+      &&reduced?.runtime_python_calculation?.contract==='probe_python_evidence'
+      &&reduced?.deterministic_statistics_feedback?.verified===true
+      &&manifest?.contract==='hard_bounded_deep_context_v0_1'
+      &&manifest?.compacted===true
+      &&Array.isArray(manifest?.externalized_paths)
+      &&manifest.externalized_paths.some(v=>v?.path==='old_historical_blob'),
+    serialized_bytes:serializedBytes,
+    byte_cap:65536,
+    retained_critical_keys:manifest?.retained_critical_keys||[],
+    externalized_paths:(manifest?.externalized_paths||[]).map(v=>v?.path).slice(0,10),
+    retrieval_rule:manifest?.retrieval_rule||null,
+    contract:manifest?.contract||null,
+  }));
+} catch (error) {
+  console.error('AAU_DEEP_CONTEXT_HARD_CAP_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
   const {
     structuredChildScopeLedger,
     childAuthoringCounterState,
