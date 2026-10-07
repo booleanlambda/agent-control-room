@@ -2054,14 +2054,34 @@ async function resolveDeepCognitionWithCheckpoint(model, packet, modeInfo, agent
     p_agent_id:agentId, p_wake_request_id:intentExecutionId,
     p_unit_id:unitId, p_model:model,
   };
-  const existing = await rpc('aau_bridge_deep_cognition_checkpoint', {
-    ...checkpointArgs, p_action:'get',
-  });
+  let existing;
+  try{
+    existing = await rpc('aau_bridge_deep_cognition_checkpoint', {
+      ...checkpointArgs, p_action:'get',
+    });
+  }catch(error){
+    const msg=String(error?.message||error);
+    if(/deep_checkpoint_(?:hash_mismatch|bound_model_mismatch|assignment_mismatch|wake_not_running)/i.test(msg)){
+      const integrityError=new Error('deep_checkpoint_integrity_fault:'+msg.slice(0,1000));
+      integrityError.code='DEEP_CHECKPOINT_INTEGRITY_FAULT';
+      integrityError.checkpointFailure={phase:'get',message:msg.slice(0,1000)};
+      throw integrityError;
+    }
+    throw error;
+  }
   let reusableExisting=false;
   if (existing?.status === 'ready') {
     if (existing.model !== model
         || sha256(existing.artifact || '') !== existing.artifact_hash) {
-      throw new Error('deep_checkpoint_model_or_hash_mismatch');
+      const integrityError=new Error('deep_checkpoint_model_or_hash_mismatch');
+      integrityError.code='DEEP_CHECKPOINT_INTEGRITY_FAULT';
+      integrityError.checkpointFailure={
+        phase:'ready_validation',
+        checkpoint_id:existing?.checkpoint_id||null,
+        model_match:existing?.model===model,
+        artifact_hash_match:sha256(existing?.artifact||'')===existing?.artifact_hash,
+      };
+      throw integrityError;
     }
     reusableExisting=String(existing?.meta?.contract || '').includes('universal_cognition_cycle_v0_1');
     if(reusableExisting){
@@ -2090,7 +2110,14 @@ async function resolveDeepCognitionWithCheckpoint(model, packet, modeInfo, agent
     }));
   }
   if (existing?.status !== 'not_found' && existing?.status !== 'ready') {
-    throw new Error('deep_checkpoint_lookup_unexpected_status');
+    const integrityError=new Error('deep_checkpoint_lookup_unexpected_status');
+    integrityError.code='DEEP_CHECKPOINT_INTEGRITY_FAULT';
+    integrityError.checkpointFailure={
+      phase:'lookup_status',
+      status:existing?.status||null,
+      checkpoint_id:existing?.checkpoint_id||null,
+    };
+    throw integrityError;
   }
   const fresh = await runDeepCognition(model, packet, modeInfo, agentId, intentExecutionId);
   // Never submit a non-durable deep artifact; retries must not redo good work.
@@ -2099,7 +2126,16 @@ async function resolveDeepCognitionWithCheckpoint(model, packet, modeInfo, agent
   });
   if (saved?.status !== 'ready' || saved.model !== model
       || sha256(saved.artifact || '') !== saved.artifact_hash) {
-    throw new Error('deep_checkpoint_persist_or_integrity_failed');
+    const integrityError=new Error('deep_checkpoint_persist_or_integrity_failed');
+    integrityError.code='DEEP_CHECKPOINT_INTEGRITY_FAULT';
+    integrityError.checkpointFailure={
+      phase:'save_validation',
+      status:saved?.status||null,
+      checkpoint_id:saved?.checkpoint_id||null,
+      model_match:saved?.model===model,
+      artifact_hash_match:sha256(saved?.artifact||'')===saved?.artifact_hash,
+    };
+    throw integrityError;
   }
   console.log('AAU_DEEP_COGNITION_CHECKPOINT_SAVED', JSON.stringify({
     agent_id:agentId,intent_execution_id:intentExecutionId,
@@ -3096,6 +3132,7 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
   if (!requestedIntentExecutionId || !requestedAgentId) throw new Error('intentExecutionId_and_agentId_required');
   const resolvedWorkerId = String(workerId || `render-model-intent-${process.env.RENDER_INSTANCE_ID || process.pid}`).trim();
   let begun = null;
+  let appliedCommit = null;
   try {
     begun = await rpc('aau_bridge_begin_model_intent_execution', {
       p_intent_execution_id: requestedIntentExecutionId,
@@ -3161,19 +3198,48 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
       p_result: decision,
       p_runtime: runtime,
     });
+    appliedCommit=applied||{status:'applied_without_response'};
 
     // Submit the unified Expertise + Viability package only after source cognition commits.
     // Operator approval is external to the agent and materializes the exact approved artifact.
     let expertiseViabilityProposalResult = null;
     const viabilityCase = decision.associations.find(a=>a?.origin==='expertise_viability_proposal_v0_1');
     if (viabilityCase) {
-      expertiseViabilityProposalResult = await rpc('aau_bridge_submit_expertise_viability_proposal',{
-        p_agent_id:requestedAgentId,p_wake_request_id:requestedIntentExecutionId,p_proposal:viabilityCase,
-      });
-      if (expertiseViabilityProposalResult?.status === 'pending' || expertiseViabilityProposalResult?.status === 'already_pending') {
-        expertiseViabilityProposalResult.pause = await rpc('aau_bridge_pause_pending_expertise_viability_proposal',{
-          p_agent_id:requestedAgentId,p_proposal_id:expertiseViabilityProposalResult.proposal_id,
+      try{
+        expertiseViabilityProposalResult = await rpc('aau_bridge_submit_expertise_viability_proposal',{
+          p_agent_id:requestedAgentId,p_wake_request_id:requestedIntentExecutionId,p_proposal:viabilityCase,
         });
+        if (expertiseViabilityProposalResult?.status === 'pending' || expertiseViabilityProposalResult?.status === 'already_pending') {
+          try{
+            expertiseViabilityProposalResult.pause = await rpc('aau_bridge_pause_pending_expertise_viability_proposal',{
+              p_agent_id:requestedAgentId,p_proposal_id:expertiseViabilityProposalResult.proposal_id,
+            });
+          }catch(error){
+            expertiseViabilityProposalResult.pause={
+              status:'post_commit_ancillary_unavailable',
+              error:String(error?.message||error).slice(0,500),
+            };
+            console.error('AAU_POST_COMMIT_EXPERTISE_PAUSE_UNAVAILABLE',JSON.stringify({
+              agent_id:requestedAgentId,
+              intent_execution_id:requestedIntentExecutionId,
+              proposal_id:expertiseViabilityProposalResult?.proposal_id||null,
+              error:String(error?.message||error).slice(0,500),
+              replay_forbidden:true,
+            }));
+          }
+        }
+      }catch(error){
+        expertiseViabilityProposalResult={
+          status:'post_commit_ancillary_unavailable',
+          error:String(error?.message||error).slice(0,500),
+        };
+        console.error('AAU_POST_COMMIT_EXPERTISE_PROPOSAL_UNAVAILABLE',JSON.stringify({
+          agent_id:requestedAgentId,
+          intent_execution_id:requestedIntentExecutionId,
+          source_activity_id:applied?.activity_id||null,
+          error:String(error?.message||error).slice(0,500),
+          replay_forbidden:true,
+        }));
       }
     }
 
@@ -3260,19 +3326,41 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
       String(error?.code||'')==='COGNITION_PROVENANCE_CONTINUATION_REQUIRED';
     const cognitionProvenanceContinuationExhausted=
       String(error?.code||'')==='COGNITION_PROVENANCE_CONTINUATION_EXHAUSTED';
+    const cognitionSemanticContinuationRequired=
+      String(error?.code||'')==='COGNITION_SEMANTIC_CONTINUATION_REQUIRED';
+    const deepCheckpointIntegrityFault=
+      String(error?.code||'')==='DEEP_CHECKPOINT_INTEGRITY_FAULT';
+    const postCommitAncillaryFailure=Boolean(appliedCommit);
     const transportFailure=classifyModelTransportFailure(error);
     const providerTransient=transportFailure.failure_class==='model_transport_transient';
     const explicitErrorCode=String(error?.code||'').trim();
     const cognitionRuntimeFault=
-      !explicitErrorCode
-      && !failureDetails
-      && !terminalSemanticRuntimeCode
-      && !cognitionAdmissionDeferred
-      && !cognitionProvenanceContinuationRequired
-      && !cognitionProvenanceContinuationExhausted
-      && /^(?:autonomous_decomposition_|qda_(?:root|recursive)_)/i.test(message);
+      deepCheckpointIntegrityFault
+      ||(
+        !explicitErrorCode
+        && !failureDetails
+        && !terminalSemanticRuntimeCode
+        && !cognitionAdmissionDeferred
+        && !cognitionProvenanceContinuationRequired
+        && !cognitionProvenanceContinuationExhausted
+        && !cognitionSemanticContinuationRequired
+        && /^(?:autonomous_decomposition_|qda_(?:root|recursive)_)/i.test(message)
+      );
     if (begun) {
-      if (terminalSemanticRuntimeCode) {
+      if(postCommitAncillaryFailure){
+        console.error('AAU_POST_COMMIT_ANCILLARY_FAILURE_REPLAY_SUPPRESSED',JSON.stringify({
+          intent_execution_id:requestedIntentExecutionId,
+          activity_id:appliedCommit?.activity_id||null,
+          error:message,
+          replay_forbidden:true,
+        }));
+      } else if(cognitionSemanticContinuationRequired){
+        console.log('AAU_COGNITION_SEMANTIC_CONTINUATION_YIELD',JSON.stringify({
+          intent_execution_id:requestedIntentExecutionId,
+          semantic_continuation:error?.semanticContinuation||null,
+          durable_state_preserved:true,
+        }));
+      } else if (terminalSemanticRuntimeCode) {
         await rpc('aau_bridge_hold_semantic_runtime_terminal_v0_2',{
           p_intent_execution_id:requestedIntentExecutionId,
           p_terminal_code:terminalSemanticRuntimeCode,
@@ -3356,6 +3444,9 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
       cognition_admission_deferred:cognitionAdmissionDeferred,
       cognition_provenance_continuation_required:cognitionProvenanceContinuationRequired,
       cognition_provenance_continuation_exhausted:cognitionProvenanceContinuationExhausted,
+      cognition_semantic_continuation_required:cognitionSemanticContinuationRequired,
+      deep_checkpoint_integrity_fault:deepCheckpointIntegrityFault,
+      post_commit_ancillary_failure:postCommitAncillaryFailure,
       cognition_runtime_fault:cognitionRuntimeFault,
       provider_transient:providerTransient,
       validation_failures: failureDetails?.validation?.failures || null,
@@ -3367,6 +3458,9 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
       || (cognitionAdmissionDeferred?'COGNITION_ADMISSION_DEFERRED':null)
       || (cognitionProvenanceContinuationRequired?'COGNITION_PROVENANCE_CONTINUATION_REQUIRED':null)
       || (cognitionProvenanceContinuationExhausted?'COGNITION_PROVENANCE_CONTINUATION_EXHAUSTED':null)
+      || (postCommitAncillaryFailure?'POST_COMMIT_ANCILLARY_FAILURE':null)
+      || (cognitionSemanticContinuationRequired?'COGNITION_SEMANTIC_CONTINUATION_REQUIRED':null)
+      || (deepCheckpointIntegrityFault?'COGNITION_RUNTIME_FAULT':null)
       || (providerTransient?'MODEL_TRANSPORT_TRANSIENT':null)
       || (cognitionRuntimeFault?'COGNITION_RUNTIME_FAULT':null)
       || error?.code
@@ -3374,6 +3468,9 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
     wrapped.semanticRuntime = error?.semanticRuntime || null;
     wrapped.admission = error?.admission || null;
     wrapped.provenanceContinuation = error?.provenanceContinuation || null;
+    wrapped.semanticContinuation = error?.semanticContinuation || null;
+    wrapped.checkpointFailure = error?.checkpointFailure || null;
+    wrapped.commitApplied = Boolean(appliedCommit);
     wrapped.intentBegun = Boolean(begun);
     wrapped.failureDetails = failureDetails;
     throw wrapped;
