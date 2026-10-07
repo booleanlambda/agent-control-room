@@ -989,6 +989,24 @@ export function materializeQda601UnitFromVerifiedChildren(packet,deepCognition){
     }
     if(!coverage.ordinals.length){
       if(qdaSynthesisOnlyChildRequirement(child?.requirement_text)) continue;
+      console.warn('AAU_QDA601_CHILD_COVERAGE_MISSING',JSON.stringify({
+        node_path:String(child?.node_path||'unknown'),
+        requirement_text:String(child?.requirement_text||'').slice(0,1600),
+        expected_unit:String(ctx?.next_unit?.unit_code||''),
+        expected_problem_count:expectedProblems.length,
+        artifact_top_keys:Object.keys(artifact||{}).slice(0,40),
+        calculation_keys:
+          artifact?.calculation&&typeof artifact.calculation==='object'&&!Array.isArray(artifact.calculation)
+            ?Object.keys(artifact.calculation).slice(0,40):[],
+        problem_response_count:Array.isArray(artifact?.problem_responses)
+          ?artifact.problem_responses.length:0,
+        explicit_problem_ordinals:qdaExplicitProblemOrdinals(child?.requirement_text)
+          .filter(ordinal=>ordinal>=1&&ordinal<=expectedProblems.length),
+        full_set_word_match:String(child?.requirement_text||'').match(
+          /\b(?:all\s+)?(?:the\s+)?(one|two|three|four|five|six|seven|eight|nine|ten)\s+assigned\s+(?:problems|questions|items)\b/i
+        )?.[0]||null,
+        contract:'qda601_problem_coverage_diagnostic_v0_1',
+      }));
       failures.push('qda_verified_child_problem_coverage_missing:'+String(child?.node_path||'unknown'));
       continue;
     }
