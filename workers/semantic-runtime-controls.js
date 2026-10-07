@@ -492,6 +492,97 @@ export function modelTransportRetryPolicy({
   });
 }
 
+export const SEMANTIC_BUDGET_BUCKET_CONTRACT='semantic_budget_buckets_v0_1';
+
+export function semanticModelBudgetClass({phase='',kind='',attempt=1}={}){
+  const p=String(phase||'').toLowerCase();
+  const k=String(kind||'').toLowerCase();
+  const finalizationEligible=/(?:synthesis_final|synthesis_provenance|stage_contract_materialize|terminal_synthesis|terminal_reconciliation|finalize|finalization|root_completion)/.test(p);
+  if(Math.max(1,Math.floor(Number(attempt)||1))>1)return Object.freeze({
+    bucket:'transport_retry',finalization_eligible:finalizationEligible,
+    contract:SEMANTIC_BUDGET_BUCKET_CONTRACT,
+  });
+  if(finalizationEligible)return Object.freeze({
+    bucket:'finalization',finalization_eligible:true,
+    contract:SEMANTIC_BUDGET_BUCKET_CONTRACT,
+  });
+  if(/(?:provenance|verify|verification|reconciliation|audit|review|math_check_contract|python_check)/.test(p))return Object.freeze({
+    bucket:'verification',finalization_eligible:false,
+    contract:SEMANTIC_BUDGET_BUCKET_CONTRACT,
+  });
+  if(k==='serialize_json'||/(?:routing_commit|route_commit|context_plan|serialize|protocol_packag|child_commit|checkpoint_commit)/.test(p))return Object.freeze({
+    bucket:'orchestration',finalization_eligible:false,
+    contract:SEMANTIC_BUDGET_BUCKET_CONTRACT,
+  });
+  return Object.freeze({
+    bucket:'reasoning',finalization_eligible:false,
+    contract:SEMANTIC_BUDGET_BUCKET_CONTRACT,
+  });
+}
+
+export function semanticFinalizationReserveUnits({
+  initialBudgetUnits=0,safetyReserveUnits=0,projectedFinalizationUnits=0,
+}={}){
+  const initial=Math.max(1,Math.floor(Number(initialBudgetUnits)||1));
+  const safety=Math.max(0,Math.floor(Number(safetyReserveUnits)||0));
+  const projected=Math.max(0,Math.floor(Number(projectedFinalizationUnits)||0));
+  const hardCeiling=Math.max(safety,Math.floor(initial*0.35));
+  return Math.min(initial,Math.max(safety,Math.min(projected||safety,hardCeiling)));
+}
+
+export function semanticBudgetBucketPolicy({
+  initialBudgetUnits=0,finalizationReserveUnits=0,bucket='reasoning',
+}={}){
+  const initial=Math.max(1,Math.floor(Number(initialBudgetUnits)||1));
+  const reserve=Math.max(0,Math.min(initial,Math.floor(Number(finalizationReserveUnits)||0)));
+  const spendable=Math.max(0,initial-reserve);
+  const reasoning=Math.floor(spendable*0.70);
+  const verification=Math.floor(spendable*0.20);
+  const orchestration=Math.max(0,spendable-reasoning-verification);
+  const limits={
+    reasoning,verification,orchestration,
+    transport_retry:Math.floor(spendable*0.08),
+    finalization:reserve,
+  };
+  const normalized=Object.prototype.hasOwnProperty.call(limits,bucket)?bucket:'reasoning';
+  return Object.freeze({
+    bucket:normalized,bucket_limit_units:Math.max(0,limits[normalized]),
+    finalization_reserve_units:reserve,nonfinal_spendable_units:spendable,
+    limits:Object.freeze({...limits}),contract:SEMANTIC_BUDGET_BUCKET_CONTRACT,
+  });
+}
+
+export function semanticBudgetAdmission({
+  remainingBudgetUnits=0,requestUnits=0,bucketSpentUnits=0,bucketLimitUnits=0,
+  finalizationReserveUnits=0,finalizationEligible=false,
+}={}){
+  const remaining=Math.max(0,Math.floor(Number(remainingBudgetUnits)||0));
+  const request=Math.max(1,Math.floor(Number(requestUnits)||1));
+  const spent=Math.max(0,Math.floor(Number(bucketSpentUnits)||0));
+  const limit=Math.max(0,Math.floor(Number(bucketLimitUnits)||0));
+  const reserve=Math.max(0,Math.floor(Number(finalizationReserveUnits)||0));
+  if(request>remaining)return Object.freeze({
+    admitted:false,reason:'total_budget_exhausted',remaining_budget_units:remaining,
+    remaining_after_units:remaining,contract:SEMANTIC_BUDGET_BUCKET_CONTRACT,
+  });
+  if(spent+request>limit)return Object.freeze({
+    admitted:false,reason:'bucket_limit_exhausted',remaining_budget_units:remaining,
+    remaining_after_units:remaining,bucket_spent_units:spent,bucket_limit_units:limit,
+    contract:SEMANTIC_BUDGET_BUCKET_CONTRACT,
+  });
+  if(!finalizationEligible&&remaining-request<reserve)return Object.freeze({
+    admitted:false,reason:'finalization_reserve_protected',remaining_budget_units:remaining,
+    remaining_after_units:remaining,finalization_reserve_units:reserve,
+    contract:SEMANTIC_BUDGET_BUCKET_CONTRACT,
+  });
+  return Object.freeze({
+    admitted:true,reason:'admitted',remaining_budget_units:remaining,
+    remaining_after_units:remaining-request,bucket_spent_units:spent,bucket_limit_units:limit,
+    finalization_reserve_units:reserve,finalization_eligible:Boolean(finalizationEligible),
+    contract:SEMANTIC_BUDGET_BUCKET_CONTRACT,
+  });
+}
+
 export function pathDepth(nodePath){
   const path=String(nodePath||'');
   if(path==='R')return 0;
