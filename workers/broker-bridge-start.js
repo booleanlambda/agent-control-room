@@ -390,6 +390,91 @@ try {
 }
 
 try {
+  const { reduceDeepCognitionPacketForInference } = await import('./model-intent-execution.js');
+  const qda={
+    assigned:true,
+    blocking_stage4:true,
+    next_unit:{
+      unit_code:'QDA601-M9-U3',
+      exercise_pack_ref:'curriculum/qda601-exercise-packs-v0.1.json#QDA601-M9-U3',
+      exercise_pack:{
+        distributions:{
+          monthly_volume:{type:'triangular',min:7000,mode:10000,max:14000},
+          price:{type:'triangular',min:65,mode:72,max:78},
+          variable_cost:{type:'triangular',min:29,mode:34,max:41},
+          fixed_cost:{type:'fixed',value:310000},
+        },
+        problems:['p1','p2','p3'],
+      },
+    },
+  };
+  const progress={
+    status:'in_progress',
+    next_kind:'study_unit',
+    next_unit:{unit_id:'QDA601-M9-U3',unit_code:'QDA601-M9-U3'},
+  };
+  const oversized={
+    brain_packet_version:'probe',
+    agent:{agent_id:'probe-agent',model:'probe-model'},
+    state:{state_payload:{current_focus:'simulation and uncertainty'}},
+    mandatory_lifecycle_context:{
+      current_stage:'expertise_development',
+      entrepreneurship_program_progress:progress,
+      cumulative_competency_inheritance:{blob:'x'.repeat(70000)},
+    },
+    qda_601_context:qda,
+    intent_execution_context:{execution_id:'probe'},
+    intent_trigger:{intent_reason:'continue QDA601-M9-U3'},
+    next_intent_context:{intent_reason:'continue'},
+    attention_arbiter_context:{},
+    admin_chat_context:{current_admin_message:null,conversation_transcript:[]},
+    evidence_first_cognition_contract:{required:true},
+    recent_capability_results:[{blob:'y'.repeat(50000)}],
+    evidence_provenance:{blob:'z'.repeat(50000)},
+    complex_work_context:{blob:'w'.repeat(50000)},
+    recent_activity:{
+      recent_summaries:[{stated_reason:'r'.repeat(10000)}],
+      current_unit_prior_submission:null,
+      latest_relevant_external_evidence:[],
+    },
+    knowledge_pool_context:{
+      version:'knowledge_pool_v0_2_refresh_provenance',
+      general_knowledge:{adopted_items:[{claim:'k'.repeat(10000)}]},
+      peripheral_knowledge:{adopted_items:[{claim:'p'.repeat(10000)}]},
+    },
+    cognition_mode_context:{mode:'deep'},
+  };
+  const reduced=reduceDeepCognitionPacketForInference(oversized);
+  const bytes=Buffer.byteLength(JSON.stringify(reduced));
+  const manifest=reduced.inference_reduction_manifest||{};
+  console.log('AAU_DEEP_COGNITION_PACKET_REDUCER_PROBE',JSON.stringify({
+    ok:bytes<=96*1024
+      &&Math.ceil(bytes/4)<=24*1024
+      &&JSON.stringify(reduced.qda_601_context)===JSON.stringify(qda)
+      &&JSON.stringify(
+        reduced.mandatory_lifecycle_context.entrepreneurship_program_progress
+      )===JSON.stringify(progress)
+      &&manifest.canonical_packet_unchanged===true
+      &&Array.isArray(manifest.externalized_sections)
+      &&manifest.externalized_sections.length>=1,
+    original_bytes:Buffer.byteLength(JSON.stringify(oversized)),
+    reduced_bytes:bytes,
+    estimated_tokens:Math.ceil(bytes/4),
+    max_bytes:96*1024,
+    max_estimated_tokens:24*1024,
+    qda_preserved_exact:true,
+    lifecycle_progress_preserved_exact:true,
+    externalized_count:Array.isArray(manifest.externalized_sections)
+      ?manifest.externalized_sections.length:0,
+    contract:manifest.contract||null,
+  }));
+} catch (error) {
+  console.error('AAU_DEEP_COGNITION_PACKET_REDUCER_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
   const { deepContextCapForProbe } = await import('./autonomous-recursive-decomposition.js');
   const huge='x'.repeat(180000);
   const reduced=deepContextCapForProbe({

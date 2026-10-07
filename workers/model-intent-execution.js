@@ -1625,6 +1625,304 @@ function buildDeepCognitionPacket(packet, modeInfo = null) {
   return out;
 }
 
+
+const DEEP_COGNITION_MAX_INFERENCE_BYTES=96*1024;
+const DEEP_COGNITION_MAX_ESTIMATED_TOKENS=24*1024;
+
+function inferencePacketBytes(value){
+  return Buffer.byteLength(JSON.stringify(value));
+}
+function inferenceSectionRef(name,value,reason){
+  return {
+    section:name,
+    sha256:sha256(value),
+    bytes:inferencePacketBytes(value),
+    canonical_record_preserved:true,
+    retrieval_required_for_full_detail:true,
+    reason,
+  };
+}
+function compactDeepKnowledgePoolForCap(value){
+  const source=obj(value);
+  const compactSection=section=>{
+    const row=obj(source[section]);
+    return {
+      adopted_items:arr(row.adopted_items,3).map(item=>({
+        source_kind:item?.source_kind||null,item_id:item?.item_id||null,
+        claim:String(item?.claim||'').slice(0,500),topic:item?.topic||null,
+        publisher:item?.publisher||null,source_url:item?.source_url||null,
+        published_at:item?.published_at||null,
+      })),
+      refresh_candidates:arr(row.refresh_candidates,1).map(item=>({
+        item_id:item?.item_id||null,claim:String(item?.claim||'').slice(0,500),
+        topic:item?.topic||null,publisher:item?.publisher||null,
+        source_url:item?.source_url||null,published_at:item?.published_at||null,
+      })),
+      seed_candidates:arr(row.seed_candidates,1).map(item=>({
+        item_id:item?.item_id||null,claim:String(item?.claim||'').slice(0,500),
+        topic:item?.topic||null,publisher:item?.publisher||null,
+        source_url:item?.source_url||null,published_at:item?.published_at||null,
+      })),
+      candidate_events:arr(row.candidate_events,1).map(item=>({
+        event_id:item?.event_id||null,title:String(item?.title||'').slice(0,240),
+        summary:String(item?.summary||'').slice(0,500),
+        publisher:item?.publisher||null,source_url:item?.source_url||null,
+        occurred_at:item?.occurred_at||null,
+      })),
+    };
+  };
+  return {
+    version:source.version||null,
+    general_knowledge:compactSection('general_knowledge'),
+    peripheral_knowledge:compactSection('peripheral_knowledge'),
+    rules:arr(source.rules,3),
+    reduction_contract:'deep_packet_knowledge_compaction_v0_1',
+  };
+}
+function compactDeepRecentForCap(value){
+  const source=obj(value);
+  const prior=obj(source.current_unit_prior_submission);
+  const priorAssociation=prior.association;
+  const compactPrior=Object.keys(prior).length?{
+    source_activity_id:prior.source_activity_id||null,
+    created_at:prior.created_at||null,
+    association:priorAssociation?{
+      origin:priorAssociation.origin||null,
+      unit_id:priorAssociation.unit_id||null,
+      course_code:priorAssociation.course_code||null,
+      submission_sha256:sha256(priorAssociation),
+      submission_bytes:inferencePacketBytes(priorAssociation),
+      canonical_submission_preserved:true,
+    }:null,
+  }:null;
+  return {
+    recent_summaries:arr(source.recent_summaries,2).map(row=>({
+      activity_id:row?.activity_id||null,created_at:row?.created_at||null,
+      event_type:row?.event_type||null,selected_action:row?.selected_action||null,
+      stated_reason:String(row?.stated_reason||'').slice(0,350),
+      current_focus:String(row?.current_focus||'').slice(0,350),
+      association_origins:arr(row?.association_origins,4),
+    })),
+    current_unit_prior_submission:compactPrior,
+    latest_relevant_external_evidence:arr(source.latest_relevant_external_evidence,2).map(row=>({
+      source_activity_id:row?.source_activity_id||null,
+      created_at:row?.created_at||null,
+      association_origin:row?.association?.origin||null,
+      association_sha256:row?.association?sha256(row.association):null,
+      association_bytes:row?.association?inferencePacketBytes(row.association):0,
+      canonical_association_preserved:true,
+    })),
+    reduction_contract:'deep_packet_recent_activity_compaction_v0_1',
+  };
+}
+function compactAdminContextForCap(value){
+  const source=obj(value);
+  const transcript=Array.isArray(source.conversation_transcript)
+    ?source.conversation_transcript.slice(-1):[];
+  return {
+    active:source.active===true,
+    current_admin_message:source.current_admin_message||null,
+    conversation_transcript:transcript,
+    canonical_older_transcript_preserved:true,
+    reduction_contract:'deep_packet_admin_compaction_v0_1',
+  };
+}
+function compactQdaLifecycleForCap(value){
+  const lifecycle=obj(value);
+  const progress=obj(lifecycle.entrepreneurship_program_progress);
+  return {
+    current_stage:lifecycle.current_stage||null,
+    stage:lifecycle.stage||null,
+    current_stage_label:lifecycle.current_stage_label||null,
+    stage_rule:lifecycle.stage_rule||null,
+    stage_contract:lifecycle.stage_contract||null,
+    supplemental_training_hold:lifecycle.supplemental_training_hold||null,
+    entrepreneurship_program_progress:progress,
+    metadata:lifecycle.metadata||null,
+    qda_reduction_note:'QDA hold preserves the complete entrepreneurship_program_progress; unrelated historical lifecycle inheritance is externally addressable.',
+  };
+}
+
+export function reduceDeepCognitionPacketForInference(
+  packet,
+  {
+    maxBytes=DEEP_COGNITION_MAX_INFERENCE_BYTES,
+    maxEstimatedTokens=DEEP_COGNITION_MAX_ESTIMATED_TOKENS,
+  }={}
+){
+  if(!packet||typeof packet!=='object'||Array.isArray(packet))return packet;
+  const byteCap=Math.max(32768,Math.floor(Number(maxBytes)||DEEP_COGNITION_MAX_INFERENCE_BYTES));
+  const tokenCap=Math.max(8192,Math.floor(Number(maxEstimatedTokens)||DEEP_COGNITION_MAX_ESTIMATED_TOKENS));
+  const effectiveByteCap=Math.min(byteCap,tokenCap*4);
+  const reserveForManifest=Math.min(8192,Math.floor(effectiveByteCap*0.08));
+  const contentTarget=effectiveByteCap-reserveForManifest;
+  const originalBytes=inferencePacketBytes(packet);
+  if(originalBytes<=contentTarget){
+    return packet;
+  }
+
+  const reduced={...packet};
+  const externalized=[];
+  const recordReplacement=(key,next,reason)=>{
+    const prior=reduced[key];
+    if(prior===undefined)return;
+    externalized.push(inferenceSectionRef(key,prior,reason));
+    reduced[key]=next;
+  };
+
+  if(reduced.knowledge_pool_context)
+    recordReplacement(
+      'knowledge_pool_context',
+      compactDeepKnowledgePoolForCap(reduced.knowledge_pool_context),
+      'bounded knowledge offer retained; full pool remains durable'
+    );
+  if(reduced.recent_activity)
+    recordReplacement(
+      'recent_activity',
+      compactDeepRecentForCap(reduced.recent_activity),
+      'recent navigation retained; full historical artifacts remain durable'
+    );
+  if(reduced.admin_chat_context)
+    recordReplacement(
+      'admin_chat_context',
+      compactAdminContextForCap(reduced.admin_chat_context),
+      'current admin message and latest turn retained'
+    );
+
+  const optionalExternalizationOrder=[
+    'recent_capability_results',
+    'evidence_provenance',
+    'complex_work_context',
+    'projects',
+    'goals',
+    'aspirations',
+    'capability_surface',
+    'agent_file_context',
+    'expertise_portfolio_context',
+    'expertise_application_context',
+    'expertise_action_feedback',
+  ];
+  for(const key of optionalExternalizationOrder){
+    if(inferencePacketBytes(reduced)<=contentTarget)break;
+    if(reduced[key]===undefined)continue;
+    const prior=reduced[key];
+    recordReplacement(key,{
+      externalized:true,
+      section:key,
+      sha256:sha256(prior),
+      bytes:inferencePacketBytes(prior),
+      canonical_record_preserved:true,
+      retrieval_rule:'retrieve durable canonical section before making a claim that depends on omitted detail',
+    },'optional deep context externalized under packet cap');
+  }
+
+  const qdaAssigned=reduced?.qda_601_context?.assigned===true;
+  if(inferencePacketBytes(reduced)>contentTarget && qdaAssigned && reduced.mandatory_lifecycle_context){
+    const prior=reduced.mandatory_lifecycle_context;
+    const next=compactQdaLifecycleForCap(prior);
+    externalized.push(inferenceSectionRef(
+      'mandatory_lifecycle_context.non_qda_history',
+      prior,
+      'QDA hold: preserve active stage/progress exactly, externalize unrelated lifecycle history'
+    ));
+    reduced.mandatory_lifecycle_context=next;
+  }
+
+  if(inferencePacketBytes(reduced)>contentTarget && reduced.academic_standard_context){
+    const prior=reduced.academic_standard_context;
+    const compact={
+      program_code:prior?.program_code||null,
+      program_version:prior?.program_version||null,
+      standard:prior?.standard||prior?.academic_standard||null,
+      required_level:prior?.required_level||null,
+      verification_policy:prior?.verification_policy||null,
+      canonical_sha256:sha256(prior),
+      canonical_bytes:inferencePacketBytes(prior),
+      canonical_record_preserved:true,
+    };
+    recordReplacement(
+      'academic_standard_context',compact,
+      'academic standard identity retained; verbose standard history externalized'
+    );
+  }
+
+  const protectedKeys=new Set([
+    'brain_packet_version','generated_at','agent','identity_context','continuity',
+    'traits','interests','state','mandatory_lifecycle_context','qda_601_context',
+    'evidence_first_cognition_contract','intent_execution_context','intent_trigger',
+    'next_intent_context','sleep_eligibility_context','attention_arbiter_context',
+    'entrepreneurship_remediation_context','cognition_mode_context','admin_chat_context',
+  ]);
+  const candidates=Object.keys(reduced)
+    .filter(key=>!protectedKeys.has(key)&&key!=='inference_reduction_manifest')
+    .map(key=>({key,bytes:inferencePacketBytes(reduced[key])}))
+    .sort((a,b)=>b.bytes-a.bytes);
+  for(const candidate of candidates){
+    if(inferencePacketBytes(reduced)<=contentTarget)break;
+    const prior=reduced[candidate.key];
+    if(prior===undefined)continue;
+    recordReplacement(candidate.key,{
+      externalized:true,
+      section:candidate.key,
+      sha256:sha256(prior),
+      bytes:candidate.bytes,
+      canonical_record_preserved:true,
+    },'largest remaining non-protected section externalized under hard cap');
+  }
+
+  const qdaHash=reduced.qda_601_context?sha256(reduced.qda_601_context):null;
+  const progress=reduced?.mandatory_lifecycle_context?.entrepreneurship_program_progress;
+  const progressHash=progress?sha256(progress):null;
+  const remediationHash=reduced.entrepreneurship_remediation_context
+    ?sha256(reduced.entrepreneurship_remediation_context):null;
+
+  reduced.inference_reduction_manifest={
+    contract:'deep_cognition_packet_reducer_v0_1',
+    original_bytes:originalBytes,
+    content_bytes_before_manifest:inferencePacketBytes(reduced),
+    max_bytes:effectiveByteCap,
+    max_estimated_tokens:tokenCap,
+    estimated_tokens_ceiling_rule:'ceil(serialized_bytes/4)',
+    canonical_packet_unchanged:true,
+    model_facing_copy_only:true,
+    externalized_sections:externalized,
+    preserved_invariants:{
+      current_qda_context_exact_sha256:qdaHash,
+      current_lifecycle_progress_exact_sha256:progressHash,
+      remediation_context_exact_sha256:remediationHash,
+      state_preserved:reduced.state!==undefined,
+      intent_trigger_preserved:reduced.intent_trigger!==undefined,
+      attention_context_preserved:reduced.attention_arbiter_context!==undefined,
+      current_admin_message_preserved:Boolean(reduced?.admin_chat_context?.current_admin_message),
+      durable_checkpoint_policy:'checkpoint rows remain external and are loaded by the recursive runtime; reducer does not mutate them',
+      verification_artifact_policy:'QDA context and active exercise pack remain inline; externalized sections retain hashes and canonical retrieval requirement',
+    },
+  };
+
+  const finalBytes=inferencePacketBytes(reduced);
+  const finalEstimatedTokens=Math.ceil(finalBytes/4);
+  reduced.inference_reduction_manifest.final_bytes=finalBytes;
+  reduced.inference_reduction_manifest.final_estimated_tokens=finalEstimatedTokens;
+
+  // Updating the two final metrics changes serialization length by only a small
+  // fixed amount. Re-measure after the write and fail closed if protected
+  // invariants alone cannot fit the configured bound.
+  const measuredBytes=inferencePacketBytes(reduced);
+  const measuredEstimatedTokens=Math.ceil(measuredBytes/4);
+  reduced.inference_reduction_manifest.final_bytes=measuredBytes;
+  reduced.inference_reduction_manifest.final_estimated_tokens=measuredEstimatedTokens;
+  if(measuredBytes>effectiveByteCap||measuredEstimatedTokens>tokenCap){
+    const error=new Error(
+      'deep_cognition_packet_cap_unachievable:bytes='+measuredBytes
+      +':max_bytes='+effectiveByteCap
+    );
+    error.code='DEEP_COGNITION_PACKET_CAP_UNACHIEVABLE';
+    error.packetReductionManifest=reduced.inference_reduction_manifest;
+    throw error;
+  }
+  return reduced;
+}
+
 function decisionRequestsDeepCognition(decision) {
   const associations = Array.isArray(decision?.associations) ? decision.associations : [];
   return associations.some((a)=>String(a?.origin || '') === 'cognition_escalation_request_v0_1')
@@ -2025,8 +2323,21 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
       evidence_rule:'Fetched receipts are observations, not automatic claim verification. Every indexed source remains discoverable; request a listed exact URL again when more source text is required.',
     };
   };
+  const rawDeepPacket=buildDeepCognitionPacket(packet,modeInfo);
+  const recursiveInferencePacket=reduceDeepCognitionPacketForInference(rawDeepPacket);
+  console.log('AAU_DEEP_COGNITION_PACKET_REDUCED',JSON.stringify({
+    agent_id:agentId,
+    intent_execution_id:intentExecutionId,
+    original_deep_bytes:inferencePacketBytes(rawDeepPacket),
+    recursive_inference_bytes:inferencePacketBytes(recursiveInferencePacket),
+    reduced:Boolean(recursiveInferencePacket.inference_reduction_manifest),
+    max_bytes:DEEP_COGNITION_MAX_INFERENCE_BYTES,
+    estimated_tokens:Math.ceil(inferencePacketBytes(recursiveInferencePacket)/4),
+    contract:recursiveInferencePacket.inference_reduction_manifest?.contract
+      ||'deep_cognition_packet_under_cap_no_reduction',
+  }));
   const result=await runAutonomousRequirementCognition({
-    model,packet,modeInfo,agentId,intentExecutionId,rpc,sha256,researchContext,
+    model,packet:recursiveInferencePacket,modeInfo,agentId,intentExecutionId,rpc,sha256,researchContext,
     completeRouteJson:(messages,maxTokens,phase,transport={})=>completeRoutingJson(
       model,messages,maxTokens,{
         ...commonAudit,phase,
@@ -2515,7 +2826,7 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
   let modeInfo = resolveCognitionMode(packet);
   let deepCognition = null;
   let inferencePacket = modeInfo.mode === 'deep'
-    ? buildDeepCognitionPacket(packet, modeInfo)
+    ? reduceDeepCognitionPacketForInference(buildDeepCognitionPacket(packet, modeInfo))
     : compactCognitionPacketForInference(packet);
 
   if (modeInfo.mode === 'fast') {
@@ -2582,7 +2893,9 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
 
   if (modeInfo.mode === 'fast' && decisionRequestsDeepCognition(decision)) {
     modeInfo = { mode:'deep', reason:'agent_requested_complexity_escalation', stage:currentStage(packet) };
-    inferencePacket = buildDeepCognitionPacket(packet, modeInfo);
+    inferencePacket = reduceDeepCognitionPacketForInference(
+      buildDeepCognitionPacket(packet, modeInfo)
+    );
     packetText = JSON.stringify(inferencePacket);
     deepCognition = await resolveDeepCognitionWithCheckpoint(model, packet, modeInfo, agentId, intentExecutionId);
     packetText = JSON.stringify(buildStructuredCommitPacket(packet, modeInfo));
