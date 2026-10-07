@@ -3332,6 +3332,8 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
       String(error?.code||'')==='DEEP_CHECKPOINT_INTEGRITY_FAULT';
     const childReconsiderationLimit=
       String(error?.code||'')==='COGNITION_CHILD_RECONSIDERATION_LIMIT';
+    const cognitionResponseRejected=
+      String(error?.code||'')==='COGNITION_RESPONSE_REJECTED';
     const postCommitAncillaryFailure=Boolean(appliedCommit);
     const transportFailure=classifyModelTransportFailure(error);
     const providerTransient=transportFailure.failure_class==='model_transport_transient';
