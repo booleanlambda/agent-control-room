@@ -143,7 +143,7 @@ function normalize(raw){
   return {report:r,score:r.overall_score,verdict:pass?'verified_pass':'verified_fail'};
 }
 
-async function callModel(model,task){
+async function callModel(model,task,{primaryRetry=false}={}){
   const directKimi=model===PRIMARY;
   const projection=directKimi?projectQdaArtifactForReview(task.artifact):{
     text:String(task.artifact||''),contract:'raw_frozen_artifact_v0_1',dropped_keys:[],
@@ -166,7 +166,7 @@ ${projection.text}`;
       const out=await modelChatCompletion({
         provider:directKimi?'moonshot_direct':null,
         model,messages:[{role:'system',content:system},{role:'user',content:user}],
-        maxTokens:directKimi?900:model.startsWith('meta/')?2600:2200,temperature:0,
+        maxTokens:directKimi?(primaryRetry?2400:1200):model.startsWith('meta/')?2600:2200,temperature:0,
         jsonMode:directKimi?true:profile.supports_json_mode===true,
         enableThinking:String(model).startsWith('nvidia/nemotron')?false:null,
         reasoningEffort:directKimi?'low':null,
@@ -174,9 +174,11 @@ ${projection.text}`;
         runtimeRole:'authenticator',
       });
       noteReviewerModelSuccess(model);
-      return {content:String(out.content||out.reasoning_content||'').trim(),model:out.model_returned||model,
+      return {content:String(out.content||'').trim(),model:out.model_returned||model,
         provider:out.provider||null,latency_ms:Date.now()-begun,runtime_contract:out.runtime_contract||null,
-        usage:out.usage||null,prompt_projection:projectionMeta};
+        usage:out.usage||null,prompt_projection:projectionMeta,finish_reason:out.finish_reason||null,
+        reasoning_content_present:Boolean(String(out.reasoning_content||'').trim()),
+        primary_retry:Boolean(primaryRetry)};
     }catch(e){if(e?.code==='MODEL_TIMEOUT'||e?.name==='AbortError'||e?.name==='TimeoutError')noteReviewerModelTimeout(model);throw e;}
   });
 }
@@ -187,10 +189,17 @@ async function authenticate(task){
   let last=null;
   for(const model of MODELS){
     if(isReviewerModelInBackoff(model)){console.warn('AAU_QDA601_AUTHENTICATOR_BACKOFF_SKIP',model);continue;}
-    const attempts=model===PRIMARY?1:(model==='openai/gpt-oss-20b'?2:1);
+    const attempts=model===PRIMARY?2:(model==='openai/gpt-oss-20b'?2:1);
     for(let attempt=1;attempt<=attempts;attempt++){
       try{
-        const out=await callModel(model,task);
+        const out=await callModel(model,task,{primaryRetry:model===PRIMARY&&attempt>1});
+        if(model===PRIMARY&&!out.content){
+          const e=new Error(out.finish_reason==='length'?'qda_authenticator_kimi_output_truncated':'qda_authenticator_json_missing');
+          e.code='AUTHENTICATOR_OUTPUT_CONTRACT';
+          e.finish_reason=out.finish_reason||null;
+          e.reasoning_content_present=out.reasoning_content_present===true;
+          throw e;
+        }
         const g=normalize(out.content);
         const report={...g.report,review_provider:out.provider||null,review_model:out.model,
           review_model_requested:model,authenticator_fallback_used:model!==PRIMARY,
@@ -208,9 +217,14 @@ async function authenticate(task){
         last=e;
         console.warn('AAU_QDA601_AUTHENTICATOR_MODEL_FAILED',JSON.stringify({
           review_id:task.review_id,unit_code:task.unit_code,model,attempt,error:String(e?.message||e).slice(0,900)}));
-        const status=Number(e?.status||0),retryable=e?.code==='MODEL_TIMEOUT'||e?.name==='AbortError'||status===429||status>=500;
+        const status=Number(e?.status||0);
+        const outputContractRetry=model===PRIMARY&&(
+          e?.code==='AUTHENTICATOR_OUTPUT_CONTRACT'||
+          ['qda_authenticator_json_missing','qda_authenticator_review_incomplete'].includes(String(e?.message||''))
+        );
+        const retryable=e?.code==='MODEL_TIMEOUT'||e?.name==='AbortError'||status===429||status>=500||outputContractRetry;
         if(!retryable)break;
-        if(attempt<attempts)await sleep(1500*attempt);
+        if(attempt<attempts)await sleep(outputContractRetry?250:1500*attempt);
       }
     }
   }
