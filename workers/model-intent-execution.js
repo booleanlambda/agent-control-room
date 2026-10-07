@@ -3484,6 +3484,7 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
       cognition_semantic_continuation_required:cognitionSemanticContinuationRequired,
       deep_checkpoint_integrity_fault:deepCheckpointIntegrityFault,
       child_reconsideration_limit:childReconsiderationLimit,
+      cognition_response_rejected:cognitionResponseRejected,
       post_commit_ancillary_failure:postCommitAncillaryFailure,
       cognition_runtime_fault:cognitionRuntimeFault,
       provider_transient:providerTransient,
@@ -3498,6 +3499,7 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
       || (cognitionProvenanceContinuationExhausted?'COGNITION_PROVENANCE_CONTINUATION_EXHAUSTED':null)
       || (postCommitAncillaryFailure?'POST_COMMIT_ANCILLARY_FAILURE':null)
       || (cognitionSemanticContinuationRequired?'COGNITION_SEMANTIC_CONTINUATION_REQUIRED':null)
+      || (cognitionResponseRejected?'COGNITION_RESPONSE_REJECTED':null)
       || (deepCheckpointIntegrityFault?'COGNITION_RUNTIME_FAULT':null)
       || (providerTransient?'MODEL_TRANSPORT_TRANSIENT':null)
       || (cognitionRuntimeFault?'COGNITION_RUNTIME_FAULT':null)
@@ -3508,6 +3510,7 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
     wrapped.provenanceContinuation = error?.provenanceContinuation || null;
     wrapped.semanticContinuation = error?.semanticContinuation || null;
     wrapped.checkpointFailure = error?.checkpointFailure || null;
+    wrapped.cognitionResponseRejected = cognitionResponseRejected;
     wrapped.commitApplied = Boolean(appliedCommit);
     wrapped.intentBegun = Boolean(begun);
     wrapped.failureDetails = failureDetails;
