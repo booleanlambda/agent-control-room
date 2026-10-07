@@ -1710,11 +1710,11 @@ export function splitParentVerificationRetryState(payload){
     attempt,
     max_attempts:maxAttempts,
     exhausted:attempt>=maxAttempts,
-    retry_nonce:sha256({
-      prior_nonce:text(prior.split_parent_verification_retry_nonce)||null,
-      attempt,
-      prior_verification:asObject(prior.deterministic_math_verification),
-    }).slice(0,24),
+    retry_nonce:[
+      'split-parent-verification',
+      String(attempt),
+      text(prior.split_parent_verification_retry_nonce)||'root',
+    ].join(':'),
     contract:'split_parent_verification_retry_v0_1',
   };
 }
