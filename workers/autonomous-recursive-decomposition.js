@@ -3383,6 +3383,9 @@ export async function runAutonomousRequirementCognition({
         explicit_partition_sibling:siblingOverlap?.explicit_partition_sibling??{},
         canonical_identity:siblingOverlap?.canonical_identity??null,
         canonical_instance_disjoint:Boolean(siblingOverlap?.canonical_instance_disjoint),
+        structured_scope_candidate:siblingOverlap?.structured_scope_candidate??[],
+        structured_scope_sibling:siblingOverlap?.structured_scope_sibling??[],
+        structured_scope_disjoint:Boolean(siblingOverlap?.structured_scope_disjoint),
       },
       prior_children_signature:childProposalSiblingSignature(previous),
       recorded_at:new Date().toISOString(),
@@ -6099,7 +6102,7 @@ export async function runAutonomousRequirementCognition({
                   throw scopeError;
                 }
                 candidate._structured_scope_validation={
-                  contract:'authoritative_structured_remaining_scope_v0_1',
+                  contract:'authoritative_structured_remaining_scope_v0_2_owned_scope_only',
                   authoritative_scope:structuredScopeLedger.authoritative_scope,
                   already_covered_scope:structuredScopeLedger.already_covered_scope,
                   remaining_scope:structuredScopeLedger.remaining_scope,
@@ -6160,6 +6163,31 @@ export async function runAutonomousRequirementCognition({
                   canonical_instance_disjoint:canonicalRepeatedInstancesDisjoint(
                     candidate,v,childContextView.suppliedContext
                   ),
+                  structured_scope_candidate:
+                    structuredScopeLedger
+                      ?scopeMentions(
+                          candidate.requirement,
+                          structuredScopeLedger.authoritative_scope
+                        )
+                      :[],
+                  structured_scope_sibling:
+                    structuredScopeLedger
+                      ?scopeMentions(
+                          v?.requirement,
+                          structuredScopeLedger.authoritative_scope
+                        )
+                      :[],
+                }))
+                .map(v=>({
+                  ...v,
+                  structured_scope_disjoint:Boolean(
+                    structuredScopeLedger
+                    &&v.structured_scope_candidate.length>0
+                    &&v.structured_scope_sibling.length>0
+                    &&!v.structured_scope_candidate.some(key=>
+                      v.structured_scope_sibling.includes(key)
+                    )
+                  ),
                 }))
                 .sort((a,b)=>b.similarity-a.similarity)[0]||null;
               const candidateInstanceId=explicitRepeatedInstanceId(candidate);
@@ -6169,6 +6197,7 @@ export async function runAutonomousRequirementCognition({
                 &&!siblingOverlap.explicit_instance_disjoint
                 &&!siblingOverlap.explicit_partition_disjoint
                 &&!siblingOverlap.canonical_instance_disjoint
+                &&!siblingOverlap.structured_scope_disjoint
               ){
                 await persistChildProposalRejection(
                   node,ordinal,candidate,siblingOverlap,previous
@@ -6192,22 +6221,32 @@ export async function runAutonomousRequirementCognition({
                 explicit_partition_disjoint:Boolean(siblingOverlap?.explicit_partition_disjoint),
                 canonical_candidate_identity:candidateCanonicalIdentity,
                 compared_sibling_canonical_identity:siblingOverlap?.canonical_identity||null,
+                structured_scope_candidate:
+                  siblingOverlap?.structured_scope_candidate||[],
+                structured_scope_sibling:
+                  siblingOverlap?.structured_scope_sibling||[],
+                structured_scope_disjoint:Boolean(
+                  siblingOverlap?.structured_scope_disjoint
+                ),
                 disjoint_repeated_instance_override:Boolean(
                   siblingOverlap?.similarity>=0.78
                   &&(
                     siblingOverlap?.explicit_instance_disjoint
                     ||siblingOverlap?.explicit_partition_disjoint
                     ||siblingOverlap?.canonical_instance_disjoint
+                    ||siblingOverlap?.structured_scope_disjoint
                   )
                 ),
                 override_basis:
-                  siblingOverlap?.canonical_instance_disjoint
-                    ?'canonical_candidate_identity'
-                    :siblingOverlap?.explicit_instance_disjoint
-                      ?'explicit_repeated_instance'
-                      :siblingOverlap?.explicit_partition_disjoint
-                        ?'explicit_partition'
-                        :null,
+                  siblingOverlap?.structured_scope_disjoint
+                    ?'authoritative_structured_owned_scope_partition'
+                    :siblingOverlap?.canonical_instance_disjoint
+                      ?'canonical_candidate_identity'
+                      :siblingOverlap?.explicit_instance_disjoint
+                        ?'explicit_repeated_instance'
+                        :siblingOverlap?.explicit_partition_disjoint
+                          ?'explicit_partition'
+                          :null,
               };
 
               const provenanceReview=await reviewChildProposalProvenance(
@@ -6379,7 +6418,9 @@ export async function runAutonomousRequirementCognition({
       counters.nodes++;
 
       const acceptedScopeLedger=structuredChildScopeLedger(node,authored.map(item=>({
+        node_path:item?.node_path||null,
         requirement:item?.requirement_text,
+        structured_scope_validation:item?.decision_payload?.structured_scope_validation||null,
         scope_removed:item?.decision_payload?.scope_removed,
         completion_criterion:item?.decision_payload?.completion_criterion,
       })));
