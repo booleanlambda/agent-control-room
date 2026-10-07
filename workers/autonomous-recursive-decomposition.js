@@ -1613,6 +1613,38 @@ export function structuredChildScopeLedger(node,previous=[]){
   };
 }
 
+export function existingSplitContinuationState(node,childRows=[]){
+  const active=asArray(childRows)
+    .filter(child=>String(child?.status||child?.node_status||'')!=='cancelled');
+  const scopeLedger=structuredChildScopeLedger(node,active.map(child=>({
+    requirement:child?.requirement_text||child?.requirement,
+    scope_removed:child?.decision_payload?.scope_removed||child?.scope_removed,
+    completion_criterion:child?.decision_payload?.completion_criterion||child?.completion_criterion,
+  })));
+  const authoritativeCount=asArray(scopeLedger?.authoritative_scope).length;
+  const coveredCount=asArray(scopeLedger?.already_covered_scope).length;
+  const scopeComplete=Boolean(
+    scopeLedger
+    &&authoritativeCount>0
+    &&coveredCount===authoritativeCount
+    &&asArray(scopeLedger.remaining_scope).length===0
+  );
+  const agentFinalized=Boolean(node?.decision_payload?.children_authored);
+  return {
+    contract:'existing_agent_split_continuation_v0_1',
+    available:active.length>0&&(agentFinalized||scopeComplete),
+    child_count:active.length,
+    child_paths:active.map(child=>text(child?.node_path)).filter(Boolean),
+    child_statuses:active.map(child=>({
+      node_path:text(child?.node_path)||null,
+      status:text(child?.status||child?.node_status)||null,
+    })),
+    agent_finalized_children:agentFinalized,
+    structured_scope_complete:scopeComplete,
+    structured_scope_ledger:scopeLedger,
+  };
+}
+
 export function childAuthoringCounterState(payload,currentEpoch){
   const value=asObject(payload);
   const epoch=Math.max(1,Math.floor(Number(currentEpoch)||1));
@@ -4280,6 +4312,12 @@ export async function runAutonomousRequirementCognition({
       );
       const evidenceAcquisitionClosed=evidenceCeilingResolution.status==='ACTIVE';
       const synthesisRecoveryRouting=Object.keys(synthesisFailure).length>0;
+      const durableRoutingChildren=(await children(node.node_path))
+        .filter(child=>String(child?.status||child?.node_status||'')!=='cancelled')
+        .sort((a,b)=>Number(a?.ordinal||0)-Number(b?.ordinal||0));
+      const existingSplitContinuation=existingSplitContinuationState(
+        node,durableRoutingChildren
+      );
       // A synthesis failure is downstream of successful decomposition. An old
       // atomic-overflow marker must not force the already-resolved parent back
       // into SPLIT or hide REMEDIATE. At this boundary the agent owns recovery:
@@ -4409,6 +4447,9 @@ export async function runAutonomousRequirementCognition({
                 'Thinking is enabled. This pass is where YOU determine what the requirement means and what action YOU intend to take.',
                 'The runtime does not choose, reinterpret, decompose, repair, or declare the requirement blocked for you.',
                 'Available decisions for this exact node: '+availableDecisions.join(', ')+'.',
+                existingSplitContinuation.available
+                  ? 'EXISTING SPLIT CONTINUATION: durable agent-authored children already exist and the split is semantically complete. SPLIT now means continue those existing children into parent reconciliation/synthesis; it does NOT mean invent another child. Choose SPLIT when that is your intended next action. Do not emit DONE, COMPLETE, SYNTHESIZE, SYNTHESIS, or FINALIZE because those are not discovery protocol decisions.'
+                  : 'No finalized existing split continuation is available at this node.',
                 'CANONICAL STAGE-4 LEDGER: when supplied_context.expertise_candidate_ledger is available, it is the authoritative current-cohort record of already submitted candidate domains, ordinals, and progress. Use it for distinctness/progress checks. Do not reconstruct those facts from recent_activity, historical trees, or prior invalidated cohorts.',
                 'CANONICAL PRIOR-LEARNING LEDGER: when supplied_context.entrepreneurship_masters or supplied_context.agent.competency_verification_records is available, it is the authoritative verified competency record for cumulative transfer. Use those records directly for prior_learning_application; do not ask for a separate competency ledger that already exists in supplied context.',
                 remediationAvailable
@@ -4462,6 +4503,7 @@ export async function runAutonomousRequirementCognition({
                 active_self_remediation:activeRemediation?compactRemediationEpisodes([activeRemediation])[0]:null,
                 durable_self_remediation_history:compactRemediationEpisodes(remediationEpisodes),
                 decomposition_execution_failure:asObject(node?.decision_payload?.child_authoring_failure),
+                existing_split_continuation:existingSplitContinuation,
                 supplied_context:cognitionContext,
                 available_context_index:idx,
                 available_supplied_context_index:indexObject(cognitionContext),
@@ -4512,6 +4554,34 @@ export async function runAutonomousRequirementCognition({
             const candidate=asObject(response?.parsed);
             const rawCandidateDecision=text(candidate.decision).toUpperCase();
             let candidateDecision=rawCandidateDecision;
+            let availableActionNormalization=null;
+            if(
+              existingSplitContinuation.available
+              &&availableDecisions.includes('SPLIT')
+              &&['DONE','COMPLETE','SYNTHESIZE','SYNTHESIS','FINALIZE'].includes(rawCandidateDecision)
+            ){
+              candidateDecision='SPLIT';
+              availableActionNormalization={
+                contract:'existing_split_terminal_alias_normalization_v0_1',
+                raw_decision:rawCandidateDecision,
+                normalized_decision:'SPLIT',
+                reason:'durable_agent_authored_split_is_complete_and_runtime_control_flow_uses_SPLIT_to_resume_parent_reconciliation_synthesis',
+                child_count:existingSplitContinuation.child_count,
+                child_paths:existingSplitContinuation.child_paths,
+                structured_scope_complete:existingSplitContinuation.structured_scope_complete,
+                normalized_at:new Date().toISOString(),
+              };
+              console.warn('AAU_EXISTING_SPLIT_TERMINAL_ALIAS_NORMALIZED',JSON.stringify({
+                agent_id:agentId,
+                intent_execution_id:intentExecutionId,
+                node_path:node.node_path,
+                raw_decision:rawCandidateDecision,
+                normalized_decision:'SPLIT',
+                child_count:existingSplitContinuation.child_count,
+                structured_scope_complete:existingSplitContinuation.structured_scope_complete,
+                policy:'existing_split_terminal_alias_normalization_v0_1',
+              }));
+            }
             if(
               rawCandidateDecision==='REMEDIATE'
               &&!allowedRemediationRepairs.includes(
@@ -4648,6 +4718,7 @@ export async function runAutonomousRequirementCognition({
               raw_decision:rawCandidateDecision,
               block_basis:blockBasis||null,
               block_normalization:blockNormalization,
+              available_action_normalization:availableActionNormalization,
             };
 
             if(!durableDiscovery.parsed){
@@ -4670,6 +4741,8 @@ export async function runAutonomousRequirementCognition({
               raw_decision:rawCandidateDecision,
               block_basis:blockBasis||null,
               block_normalization:blockNormalization,
+              available_action_normalization:availableActionNormalization,
+              existing_split_continuation:existingSplitContinuation,
               reason:clip(candidate.reason,2200),
               requirement_interpretation:clip(candidate.requirement_interpretation,2800),
               evidence_assessment:clip(candidate.evidence_assessment,3200),
