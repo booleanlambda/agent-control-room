@@ -227,6 +227,46 @@ try {
 }
 
 try {
+  const { discoveryLoopGuardState } = await import('./autonomous-recursive-decomposition.js');
+  const first=discoveryLoopGuardState({},'fp-A',{freshDiscoveryRequired:true});
+  const repeat=discoveryLoopGuardState({
+    discovery_loop_guard:{
+      context_fingerprint:'fp-A',
+      fresh_discovery_entries:1,
+      route_committed:true,
+    }
+  },'fp-A',{freshDiscoveryRequired:true});
+  const checkpointReuse=discoveryLoopGuardState({
+    discovery_loop_guard:{
+      context_fingerprint:'fp-A',
+      fresh_discovery_entries:1,
+      route_committed:true,
+    }
+  },'fp-A',{freshDiscoveryRequired:false});
+  const changed=discoveryLoopGuardState({
+    discovery_loop_guard:{
+      context_fingerprint:'fp-A',
+      fresh_discovery_entries:1,
+      route_committed:true,
+    }
+  },'fp-B',{freshDiscoveryRequired:true});
+  console.log('AAU_DISCOVERY_LOOP_GUARD_PROBE',JSON.stringify({
+    ok:first.blocked===false
+      &&first.next_fresh_discovery_entries===1
+      &&repeat.blocked===true
+      &&checkpointReuse.blocked===false
+      &&changed.blocked===false
+      &&changed.next_fresh_discovery_entries===1,
+    first,repeat,checkpoint_reuse:checkpointReuse,changed,
+    contract:'bounded_discovery_loop_guard_v0_1',
+  }));
+} catch (error) {
+  console.error('AAU_DISCOVERY_LOOP_GUARD_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
   const {
     structuredChildScopeLedger,
     childAuthoringCounterState,

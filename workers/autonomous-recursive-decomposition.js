@@ -96,6 +96,34 @@ export function committedAtomicResumeState(node){
     contract:'atomic_route_commit_resume_v0_1',
   };
 }
+export function discoveryLoopGuardState(priorPayload,currentFingerprint,{freshDiscoveryRequired=true}={}){
+  const payload=asObject(priorPayload);
+  const prior=asObject(payload.discovery_loop_guard);
+  const fingerprint=text(currentFingerprint);
+  const sameFingerprint=Boolean(
+    fingerprint&&text(prior.context_fingerprint)===fingerprint
+  );
+  const priorFreshEntries=sameFingerprint
+    ?Math.max(0,Number(prior.fresh_discovery_entries||0))
+    :0;
+  const routeCommitted=sameFingerprint&&prior.route_committed===true;
+  const blocked=Boolean(
+    freshDiscoveryRequired===true
+    &&routeCommitted
+    &&priorFreshEntries>=1
+  );
+  return {
+    blocked,
+    same_fingerprint:sameFingerprint,
+    route_committed:routeCommitted,
+    prior_fresh_discovery_entries:priorFreshEntries,
+    next_fresh_discovery_entries:freshDiscoveryRequired===true
+      ?(sameFingerprint?priorFreshEntries+1:1)
+      :priorFreshEntries,
+    context_fingerprint:fingerprint||null,
+    contract:'bounded_discovery_loop_guard_v0_1',
+  };
+}
 function bytes(v){try{return Buffer.byteLength(typeof v==='string'?v:JSON.stringify(v));}catch{return 0;}}
 function clip(s,n){const v=String(s??'');return v.length<=n?v:v.slice(0,n);}
 export function safeJson(v){
@@ -4626,6 +4654,7 @@ export async function runAutonomousRequirementCognition({
         );
 
       let discovery=reusableDiscovery?priorDiscovery:null;
+      let freshDiscoveryPerformed=false;
 
       if(!discovery){
         let siblingInspectionRetry=null;
@@ -4633,6 +4662,29 @@ export async function runAutonomousRequirementCognition({
         const durableDiscovery=await loadJsonPhaseCheckpoint(
           node.node_path,'DISCOVERY',contextFingerprint
         );
+        const discoveryLoopGuard=discoveryLoopGuardState(
+          priorPayload,
+          contextFingerprint,
+          {freshDiscoveryRequired:!durableDiscovery.parsed}
+        );
+        if(discoveryLoopGuard.blocked){
+          const terminal=await closeSemanticRuntime('blocked',{
+            block_reason:'repeated_discovery_same_material_state',
+            node_path:node.node_path,
+            context_fingerprint:contextFingerprint,
+            fresh_discovery_entries:discoveryLoopGuard.prior_fresh_discovery_entries,
+            route_committed:true,
+            semantic_state_preserved:true,
+            policy:'bounded_discovery_loop_guard_v0_1',
+          });
+          const error=new Error(
+            'semantic_runtime_cycle_lock:'+assignmentKey+':discovery:'+node.node_path
+          );
+          error.code='SEMANTIC_RUNTIME_CYCLE_LOCK';
+          error.semanticRuntime=terminal;
+          error.discoveryLoopGuard=discoveryLoopGuard;
+          throw error;
+        }
         for(let attempt=1;attempt<=2;attempt++){
           try{
             const response=durableDiscovery.parsed
@@ -4747,6 +4799,7 @@ export async function runAutonomousRequirementCognition({
               })},
             ],10000,'req_'+node.node_path.replaceAll('.','_')+'_discovery_'+(resourceView.context_rounds_attempted+1)+'_'+attempt);
 
+            if(!durableDiscovery.parsed)freshDiscoveryPerformed=true;
             const candidate=asObject(response?.parsed);
             const rawCandidateDecision=text(candidate.decision).toUpperCase();
             const actionResolution=normalizeExistingSplitDiscoveryDecision(
@@ -5109,8 +5162,25 @@ export async function runAutonomousRequirementCognition({
       if(!serialized)throw new Error('autonomous_decomposition_routing_commit_missing:'+node.node_path);
 
       const decision=discovery.decision;
+      const priorDiscoveryLoopGuard=asObject(priorPayload.discovery_loop_guard);
+      const sameDiscoveryLoopFingerprint=
+        text(priorDiscoveryLoopGuard.context_fingerprint)===contextFingerprint;
+      const priorDiscoveryFreshEntries=sameDiscoveryLoopFingerprint
+        ?Math.max(0,Number(priorDiscoveryLoopGuard.fresh_discovery_entries||0))
+        :0;
       const decisionPayload={
         ...(node.decision_payload||{}),
+        discovery_loop_guard:{
+          contract:'bounded_discovery_loop_guard_v0_1',
+          context_fingerprint:contextFingerprint,
+          fresh_discovery_entries:freshDiscoveryPerformed
+            ?priorDiscoveryFreshEntries+1
+            :Math.max(1,priorDiscoveryFreshEntries),
+          route_committed:true,
+          semantic_decision:decision,
+          checkpoint_reused:!freshDiscoveryPerformed,
+          committed_at:new Date().toISOString(),
+        },
         reason:discovery.reason,
         requirement_interpretation:discovery.requirement_interpretation,
         evidence_assessment:discovery.evidence_assessment,
