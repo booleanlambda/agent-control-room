@@ -1565,32 +1565,102 @@ function scopeMentions(value,scope){
   });
 }
 
+const STATEMENT_SCOPE_STOPWORDS=new Set([
+  'the','a','an','and','or','of','to','for','in','on','at','by','from',
+  'average','including','excluding','annual','monthly','quarterly','value',
+  'customer','customers','new','logos','payroll'
+]);
+function statementScopeItems(statements){
+  return asArray(statements).map((statement,index)=>{
+    const raw=text(statement).trim();
+    const colon=raw.indexOf(':');
+    const source=colon>=0?raw.slice(0,colon).trim():'';
+    const body=colon>=0?raw.slice(colon+1).trim():raw;
+    const descriptor=body.split('=')[0].replace(/[$%0-9.,]+/g,' ').trim();
+    const metric_tokens=normalizedRequirement(descriptor)
+      .split(/\s+/)
+      .map(v=>v.trim())
+      .filter(v=>v.length>=2&&!STATEMENT_SCOPE_STOPWORDS.has(v));
+    return {
+      scope_id:'S'+String(index+1),
+      statement:raw,
+      source,
+      descriptor,
+      metric_tokens:[...new Set(metric_tokens)],
+    };
+  }).filter(v=>v.statement);
+}
+function statementScopeMentions(value,items){
+  const source=normalizedRequirement(value);
+  return asArray(items).filter(item=>{
+    const sourceNorm=normalizedRequirement(item?.source);
+    if(!sourceNorm||!source.includes(sourceNorm))return false;
+    const metricTokens=asArray(item?.metric_tokens);
+    if(!metricTokens.length)return true;
+    return metricTokens.some(token=>scopeTokenPattern(token)?.test(source));
+  }).map(item=>item.scope_id);
+}
+function structuredScopeMentions(value,ledger){
+  const scope=asObject(ledger);
+  if(scope.scope_kind==='statement_set'){
+    return statementScopeMentions(value,scope.scope_items);
+  }
+  return scopeMentions(value,scope.authoritative_scope);
+}
+
 export function structuredChildScopeLedger(node,previous=[]){
   const context=asObject(node?.context_payload);
   const qda=unwrappedContextObject(context.qda_601_context);
   const next=asObject(qda.next_unit);
   const pack=asObject(next.exercise_pack);
   const reports=asArray(pack.reports).filter(v=>Object.keys(asObject(v)).length);
+  const statements=asArray(pack.statements).map(text).map(v=>v.trim()).filter(Boolean);
   const binding=asObject(context.qda_curriculum_problem_binding);
   const problemOrdinal=Number(binding.problem_ordinal||0);
   const problemText=text(asArray(pack.problems)[Math.max(0,problemOrdinal-1)]);
-  if(
-    reports.length<2
-    ||problemOrdinal<1
-    ||!/\b(variable|ledger|canonical)\b/i.test(problemText+' '+text(node?.requirement_text))
-  )return null;
+  if(problemOrdinal<1)return null;
 
-  const authoritative=[];
-  const seen=new Set();
-  for(const row of reports){
-    for(const key of Object.keys(asObject(row))){
-      const normalized=String(key).trim();
-      if(!normalized||STRUCTURED_SCOPE_METADATA_KEYS.has(normalized.toLowerCase())||seen.has(normalized))continue;
-      seen.add(normalized);
-      authoritative.push(normalized);
+  let scopeKind=null;
+  let authoritative=[];
+  let scopeItems=[];
+  let sourceContract=null;
+
+  if(
+    reports.length>=2
+    &&/\b(variable|ledger|canonical)\b/i.test(problemText+' '+text(node?.requirement_text))
+  ){
+    const seen=new Set();
+    for(const row of reports){
+      for(const key of Object.keys(asObject(row))){
+        const normalized=String(key).trim();
+        if(
+          !normalized
+          ||STRUCTURED_SCOPE_METADATA_KEYS.has(normalized.toLowerCase())
+          ||seen.has(normalized)
+        )continue;
+        seen.add(normalized);
+        authoritative.push(normalized);
+      }
+    }
+    if(authoritative.length>=2){
+      scopeKind='field_set';
+      sourceContract='qda_structured_report_scope_v0_1';
+    }
+  }else if(
+    statements.length>=2
+    &&/\b(conflict|contradiction|definition|period)\b/i.test(
+      problemText+' '+text(node?.requirement_text)
+    )
+  ){
+    scopeItems=statementScopeItems(statements);
+    authoritative=scopeItems.map(item=>item.scope_id);
+    if(authoritative.length>=2){
+      scopeKind='statement_set';
+      sourceContract='qda_structured_statement_scope_v0_1';
     }
   }
-  if(authoritative.length<2)return null;
+
+  if(!scopeKind||authoritative.length<2)return null;
 
   const coveredSet=new Set();
   const coverageEvidence=[];
@@ -1604,9 +1674,13 @@ export function structuredChildScopeLedger(node,previous=[]){
       .filter(v=>authoritative.includes(v));
     const ownedMentions=validatedMentions.length
       ?validatedMentions
-      :scopeMentions(
+      :structuredScopeMentions(
           [child?.requirement,child?.requirement_text].filter(Boolean).join(' '),
-          authoritative
+          {
+            scope_kind:scopeKind,
+            authoritative_scope:authoritative,
+            scope_items:scopeItems,
+          }
         );
     for(const key of ownedMentions)coveredSet.add(key);
     coverageEvidence.push({
@@ -1619,14 +1693,20 @@ export function structuredChildScopeLedger(node,previous=[]){
   }
   const covered=authoritative.filter(key=>coveredSet.has(key));
   const remaining=authoritative.filter(key=>!coveredSet.has(key));
+  const remainingItems=scopeKind==='statement_set'
+    ?scopeItems.filter(item=>remaining.includes(item.scope_id))
+    :[];
   return {
-    contract:'authoritative_structured_remaining_scope_v0_2_owned_scope_only',
-    source_contract:'qda_structured_report_scope_v0_1',
+    contract:'authoritative_structured_remaining_scope_v0_3_owned_scope_only',
+    source_contract:sourceContract,
+    scope_kind:scopeKind,
     unit_code:text(next.unit_code)||null,
     problem_ordinal:problemOrdinal,
     authoritative_scope:authoritative,
     already_covered_scope:covered,
     remaining_scope:remaining,
+    scope_items:scopeItems,
+    remaining_scope_items:remainingItems,
     coverage_evidence:coverageEvidence,
     ignored_exclusion_fields:['scope_removed','completion_criterion'],
     derivation:'authoritative_scope_minus_accepted_child_owned_scope_only',
@@ -6071,9 +6151,9 @@ export async function runAutonomousRequirementCognition({
               throw new Error('autonomous_decomposition_child_formulation_status_invalid:'+node.node_path);
             if(candidateStatus==='CHILD'){
               if(structuredScopeLedger){
-                const mentioned=scopeMentions(
+                const mentioned=structuredScopeMentions(
                   candidate.requirement,
-                  structuredScopeLedger.authoritative_scope
+                  structuredScopeLedger
                 );
                 const coveredMentioned=mentioned.filter(key=>
                   structuredScopeLedger.already_covered_scope.includes(key)
@@ -6090,7 +6170,8 @@ export async function runAutonomousRequirementCognition({
                     'COGNITION_CHILD_OVERLAP:covered_scope='+coveredMentioned.join(',');
                   provenanceRevisionGuidance=
                     'Author only from structured_scope_ledger.remaining_scope. '
-                    +'Do not include already-covered variables as child work.';
+                    +'When remaining_scope_items are present, bind the child only to those exact authoritative statements. '
+                    +'Do not include already-covered scope as child work.';
                   throw scopeError;
                 }
                 if(structuredScopeLedger.remaining_scope.length&&remainingMentioned.length<1){
@@ -6106,7 +6187,7 @@ export async function runAutonomousRequirementCognition({
                   throw scopeError;
                 }
                 candidate._structured_scope_validation={
-                  contract:'authoritative_structured_remaining_scope_v0_2_owned_scope_only',
+                  contract:'authoritative_structured_remaining_scope_v0_3_owned_scope_only',
                   authoritative_scope:structuredScopeLedger.authoritative_scope,
                   already_covered_scope:structuredScopeLedger.already_covered_scope,
                   remaining_scope:structuredScopeLedger.remaining_scope,
@@ -6169,16 +6250,16 @@ export async function runAutonomousRequirementCognition({
                   ),
                   structured_scope_candidate:
                     structuredScopeLedger
-                      ?scopeMentions(
+                      ?structuredScopeMentions(
                           candidate.requirement,
-                          structuredScopeLedger.authoritative_scope
+                          structuredScopeLedger
                         )
                       :[],
                   structured_scope_sibling:
                     structuredScopeLedger
-                      ?scopeMentions(
+                      ?structuredScopeMentions(
                           v?.requirement,
-                          structuredScopeLedger.authoritative_scope
+                          structuredScopeLedger
                         )
                       :[],
                 }))
