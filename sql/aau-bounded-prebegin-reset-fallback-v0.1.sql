@@ -122,4 +122,28 @@ begin
 end;
 $function$;
 
+
+-- The non-legacy intent-arm reset is deliberately a thin alias to the same
+-- bounded implementation above. This keeps legacy wake and non-legacy intent
+-- paths under one durable counter/status guard and prevents audit drift where
+-- the wrapper is omitted from the evidence packet.
+create or replace function public.aau_bridge_reset_autonomous_intent_arm(
+  p_bridge_token text,
+  p_intent_execution_id uuid,
+  p_worker_id text,
+  p_error text
+)
+returns boolean
+language sql
+security definer
+set search_path to 'pg_catalog','public','agent_lab'
+as $function$
+  select public.aau_bridge_reset_autonomous_wake_arm(
+    p_bridge_token,
+    p_intent_execution_id,
+    p_worker_id,
+    p_error
+  );
+$function$;
+
 commit;
