@@ -7866,6 +7866,47 @@ export async function runAutonomousRequirementCognition({
         Number(node?.decision_payload?.deterministic_math_attempts||0)
       );
       const mathAttempt=priorMathAttempts+1;
+      if(mathAttempt>=3){
+        const reset=await saveNode({
+          nodePath:node.node_path,
+          parentPath:node.parent_path??parentPathOf(node.node_path),
+          ordinal:node.ordinal||0,
+          requirement:node.requirement_text,
+          sourceKind:node.source_kind,
+          sourceRef:node.source_ref,
+          status:'pending',
+          decisionType:null,
+          decisionPayload:{
+            ...(node.decision_payload||{}),
+            deterministic_math_reconciliation_required:true,
+            deterministic_math_attempts:mathAttempt,
+            deterministic_math_verification:proposedMathVerification,
+            deterministic_math_gate:'bounded_math_repair_exhausted_v0_1',
+            atomic_unavailable:true,
+            reconsider_decomposition:true,
+          },
+          contextPayload:{
+            ...(node.context_payload||{}),
+            deterministic_math_feedback:{
+              attempt:mathAttempt,
+              verifier:'python3_safe_math_v0_1',
+              verification:proposedMathVerification,
+              instruction:'The bounded direct arithmetic repair path is exhausted. Narrow or decompose the requirement while preserving the exact problem, formula obligations, units, and verified inputs.',
+            },
+          },
+          resultArtifact:null,
+        });
+        reset.parent_path=node.parent_path??parentPathOf(node.node_path);
+        console.warn('AAU_QDA_MATH_REPAIR_BOUNDED_DECOMPOSITION',JSON.stringify({
+          agent_id:agentId,
+          intent_execution_id:intentExecutionId,
+          node_path:node.node_path,
+          attempts:mathAttempt,
+          error:proposedMathVerification.error||null,
+          policy:'math_repair_max_two_full_retries_v0_1',
+        }));
+        return {reconsider:true,node:reset};
+      }
       const reset=await saveNode({
         nodePath:node.node_path,
         parentPath:node.parent_path??parentPathOf(node.node_path),
@@ -8256,6 +8297,50 @@ export async function runAutonomousRequirementCognition({
     const finalMathVerification=deterministicMathVerification(packet,node,artifact);
     const finalStatisticsVerification=deterministicStatisticalVerification(packet,node,artifact);
     if(finalMathVerification.required && (!finalMathVerification.ok || !finalMathVerification.all_match)){
+      const priorMathAttempts=Math.max(
+        0,Number(node?.decision_payload?.deterministic_math_attempts||0)
+      );
+      const mathAttempt=priorMathAttempts+1;
+      if(mathAttempt>=3){
+        const reset=await saveNode({
+          nodePath:node.node_path,
+          parentPath:node.parent_path??parentPathOf(node.node_path),
+          ordinal:node.ordinal||0,
+          requirement:node.requirement_text,
+          sourceKind:node.source_kind,
+          sourceRef:node.source_ref,
+          status:'pending',
+          decisionType:null,
+          decisionPayload:{
+            ...(node.decision_payload||{}),
+            ...reconciliationMeta,
+            deterministic_math_reconciliation_required:true,
+            deterministic_math_attempts:mathAttempt,
+            deterministic_math_verification:finalMathVerification,
+            deterministic_math_gate:'post_reconciliation_math_repair_exhausted_v0_1',
+            atomic_unavailable:true,
+            reconsider_decomposition:true,
+          },
+          contextPayload:{
+            ...(node.context_payload||{}),
+            deterministic_math_feedback:{
+              attempt:mathAttempt,
+              verifier:'python3_safe_math_v0_1',
+              verification:finalMathVerification,
+              instruction:'Post-reconciliation deterministic math still fails after bounded direct repair. Narrow or decompose the requirement; do not reuse the rejected artifact.',
+            },
+          },
+          resultArtifact:null,
+        });
+        reset.parent_path=node.parent_path??parentPathOf(node.node_path);
+        return {reconsider:true,node:reset};
+      }
+      const retryNonce=sha256({
+        node_path:node.node_path,
+        gate:'post_reconciliation_python_v0_2',
+        attempt:mathAttempt,
+        verification:finalMathVerification,
+      }).slice(0,24);
       const reset=await saveNode({
         nodePath:node.node_path,
         parentPath:node.parent_path??parentPathOf(node.node_path),
@@ -8269,12 +8354,20 @@ export async function runAutonomousRequirementCognition({
           ...(node.decision_payload||{}),
           ...reconciliationMeta,
           deterministic_math_reconciliation_required:true,
+          deterministic_math_attempts:mathAttempt,
           deterministic_math_verification:finalMathVerification,
+          deterministic_math_gate:'post_reconciliation_python_v0_2_checkpoint_identity',
+          deterministic_math_retry_nonce:retryNonce,
           reconsider_decomposition:false,
         },
         contextPayload:{
           ...(node.context_payload||{}),
-          deterministic_math_verification:finalMathVerification,
+          deterministic_math_feedback:{
+            attempt:mathAttempt,
+            verifier:'python3_safe_math_v0_1',
+            verification:finalMathVerification,
+            instruction:'Your reconciled artifact failed deterministic arithmetic verification. Correct the numerical work and python_checks from first principles; this is a fresh checkpoint identity and the rejected artifact must not be reused.',
+          },
         },
         resultArtifact:null,
       });
@@ -8284,6 +8377,50 @@ export async function runAutonomousRequirementCognition({
 
     if(finalStatisticsVerification.required
        &&(!finalStatisticsVerification.ok||!finalStatisticsVerification.all_claims_match)){
+      const priorStatisticsAttempts=Math.max(
+        0,Number(node?.decision_payload?.deterministic_statistics_attempts||0)
+      );
+      const statisticsAttempt=priorStatisticsAttempts+1;
+      if(statisticsAttempt>=3){
+        const reset=await saveNode({
+          nodePath:node.node_path,
+          parentPath:node.parent_path??parentPathOf(node.node_path),
+          ordinal:node.ordinal||0,
+          requirement:node.requirement_text,
+          sourceKind:node.source_kind,
+          sourceRef:node.source_ref,
+          status:'pending',
+          decisionType:null,
+          decisionPayload:{
+            ...(node.decision_payload||{}),
+            ...reconciliationMeta,
+            deterministic_statistics_reconciliation_required:true,
+            deterministic_statistics_attempts:statisticsAttempt,
+            deterministic_statistics_verification:finalStatisticsVerification,
+            deterministic_statistics_gate:'post_reconciliation_statistics_repair_exhausted_v0_1',
+            atomic_unavailable:true,
+            reconsider_decomposition:true,
+          },
+          contextPayload:{
+            ...(node.context_payload||{}),
+            deterministic_statistics_feedback:{
+              attempt:statisticsAttempt,
+              verifier:'aau_quantitative_python_v0_1',
+              verification:finalStatisticsVerification,
+              instruction:'Post-reconciliation statistical verification still fails after bounded direct repair. Narrow or decompose the requirement; do not reuse the rejected artifact.',
+            },
+          },
+          resultArtifact:null,
+        });
+        reset.parent_path=node.parent_path??parentPathOf(node.node_path);
+        return {reconsider:true,node:reset};
+      }
+      const retryNonce=sha256({
+        node_path:node.node_path,
+        gate:'post_reconciliation_python_statistics_v0_2',
+        attempt:statisticsAttempt,
+        verification:finalStatisticsVerification,
+      }).slice(0,24);
       const reset=await saveNode({
         nodePath:node.node_path,
         parentPath:node.parent_path??parentPathOf(node.node_path),
@@ -8295,18 +8432,21 @@ export async function runAutonomousRequirementCognition({
         decisionType:'ATOMIC',
         decisionPayload:{
           ...(node.decision_payload||{}),
+          ...reconciliationMeta,
           deterministic_statistics_reconciliation_required:true,
+          deterministic_statistics_attempts:statisticsAttempt,
           deterministic_statistics_verification:finalStatisticsVerification,
-          deterministic_statistics_gate:'post_reconciliation_python_statistics_v0_1',
+          deterministic_statistics_gate:'post_reconciliation_python_statistics_v0_2_checkpoint_identity',
+          deterministic_statistics_retry_nonce:retryNonce,
           reconsider_decomposition:false,
         },
         contextPayload:{
           ...(node.context_payload||{}),
           deterministic_statistics_feedback:{
-            attempt:Math.max(1,Number(node?.decision_payload?.deterministic_statistics_attempts||0)+1),
+            attempt:statisticsAttempt,
             verifier:'aau_quantitative_python_v0_1',
             verification:finalStatisticsVerification,
-            instruction:'Your reconciled artifact still disagrees with deterministic statistical computation. Correct the claims and interpretation before completion.'
+            instruction:'Your reconciled artifact failed deterministic statistical verification. Reassess method, inputs, claims, and interpretation; this is a fresh checkpoint identity and the rejected artifact must not be reused.',
           },
         },
         resultArtifact:null,
@@ -8314,6 +8454,7 @@ export async function runAutonomousRequirementCognition({
       reset.parent_path=node.parent_path??parentPathOf(node.node_path);
       return {reconsider:true,node:reset};
     }
+
     const atomicStageContract=stageContractForRequirement(packet,node.requirement_text,node.node_path);
     let atomicStageProposal=null;
     let atomicStageMaterializationVersion=null;
