@@ -187,6 +187,8 @@ try {
     childAuthoringCounterState,
     existingSplitContinuationState,
     normalizeExistingSplitDiscoveryDecision,
+    budgetConstrainedSplitAction,
+    splitParentVerificationRetryState,
   } = await import('./autonomous-recursive-decomposition.js');
   const structuredNode={
     requirement_text:'Solve Problem 1: Create a canonical ledger with variable, value, unit, period, evidence state, source, and confidence.',
@@ -207,8 +209,18 @@ try {
     },
   };
   const ledger=structuredChildScopeLedger(structuredNode,[
-    {requirement:'Resolve ACV and create its canonical ledger entry.'},
-    {requirement:'Resolve CAC and churn_monthly and create their canonical ledger entries.'},
+    {
+      node_path:'R.001.001',
+      requirement:'Resolve ACV and create its canonical ledger entry.',
+      scope_removed:'Reconciliation and submission for CAC, churn_monthly, and gross_margin.',
+      completion_criterion:'Complete ACV only.'
+    },
+    {
+      node_path:'R.001.002',
+      requirement:'Resolve CAC and churn_monthly and create their canonical ledger entries.',
+      scope_removed:'Reconciliation and submission for ACV and gross_margin.',
+      completion_criterion:'Complete CAC and churn_monthly only.'
+    },
   ]);
   const unstructured=structuredChildScopeLedger({
     requirement_text:'Investigate the issue.',
@@ -232,6 +244,15 @@ try {
   const atomicUnaffected=normalizeExistingSplitDiscoveryDecision(
     'ATOMIC',['ATOMIC','SPLIT'],splitContinuation
   );
+  const budgetExisting=budgetConstrainedSplitAction(2,0);
+  const budgetEmpty=budgetConstrainedSplitAction(0,0);
+  const budgetContinue=budgetConstrainedSplitAction(2,1);
+  const splitRetryOne=splitParentVerificationRetryState({});
+  const splitRetryTwo=splitParentVerificationRetryState({
+    split_parent_verification_fail_count:1,
+    split_parent_verification_retry_nonce:splitRetryOne.retry_nonce,
+    deterministic_math_verification:{ok:false,all_match:false},
+  });
   const legacy=childAuthoringCounterState(
     {child_authoring_failure_count:25},7
   );
@@ -254,7 +275,7 @@ try {
     },8
   );
   console.log('AAU_STRUCTURED_REMAINING_SCOPE_PROBE',JSON.stringify({
-    ok:ledger?.contract==='authoritative_structured_remaining_scope_v0_1'
+    ok:ledger?.contract==='authoritative_structured_remaining_scope_v0_2_owned_scope_only'
       &&JSON.stringify(ledger.authoritative_scope)===JSON.stringify(['ACV','CAC','churn_monthly','gross_margin'])
       &&JSON.stringify(ledger.already_covered_scope)===JSON.stringify(['ACV','CAC','churn_monthly'])
       &&JSON.stringify(ledger.remaining_scope)===JSON.stringify(['gross_margin'])
@@ -271,7 +292,15 @@ try {
       &&doneAlias.normalized===true
       &&doneAlias.decision==='SPLIT'
       &&atomicUnaffected.normalized===false
-      &&atomicUnaffected.decision==='ATOMIC',
+      &&atomicUnaffected.decision==='ATOMIC'
+      &&budgetExisting==='FINALIZE_EXISTING_SPLIT'
+      &&budgetEmpty==='EXHAUST_WITHOUT_CHILD'
+      &&budgetContinue==='CONTINUE_AUTHORING'
+      &&splitRetryOne.attempt===1
+      &&splitRetryOne.exhausted===false
+      &&splitRetryTwo.attempt===2
+      &&splitRetryTwo.exhausted===true
+      &&splitRetryOne.retry_nonce!==splitRetryTwo.retry_nonce,
     authoritative_scope:ledger?.authoritative_scope||null,
     covered_scope:ledger?.already_covered_scope||null,
     remaining_scope:ledger?.remaining_scope||null,
@@ -284,7 +313,14 @@ try {
     split_scope_complete:splitContinuation.structured_scope_complete,
     done_alias_normalized_to:doneAlias.decision,
     atomic_decision_preserved:atomicUnaffected.decision,
-    contract:'bounded_authoritative_remaining_scope_v0_2_split_continuation',
+    exclusion_text_did_not_expand_coverage:
+      JSON.stringify(ledger?.remaining_scope||[])===JSON.stringify(['gross_margin']),
+    budget_existing_action:budgetExisting,
+    budget_empty_action:budgetEmpty,
+    budget_continue_action:budgetContinue,
+    split_parent_retry_attempts:[splitRetryOne.attempt,splitRetryTwo.attempt],
+    split_parent_retry_exhausted:splitRetryTwo.exhausted,
+    contract:'cognition_transition_invariants_v0_1',
   }));
 } catch (error) {
   console.error('AAU_STRUCTURED_REMAINING_SCOPE_PROBE',JSON.stringify({
