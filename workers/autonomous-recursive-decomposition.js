@@ -78,6 +78,24 @@ const asObject=(v)=>v&&typeof v==='object'&&!Array.isArray(v)?v:{};
 const asArray=(v)=>Array.isArray(v)?v:[];
 
 function text(v){return String(v??'').trim();}
+export function committedAtomicResumeState(node){
+  const payload=asObject(node?.decision_payload);
+  const decision=text(node?.decision_type).toUpperCase();
+  const status=text(node?.node_status??node?.status).toLowerCase();
+  const invalidationReason=
+    payload.atomic_unavailable===true?'atomic_unavailable'
+    :payload.reconsider_decomposition===true?'reconsider_decomposition'
+    :null;
+  const terminal=['completed','blocked','split'].includes(status);
+  return {
+    resume:decision==='ATOMIC'&&!terminal&&!invalidationReason,
+    decision,
+    status,
+    invalidated:Boolean(invalidationReason),
+    invalidation_reason:invalidationReason,
+    contract:'atomic_route_commit_resume_v0_1',
+  };
+}
 function bytes(v){try{return Buffer.byteLength(typeof v==='string'?v:JSON.stringify(v));}catch{return 0;}}
 function clip(s,n){const v=String(s??'');return v.length<=n?v:v.slice(0,n);}
 export function safeJson(v){
@@ -11078,12 +11096,27 @@ export async function runAutonomousRequirementCognition({
       }
 
       const forceReconsider=Boolean(node?.decision_payload?.reconsider_decomposition);
-      if(qdaDirectProblemFastAtomic(node,parentPath)){
+      const directQdaAtomic=qdaDirectProblemFastAtomic(node,parentPath);
+      const committedAtomicResume=committedAtomicResumeState(node);
+      if(directQdaAtomic||committedAtomicResume.resume){
+        if(committedAtomicResume.resume&&!directQdaAtomic){
+          console.log('AAU_ATOMIC_ROUTE_COMMIT_RESUMED',JSON.stringify({
+            agent_id:agentId,
+            intent_execution_id:intentExecutionId,
+            node_path:node.node_path,
+            node_status:node.node_status||null,
+            decision_type:node.decision_type||null,
+            contract:committedAtomicResume.contract,
+            policy:'resume_committed_atomic_without_rediscovery_v0_1',
+          }));
+        }
         const result=await executeAtomic(node);
         node=result.node;
         node.parent_path=parentPath;
         if(result.completed)return node;
         if(result.split||result.reconsider)continue;
+        if(committedAtomicResume.resume)
+          throw new Error('atomic_route_commit_resume_unresolved_outcome:'+node.node_path);
       }
       const decision=await decide(node,{forceReconsider,branchDepth,singleChildRefinements});
       node=decision.node;

@@ -117,6 +117,7 @@ try {
     pythonChecksFromArtifact,
     qdaDirectAtomicArtifactCandidate,
     safeJson,
+    committedAtomicResumeState,
   } = await import('./autonomous-recursive-decomposition.js');
   const { verifyPythonMathChecks } = await import('./python-math.js');
   const artifact={
@@ -177,6 +178,50 @@ try {
   }));
 } catch (error) {
   console.error('AAU_QDA601_NESTED_PYTHON_CHECKS_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
+  const { committedAtomicResumeState } = await import('./autonomous-recursive-decomposition.js');
+  const committed=committedAtomicResumeState({
+    node_status:'pending',
+    decision_type:'ATOMIC',
+    decision_payload:{
+      deterministic_statistics_reconciliation_required:true,
+      reconsider_decomposition:false,
+    },
+  });
+  const explicitReconsider=committedAtomicResumeState({
+    node_status:'pending',
+    decision_type:'ATOMIC',
+    decision_payload:{reconsider_decomposition:true},
+  });
+  const unavailable=committedAtomicResumeState({
+    node_status:'pending',
+    decision_type:'ATOMIC',
+    decision_payload:{atomic_unavailable:true},
+  });
+  const split=committedAtomicResumeState({
+    node_status:'split',
+    decision_type:'ATOMIC',
+    decision_payload:{},
+  });
+  console.log('AAU_ATOMIC_ROUTE_COMMIT_RESUME_PROBE',JSON.stringify({
+    ok:committed.resume===true
+      &&explicitReconsider.resume===false
+      &&explicitReconsider.invalidation_reason==='reconsider_decomposition'
+      &&unavailable.resume===false
+      &&unavailable.invalidation_reason==='atomic_unavailable'
+      &&split.resume===false,
+    committed,
+    explicit_reconsider:explicitReconsider,
+    unavailable,
+    split,
+    contract:'atomic_route_commit_resume_v0_1',
+  }));
+} catch (error) {
+  console.error('AAU_ATOMIC_ROUTE_COMMIT_RESUME_PROBE',JSON.stringify({
     ok:false,error:String(error?.message||error).slice(0,500)
   }));
 }
