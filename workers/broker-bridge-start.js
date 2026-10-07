@@ -267,6 +267,18 @@ try {
       requirement_text:'Resolve CAC, churn_monthly, and gross_margin and create their canonical ledger entries.'
     },
   ]);
+  const partialSplitContinuation=existingSplitContinuationState(structuredNode,[
+    {
+      node_path:'R.001.001',
+      status:'completed',
+      requirement_text:'Resolve ACV and create its canonical ledger entry.'
+    },
+    {
+      node_path:'R.001.002',
+      status:'completed',
+      requirement_text:'Resolve CAC and churn_monthly and create their canonical ledger entries.'
+    },
+  ]);
   const doneAlias=normalizeExistingSplitDiscoveryDecision(
     'DONE',['SPLIT'],splitContinuation
   );
@@ -324,6 +336,8 @@ try {
       &&nextEpoch.epoch_transition_count_base===2
       &&splitContinuation.available===true
       &&splitContinuation.structured_scope_complete===true
+      &&partialSplitContinuation.available===false
+      &&partialSplitContinuation.structured_scope_complete===false
       &&doneAlias.normalized===true
       &&doneAlias.decision==='SPLIT'
       &&atomicUnaffected.normalized===false
@@ -350,6 +364,8 @@ try {
     next_epoch_transition_count:nextEpoch.epoch_transition_count_base,
     split_continuation_available:splitContinuation.available,
     split_scope_complete:splitContinuation.structured_scope_complete,
+    partial_split_continuation_available:partialSplitContinuation.available,
+    partial_split_scope_complete:partialSplitContinuation.structured_scope_complete,
     done_alias_normalized_to:doneAlias.decision,
     atomic_decision_preserved:atomicUnaffected.decision,
     exclusion_text_did_not_expand_coverage:
