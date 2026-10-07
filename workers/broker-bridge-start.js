@@ -1361,6 +1361,33 @@ if (isEnabled('AAU_REVIEWER_ENDPOINT_SMOKE')) {
 
 await import('./broker-bridge-envcheck.js');
 
+if (isEnabled('AAU_KIMI_COGNITION_SYSTEM_AUDIT')) {
+  // Fire-and-forget read-only system audit. It never wakes, grades, pauses,
+  // mutates, or repairs an agent. Kimi reviews source and emits structured logs.
+  void import('./kimi-cognition-system-audit.js')
+    .then(({runKimiCognitionSystemAudit})=>runKimiCognitionSystemAudit())
+    .then(result=>console.log('AAU_KIMI_COGNITION_AUDIT_COMPLETE',JSON.stringify({
+      ok:result.ok,
+      overall_verdict:result?.synthesis?.review?.overall_verdict||null,
+      release_gate:result?.synthesis?.review?.release_gate||null,
+      confidence:result?.synthesis?.review?.confidence??null,
+      total_usage:{
+        prompt_tokens:[result.pass_a,result.pass_b,result.pass_c,result.synthesis]
+          .reduce((sum,v)=>sum+Number(v?.usage?.prompt_tokens||0),0),
+        completion_tokens:[result.pass_a,result.pass_b,result.pass_c,result.synthesis]
+          .reduce((sum,v)=>sum+Number(v?.usage?.completion_tokens||0),0),
+        total_tokens:[result.pass_a,result.pass_b,result.pass_c,result.synthesis]
+          .reduce((sum,v)=>sum+Number(v?.usage?.total_tokens||0),0),
+      }
+    })))
+    .catch(error=>console.error('AAU_KIMI_COGNITION_AUDIT_FATAL',JSON.stringify({
+      name:error?.name||null,
+      code:error?.code||null,
+      status:error?.status||null,
+      message:String(error?.message||error).slice(0,3000),
+    })));
+}
+
 if (isEnabled('AAU_AUTHENTICATOR_IO_TIMEOUT_PROBE')) {
   // Run independently of broker boot; never touch agent evidence or verification state.
   void import('./authenticator-io-timeout-probe.js')
