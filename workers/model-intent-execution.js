@@ -3355,9 +3355,26 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
           replay_forbidden:true,
         }));
       } else if(cognitionSemanticContinuationRequired){
+        const continuationState=
+          error?.semanticContinuation&&typeof error.semanticContinuation==='object'
+            ?error.semanticContinuation:{};
+        const continuationResult=await rpc(
+          'aau_bridge_continue_model_intent_execution_v0_1',{
+            p_intent_execution_id:requestedIntentExecutionId,
+            p_reason:message,
+            p_state:continuationState,
+          }
+        ).catch((continuationError)=>{
+          console.error('AAU_COGNITION_SEMANTIC_CONTINUATION_RELEASE_FAILED',JSON.stringify({
+            intent_execution_id:requestedIntentExecutionId,
+            error:String(continuationError?.message||continuationError).slice(0,800),
+          }));
+          return null;
+        });
         console.log('AAU_COGNITION_SEMANTIC_CONTINUATION_YIELD',JSON.stringify({
           intent_execution_id:requestedIntentExecutionId,
-          semantic_continuation:error?.semanticContinuation||null,
+          semantic_continuation:continuationState,
+          continuation_result:continuationResult,
           durable_state_preserved:true,
         }));
       } else if (terminalSemanticRuntimeCode) {
