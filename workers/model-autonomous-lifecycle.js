@@ -355,8 +355,11 @@ async function handleIntent(channel, msg) {
     const cognitionRuntimeFault=String(error?.code||'')==='COGNITION_RUNTIME_FAULT';
     const cognitionSemanticContinuationRequired=
       String(error?.code||'')==='COGNITION_SEMANTIC_CONTINUATION_REQUIRED';
+    const cognitionResponseRejected=
+      String(error?.code||'')==='COGNITION_RESPONSE_REJECTED';
     const postCommitAncillaryFailure=
       String(error?.code||'')==='POST_COMMIT_ANCILLARY_FAILURE';
+    const preBeginFailure=error?.intentBegun===false;
     if (!terminalSemanticRuntime
         &&!cognitionAdmissionDeferred
         &&!cognitionProvenanceContinuationRequired
@@ -364,8 +367,36 @@ async function handleIntent(channel, msg) {
         &&!modelTransportTransient
         &&!cognitionRuntimeFault
         &&!cognitionSemanticContinuationRequired
+        &&!cognitionResponseRejected
         &&!postCommitAncillaryFailure) {
-      if (event.legacy) {
+      if(preBeginFailure){
+        const preBeginHandled=await rpc('aau_bridge_handle_prebegin_failure_v0_1',{
+          p_intent_execution_id:event.intent_execution_id,
+          p_worker_id:workerId,
+          p_error:message.slice(0,1200),
+        }).catch((preBeginError)=>{
+          console.error('AAU_PREBEGIN_FAILURE_RECOVERY_FAILED',JSON.stringify({
+            intent_execution_id:event.intent_execution_id,
+            error:String(preBeginError?.message||preBeginError).slice(0,800),
+          }));
+          return null;
+        });
+        if(!preBeginHandled){
+          if(event.legacy){
+            await rpc('aau_bridge_reset_autonomous_wake_arm',{
+              p_wake_request_id:event.intent_execution_id,
+              p_worker_id:workerId,
+              p_error:message.slice(0,1200),
+            }).catch(()=>{});
+          }else{
+            await rpc('aau_bridge_reset_autonomous_intent_arm',{
+              p_intent_execution_id:event.intent_execution_id,
+              p_worker_id:workerId,
+              p_error:message.slice(0,1200),
+            }).catch(()=>{});
+          }
+        }
+      }else if (event.legacy) {
         await rpc('aau_bridge_reset_autonomous_wake_arm', {
           p_wake_request_id: event.intent_execution_id,
           p_worker_id: workerId,
@@ -392,6 +423,8 @@ async function handleIntent(channel, msg) {
                   ? 'AAU_COGNITION_RUNTIME_FAULT_NOT_REARMED'
                   : cognitionSemanticContinuationRequired
                     ? 'AAU_COGNITION_SEMANTIC_CONTINUATION_REQUEUED'
+                    : cognitionResponseRejected
+                      ? 'AAU_COGNITION_RESPONSE_REJECTION_RETRY_OWNED_BY_RECOVERY'
                     : postCommitAncillaryFailure
                       ? 'AAU_POST_COMMIT_ANCILLARY_FAILURE_NOT_REPLAYED'
                       : 'AAU_SEMANTIC_RUNTIME_TERMINAL_NOT_REARMED',
