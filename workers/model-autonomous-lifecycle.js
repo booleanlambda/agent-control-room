@@ -386,13 +386,13 @@ async function handleIntent(channel, msg) {
             await rpc('aau_bridge_reset_autonomous_wake_arm',{
               p_wake_request_id:event.intent_execution_id,
               p_worker_id:workerId,
-              p_error:message.slice(0,1200),
+              p_error:('prebegin_recovery_handler_unavailable:'+message).slice(0,1200),
             }).catch(()=>{});
           }else{
             await rpc('aau_bridge_reset_autonomous_intent_arm',{
               p_intent_execution_id:event.intent_execution_id,
               p_worker_id:workerId,
-              p_error:message.slice(0,1200),
+              p_error:('prebegin_recovery_handler_unavailable:'+message).slice(0,1200),
             }).catch(()=>{});
           }
         }
