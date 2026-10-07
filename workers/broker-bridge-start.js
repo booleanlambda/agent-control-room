@@ -1487,6 +1487,18 @@ if (isEnabled('AAU_REVIEWER_ENDPOINT_SMOKE')) {
 
 await import('./broker-bridge-envcheck.js');
 
+if (isEnabled('AAU_KIMI_COGNITION_FIX_VERIFY')) {
+  void import('./kimi-cognition-fix-verification.js')
+    .then(({runKimiCognitionFixVerification})=>runKimiCognitionFixVerification())
+    .then(result=>console.log('AAU_KIMI_COGNITION_FIX_VERIFY_RESULT',JSON.stringify(result)))
+    .catch(error=>console.error('AAU_KIMI_COGNITION_FIX_VERIFY_FAILED',JSON.stringify({
+      name:error?.name||null,
+      code:error?.code||null,
+      status:error?.status||null,
+      message:String(error?.message||error).slice(0,3000),
+    })));
+}
+
 if (isEnabled('AAU_KIMI_COGNITION_SYSTEM_AUDIT')) {
   // Fire-and-forget read-only system audit. It never wakes, grades, pauses,
   // mutates, or repairs an agent. Kimi reviews source and emits structured logs.
