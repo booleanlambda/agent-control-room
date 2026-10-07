@@ -296,4 +296,23 @@ if (process.env.AAU_GITHUB_TOKEN) {
 
 
 
+const kimiConsultEnabled = ['1','true','yes','on'].includes(
+  String(process.env.AAU_KIMI_CONSULT_WORKER_ENABLED || '').trim().toLowerCase(),
+);
+
+if (kimiConsultEnabled) {
+  try {
+    const { startUniversalKimiConsultWorker } = await import('./universal-kimi-consult-worker.js');
+    const result = startUniversalKimiConsultWorker();
+    console.log('AAU_KIMI_CONSULT_WORKER_STARTED', JSON.stringify(result));
+  } catch (error) {
+    console.error('AAU_KIMI_CONSULT_WORKER_START_FAILED', JSON.stringify({
+      error_name: error?.name || null,
+      code: error?.code || null,
+      message: String(error?.message || error).slice(0,1200),
+    }));
+  }
+}
+
+
 await import('./broker-bridge-render.js');
