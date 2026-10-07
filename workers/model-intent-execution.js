@@ -3330,12 +3330,15 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
       String(error?.code||'')==='COGNITION_SEMANTIC_CONTINUATION_REQUIRED';
     const deepCheckpointIntegrityFault=
       String(error?.code||'')==='DEEP_CHECKPOINT_INTEGRITY_FAULT';
+    const childReconsiderationLimit=
+      String(error?.code||'')==='COGNITION_CHILD_RECONSIDERATION_LIMIT';
     const postCommitAncillaryFailure=Boolean(appliedCommit);
     const transportFailure=classifyModelTransportFailure(error);
     const providerTransient=transportFailure.failure_class==='model_transport_transient';
     const explicitErrorCode=String(error?.code||'').trim();
     const cognitionRuntimeFault=
       deepCheckpointIntegrityFault
+      ||childReconsiderationLimit
       ||(
         !explicitErrorCode
         && !failureDetails
@@ -3463,6 +3466,7 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
       cognition_provenance_continuation_exhausted:cognitionProvenanceContinuationExhausted,
       cognition_semantic_continuation_required:cognitionSemanticContinuationRequired,
       deep_checkpoint_integrity_fault:deepCheckpointIntegrityFault,
+      child_reconsideration_limit:childReconsiderationLimit,
       post_commit_ancillary_failure:postCommitAncillaryFailure,
       cognition_runtime_fault:cognitionRuntimeFault,
       provider_transient:providerTransient,
