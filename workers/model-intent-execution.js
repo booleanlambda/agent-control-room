@@ -1786,6 +1786,8 @@ async function completeDeepJson(model, messages, maxTokens, audit) {
   const result = await callWithCognitionIntegrity(() => modelChatCompletion({
     model,messages,maxTokens,temperature:0.1,jsonMode:true,enableThinking:true,timeoutMs:900000,runtimeRole:'agent',
     usageContext:audit,
+    idempotencyKey:audit?.transportIdempotencyKey||null,
+    transportAttempt:Number(audit?.transportAttempt||1),
   }), audit);
   const explicitReasoningTokens=result?.usage?.completion_tokens_details?.reasoning_tokens;
   if(explicitReasoningTokens!==undefined&&explicitReasoningTokens!==null
@@ -1842,6 +1844,8 @@ async function completeRoutingJson(model, messages, maxTokens, audit) {
     model,messages,maxTokens:requested,
     temperature:0.1,jsonMode:true,enableThinking:true,timeoutMs:900000,runtimeRole:'agent',
     usageContext:audit,
+    idempotencyKey:audit?.transportIdempotencyKey||null,
+    transportAttempt:Number(audit?.transportAttempt||1),
   }), audit);
   let parsed=null;
   try { parsed=JSON.parse(String(result.content || '')); }
@@ -1874,6 +1878,8 @@ async function completeProtocolSerializeJson(model, messages, maxTokens, audit) 
     model,messages,maxTokens:Math.min(Math.max(300,Number(maxTokens)||700),900),
     temperature:0,jsonMode:true,enableThinking:false,timeoutMs:120000,runtimeRole:'serializer',
     usageContext:audit,
+    idempotencyKey:audit?.transportIdempotencyKey||null,
+    transportAttempt:Number(audit?.transportAttempt||1),
   }), audit);
   let parsed=null;
   try { parsed=JSON.parse(String(result.content || '')); }
@@ -2021,14 +2027,29 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
   };
   const result=await runAutonomousRequirementCognition({
     model,packet,modeInfo,agentId,intentExecutionId,rpc,sha256,researchContext,
-    completeRouteJson:(messages,maxTokens,phase)=>completeRoutingJson(
-      model,messages,maxTokens,{...commonAudit,phase}
+    completeRouteJson:(messages,maxTokens,phase,transport={})=>completeRoutingJson(
+      model,messages,maxTokens,{
+        ...commonAudit,phase,
+        transportIdempotencyKey:transport.idempotencyKey||null,
+        transportAttempt:Number(transport.attempt||1),
+        transportRetryContract:transport.contract||null,
+      }
     ),
-    completeSerializeJson:(messages,maxTokens,phase)=>completeProtocolSerializeJson(
-      model,messages,maxTokens,{...commonAudit,phase}
+    completeSerializeJson:(messages,maxTokens,phase,transport={})=>completeProtocolSerializeJson(
+      model,messages,maxTokens,{
+        ...commonAudit,phase,
+        transportIdempotencyKey:transport.idempotencyKey||null,
+        transportAttempt:Number(transport.attempt||1),
+        transportRetryContract:transport.contract||null,
+      }
     ),
-    completeJson:(messages,maxTokens,phase)=>completeDeepJson(
-      model,messages,maxTokens,{...commonAudit,phase}
+    completeJson:(messages,maxTokens,phase,transport={})=>completeDeepJson(
+      model,messages,maxTokens,{
+        ...commonAudit,phase,
+        transportIdempotencyKey:transport.idempotencyKey||null,
+        transportAttempt:Number(transport.attempt||1),
+        transportRetryContract:transport.contract||null,
+      }
     ),
   });
   console.log('AAU_AUTONOMOUS_DECOMPOSITION_RESULT',JSON.stringify({

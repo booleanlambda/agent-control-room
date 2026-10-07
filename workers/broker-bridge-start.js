@@ -349,6 +349,48 @@ try {
 
 try {
   const {
+    classifyModelTransportFailure,
+    modelTransportRetryPolicy,
+    MAX_MODEL_TRANSPORT_ATTEMPTS,
+  } = await import('./semantic-runtime-controls.js');
+  const timeout=Object.assign(new Error('model_timeout_after_120000ms'),{code:'MODEL_TIMEOUT'});
+  const gateway=Object.assign(new Error('model_provider_http_504'),{status:504,providerStatusCode:504});
+  const timeoutClass=classifyModelTransportFailure(timeout);
+  const timeoutFirst=modelTransportRetryPolicy({
+    error:timeout,attempt:1,maxAttempts:MAX_MODEL_TRANSPORT_ATTEMPTS,idempotencyKey:'probe-stable-key'
+  });
+  const timeoutLast=modelTransportRetryPolicy({
+    error:timeout,attempt:MAX_MODEL_TRANSPORT_ATTEMPTS,maxAttempts:MAX_MODEL_TRANSPORT_ATTEMPTS,idempotencyKey:'probe-stable-key'
+  });
+  const gatewayFirst=modelTransportRetryPolicy({
+    error:gateway,attempt:1,maxAttempts:MAX_MODEL_TRANSPORT_ATTEMPTS,idempotencyKey:'probe-stable-key'
+  });
+  const gatewayAgain=modelTransportRetryPolicy({
+    error:gateway,attempt:1,maxAttempts:MAX_MODEL_TRANSPORT_ATTEMPTS,idempotencyKey:'probe-stable-key'
+  });
+  console.log('AAU_IDEMPOTENT_MODEL_TRANSPORT_RETRY_PROBE',JSON.stringify({
+    ok:timeoutClass.transport_kind==='timeout'
+      &&timeoutClass.immediate_retryable===true
+      &&timeoutFirst.retry===true
+      &&timeoutLast.retry===false
+      &&gatewayFirst.retry===true
+      &&gatewayFirst.delay_ms===gatewayAgain.delay_ms
+      &&timeoutFirst.idempotency_key_present===true,
+    timeout_retry:timeoutFirst.retry,
+    timeout_last_retry:timeoutLast.retry,
+    gateway_retry:gatewayFirst.retry,
+    deterministic_delay_ms:gatewayFirst.delay_ms,
+    max_attempts:MAX_MODEL_TRANSPORT_ATTEMPTS,
+    contract:gatewayFirst.contract,
+  }));
+} catch (error) {
+  console.error('AAU_IDEMPOTENT_MODEL_TRANSPORT_RETRY_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
+  const {
     structuredChildScopeLedger,
     childAuthoringCounterState,
     existingSplitContinuationState,

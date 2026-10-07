@@ -141,6 +141,8 @@ export async function moonshotChatCompletion({
   enableThinking = null,
   reasoningEffort = null,
   timeoutMs = null,
+  idempotencyKey = null,
+  transportAttempt = 1,
 } = {}) {
   const config = resolveConfig();
   if (!config.apiKey) throw new Error('MOONSHOT_APIKEY is not configured');
@@ -185,6 +187,11 @@ export async function moonshotChatCompletion({
       'content-type': 'application/json',
       accept: 'application/json',
       'user-agent': 'AAU-Moonshot-Direct-Experimental-Adapter/1.1',
+      ...(clean(idempotencyKey)?{
+        'idempotency-key':clean(idempotencyKey),
+        'x-aau-request-key':clean(idempotencyKey),
+        'x-aau-transport-attempt':String(Math.max(1,Math.floor(Number(transportAttempt)||1))),
+      }:{}),
     },
     body: JSON.stringify(requestBody),
   }, resolvedTimeoutMs);
@@ -204,6 +211,10 @@ export async function moonshotChatCompletion({
           'content-type': 'application/json',
           accept: 'application/json',
           'user-agent': 'AAU-Moonshot-Direct-Experimental-Adapter/1.1-json-fallback',
+          ...(clean(idempotencyKey)?{
+            'idempotency-key':clean(idempotencyKey)+'-json-fallback',
+            'x-aau-request-key':clean(idempotencyKey)+'-json-fallback',
+          }:{}),
         },
         body: JSON.stringify(retryBody),
       }, resolvedTimeoutMs);
@@ -249,6 +260,8 @@ export async function moonshotChatCompletion({
       reasoning_effort: requestBody.reasoning_effort || null,
       reasoning_effort_policy: requestBody.reasoning_effort ? 'explicit_k3' : 'provider_default',
       temperature_policy: 'provider_default_fixed_1',
+      idempotency_key_present:Boolean(clean(idempotencyKey)),
+      transport_attempt:Math.max(1,Math.floor(Number(transportAttempt)||1)),
     },
   };
 }

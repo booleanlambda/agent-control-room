@@ -407,7 +407,7 @@ export function classifyModelTransportFailure(error){
       transport_kind:'timeout',
       transport_status:null,
       transport_code:code||name,
-      immediate_retryable:false,
+      immediate_retryable:true,
       cognition_fault:false,
     });
   }
@@ -459,6 +459,37 @@ export function retryableModelTransportError(error){
   const classified=classifyModelTransportFailure(error);
   return classified.failure_class==='model_transport_transient'
     &&classified.immediate_retryable===true;
+}
+export function modelTransportRetryPolicy({
+  error,
+  attempt=1,
+  maxAttempts=MAX_MODEL_TRANSPORT_ATTEMPTS,
+  idempotencyKey='',
+}={}){
+  const classified=classifyModelTransportFailure(error);
+  const current=Math.max(1,Math.floor(Number(attempt)||1));
+  const limit=Math.max(1,Math.floor(Number(maxAttempts)||MAX_MODEL_TRANSPORT_ATTEMPTS));
+  const retryable=
+    classified.failure_class==='model_transport_transient'
+    &&classified.immediate_retryable===true
+    &&current<limit;
+  const key=String(idempotencyKey||'');
+  let hash=0;
+  for(let i=0;i<key.length;i++)hash=(hash*33+key.charCodeAt(i))>>>0;
+  const jitterMs=hash%251;
+  const backoffMs=Math.min(4000,500*Math.pow(2,Math.max(0,current-1)));
+  return Object.freeze({
+    retry:retryable,
+    attempt:current,
+    next_attempt:retryable?current+1:null,
+    max_attempts:limit,
+    delay_ms:retryable?backoffMs+jitterMs:0,
+    transport_kind:classified.transport_kind,
+    transport_status:classified.transport_status,
+    transport_code:classified.transport_code,
+    idempotency_key_present:Boolean(key),
+    contract:'idempotent_model_transport_retry_v0_1',
+  });
 }
 
 export function pathDepth(nodePath){

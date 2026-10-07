@@ -11,6 +11,7 @@ import {
   repeatedStructuralFailureLocked,
   durableSiblingInspection,
   retryableModelTransportError,
+  modelTransportRetryPolicy,
   autonomousEvidenceWindowDecision,
   evidenceCeilingRequiresAgentResolution,
   mergeInheritedDependencyResults,
@@ -4519,19 +4520,59 @@ export async function runAutonomousRequirementCognition({
 
   async function callWithChargedTransportRetry(fn,messages,maxTokens,phase,kind){
     let lastError=null;
+    const transportRequestKey='aau-'+sha256({
+      contract:'idempotent_model_transport_retry_v0_1',
+      assignment_key:assignmentKey,
+      epoch_no:semanticRuntime.epoch_no,
+      model,
+      phase,
+      kind,
+      messages,
+      max_tokens:maxTokens,
+    }).slice(0,48);
     for(let attempt=1;attempt<=MAX_MODEL_TRANSPORT_ATTEMPTS;attempt++){
+      // Accounting stays attempt-specific, but provider/audit request identity
+      // remains stable so an ambiguous timeout/504 cannot become two semantic calls.
       const attemptPhase=attempt===1?phase:phase+'_transport_retry_'+attempt;
       const reservation=await reserveModelCall(messages,maxTokens,attemptPhase,kind,attempt);
       counters.model_calls++;
       try{
-        const response=await fn(messages,maxTokens,attemptPhase);
+        const response=await fn(messages,maxTokens,phase,{
+          idempotencyKey:transportRequestKey,
+          attempt,
+          maxAttempts:MAX_MODEL_TRANSPORT_ATTEMPTS,
+          contract:'idempotent_model_transport_retry_v0_1',
+        });
         await settleModelCall(reservation,{response});
         return response;
       }catch(error){
         lastError=error;
         await settleModelCall(reservation,{error});
-        if(!retryableModelTransportError(error)||attempt>=MAX_MODEL_TRANSPORT_ATTEMPTS)throw error;
-        console.warn('AAU_MODEL_TRANSPORT_LOCAL_RETRY',JSON.stringify({agent_id:agentId,intent_execution_id:intentExecutionId,assignment_key:assignmentKey,phase,failed_attempt:attempt,next_attempt:attempt+1,error_name:String(error?.name||'Error'),error_code:String(error?.code||error?.cause?.code||''),error_message:String(error?.message||error).slice(0,300)}));
+        const retryPolicy=modelTransportRetryPolicy({
+          error,
+          attempt,
+          maxAttempts:MAX_MODEL_TRANSPORT_ATTEMPTS,
+          idempotencyKey:transportRequestKey,
+        });
+        if(!retryPolicy.retry)throw error;
+        console.warn('AAU_MODEL_TRANSPORT_LOCAL_RETRY',JSON.stringify({
+          agent_id:agentId,
+          intent_execution_id:intentExecutionId,
+          assignment_key:assignmentKey,
+          phase,
+          failed_attempt:attempt,
+          next_attempt:retryPolicy.next_attempt,
+          retry_delay_ms:retryPolicy.delay_ms,
+          transport_kind:retryPolicy.transport_kind,
+          transport_status:retryPolicy.transport_status,
+          transport_code:retryPolicy.transport_code,
+          idempotency_key:transportRequestKey,
+          error_name:String(error?.name||'Error'),
+          error_code:String(error?.code||error?.cause?.code||''),
+          error_message:String(error?.message||error).slice(0,300),
+          policy:retryPolicy.contract,
+        }));
+        await new Promise(resolve=>setTimeout(resolve,retryPolicy.delay_ms));
       }
     }
     throw lastError||new Error('model_transport_retry_exhausted');

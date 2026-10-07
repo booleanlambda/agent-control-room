@@ -106,6 +106,8 @@ async function persistModelCallUsage({
       transport_body_timeout_ms:nullableNonnegativeInt(callMeta?.transportBodyTimeoutMs),
       max_input_tokens:nullableNonnegativeInt(callMeta?.maxInputTokens),
       timeout_capped:Boolean(callMeta?.timeoutCapped),
+      idempotency_key:clean(callMeta?.idempotencyKey)||null,
+      transport_attempt:nullableNonnegativeInt(callMeta?.transportAttempt),
       telemetry_scope:usageContext?.agentId ? 'agent_attributed' : 'provider_unattributed',
     },
     p_started_at:new Date(startedAt).toISOString(),
@@ -327,6 +329,10 @@ async function requestNvidia(config, requestBody, timeoutMs, userAgent, usageCon
         'content-type': 'application/json',
         accept: 'application/json',
         'user-agent': userAgent,
+        ...(clean(callMeta?.idempotencyKey)?{
+          'idempotency-key':clean(callMeta.idempotencyKey),
+          'x-aau-request-key':clean(callMeta.idempotencyKey),
+        }:{}),
       },
       body: JSON.stringify(requestBody),
       dispatcher: NVIDIA_TRANSPORT_DISPATCHER,
@@ -439,6 +445,8 @@ export async function nvidiaChatCompletion({
   timeoutMs = null,
   runtimeRole = 'generic',
   usageContext = null,
+  idempotencyKey = null,
+  transportAttempt = 1,
 } = {}) {
   const config = resolveConfig();
   if (!config.apiKey) throw new Error('NVIDIA_API_KEY is not configured');
@@ -508,6 +516,8 @@ export async function nvidiaChatCompletion({
     transportHeadersTimeoutMs:0,
     transportBodyTimeoutMs:0,
     requestLabel:'primary',
+    idempotencyKey:clean(idempotencyKey)||null,
+    transportAttempt:Math.max(1,Math.floor(Number(transportAttempt)||1)),
   };
   let body = await requestNvidia(
     config,requestBody,resolvedTimeoutMs,
