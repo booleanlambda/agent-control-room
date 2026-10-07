@@ -498,12 +498,12 @@ export function semanticModelBudgetClass({phase='',kind='',attempt=1}={}){
   const p=String(phase||'').toLowerCase();
   const k=String(kind||'').toLowerCase();
   const finalizationEligible=/(?:synthesis_final|synthesis_provenance|stage_contract_materialize|terminal_synthesis|terminal_reconciliation|finalize|finalization|root_completion)/.test(p);
-  if(Math.max(1,Math.floor(Number(attempt)||1))>1)return Object.freeze({
-    bucket:'transport_retry',finalization_eligible:finalizationEligible,
-    contract:SEMANTIC_BUDGET_BUCKET_CONTRACT,
-  });
   if(finalizationEligible)return Object.freeze({
     bucket:'finalization',finalization_eligible:true,
+    contract:SEMANTIC_BUDGET_BUCKET_CONTRACT,
+  });
+  if(Math.max(1,Math.floor(Number(attempt)||1))>1)return Object.freeze({
+    bucket:'transport_retry',finalization_eligible:false,
     contract:SEMANTIC_BUDGET_BUCKET_CONTRACT,
   });
   if(/(?:provenance|verify|verification|reconciliation|audit|review|math_check_contract|python_check)/.test(p))return Object.freeze({
