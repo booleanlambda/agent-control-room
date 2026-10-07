@@ -1487,6 +1487,19 @@ if (isEnabled('AAU_REVIEWER_ENDPOINT_SMOKE')) {
 
 await import('./broker-bridge-envcheck.js');
 
+if (isEnabled('AAU_KIMI_LATENCY_REVIEW')) {
+  // Read-only one-shot Kimi review of observed cognition latency. No agent mutation.
+  void import('./kimi-cognition-latency-review.js')
+    .then(({runKimiCognitionLatencyReview})=>runKimiCognitionLatencyReview())
+    .then(result=>console.log('AAU_KIMI_LATENCY_REVIEW_RESULT',JSON.stringify(result)))
+    .catch(error=>console.error('AAU_KIMI_LATENCY_REVIEW_FAILED',JSON.stringify({
+      name:error?.name||null,
+      code:error?.code||null,
+      status:error?.status||null,
+      message:String(error?.message||error).slice(0,3000),
+    })));
+}
+
 if (isEnabled('AAU_KIMI_COGNITION_FINAL_CLOSURE')) {
   void import('./kimi-cognition-final-closure.js')
     .then(({runKimiCognitionFinalClosure})=>runKimiCognitionFinalClosure())
