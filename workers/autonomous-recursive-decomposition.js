@@ -1589,26 +1589,43 @@ export function structuredChildScopeLedger(node,previous=[]){
   if(authoritative.length<2)return null;
 
   const coveredSet=new Set();
+  const coverageEvidence=[];
   for(const child of asArray(previous)){
-    const material=[
-      child?.requirement,
-      child?.requirement_text,
-      child?.scope_removed,
-      child?.completion_criterion,
-    ].filter(Boolean).join(' ');
-    for(const key of scopeMentions(material,authoritative))coveredSet.add(key);
+    const validation=asObject(
+      child?.structured_scope_validation
+      ||child?.decision_payload?.structured_scope_validation
+    );
+    const validatedMentions=asArray(validation.candidate_mentions)
+      .map(v=>text(v))
+      .filter(v=>authoritative.includes(v));
+    const ownedMentions=validatedMentions.length
+      ?validatedMentions
+      :scopeMentions(
+          [child?.requirement,child?.requirement_text].filter(Boolean).join(' '),
+          authoritative
+        );
+    for(const key of ownedMentions)coveredSet.add(key);
+    coverageEvidence.push({
+      node_path:text(child?.node_path)||null,
+      owned_scope:ownedMentions,
+      basis:validatedMentions.length
+        ?'accepted_structured_scope_validation'
+        :'accepted_child_requirement_text',
+    });
   }
   const covered=authoritative.filter(key=>coveredSet.has(key));
   const remaining=authoritative.filter(key=>!coveredSet.has(key));
   return {
-    contract:'authoritative_structured_remaining_scope_v0_1',
+    contract:'authoritative_structured_remaining_scope_v0_2_owned_scope_only',
     source_contract:'qda_structured_report_scope_v0_1',
     unit_code:text(next.unit_code)||null,
     problem_ordinal:problemOrdinal,
     authoritative_scope:authoritative,
     already_covered_scope:covered,
     remaining_scope:remaining,
-    derivation:'authoritative_scope_minus_exact_accepted_child_mentions',
+    coverage_evidence:coverageEvidence,
+    ignored_exclusion_fields:['scope_removed','completion_criterion'],
+    derivation:'authoritative_scope_minus_accepted_child_owned_scope_only',
     model_authored_scope_inference:false,
   };
 }
@@ -1618,6 +1635,9 @@ export function existingSplitContinuationState(node,childRows=[]){
     .filter(child=>String(child?.status||child?.node_status||'')!=='cancelled');
   const scopeLedger=structuredChildScopeLedger(node,active.map(child=>({
     requirement:child?.requirement_text||child?.requirement,
+    structured_scope_validation:
+      child?.decision_payload?.structured_scope_validation
+      ||child?.structured_scope_validation||null,
     scope_removed:child?.decision_payload?.scope_removed||child?.scope_removed,
     completion_criterion:child?.decision_payload?.completion_criterion||child?.completion_criterion,
   })));
@@ -1671,6 +1691,32 @@ export function normalizeExistingSplitDiscoveryDecision(
     };
   }
   return {decision:raw,normalized:false,normalization:null};
+}
+
+export function budgetConstrainedSplitAction(authoredCount,currentChildCapacity){
+  const authored=Math.max(0,Math.floor(Number(authoredCount)||0));
+  const capacity=Math.floor(Number(currentChildCapacity)||0);
+  if(capacity>=1)return 'CONTINUE_AUTHORING';
+  return authored>0?'FINALIZE_EXISTING_SPLIT':'EXHAUST_WITHOUT_CHILD';
+}
+
+export function splitParentVerificationRetryState(payload){
+  const prior=asObject(payload);
+  const attempt=Math.max(
+    0,Math.floor(Number(prior.split_parent_verification_fail_count)||0)
+  )+1;
+  const maxAttempts=2;
+  return {
+    attempt,
+    max_attempts:maxAttempts,
+    exhausted:attempt>=maxAttempts,
+    retry_nonce:sha256({
+      prior_nonce:text(prior.split_parent_verification_retry_nonce)||null,
+      attempt,
+      prior_verification:asObject(prior.deterministic_math_verification),
+    }).slice(0,24),
+    contract:'split_parent_verification_retry_v0_1',
+  };
 }
 
 export function childAuthoringCounterState(payload,currentEpoch){
@@ -5849,6 +5895,11 @@ export async function runAutonomousRequirementCognition({
     const finalizeBudgetConstrainedSplit=async({
       runtimeView,branchEconomics,availableChildCapacity
     })=>{
+      const budgetScopeLedger=structuredChildScopeLedger(node,authored.map(child=>({
+        node_path:child?.node_path||null,
+        requirement:child?.requirement_text,
+        structured_scope_validation:child?.decision_payload?.structured_scope_validation||null,
+      })));
       const finalized=await saveNode({
         nodePath:node.node_path,parentPath:node.parent_path??parentPathOf(node.node_path),ordinal:node.ordinal||0,
         requirement:node.requirement_text,sourceKind:node.source_kind,sourceRef:node.source_ref,
@@ -5857,6 +5908,9 @@ export async function runAutonomousRequirementCognition({
           ...(node.decision_payload||{}),
           child_count:authored.length,
           children_authored:true,
+          budget_constrained_partial_split:true,
+          child_authoring_scope_ledger:budgetScopeLedger||null,
+          budget_constrained_remaining_scope:budgetScopeLedger?.remaining_scope||null,
           conserved_branch_economics_constraint_applied:true,
           semantic_branch_economics_contract:branchEconomics.contract,
           expected_child_lifecycle_units:branchEconomics.expected_child_lifecycle_units,
@@ -5880,6 +5934,7 @@ export async function runAutonomousRequirementCognition({
         ordinal:Number(c.ordinal||0),
         status:c.node_status||c.status||null,
         requirement:c.requirement_text,
+        structured_scope_validation:c?.decision_payload?.structured_scope_validation||null,
         scope_removed:c?.decision_payload?.scope_removed||null,
         completion_criterion:c?.decision_payload?.completion_criterion||null,
       }));
@@ -5902,6 +5957,24 @@ export async function runAutonomousRequirementCognition({
       const structuralBranchingAvailable=currentChildCapacity>=2;
       const singleRefinementAvailable=currentChildCapacity>=1;
       if(currentChildCapacity<1){
+        const budgetAction=budgetConstrainedSplitAction(
+          authored.length,currentChildCapacity
+        );
+        if(budgetAction==='FINALIZE_EXISTING_SPLIT'){
+          console.warn('AAU_AUTONOMOUS_BUDGET_CONSTRAINED_SPLIT_FINALIZED',JSON.stringify({
+            agent_id:agentId,
+            intent_execution_id:intentExecutionId,
+            node_path:node.node_path,
+            authored_child_count:authored.length,
+            semantic_child_capacity:currentChildCapacity,
+            remaining_budget_units:Number(runtimeView?.remaining_budget_units||0),
+            policy:'budget_constrained_existing_split_v0_1',
+          }));
+          return finalizeBudgetConstrainedSplit({
+            runtimeView,branchEconomics,
+            availableChildCapacity:currentChildCapacity,
+          });
+        }
         const economicTerminal=await closeSemanticRuntime('budget_exhausted',{
           reason:authored.length
             ?'split_child_authoring_continuation_budget_exhausted'
@@ -9581,7 +9654,19 @@ export async function runAutonomousRequirementCognition({
         remediation_attempts_used:Number(nextPayload.self_remediation_attempts_used||0),
       }));
 
-      return process(node.node_path,node.parent_path,pathDepth(node.node_path),0);
+      const continuationRuntime=await semanticRuntimeView();
+      const continuationError=new Error(
+        'cognition_semantic_continuation_required:synthesis_failure:'+node.node_path
+      );
+      continuationError.code='COGNITION_SEMANTIC_CONTINUATION_REQUIRED';
+      continuationError.semanticRuntime=continuationRuntime;
+      continuationError.semanticContinuation={
+        node_path:node.node_path,
+        reason:'synthesis_failure_returned_to_agent',
+        failure_type:failureType,
+        policy:'durable_synthesis_failure_yields_to_scheduler_v0_1',
+      };
+      throw continuationError;
     };
 
     let final=null;
@@ -9614,6 +9699,8 @@ export async function runAutonomousRequirementCognition({
             authoritativeVerifiedNumericalEvidence.length
               ?sha256(authoritativeVerifiedNumericalEvidence):null,
           synthesis_remediation_nonce:text(node?.decision_payload?.synthesis_remediation_nonce)||null,
+          split_parent_verification_retry_nonce:
+            text(node?.decision_payload?.split_parent_verification_retry_nonce)||null,
           provenance_continuation_round:provenanceContinuationRound,
         });
         const durableFinal=await loadJsonPhaseCheckpoint(
@@ -10006,6 +10093,26 @@ export async function runAutonomousRequirementCognition({
         ||splitParentMathVerification.all_match!==true
       )
     ){
+      const retryState=splitParentVerificationRetryState(node.decision_payload);
+      if(retryState.exhausted){
+        return returnSynthesisFailureToAgent({
+          failureType:'quantitative_parent_deterministic_verification_exhausted',
+          reason:
+            'Split-parent deterministic verification remained blocked after '
+            +String(retryState.attempt)+' bounded attempts.',
+          externalVerification:{
+            kind:'split_parent_deterministic_math',
+            ok:false,
+            status:'REJECTED',
+            attempt:retryState.attempt,
+            max_attempts:retryState.max_attempts,
+            verification_blocked:
+              qdaProblemMaterialization.verification_blocked===true,
+            verification:
+              compactMathVerificationForPersistence(splitParentMathVerification),
+          },
+        });
+      }
       const nextPayload={...asObject(node.decision_payload)};
       for(const key of [
         'synthesis_complete','synthesis_outcome','synthesis_reason',
@@ -10028,7 +10135,10 @@ export async function runAutonomousRequirementCognition({
           synthesis_rebuild_at:new Date().toISOString(),
           deterministic_math_verification:
             compactMathVerificationForPersistence(splitParentMathVerification),
-          deterministic_math_gate:'split_parent_fail_closed_v0_1',
+          deterministic_math_gate:'split_parent_fail_closed_v0_2_bounded',
+          split_parent_verification_fail_count:retryState.attempt,
+          split_parent_verification_retry_nonce:retryState.retry_nonce,
+          split_parent_verification_retry_contract:retryState.contract,
           reconsider_decomposition:false,
         },
         contextPayload:node.context_payload||{},
@@ -10042,14 +10152,27 @@ export async function runAutonomousRequirementCognition({
         error:splitParentMathVerification.error||null,
         check_count:Number(splitParentMathVerification.check_count||0),
         required_check_count:Number(splitParentMathVerification.required_check_count||0),
-        policy:'split_parent_fail_closed_v0_1',
+        retry_attempt:retryState.attempt,
+        retry_max:retryState.max_attempts,
+        retry_nonce:retryState.retry_nonce,
+        policy:'split_parent_fail_closed_v0_2_bounded',
       }));
-      return process(
-        node.node_path,
-        node.parent_path,
-        pathDepth(node.node_path),
-        0
+      const continuationRuntime=await semanticRuntimeView();
+      const continuationError=new Error(
+        'cognition_semantic_continuation_required:split_parent_verification:'
+        +node.node_path
       );
+      continuationError.code='COGNITION_SEMANTIC_CONTINUATION_REQUIRED';
+      continuationError.semanticRuntime=continuationRuntime;
+      continuationError.semanticContinuation={
+        node_path:node.node_path,
+        reason:'split_parent_deterministic_verification_retry',
+        retry_attempt:retryState.attempt,
+        retry_max:retryState.max_attempts,
+        retry_nonce:retryState.retry_nonce,
+        policy:'bounded_split_parent_verification_continuation_v0_1',
+      };
+      throw continuationError;
     }
 
     const resultArtifact=JSON.stringify({status:outcome,artifact,handoff:asObject(final?.parsed?.handoff)});
@@ -10071,6 +10194,9 @@ export async function runAutonomousRequirementCognition({
       'deterministic_math_reconciliation_required',
       'deterministic_math_retry_nonce',
       'deterministic_math_verification',
+      'split_parent_verification_retry_nonce',
+      'split_parent_verification_fail_count',
+      'split_parent_verification_retry_contract',
     ])delete completedDecisionPayload[key];
     completedDecisionPayload.completion_state_compaction=
       'durable_checkpoint_references_v0_1';
