@@ -3051,6 +3051,7 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
       })),
     }));
     const error=new Error('qda601_verified_child_materialization_blocked');
+    error.code='COGNITION_RESPONSE_REJECTED';
     error.failureDetails={
       schema:'aau.qda601_verified_child_materialization.v0_1',
       error_code:'QDA601_VERIFIED_CHILD_MATERIALIZATION_BLOCKED',
