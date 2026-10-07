@@ -553,6 +553,10 @@ export function pythonChecksFromArtifact(artifact){
     for(const [key,child] of Object.entries(value)){
       const childPath=path?path+'.'+key:key;
       if(key==='python_checks'){
+        // Top-level python_checks are already collected directly. Traverse only
+        // nested semantic objects here; otherwise every top-level check is
+        // counted twice with a synthetic nested-artifact problem label.
+        if(path==='')continue;
         if(!Array.isArray(child)){
           deepTypeError={
             present:true,type_ok:false,value:[],
