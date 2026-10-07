@@ -1645,6 +1645,34 @@ export function existingSplitContinuationState(node,childRows=[]){
   };
 }
 
+export function normalizeExistingSplitDiscoveryDecision(
+  rawDecision,availableDecisions,continuationState
+){
+  const raw=text(rawDecision).toUpperCase();
+  const allowed=asArray(availableDecisions).map(v=>text(v).toUpperCase());
+  const aliases=['DONE','COMPLETE','SYNTHESIZE','SYNTHESIS','FINALIZE'];
+  if(
+    continuationState?.available===true
+    &&allowed.includes('SPLIT')
+    &&aliases.includes(raw)
+  ){
+    return {
+      decision:'SPLIT',
+      normalized:true,
+      normalization:{
+        contract:'existing_split_terminal_alias_normalization_v0_1',
+        raw_decision:raw,
+        normalized_decision:'SPLIT',
+        reason:'durable_agent_authored_split_is_complete_and_runtime_control_flow_uses_SPLIT_to_resume_parent_reconciliation_synthesis',
+        child_count:Number(continuationState?.child_count||0),
+        child_paths:asArray(continuationState?.child_paths).map(text).filter(Boolean),
+        structured_scope_complete:Boolean(continuationState?.structured_scope_complete),
+      },
+    };
+  }
+  return {decision:raw,normalized:false,normalization:null};
+}
+
 export function childAuthoringCounterState(payload,currentEpoch){
   const value=asObject(payload);
   const epoch=Math.max(1,Math.floor(Number(currentEpoch)||1));
@@ -4553,30 +4581,20 @@ export async function runAutonomousRequirementCognition({
 
             const candidate=asObject(response?.parsed);
             const rawCandidateDecision=text(candidate.decision).toUpperCase();
-            let candidateDecision=rawCandidateDecision;
-            let availableActionNormalization=null;
-            if(
-              existingSplitContinuation.available
-              &&availableDecisions.includes('SPLIT')
-              &&['DONE','COMPLETE','SYNTHESIZE','SYNTHESIS','FINALIZE'].includes(rawCandidateDecision)
-            ){
-              candidateDecision='SPLIT';
-              availableActionNormalization={
-                contract:'existing_split_terminal_alias_normalization_v0_1',
-                raw_decision:rawCandidateDecision,
-                normalized_decision:'SPLIT',
-                reason:'durable_agent_authored_split_is_complete_and_runtime_control_flow_uses_SPLIT_to_resume_parent_reconciliation_synthesis',
-                child_count:existingSplitContinuation.child_count,
-                child_paths:existingSplitContinuation.child_paths,
-                structured_scope_complete:existingSplitContinuation.structured_scope_complete,
-                normalized_at:new Date().toISOString(),
-              };
+            const actionResolution=normalizeExistingSplitDiscoveryDecision(
+              rawCandidateDecision,availableDecisions,existingSplitContinuation
+            );
+            let candidateDecision=actionResolution.decision;
+            let availableActionNormalization=actionResolution.normalization
+              ?{...actionResolution.normalization,normalized_at:new Date().toISOString()}
+              :null;
+            if(actionResolution.normalized){
               console.warn('AAU_EXISTING_SPLIT_TERMINAL_ALIAS_NORMALIZED',JSON.stringify({
                 agent_id:agentId,
                 intent_execution_id:intentExecutionId,
                 node_path:node.node_path,
                 raw_decision:rawCandidateDecision,
-                normalized_decision:'SPLIT',
+                normalized_decision:candidateDecision,
                 child_count:existingSplitContinuation.child_count,
                 structured_scope_complete:existingSplitContinuation.structured_scope_complete,
                 policy:'existing_split_terminal_alias_normalization_v0_1',
