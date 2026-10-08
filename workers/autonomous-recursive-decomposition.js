@@ -3513,10 +3513,17 @@ export async function runAutonomousRequirementCognition({
       material_key:String(materialKey||''),
       metadata,
     });
-    const row=await semanticRuntimeRpc('meter',{
-      eventKey,eventKind,eventFingerprint:fingerprint,
-      costUnits:0,nodePath,
-      metadata:{
+    const row=await rpc('aau_bridge_meter_semantic_runtime_v0_1',{
+      p_agent_id:agentId,
+      p_wake_request_id:intentExecutionId,
+      p_assignment_key:assignmentKey,
+      p_model:model,
+      p_epoch_no:semanticRuntime.epoch_no,
+      p_event_key:eventKey,
+      p_event_kind:eventKind,
+      p_event_fingerprint:fingerprint,
+      p_node_path:nodePath,
+      p_metadata:{
         ...asObject(metadata),
         budget_contract:'semantic_replay_accounting_v0_1',
         budget_bucket:'replay',
