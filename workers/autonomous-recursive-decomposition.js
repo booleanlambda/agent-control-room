@@ -87,6 +87,73 @@ const asObject=(v)=>v&&typeof v==='object'&&!Array.isArray(v)?v:{};
 const asArray=(v)=>Array.isArray(v)?v:[];
 
 function text(v){return String(v??'').trim();}
+
+export function qdaMathCheckBatchSlices(targets,batchSize=3){
+  const rows=asArray(targets);
+  const size=Math.max(1,Math.floor(Number(batchSize)||3));
+  const batches=[];
+  for(let index=0;index<rows.length;index+=size){
+    batches.push(rows.slice(index,index+size));
+  }
+  return batches;
+}
+
+export function qdaNormalizeMathCheckBatchResponse(parsed,targetCount){
+  const parsedResponse=asObject(parsed);
+  let batchChecks=asArray(parsedResponse.python_checks);
+  let normalizedShape='python_checks';
+  if(Number(targetCount)===1 && batchChecks.length!==1){
+    const directCandidate=
+      (parsedResponse.python_check&&typeof parsedResponse.python_check==='object'&&!Array.isArray(parsedResponse.python_check))
+        ?parsedResponse.python_check
+        :(parsedResponse.check&&typeof parsedResponse.check==='object'&&!Array.isArray(parsedResponse.check))
+          ?parsedResponse.check
+          :(
+            typeof parsedResponse.label==='string'
+            &&typeof parsedResponse.expression==='string'
+            &&typeof parsedResponse.claimed_result==='number'
+              ?parsedResponse
+              :null
+          );
+    const checksAlias=asArray(parsedResponse.checks);
+    if(directCandidate){
+      batchChecks=[directCandidate];
+      normalizedShape=parsedResponse.python_check?'python_check'
+        :parsedResponse.check?'check':'direct_check';
+    }else if(checksAlias.length===1){
+      batchChecks=checksAlias;
+      normalizedShape='checks';
+    }
+  }
+  return {
+    checks:batchChecks,
+    count_ok:batchChecks.length===Number(targetCount),
+    expected_count:Number(targetCount),
+    returned_count:batchChecks.length,
+    returned_shape:Object.keys(parsedResponse).slice(0,12),
+    normalized_shape:normalizedShape,
+  };
+}
+
+export async function qdaMathCheckFallbackRepair(batchTargets,generateSingleton){
+  const targets=asArray(batchTargets);
+  if(typeof generateSingleton!=='function'){
+    throw new Error('qda_math_check_singleton_generator_required');
+  }
+  const repaired=[];
+  for(let index=0;index<targets.length;index+=1){
+    const one=asArray(await generateSingleton(targets[index],index));
+    if(one.length!==1){
+      const error=new Error('qda_math_check_singleton_repair_count_mismatch');
+      error.code='QDA_MATH_CHECK_SINGLETON_REPAIR_INVALID';
+      error.expected_count=1;
+      error.returned_count=one.length;
+      throw error;
+    }
+    repaired.push(...one);
+  }
+  return repaired;
+}
 export function committedAtomicResumeState(node){
   const payload=asObject(node?.decision_payload);
   const decision=text(node?.decision_type).toUpperCase();
@@ -8048,29 +8115,17 @@ export async function runAutonomousRequirementCognition({
           // serializer-only: no path may escalate a single check into deep
           // cognition or a multi-thousand-token response.
           const response=await callSerialize(messages,900,phase);
-          const parsedResponse=asObject(response?.parsed);
-          let batchChecks=asArray(parsedResponse.python_checks);
-          if(targetSubset.length===1 && batchChecks.length!==1){
-            const directCandidate=
-              asObject(parsedResponse.python_check)
-              ||asObject(parsedResponse.check)
-              ||(
-                typeof parsedResponse.label==='string'
-                &&typeof parsedResponse.expression==='string'
-                &&typeof parsedResponse.claimed_result==='number'
-                  ?parsedResponse
-                  :null
-              );
-            const checksAlias=asArray(parsedResponse.checks);
-            if(directCandidate) batchChecks=[directCandidate];
-            else if(checksAlias.length===1) batchChecks=checksAlias;
-          }
-          if(batchChecks.length!==targetSubset.length){
+          const normalized=qdaNormalizeMathCheckBatchResponse(
+            response?.parsed,targetSubset.length
+          );
+          let batchChecks=normalized.checks;
+          if(!normalized.count_ok){
             const error=new Error('qda_math_check_batch_count_mismatch');
             error.code='QDA_MATH_CHECK_BATCH_INVALID';
-            error.returned_shape=Object.keys(parsedResponse).slice(0,12);
-            error.returned_count=batchChecks.length;
-            error.expected_count=targetSubset.length;
+            error.returned_shape=normalized.returned_shape;
+            error.returned_count=normalized.returned_count;
+            error.expected_count=normalized.expected_count;
+            error.normalized_shape=normalized.normalized_shape;
             throw error;
           }
           batchChecks=bindChecksToTargets(batchChecks,targetSubset);
@@ -8166,32 +8221,26 @@ export async function runAutonomousRequirementCognition({
             batchChecks=await callBatch(batchTargets,'');
           }
         }catch(error){
-          if(batchTargets.length===1){
-            console.warn('AAU_QDA_MATH_CHECK_SINGLE_BATCH_REPAIR',JSON.stringify({
+          const singletonBatch=batchTargets.length===1;
+          console.warn(
+            singletonBatch
+              ?'AAU_QDA_MATH_CHECK_SINGLE_BATCH_REPAIR'
+              :'AAU_QDA_MATH_CHECK_BATCH_SPLIT_TO_SINGLETONS',
+            JSON.stringify({
               agent_id:agentId,
               intent_execution_id:intentExecutionId,
               node_path:node.node_path,
               batch_ordinal:batchOrdinal,
-              target_count:1,
+              target_count:batchTargets.length,
               error:clip(String(error?.message||error),400),
-              policy:'single_batch_to_bounded_singleton_repair_v0_1',
-            }));
-            batchChecks=await generateSingleton(batchTargets[0],0);
-          }else{
-          console.warn('AAU_QDA_MATH_CHECK_BATCH_SPLIT_TO_SINGLETONS',JSON.stringify({
-            agent_id:agentId,
-            intent_execution_id:intentExecutionId,
-            node_path:node.node_path,
-            batch_ordinal:batchOrdinal,
-            target_count:batchTargets.length,
-            error:clip(String(error?.message||error),400),
-            policy:'batch_to_durable_singletons_v0_1',
-          }));
-          for(let index=0;index<batchTargets.length;index+=1){
-            const one=await generateSingleton(batchTargets[index],index);
-            batchChecks.push(...one);
-          }
-          }
+              policy:singletonBatch
+                ?'single_batch_to_bounded_singleton_repair_v0_2'
+                :'batch_to_durable_singletons_v0_2',
+            })
+          );
+          batchChecks=await qdaMathCheckFallbackRepair(
+            batchTargets,generateSingleton
+          );
         }
 
         await saveJsonPhaseCheckpoint(
@@ -8207,11 +8256,10 @@ export async function runAutonomousRequirementCognition({
         return batchChecks;
       };
 
-      const batchSize=3;
+      const targetBatches=qdaMathCheckBatchSlices(targets,3);
       let batchOrdinal=0;
-      for(let startIndex=0;startIndex<targets.length;startIndex+=batchSize){
+      for(const batchTargets of targetBatches){
         batchOrdinal++;
-        const batchTargets=targets.slice(startIndex,startIndex+batchSize);
         const batchChecks=await generateBatch(batchTargets,batchOrdinal);
         checks.push(...batchChecks);
       }
