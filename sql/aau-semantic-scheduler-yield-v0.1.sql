@@ -82,7 +82,10 @@ begin
            'intent_pending_since',now(),
            'wake_pending_since',now(),
            'semantic_continuation_pending',true,
-           'semantic_continuation_at',now()
+           'semantic_continuation_at',now(),
+           'semantic_continuation_count',v_count+1,
+           'semantic_continuation_reason',left(coalesce(p_reason,''),1200),
+           'semantic_continuation_state',coalesce(p_state,'{}'::jsonb)
          ),
          updated_at=now()
    where agent_id=v_agent_id;
