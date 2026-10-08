@@ -3708,7 +3708,7 @@ export async function runAutonomousRequirementCognition({
       childSerializationUnits,
       childDiscoveryUnits:childDiscovery.cost_units,
       childResolutionUnits:childResolution.cost_units,
-      childTransitionUnits:3,
+      childTransitionUnits:0,
       terminalReconciliationUnits:terminalReconciliation.cost_units,
       terminalSynthesisUnits:terminalSynthesis.cost_units,
       safetyReserveUnits:semanticRuntime.safety_reserve_units,
@@ -3743,8 +3743,9 @@ export async function runAutonomousRequirementCognition({
       semanticRuntime.context_acquire_units
       +discovery.cost_units
       +contextPlan.cost_units
-      +routingSerializationUnits
-      +3; // context transition + routing transition + checkpoint transition
+      +routingSerializationUnits;
+      // Context/routing/checkpoint persistence transitions are metered at zero
+      // semantic cost by semantic_replay_accounting_v0_1.
     const completionReserveUnits=Math.max(
       semanticRuntime.safety_reserve_units,
       Number(branchEconomics?.completion_reserve_units||0)
