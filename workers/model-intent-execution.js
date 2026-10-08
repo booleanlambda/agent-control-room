@@ -3686,6 +3686,8 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
       String(error?.code||'')==='COGNITION_PROVENANCE_CONTINUATION_EXHAUSTED';
     const cognitionSemanticContinuationRequired=
       String(error?.code||'')==='COGNITION_SEMANTIC_CONTINUATION_REQUIRED';
+    const semanticBudgetBucketExhausted=
+      String(error?.code||'')==='SEMANTIC_BUDGET_BUCKET_EXHAUSTED';
     const deepCheckpointIntegrityFault=
       String(error?.code||'')==='DEEP_CHECKPOINT_INTEGRITY_FAULT';
     const childReconsiderationLimit=
@@ -3711,6 +3713,7 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
         && !cognitionProvenanceContinuationRequired
         && !cognitionProvenanceContinuationExhausted
         && !cognitionSemanticContinuationRequired
+        && !semanticBudgetBucketExhausted
         && /^(?:autonomous_decomposition_|qda_(?:root|recursive)_)/i.test(message)
       );
     if (begun) {
@@ -3744,6 +3747,70 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
           continuation_result:continuationResult,
           durable_state_preserved:true,
         }));
+      } else if(semanticBudgetBucketExhausted){
+        const budgetState=
+          error?.budgetAdmission&&typeof error.budgetAdmission==='object'
+            ?error.budgetAdmission
+            :(error?.semanticRuntime&&typeof error.semanticRuntime==='object'
+              ?error.semanticRuntime:{});
+        const runtimeId=String(budgetState?.runtime_id||'').trim();
+        const budgetBucket=String(
+          budgetState?.budget_bucket
+          ||error?.budgetAdmission?.budget_bucket
+          ||''
+        ).trim();
+        const rolloverResult=runtimeId&&budgetBucket
+          ?await rpc('aau_bridge_rollover_semantic_bucket_epoch_v0_1',{
+              p_intent_execution_id:requestedIntentExecutionId,
+              p_runtime_id:runtimeId,
+              p_budget_bucket:budgetBucket,
+              p_reason:message,
+            }).catch((rolloverError)=>{
+              console.error('AAU_SEMANTIC_BUCKET_ROLLOVER_FAILED',JSON.stringify({
+                intent_execution_id:requestedIntentExecutionId,
+                runtime_id:runtimeId,
+                budget_bucket:budgetBucket,
+                error:String(rolloverError?.message||rolloverError).slice(0,800),
+              }));
+              return null;
+            })
+          :null;
+        if(rolloverResult?.status==='renewed'||rolloverResult?.status==='superseded'){
+          const continuationResult=await rpc(
+            'aau_bridge_continue_model_intent_execution_v0_1',{
+              p_intent_execution_id:requestedIntentExecutionId,
+              p_reason:'semantic_bucket_epoch_rollover:'+message,
+              p_state:{
+                ...budgetState,
+                bucket_rollover:rolloverResult,
+                durable_state_preserved:true,
+              },
+            }
+          ).catch((continuationError)=>{
+            console.error('AAU_SEMANTIC_BUCKET_ROLLOVER_CONTINUATION_FAILED',JSON.stringify({
+              intent_execution_id:requestedIntentExecutionId,
+              error:String(continuationError?.message||continuationError).slice(0,800),
+            }));
+            return null;
+          });
+          console.log('AAU_SEMANTIC_BUCKET_EPOCH_ROLLED_OVER',JSON.stringify({
+            intent_execution_id:requestedIntentExecutionId,
+            budget_bucket:budgetBucket,
+            rollover_result:rolloverResult,
+            continuation_result:continuationResult,
+            durable_state_preserved:true,
+          }));
+        }else{
+          await rpc('aau_bridge_hold_cognition_runtime_fault_v0_1',{
+            p_intent_execution_id:requestedIntentExecutionId,
+            p_error:('semantic_bucket_rollover_denied:'+message).slice(0,1200),
+          }).catch(()=>{});
+          console.warn('AAU_SEMANTIC_BUCKET_ROLLOVER_DENIED',JSON.stringify({
+            intent_execution_id:requestedIntentExecutionId,
+            budget_bucket:budgetBucket||null,
+            rollover_result:rolloverResult,
+          }));
+        }
       } else if (terminalSemanticRuntimeCode) {
         await rpc('aau_bridge_hold_semantic_runtime_terminal_v0_2',{
           p_intent_execution_id:requestedIntentExecutionId,
@@ -3844,6 +3911,7 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
       cognition_provenance_continuation_required:cognitionProvenanceContinuationRequired,
       cognition_provenance_continuation_exhausted:cognitionProvenanceContinuationExhausted,
       cognition_semantic_continuation_required:cognitionSemanticContinuationRequired,
+      semantic_budget_bucket_exhausted:semanticBudgetBucketExhausted,
       deep_checkpoint_integrity_fault:deepCheckpointIntegrityFault,
       child_reconsideration_limit:childReconsiderationLimit,
       cognition_response_rejected:cognitionResponseRejected,
