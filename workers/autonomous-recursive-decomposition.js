@@ -88,6 +88,25 @@ const asArray=(v)=>Array.isArray(v)?v:[];
 
 function text(v){return String(v??'').trim();}
 
+export function semanticTransitionMaterialProgress({
+  status=null,decisionType=null,decisionPayload=null,
+}={}){
+  const s=text(status).toLowerCase();
+  const d=text(decisionType).toUpperCase();
+  const payload=asObject(decisionPayload);
+  if(['completed','blocked','split','waiting_context'].includes(s))return true;
+  if(['ATOMIC','SPLIT','NEED_CONTEXT','BLOCKED','REMEDIATE'].includes(d))return true;
+  if(
+    s==='deciding'
+    &&(
+      payload.routing_discovery_checkpointed===true
+      ||payload.routing_discovery_checkpoint
+      ||payload.context_resource_state
+    )
+  )return true;
+  return false;
+}
+
 export function qdaMathCheckBatchSlices(targets,batchSize=3){
   const rows=asArray(targets);
   const size=Math.max(1,Math.floor(Number(batchSize)||3));
@@ -3477,6 +3496,38 @@ export async function runAutonomousRequirementCognition({
     return {...row,budget_bucket:admission.policy.bucket};
   }
 
+  async function meterSemanticRuntime({
+    eventKind,materialKey,nodePath=null,eventFingerprint=null,metadata={}
+  }){
+    const eventKey=eventKind+':'+sha256({
+      assignment_key:assignmentKey,
+      epoch_no:semanticRuntime.epoch_no,
+      event_kind:eventKind,
+      material_key:String(materialKey||''),
+    }).slice(0,64);
+    const fingerprint=eventFingerprint||sha256({
+      assignment_key:assignmentKey,
+      epoch_no:semanticRuntime.epoch_no,
+      event_kind:eventKind,
+      node_path:nodePath,
+      material_key:String(materialKey||''),
+      metadata,
+    });
+    const row=await semanticRuntimeRpc('meter',{
+      eventKey,eventKind,eventFingerprint:fingerprint,
+      costUnits:0,nodePath,
+      metadata:{
+        ...asObject(metadata),
+        budget_contract:'semantic_replay_accounting_v0_1',
+        budget_bucket:'replay',
+        replay_metered:true,
+      },
+    });
+    if(row?.status!=='ready')throw new Error('semantic_runtime_meter_failed');
+    semanticRuntimeSnapshot=row;
+    return row;
+  }
+
   function agentModelContextView(rawPayload,pinnedEvidence,outputTokens){
     const providerSafeInputTokens=modelInputBudgetTokens(agentRuntimeContract,outputTokens);
     const safeInputTokens=Math.min(
@@ -3816,19 +3867,25 @@ export async function runAutonomousRequirementCognition({
       context_payload_hash:sha256(args.contextPayload??{}),
       result_artifact_hash:args.resultArtifact==null?null:sha256(String(args.resultArtifact)),
     });
-    await chargeSemanticRuntime({
+    const materialProgress=semanticTransitionMaterialProgress({
+      status:args.status,
+      decisionType:args.decisionType,
+      decisionPayload:args.decisionPayload,
+    });
+    const row=await nodeRpc('save',args);
+    if(row?.status!=='ready')throw new Error('autonomous_decomposition_checkpoint_save_failed:'+args.nodePath);
+    await meterSemanticRuntime({
       eventKind:'semantic_transition',
       materialKey:(args.nodePath||'R')+':'+transitionFingerprint,
       nodePath:args.nodePath||'R',
-      costUnits:1,
       eventFingerprint:transitionFingerprint,
       metadata:{
         status:args.status??null,
         decision_type:args.decisionType??null,
+        material_progress:materialProgress,
+        accounting_class:'durable_state_persistence_meter',
       },
     });
-    const row=await nodeRpc('save',args);
-    if(row?.status!=='ready')throw new Error('autonomous_decomposition_checkpoint_save_failed:'+args.nodePath);
     return {
       ...row,
       parent_path:args.parentPath??null,
@@ -12095,13 +12152,16 @@ export async function runAutonomousRequirementCognition({
       root_decision_payload:root.decision_payload||{},
       root_context_hash:sha256(root.context_payload||{}),
     });
-    const wakeCharge=await chargeSemanticRuntime({
+    const wakeCharge=await meterSemanticRuntime({
       eventKind:'wake_resume',
       materialKey:String(intentExecutionId),
       nodePath:'R',
-      costUnits:1,
       eventFingerprint:wakeStateFingerprint,
-      metadata:{root_status:root.node_status||null},
+      metadata:{
+        root_status:root.node_status||null,
+        material_progress:false,
+        accounting_class:'resume_replay_meter',
+      },
     });
     const cycleLocked=repeatedStructuralFailureLocked({
       repeatCount:Number(wakeCharge?.fingerprint_repeat_count||0),
