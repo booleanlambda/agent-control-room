@@ -114,6 +114,114 @@ try {
 
 try {
   const {
+    qdaMathCheckBatchSlices,
+    qdaNormalizeMathCheckBatchResponse,
+    qdaMathCheckFallbackRepair,
+  } = await import('./autonomous-recursive-decomposition.js');
+  const { verifyPythonMathChecks } = await import('./python-math.js');
+
+  const makeCheck=(ordinal)=>({
+    label:'adversarial_'+String(ordinal),
+    expression:String(ordinal)+' + 1',
+    claimed_result:ordinal+1,
+  });
+
+  const cardinalityExpectations=new Map([
+    [1,[1]],
+    [2,[2]],
+    [3,[3]],
+    [4,[3,1]],
+    [6,[3,3]],
+    [7,[3,3,1]],
+  ]);
+  const cardinalityResults=[...cardinalityExpectations.entries()].map(([count,expected])=>{
+    const actual=qdaMathCheckBatchSlices(
+      Array.from({length:count},(_,index)=>({index})),3
+    ).map(batch=>batch.length);
+    return {
+      count,
+      expected,
+      actual,
+      ok:JSON.stringify(actual)===JSON.stringify(expected),
+    };
+  });
+
+  const singleton=makeCheck(1);
+  const singletonVariants={
+    canonical:{python_checks:[singleton]},
+    python_check:{python_check:singleton},
+    check:{check:singleton},
+    direct:singleton,
+    checks_alias:{checks:[singleton]},
+  };
+  const normalizedVariants=Object.entries(singletonVariants).map(([name,value])=>{
+    const normalized=qdaNormalizeMathCheckBatchResponse(value,1);
+    const verification=verifyPythonMathChecks(normalized.checks);
+    return {
+      name,
+      shape:normalized.normalized_shape,
+      count_ok:normalized.count_ok,
+      verifier_ok:verification.ok===true&&verification.all_match===true,
+    };
+  });
+
+  const empty=qdaNormalizeMathCheckBatchResponse({},1);
+  const wrongCount=qdaNormalizeMathCheckBatchResponse(
+    {python_checks:[makeCheck(1),makeCheck(2)]},1
+  );
+  const malformed=qdaNormalizeMathCheckBatchResponse(
+    {check:{label:'bad_type',expression:'1 + 1',claimed_result:'2'}},1
+  );
+  const malformedVerification=verifyPythonMathChecks(malformed.checks);
+
+  const fallbackResults=[];
+  for(const count of [1,2,3,4,6,7]){
+    const batches=qdaMathCheckBatchSlices(
+      Array.from({length:count},(_,index)=>({ordinal:index+1})),3
+    );
+    const repairedCounts=[];
+    for(const batch of batches){
+      const repaired=await qdaMathCheckFallbackRepair(
+        batch,
+        async(target)=>[makeCheck(Number(target.ordinal||1))]
+      );
+      repairedCounts.push(repaired.length);
+    }
+    fallbackResults.push({
+      count,
+      batch_sizes:batches.map(batch=>batch.length),
+      repaired_counts:repairedCounts,
+      ok:batches.every((batch,index)=>batch.length===repairedCounts[index]),
+    });
+  }
+
+  console.log('AAU_QDA_MATH_REPAIR_ADVERSARIAL_PROBE',JSON.stringify({
+    ok:cardinalityResults.every(row=>row.ok)
+      &&normalizedVariants.every(row=>row.count_ok&&row.verifier_ok)
+      &&empty.count_ok===false
+      &&wrongCount.count_ok===false
+      &&malformed.count_ok===true
+      &&malformedVerification.ok===false
+      &&malformedVerification.failure_class==='input_contract'
+      &&fallbackResults.every(row=>row.ok),
+    contract:'qda_math_check_repair_adversarial_regression_v0_1',
+    batch_cardinality:cardinalityResults,
+    singleton_shapes:normalizedVariants,
+    empty_rejected:empty.count_ok===false,
+    wrong_count_rejected:wrongCount.count_ok===false,
+    malformed_type_rejected_by_python:
+      malformedVerification.ok===false
+      &&malformedVerification.failure_class==='input_contract',
+    fallback_cardinality:fallbackResults,
+  }));
+} catch (error) {
+  console.error('AAU_QDA_MATH_REPAIR_ADVERSARIAL_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
+  const {
     pythonChecksFromArtifact,
     qdaDirectAtomicArtifactCandidate,
     safeJson,
