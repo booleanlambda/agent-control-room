@@ -8048,10 +8048,29 @@ export async function runAutonomousRequirementCognition({
           // serializer-only: no path may escalate a single check into deep
           // cognition or a multi-thousand-token response.
           const response=await callSerialize(messages,900,phase);
-          let batchChecks=asArray(response?.parsed?.python_checks);
+          const parsedResponse=asObject(response?.parsed);
+          let batchChecks=asArray(parsedResponse.python_checks);
+          if(targetSubset.length===1 && batchChecks.length!==1){
+            const directCandidate=
+              asObject(parsedResponse.python_check)
+              ||asObject(parsedResponse.check)
+              ||(
+                typeof parsedResponse.label==='string'
+                &&typeof parsedResponse.expression==='string'
+                &&typeof parsedResponse.claimed_result==='number'
+                  ?parsedResponse
+                  :null
+              );
+            const checksAlias=asArray(parsedResponse.checks);
+            if(directCandidate) batchChecks=[directCandidate];
+            else if(checksAlias.length===1) batchChecks=checksAlias;
+          }
           if(batchChecks.length!==targetSubset.length){
             const error=new Error('qda_math_check_batch_count_mismatch');
             error.code='QDA_MATH_CHECK_BATCH_INVALID';
+            error.returned_shape=Object.keys(parsedResponse).slice(0,12);
+            error.returned_count=batchChecks.length;
+            error.expected_count=targetSubset.length;
             throw error;
           }
           batchChecks=bindChecksToTargets(batchChecks,targetSubset);
