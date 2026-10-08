@@ -94,7 +94,10 @@ export function semanticBranchBudget({
   const serialization=positive(childSerializationUnits);
   const discovery=positive(childDiscoveryUnits);
   const resolution=positive(childResolutionUnits);
-  const transitions=positive(childTransitionUnits);
+  // Durable state transitions are metered by semantic_replay_accounting_v0_1
+  // and do not consume semantic budget. Keep the default caller value intact,
+  // but allow explicit zero for replay-aware planners.
+  const transitions=Math.max(0,Math.floor(Number(childTransitionUnits)||0));
   const terminalReconciliation=positive(terminalReconciliationUnits);
   const terminalSynthesis=positive(terminalSynthesisUnits);
   const safety=Math.max(0,Math.floor(Number(safetyReserveUnits)||0));
