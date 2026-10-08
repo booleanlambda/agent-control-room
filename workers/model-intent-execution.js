@@ -3872,15 +3872,38 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
           }));
         });
       } else if (providerTransient) {
-        await rpc('aau_bridge_fail_model_transport_transient_v0_1',{
-          p_intent_execution_id:requestedIntentExecutionId,
-          p_error:message,
-        }).catch((providerError)=>{
-          console.error('AAU_MODEL_TRANSPORT_TRANSIENT_RECOVERY_FAILED',JSON.stringify({
+        const transportContinuation=await rpc(
+          'aau_bridge_continue_model_intent_execution_v0_1',{
+            p_intent_execution_id:requestedIntentExecutionId,
+            p_reason:'model_transport_transient:'+message,
+            p_state:{
+              failure_class:'model_transport_transient',
+              transport_kind:transportFailure.transport_kind||null,
+              transport_status:transportFailure.transport_status||null,
+              transport_code:transportFailure.transport_code||null,
+              semantic_state_preserved:true,
+              unfinished_model_output_discarded:true,
+              resume_from_durable_boundary:true,
+              transport_recovery_contract:'provider_transport_durable_continuation_v0_1',
+            },
+          }
+        ).catch((providerError)=>{
+          console.error('AAU_MODEL_TRANSPORT_CONTINUATION_FAILED',JSON.stringify({
             intent_execution_id:requestedIntentExecutionId,
             error:String(providerError?.message||providerError).slice(0,800),
           }));
+          return null;
         });
+        console.warn('AAU_MODEL_TRANSPORT_DURABLE_CONTINUATION',JSON.stringify({
+          intent_execution_id:requestedIntentExecutionId,
+          transport_kind:transportFailure.transport_kind||null,
+          transport_status:transportFailure.transport_status||null,
+          continuation_result:transportContinuation,
+          semantic_state_preserved:true,
+          account_suspension_forbidden:true,
+          counter_source:'durable_no_progress_guard_not_wake_attempts',
+          contract:'provider_transport_durable_continuation_v0_1',
+        }));
       } else if (cognitionRuntimeFault) {
         await rpc('aau_bridge_hold_cognition_runtime_fault_v0_1',{
           p_intent_execution_id:requestedIntentExecutionId,
