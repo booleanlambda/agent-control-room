@@ -5211,9 +5211,7 @@ export async function runAutonomousRequirementCognition({
     contextPayload=boundInMemoryContext(contextPayload,pinnedEvidence,10000);
     const atomicExecutionFailures=Math.max(0,Number(node?.decision_payload?.atomic_execution_failures||0));
     const atomicProtocolFailures=Math.max(0,Number(node?.decision_payload?.atomic_protocol_failures||0));
-    const atomicUnavailable=
-      node?.decision_payload?.atomic_unavailable===true
-      ||atomicExecutionFailures>=MAX_ATOMIC_EXECUTION_FAILURES;
+    const atomicUnavailable=atomicExecutionFailures>=MAX_ATOMIC_EXECUTION_FAILURES;
     const atomicProtocolRecoveryExhausted=atomicProtocolFailures>=MAX_ATOMIC_PROTOCOL_FAILURES;
     const priorAtomicRejection=text(node?.decision_payload?.prior_atomic_rejection).toUpperCase();
     const priorAtomicProtocolRejection=text(node?.decision_payload?.prior_atomic_protocol_rejection).toUpperCase();
@@ -8631,43 +8629,6 @@ export async function runAutonomousRequirementCognition({
         }
       }
     }catch(error){
-      if(retryableModelTransportError(error)){
-        const atomicTransportFailures=
-          Math.max(0,Number(node?.decision_payload?.atomic_transport_failures||0))+1;
-        const reset=await saveNode({
-          nodePath:node.node_path,
-          parentPath:node.parent_path??parentPathOf(node.node_path),
-          ordinal:node.ordinal||0,
-          requirement:node.requirement_text,
-          sourceKind:node.source_kind,
-          sourceRef:node.source_ref,
-          status:'pending',
-          decisionType:null,
-          decisionPayload:{
-            ...(node.decision_payload||{}),
-            prior_atomic_transport_error:String(error?.message||error).slice(0,600),
-            atomic_transport_failures:atomicTransportFailures,
-            atomic_transport_recovery_version:'provider_transport_redecompose_v0_1',
-            atomic_unavailable:true,
-            reconsider_decomposition:true,
-            provider_failure_not_cognition_failure:true,
-          },
-          contextPayload:node.context_payload||{},
-          resultArtifact:null,
-        });
-        reset.parent_path=node.parent_path??parentPathOf(node.node_path);
-        console.warn('AAU_ATOMIC_PROVIDER_TRANSPORT_REDECOMPOSE',JSON.stringify({
-          agent_id:agentId,
-          intent_execution_id:intentExecutionId,
-          node_path:node.node_path,
-          atomic_transport_failures:atomicTransportFailures,
-          error_code:String(error?.code||error?.cause?.code||''),
-          error_message:String(error?.message||error).slice(0,300),
-          semantic_failure:false,
-          policy:'provider_transport_redecompose_v0_1',
-        }));
-        return {reconsider:true,node:reset};
-      }
       if(error?.code==='NVIDIA_TIMEOUT')throw error;
       if(error?.code==='COGNITION_RESPONSE_REJECTED'){
         const atomicExecutionFailures=Math.max(0,Number(node?.decision_payload?.atomic_execution_failures||0))+1;
