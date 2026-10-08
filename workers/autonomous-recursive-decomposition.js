@@ -8147,7 +8147,18 @@ export async function runAutonomousRequirementCognition({
             batchChecks=await callBatch(batchTargets,'');
           }
         }catch(error){
-          if(batchTargets.length===1)throw error;
+          if(batchTargets.length===1){
+            console.warn('AAU_QDA_MATH_CHECK_SINGLE_BATCH_REPAIR',JSON.stringify({
+              agent_id:agentId,
+              intent_execution_id:intentExecutionId,
+              node_path:node.node_path,
+              batch_ordinal:batchOrdinal,
+              target_count:1,
+              error:clip(String(error?.message||error),400),
+              policy:'single_batch_to_bounded_singleton_repair_v0_1',
+            }));
+            batchChecks=await generateSingleton(batchTargets[0],0);
+          }else{
           console.warn('AAU_QDA_MATH_CHECK_BATCH_SPLIT_TO_SINGLETONS',JSON.stringify({
             agent_id:agentId,
             intent_execution_id:intentExecutionId,
@@ -8160,6 +8171,7 @@ export async function runAutonomousRequirementCognition({
           for(let index=0;index<batchTargets.length;index+=1){
             const one=await generateSingleton(batchTargets[index],index);
             batchChecks.push(...one);
+          }
           }
         }
 
