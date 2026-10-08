@@ -649,6 +649,54 @@ try {
 }
 
 try {
+  const { semanticBranchBudget } = await import('./semantic-runtime-controls.js');
+  const { semanticTransitionMaterialProgress } = await import('./autonomous-recursive-decomposition.js');
+  const budget=semanticBranchBudget({
+    nodeCreateUnits:4,
+    childFormulationUnits:8,
+    childProvenanceUnits:8,
+    childSerializationUnits:2,
+    childDiscoveryUnits:10,
+    childResolutionUnits:10,
+    childTransitionUnits:0,
+    terminalReconciliationUnits:8,
+    terminalSynthesisUnits:8,
+    safetyReserveUnits:12,
+  });
+  const recoveryReset=semanticTransitionMaterialProgress({
+    status:'pending',decisionType:null,
+    decisionPayload:{atomic_execution_failures:1,reconsider_decomposition:true},
+  });
+  const routeCommit=semanticTransitionMaterialProgress({
+    status:'executing',decisionType:'ATOMIC',decisionPayload:{},
+  });
+  const discoveryCommit=semanticTransitionMaterialProgress({
+    status:'deciding',decisionType:null,
+    decisionPayload:{routing_discovery_checkpointed:true},
+  });
+  const completion=semanticTransitionMaterialProgress({
+    status:'completed',decisionType:'ATOMIC',decisionPayload:{},
+  });
+  console.log('AAU_SEMANTIC_REPLAY_ACCOUNTING_PROBE',JSON.stringify({
+    ok:budget.components.child_transition_units===0
+      &&recoveryReset===false
+      &&routeCommit===true
+      &&discoveryCommit===true
+      &&completion===true,
+    child_transition_units:budget.components.child_transition_units,
+    recovery_reset_material_progress:recoveryReset,
+    route_commit_material_progress:routeCommit,
+    discovery_commit_material_progress:discoveryCommit,
+    completion_material_progress:completion,
+    contract:'semantic_replay_accounting_v0_1',
+  }));
+} catch (error) {
+  console.error('AAU_SEMANTIC_REPLAY_ACCOUNTING_PROBE',JSON.stringify({
+    ok:false,error:String(error?.message||error).slice(0,500)
+  }));
+}
+
+try {
   const { deepContextCapForProbe } = await import('./autonomous-recursive-decomposition.js');
   const huge='x'.repeat(180000);
   const reduced=deepContextCapForProbe({
