@@ -3170,6 +3170,9 @@ export async function runAutonomousRequirementCognition({
   const rootReq=extractTriggerRequirement(packet);
   const qda=asObject(packet?.qda_601_context);
   const statePayload=asObject(packet?.state?.state_payload);
+  let providerTransportRecoveryWake=
+    statePayload.provider_transport_recovery_pending===true
+    &&text(statePayload.provider_transport_recovery_wake_request_id)===String(intentExecutionId);
   const assignmentKey='req:'+sha256({
     agent_id:agentId,
     source_kind:rootReq.source_kind,
@@ -5137,6 +5140,27 @@ export async function runAutonomousRequirementCognition({
           contract:'idempotent_model_transport_retry_v0_1',
         });
         await settleModelCall(reservation,{response});
+        if(providerTransportRecoveryWake){
+          await rpc('aau_bridge_clear_model_provider_transport_recovery_v0_1',{
+            p_intent_execution_id:intentExecutionId,
+          }).then((result)=>{
+            console.log('AAU_MODEL_PROVIDER_TRANSPORT_RECOVERY_CLEARED',JSON.stringify({
+              agent_id:agentId,
+              intent_execution_id:intentExecutionId,
+              phase,
+              result,
+            }));
+          }).catch((resetError)=>{
+            console.error('AAU_MODEL_PROVIDER_TRANSPORT_RECOVERY_CLEAR_FAILED',JSON.stringify({
+              agent_id:agentId,
+              intent_execution_id:intentExecutionId,
+              phase,
+              error:String(resetError?.message||resetError).slice(0,800),
+            }));
+          });
+          providerTransportRecoveryWake=false;
+          statePayload.provider_transport_recovery_pending=false;
+        }
         return response;
       }catch(error){
         lastError=error;
@@ -12148,7 +12172,7 @@ export async function runAutonomousRequirementCognition({
     throw error;
   }
 
-  if(root.node_status!=='completed'&&root.node_status!=='blocked'){
+  if(root.node_status!=='completed'&&root.node_status!=='blocked'&&!providerTransportRecoveryWake){
     const wakeRuntimeView=await semanticRuntimeView();
     const wakeStateFingerprint=sha256({
       material_transition_count:Number(wakeRuntimeView?.material_transition_count||0),
@@ -12188,6 +12212,15 @@ export async function runAutonomousRequirementCognition({
       error.semanticRuntime=semanticRuntimeSnapshot;
       throw error;
     }
+  }else if(root.node_status!=='completed'&&root.node_status!=='blocked'&&providerTransportRecoveryWake){
+    console.log('AAU_SEMANTIC_CYCLE_GUARD_SKIPPED_FOR_PROVIDER_RECOVERY',JSON.stringify({
+      agent_id:agentId,
+      intent_execution_id:intentExecutionId,
+      provider_transport_batch_count:Number(statePayload.provider_transport_batch_count||0),
+      provider_transport_total_attempts:Number(statePayload.provider_transport_total_attempts||0),
+      provider_transport_cooldown_until:statePayload.provider_transport_cooldown_until||null,
+      policy:'provider_transport_window_v0_1',
+    }));
   }
 
   let completedRoot;
