@@ -5115,7 +5115,7 @@ export async function runAutonomousRequirementCognition({
     return row;
   }
 
-  async function callWithChargedTransportRetry(fn,messages,maxTokens,phase,kind){
+  async function callWithChargedTransportRetry(fn,messages,maxTokens,phase,kind,{thinkingMode=null}={}){
     let lastError=null;
     const transportRequestKey='aau-'+sha256({
       contract:'idempotent_model_transport_retry_v0_1',
@@ -5126,6 +5126,7 @@ export async function runAutonomousRequirementCognition({
       kind,
       messages,
       max_tokens:maxTokens,
+      thinking_mode:thinkingMode,
     }).slice(0,48);
     for(let attempt=1;attempt<=MAX_MODEL_TRANSPORT_ATTEMPTS;attempt++){
       // Accounting stays attempt-specific, but provider/audit request identity
@@ -5139,6 +5140,7 @@ export async function runAutonomousRequirementCognition({
           attempt,
           maxAttempts:MAX_MODEL_TRANSPORT_ATTEMPTS,
           contract:'idempotent_model_transport_retry_v0_1',
+          thinkingMode,
         });
         await settleModelCall(reservation,{response});
         if(providerTransportRecoveryWake){
@@ -5196,19 +5198,25 @@ export async function runAutonomousRequirementCognition({
     throw lastError||new Error('model_transport_retry_exhausted');
   }
 
-  async function callJson(messages,maxTokens,phase){
-    return callWithChargedTransportRetry(completeJson,messages,maxTokens,phase,'deep_json');
+  async function callJson(messages,maxTokens,phase,options={}){
+    return callWithChargedTransportRetry(
+      completeJson,messages,maxTokens,phase,'deep_json',options
+    );
   }
 
-  async function callRoute(messages,maxTokens,phase){
+  async function callRoute(messages,maxTokens,phase,options={}){
     const fn=typeof completeRouteJson==='function'?completeRouteJson:completeJson;
-    return callWithChargedTransportRetry(fn,messages,maxTokens,phase,'route_json');
+    return callWithChargedTransportRetry(
+      fn,messages,maxTokens,phase,'route_json',options
+    );
   }
 
-  async function callSerialize(messages,maxTokens,phase){
+  async function callSerialize(messages,maxTokens,phase,options={}){
     const fn=typeof completeSerializeJson==='function'?completeSerializeJson
       :(typeof completeRouteJson==='function'?completeRouteJson:completeJson);
-    return callWithChargedTransportRetry(fn,messages,maxTokens,phase,'serialize_json');
+    return callWithChargedTransportRetry(
+      fn,messages,maxTokens,phase,'serialize_json',options
+    );
   }
 
   async function decide(node,{forceReconsider=false,branchDepth=0,singleChildRefinements=0}={}){
