@@ -5115,7 +5115,10 @@ export async function runAutonomousRequirementCognition({
     return row;
   }
 
-  async function callWithChargedTransportRetry(fn,messages,maxTokens,phase,kind,{thinkingMode=null}={}){
+  async function callWithChargedTransportRetry(
+    fn,messages,maxTokens,phase,kind,
+    {thinkingMode=null,clearProviderRecoveryOnSuccess=true}={}
+  ){
     let lastError=null;
     const transportRequestKey='aau-'+sha256({
       contract:'idempotent_model_transport_retry_v0_1',
@@ -5143,7 +5146,7 @@ export async function runAutonomousRequirementCognition({
           thinkingMode,
         });
         await settleModelCall(reservation,{response});
-        if(providerTransportRecoveryWake){
+        if(providerTransportRecoveryWake&&clearProviderRecoveryOnSuccess){
           await rpc('aau_bridge_clear_model_provider_transport_recovery_v0_1',{
             p_intent_execution_id:intentExecutionId,
           }).then((result)=>{
@@ -8623,7 +8626,10 @@ export async function runAutonomousRequirementCognition({
             })},
           ],1800,
           'req_'+node.node_path.replaceAll('.','_')+'_thinking_mode_decision_'+modeAttempt,
-          {thinkingMode:'on'});
+          {
+            thinkingMode:'on',
+            clearProviderRecoveryOnSuccess:false,
+          });
           const candidate=asObject(response?.parsed);
           const mode=text(candidate.mode).toLowerCase();
           const ambiguity=text(candidate.self_assessed_ambiguity).toLowerCase();
