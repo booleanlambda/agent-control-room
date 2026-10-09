@@ -8301,6 +8301,28 @@ export async function runAutonomousRequirementCognition({
           return verification.ok===true&&verification.all_match===true?check:null;
         };
 
+        const loadExistingSingletonForTarget=async(target,index)=>{
+          const singletonIdentity=sha256({
+            repair_identity:repairIdentity,
+            batch_ordinal:batchOrdinal,
+            singleton_ordinal:index+1,
+            target_path:target.path,
+            contract:'qda_math_check_contract_repair_single_v0_1',
+          });
+          const priorSingleton=await loadJsonPhaseCheckpoint(
+            node.node_path,'MATH_CHECK_CONTRACT_REPAIR_SINGLE',singletonIdentity
+          );
+          const priorChecks=asArray(priorSingleton.parsed?.python_checks);
+          if(priorChecks.length!==1)return null;
+          const rebound=bindChecksToTargets(priorChecks,[target]);
+          const priorVerification=verifyPythonMathChecksChunked(
+            rebound,{absoluteTolerance:0.005,relativeTolerance:1e-9}
+          );
+          return priorVerification.ok===true&&priorVerification.all_match===true
+            ?rebound[0]
+            :null;
+        };
+
         const callBatch=async(targetSubset,suffix,repairFeedback=null)=>{
           const messages=[
             {role:'system',content:[
@@ -8356,6 +8378,9 @@ export async function runAutonomousRequirementCognition({
         };
 
         const generateSingleton=async(target,index)=>{
+          const existingSingleton=await loadExistingSingletonForTarget(target,index);
+          if(existingSingleton)return [existingSingleton];
+
           const singletonIdentity=sha256({
             repair_identity:repairIdentity,
             batch_ordinal:batchOrdinal,
@@ -8363,18 +8388,6 @@ export async function runAutonomousRequirementCognition({
             target_path:target.path,
             contract:'qda_math_check_contract_repair_single_v0_1',
           });
-          const priorSingleton=await loadJsonPhaseCheckpoint(
-            node.node_path,'MATH_CHECK_CONTRACT_REPAIR_SINGLE',singletonIdentity
-          );
-          const priorChecks=asArray(priorSingleton.parsed?.python_checks);
-          if(priorChecks.length===1){
-            const priorVerification=verifyPythonMathChecksChunked(
-              priorChecks,{absoluteTolerance:0.005,relativeTolerance:1e-9}
-            );
-            if(priorVerification.ok===true&&priorVerification.all_match===true){
-              return priorChecks;
-            }
-          }
 
           const local=localCheckForTarget(target);
           let one=local?[local]:null;
@@ -8430,9 +8443,27 @@ export async function runAutonomousRequirementCognition({
           // Serializer mode has Thinking OFF and a 900-token ceiling, which
           // prevents the former repair stage from spending thousands of tokens
           // narrating a small verification structure.
-          const localBatch=batchTargets.map(localCheckForTarget);
+          const localBatch=[];
+          for(let index=0;index<batchTargets.length;index++){
+            const target=batchTargets[index];
+            const local=localCheckForTarget(target);
+            if(local){
+              localBatch.push(local);
+              continue;
+            }
+            const checkpointed=await loadExistingSingletonForTarget(target,index);
+            localBatch.push(checkpointed);
+          }
           if(localBatch.every(Boolean)){
             batchChecks=localBatch;
+            console.log('AAU_QDA_MATH_CHECK_BATCH_REUSED_WITHOUT_PROVIDER',JSON.stringify({
+              agent_id:agentId,
+              intent_execution_id:intentExecutionId,
+              node_path:node.node_path,
+              batch_ordinal:batchOrdinal,
+              check_count:batchChecks.length,
+              policy:'frozen_artifact_plus_durable_singleton_reuse_v0_1',
+            }));
           }else{
             batchChecks=await callBatch(batchTargets,'');
           }
