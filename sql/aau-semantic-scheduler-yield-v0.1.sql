@@ -221,7 +221,7 @@ begin
            ),
            account_state='suspended',
            levy_enabled=false,
-           next_due_at=null,
+           next_due_at=v_due,
            updated_at=now()
      where agent_id=v_agent_id;
 
