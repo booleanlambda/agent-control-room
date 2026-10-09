@@ -9337,11 +9337,21 @@ export async function runAutonomousRequirementCognition({
     // atomic attempt; the changed context invalidates reuse of the bad checkpoint.
     if(proposedMathVerification.required
        &&(!proposedMathVerification.ok||!proposedMathVerification.all_match)){
+      const substantiveNumericMismatch=
+        text(proposedMathVerification?.failure_class)==='numeric_mismatch'
+        ||proposedMathVerification?.substantive_mismatch===true;
       const priorMathAttempts=Math.max(
         0,
-        Number(node?.decision_payload?.deterministic_math_attempts||0)
+        Number(
+          substantiveNumericMismatch
+            ?node?.decision_payload?.deterministic_numeric_reconciliation_attempts||0
+            :node?.decision_payload?.deterministic_math_attempts||0
+        )
       );
       const mathAttempt=priorMathAttempts+1;
+      const mathAttemptPayload=substantiveNumericMismatch
+        ?{deterministic_numeric_reconciliation_attempts:mathAttempt}
+        :{deterministic_math_attempts:mathAttempt};
       if(mathAttempt>=3){
         const reset=await saveNode({
           nodePath:node.node_path,
@@ -9355,9 +9365,11 @@ export async function runAutonomousRequirementCognition({
           decisionPayload:{
             ...(node.decision_payload||{}),
             deterministic_math_reconciliation_required:true,
-            deterministic_math_attempts:mathAttempt,
+            ...mathAttemptPayload,
             deterministic_math_verification:proposedMathVerification,
-            deterministic_math_gate:'bounded_math_repair_exhausted_v0_1',
+            deterministic_math_gate:substantiveNumericMismatch
+              ?'bounded_numeric_reconciliation_exhausted_v0_1'
+              :'bounded_math_repair_exhausted_v0_1',
             atomic_unavailable:true,
             reconsider_decomposition:true,
           },
@@ -9395,9 +9407,11 @@ export async function runAutonomousRequirementCognition({
         decisionPayload:{
           ...(node.decision_payload||{}),
           deterministic_math_reconciliation_required:true,
-          deterministic_math_attempts:mathAttempt,
+          ...mathAttemptPayload,
           deterministic_math_verification:proposedMathVerification,
-          deterministic_math_gate:'pre_reconciliation_python_v0_3_checkpoint_identity',
+          deterministic_math_gate:substantiveNumericMismatch
+            ?'pre_reconciliation_numeric_mismatch_v0_1'
+            :'pre_reconciliation_python_v0_3_checkpoint_identity',
           deterministic_math_retry_nonce:sha256({
             node_path:node.node_path,
             attempt:mathAttempt,
@@ -9411,7 +9425,9 @@ export async function runAutonomousRequirementCognition({
             attempt:mathAttempt,
             verifier:'python3_safe_math_v0_1',
             verification:proposedMathVerification,
-            instruction:'Correct the numerical work and python_checks from first principles. First inspect failure_class, validation_failures, per-check valid/error_code fields, required_check_count, and mismatched actual values. Fix shape/type/safe-expression errors without changing a correct model. Use only explicit constant arithmetic and approved safe functions; expand finite sums with + terms. Preserve the correct formula, units, and assumptions; do not force a match by changing the model.'
+            instruction:substantiveNumericMismatch
+              ?'A genuine deterministic numeric mismatch was found in your frozen substantive result. Correct the stated numerical results and their python_checks from the verified inputs and formulas. Treat Python actual values as arithmetic evidence, not as a replacement for your reasoning. Preserve the correct model, units, and assumptions.'
+              :'Correct the numerical work and python_checks from first principles. First inspect failure_class, validation_failures, per-check valid/error_code fields, required_check_count, and mismatched actual values. Fix shape/type/safe-expression errors without changing a correct model. Use only explicit constant arithmetic and approved safe functions; expand finite sums with + terms. Preserve the correct formula, units, and assumptions; do not force a match by changing the model.'
           },
         },
         resultArtifact:null,
