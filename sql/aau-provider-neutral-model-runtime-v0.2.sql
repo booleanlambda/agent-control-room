@@ -132,6 +132,34 @@ begin
    where agent_id=p_agent_id
      and status in ('starting','running','degraded');
 
+  if coalesce((v_q.metadata->>'provider_transport_recovery_pending')::boolean,false) then
+    update agent_lab.agent_existence_accounts ea
+       set account_state=
+             case
+               when coalesce(nullif(ea.metadata->>'provider_cooldown_previous_account_state',''),'') in ('current','grace','arrears')
+                 then ea.metadata->>'provider_cooldown_previous_account_state'
+               when ea.arrears_balance>0 then 'arrears'
+               else 'current'
+             end,
+           levy_enabled=true,
+           next_due_at=now()+make_interval(mins=>greatest(1,coalesce(p.levy_interval_minutes,1))),
+           metadata=(
+             coalesce(ea.metadata,'{}'::jsonb)
+             -'provider_cooldown_previous_account_state'
+             -'provider_cooldown_sleep_started_at'
+             -'provider_cooldown_until'
+           ) || jsonb_build_object(
+             'provider_cooldown_resumed_at',now(),
+             'provider_cooldown_elapsed_time_billed',false,
+             'provider_cooldown_freezes_existence_levy',true,
+             'provider_cooldown_contract','provider_transport_sleep_v0_1'
+           ),
+           updated_at=now()
+      from agent_lab.existence_policies p
+     where ea.agent_id=p_agent_id
+       and p.existence_policy_id=ea.existence_policy_id;
+  end if;
+
   update agent_lab.operator_alerts
      set status='resolved',
          resolved_at=now(),
