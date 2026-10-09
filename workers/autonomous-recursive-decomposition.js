@@ -8514,6 +8514,185 @@ export async function runAutonomousRequirementCognition({
       node.node_path,'ATOMIC_TRUNCATION_PARTIAL',atomicSemanticIdentity
     );
     let parsed=durableAtomic.parsed;
+    let atomicThinkingDecision=null;
+
+    if(!parsed){
+      const providerFacts=await rpc('aau_bridge_model_runtime_facts_v0_1',{
+        p_agent_id:agentId,
+        p_model:model,
+        p_node_path:node.node_path,
+        p_limit:12,
+      }).catch((error)=>({
+        status:'unavailable',
+        observations:[],
+        error:String(error?.message||error).slice(0,400),
+        contract:'agent_thinking_mode_runtime_facts_v0_1',
+      }));
+      const providerObservations=asArray(providerFacts?.observations);
+      const providerFailureObservations=providerObservations.filter(row=>{
+        const status=Number(row?.provider_status_code||0);
+        const callStatus=text(row?.call_status).toLowerCase();
+        const phase=text(row?.phase);
+        return (
+          [408,429,500,502,503,504,529].includes(status)
+          ||callStatus==='provider_timeout'
+          ||callStatus==='provider_error'
+        )&&!phase.includes('_thinking_mode_decision');
+      }).slice(0,9);
+      const runtimeSnapshot=await semanticRuntimeView();
+      const modeContextView=atomicContextView();
+      const modeWorkFingerprint=sha256({
+        contract:'agent_authored_thinking_mode_v0_1',
+        node_path:node.node_path,
+        requirement:node.requirement_text,
+        decision_type:'ATOMIC',
+        deterministic_math_retry:mathRetryState,
+        deterministic_statistics_retry:statisticsRetryState,
+        authoritative_python_calculation_present:Boolean(authoritativePythonCalculation),
+        estimated_input_tokens:
+          modeContextView.fixedReserveTokens
+          +modeContextView.estimatedSuppliedTokens
+          +modeContextView.estimatedSiblingTokens,
+        requested_output_tokens:stageBudgets.atomic_execution,
+        provider_failure_observations:providerFailureObservations.map(row=>({
+          call_status:row?.call_status||null,
+          provider_status_code:row?.provider_status_code??null,
+          error_code:row?.error_code||null,
+          latency_ms:row?.latency_ms??null,
+          thinking:row?.thinking??null,
+          estimated_input_tokens:row?.estimated_input_tokens??null,
+          requested_output_tokens:row?.requested_output_tokens??null,
+          phase:row?.phase||null,
+          started_at:row?.started_at||null,
+        })),
+        provider_transport_batch_count:Number(statePayload.provider_transport_batch_count||0),
+        provider_transport_total_attempts:Number(statePayload.provider_transport_total_attempts||0),
+      });
+      const priorModeDecision=asObject(node?.decision_payload?.thinking_mode_decision);
+      if(
+        ['on','off'].includes(text(priorModeDecision.mode).toLowerCase())
+        &&text(priorModeDecision.work_fingerprint)===modeWorkFingerprint
+      ){
+        atomicThinkingDecision=priorModeDecision;
+      }else{
+        let modeCandidate=null;
+        for(let modeAttempt=1;modeAttempt<=2&&!modeCandidate;modeAttempt++){
+          const response=await callRoute([
+            {role:'system',content:[
+              'You are the bound autonomous agent choosing YOUR OWN thinking mode for ONE upcoming ATOMIC execution attempt.',
+              'AAU is supplying mechanical observations only. The runtime must not choose the cognitive mode for you.',
+              'Choose mode="on" when internal deliberation is worth the latency/output cost for this exact work; choose mode="off" when direct execution is preferable. Make the judgment yourself from the facts and requirement.',
+              'Do not treat provider/network failures as your cognitive failures.',
+              'Deterministic verification availability is a safety fact, not an instruction to choose either mode.',
+              'Your choice is immutable for the upcoming attempt and all of its transport retries. A later material change, verifier feedback, or provider-failure window may cause you to choose again.',
+              'Return JSON only: {"mode":"on|off","task_characterization":"your own characterization","self_assessed_ambiguity":"low|medium|high","rationale_codes":["..."],"reason":"brief auditable reason","reversal_conditions":["..."]}.',
+            ].join('\n')},
+            {role:'user',content:safeJson({
+              requirement:node.requirement_text,
+              mechanical_facts:{
+                phase:'ATOMIC_EXECUTION',
+                node_path:node.node_path,
+                committed_route:'ATOMIC',
+                model_id:model,
+                model_supports_thinking:agentRuntimeContract.supports_thinking===true,
+                aau_max_request_timeout_ms:Number(agentRuntimeContract.max_request_timeout_ms||0),
+                estimated_input_tokens:
+                  modeContextView.fixedReserveTokens
+                  +modeContextView.estimatedSuppliedTokens
+                  +modeContextView.estimatedSiblingTokens,
+                requested_output_tokens:stageBudgets.atomic_execution,
+                deterministic_python_verifier_available:
+                  qdaQuantitativeAtomicRequirement(packet,node)
+                  ||qdaStatisticalAtomicRequirement(packet,node),
+                authoritative_python_calculation_present:Boolean(authoritativePythonCalculation),
+                deterministic_math_feedback_present:Boolean(mathRetryState?.required),
+                deterministic_statistics_feedback_present:Boolean(statisticsRetryState?.required),
+                durable_atomic_checkpoint_available:Boolean(durableAtomic.parsed),
+                durable_partial_checkpoint_available:Boolean(durableAtomicPartial.parsed),
+                remaining_semantic_budget_units:Number(runtimeSnapshot?.remaining_budget_units||0),
+                provider_transport_recovery_pending:
+                  statePayload.provider_transport_recovery_pending===true,
+                provider_transport_batch_count:Number(statePayload.provider_transport_batch_count||0),
+                provider_transport_total_attempts:Number(statePayload.provider_transport_total_attempts||0),
+                recent_model_call_observations:providerObservations,
+                prior_atomic_protocol_failures:
+                  Math.max(0,Number(node?.decision_payload?.atomic_protocol_failures||0)),
+                prior_atomic_execution_failures:
+                  Math.max(0,Number(node?.decision_payload?.atomic_execution_failures||0)),
+              },
+            })},
+          ],1800,
+          'req_'+node.node_path.replaceAll('.','_')+'_thinking_mode_decision_'+modeAttempt,
+          {thinkingMode:'on'});
+          const candidate=asObject(response?.parsed);
+          const mode=text(candidate.mode).toLowerCase();
+          const ambiguity=text(candidate.self_assessed_ambiguity).toLowerCase();
+          if(!['on','off'].includes(mode)||!['low','medium','high'].includes(ambiguity)){
+            if(modeAttempt===2){
+              const error=new Error('agent_thinking_mode_decision_invalid:'+node.node_path);
+              error.code='COGNITION_RESPONSE_REJECTED';
+              error.rejectionReason='THINKING_MODE_DECISION_INVALID';
+              throw error;
+            }
+            continue;
+          }
+          modeCandidate={
+            contract:'agent_authored_thinking_mode_v0_1',
+            mode,
+            task_characterization:clip(candidate.task_characterization,240),
+            self_assessed_ambiguity:ambiguity,
+            rationale_codes:asArray(candidate.rationale_codes)
+              .map(v=>clip(text(v),80)).filter(Boolean).slice(0,12),
+            reason:clip(candidate.reason,900),
+            reversal_conditions:asArray(candidate.reversal_conditions)
+              .map(v=>clip(text(v),180)).filter(Boolean).slice(0,12),
+            work_fingerprint:modeWorkFingerprint,
+            decided_at:new Date().toISOString(),
+            decision_model:model,
+            mechanical_fact_contract:'agent_thinking_mode_runtime_facts_v0_1',
+            provider_failure_observation_count:providerFailureObservations.length,
+          };
+        }
+        atomicThinkingDecision=modeCandidate;
+
+        const nextDecisionPayload={
+          ...(node.decision_payload||{}),
+          thinking_mode_decision:atomicThinkingDecision,
+          thinking_mode_policy:'agent_authored_per_attempt_v0_1',
+        };
+        const persisted=await saveNode({
+          nodePath:node.node_path,
+          parentPath:node.parent_path??parentPathOf(node.node_path),
+          ordinal:node.ordinal||0,
+          requirement:node.requirement_text,
+          sourceKind:node.source_kind,
+          sourceRef:node.source_ref,
+          status:text(node.node_status||node.status)||'pending',
+          decisionType:'ATOMIC',
+          decisionPayload:nextDecisionPayload,
+          contextPayload:node.context_payload||{},
+          resultArtifact:node.result_artifact||null,
+        });
+        node={
+          ...node,
+          ...persisted,
+          decision_payload:nextDecisionPayload,
+          context_payload:node.context_payload||{},
+        };
+        console.log('AAU_AGENT_THINKING_MODE_DECIDED',JSON.stringify({
+          agent_id:agentId,
+          intent_execution_id:intentExecutionId,
+          node_path:node.node_path,
+          mode:atomicThinkingDecision.mode,
+          task_characterization:atomicThinkingDecision.task_characterization,
+          self_assessed_ambiguity:atomicThinkingDecision.self_assessed_ambiguity,
+          rationale_codes:atomicThinkingDecision.rationale_codes,
+          provider_failure_observation_count:providerFailureObservations.length,
+          policy:'agent_authored_per_attempt_v0_1',
+        }));
+      }
+    }
+
     const atomicExecutionBaseBudget=Math.max(1,Number(stageBudgets.atomic_execution||7000));
     const atomicExecutionBudgetForAttempt=attempt=>{
       if(!mathRetryState?.required)return atomicExecutionBaseBudget;
@@ -8546,7 +8725,8 @@ export async function runAutonomousRequirementCognition({
           continuation_contract:'atomic_truncation_continuation_v0_1',
         })},
       ],Math.min(16000,Math.max(10000,atomicExecutionBudgetForAttempt(2))),
-      'req_'+node.node_path.replaceAll('.','_')+'_atomic_continuation_1');
+      'req_'+node.node_path.replaceAll('.','_')+'_atomic_continuation_1',
+      {thinkingMode:atomicThinkingDecision?.mode||'on'});
       return response?.parsed;
     };
 
@@ -8615,7 +8795,9 @@ export async function runAutonomousRequirementCognition({
               available_context_index:mathRetryState?.required?[]:idx,
               available_supplied_context_index:indexObject(correctionSuppliedContext()),
             })},
-          ],atomicExecutionBudgetForAttempt(attempt),'req_'+node.node_path.replaceAll('.','_')+'_atomic_'+attempt);
+          ],atomicExecutionBudgetForAttempt(attempt),
+          'req_'+node.node_path.replaceAll('.','_')+'_atomic_'+attempt,
+          {thinkingMode:atomicThinkingDecision?.mode||'on'});
           parsed=response?.parsed;
           break;
         }catch(error){
