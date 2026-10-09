@@ -260,6 +260,8 @@ async function rpc(name, args = {}) {
   const heavySchedulerRpc = name === 'aau_bridge_begin_model_intent_execution'
     || name === 'aau_bridge_apply_model_intent_execution';
   const requirementNodeCheckpointRpc = name === 'aau_bridge_cognition_requirement_node_v0_1';
+  const cognitionStepCheckpointRpc = name === 'aau_bridge_cognition_step_checkpoint';
+  const durableCheckpointRpc = requirementNodeCheckpointRpc || cognitionStepCheckpointRpc;
   const rpcArgs = { p_bridge_token: bridge, ...args };
   const url = heavySchedulerRpc
     ? `${SB}/functions/v1/aau-scheduler-rpc`
@@ -269,7 +271,8 @@ async function rpc(name, args = {}) {
   // If this ever fails locally, retrying cannot help. PGRST102 after this point means
   // PostgREST did not receive/parse the same valid JSON bytes we produced here.
   JSON.parse(serializedBody);
-  const maxAttempts = requirementNodeCheckpointRpc ? 3 : 1;
+  const maxAttempts = durableCheckpointRpc ? 3 : 1;
+  const rpcTimeoutMs = heavySchedulerRpc ? 120000 : durableCheckpointRpc ? 20000 : 60000;
   let lastError = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -279,14 +282,16 @@ async function rpc(name, args = {}) {
         method: 'POST',
         headers: { apikey: anon, authorization: `Bearer ${anon}`, 'content-type': 'application/json' },
         body: serializedBody,
+        signal: AbortSignal.timeout(rpcTimeoutMs),
       });
     } catch (fetchError) {
       lastError = fetchError;
-      if (!requirementNodeCheckpointRpc || attempt >= maxAttempts) throw fetchError;
-      console.warn('AAU_REQUIREMENT_NODE_RPC_RETRY', JSON.stringify({
+      if (!durableCheckpointRpc || attempt >= maxAttempts) throw fetchError;
+      console.warn(cognitionStepCheckpointRpc ? 'AAU_COGNITION_STEP_RPC_RETRY' : 'AAU_REQUIREMENT_NODE_RPC_RETRY', JSON.stringify({
         name,
         attempt,
-        reason: 'transport_error',
+        reason: 'transport_or_timeout',
+        timeout_ms: rpcTimeoutMs,
         message: String(fetchError?.message || fetchError).slice(0,500),
         request_body_bytes: Buffer.byteLength(serializedBody),
       }));
@@ -308,7 +313,7 @@ async function rpc(name, args = {}) {
       error.details = body;
       lastError = error;
 
-      if (requirementNodeCheckpointRpc && pgrst102 && attempt < maxAttempts) {
+      if (durableCheckpointRpc && pgrst102 && attempt < maxAttempts) {
         console.warn('AAU_REQUIREMENT_NODE_RPC_RETRY', JSON.stringify({
           name,
           attempt,
@@ -326,8 +331,8 @@ async function rpc(name, args = {}) {
       throw error;
     }
 
-    if (requirementNodeCheckpointRpc && attempt > 1) {
-      console.log('AAU_REQUIREMENT_NODE_RPC_RECOVERED', JSON.stringify({
+    if (durableCheckpointRpc && attempt > 1) {
+      console.log(cognitionStepCheckpointRpc ? 'AAU_COGNITION_STEP_RPC_RECOVERED' : 'AAU_REQUIREMENT_NODE_RPC_RECOVERED', JSON.stringify({
         name,
         attempts: attempt,
         request_body_bytes: Buffer.byteLength(serializedBody),
