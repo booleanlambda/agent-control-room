@@ -3170,9 +3170,10 @@ export async function runAutonomousRequirementCognition({
   const rootReq=extractTriggerRequirement(packet);
   const qda=asObject(packet?.qda_601_context);
   const statePayload=asObject(packet?.state?.state_payload);
+  const providerRecoveryWakeId=text(statePayload.provider_transport_recovery_wake_request_id);
   let providerTransportRecoveryWake=
     statePayload.provider_transport_recovery_pending===true
-    &&text(statePayload.provider_transport_recovery_wake_request_id)===String(intentExecutionId);
+    &&(!providerRecoveryWakeId||providerRecoveryWakeId===String(intentExecutionId));
   const assignmentKey='req:'+sha256({
     agent_id:agentId,
     source_kind:rootReq.source_kind,
