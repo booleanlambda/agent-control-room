@@ -11,7 +11,7 @@ export const DEFAULT_SAFETY_RESERVE_TOKENS=12000;
 export const MAX_IDENTICAL_STRUCTURAL_FAILURES=2;
 export const HARD_STORAGE_PATH_DEPTH=16;
 export const MAX_CHILDREN_PER_SPLIT=16;
-export const MAX_MODEL_TRANSPORT_ATTEMPTS=2;
+export const MAX_MODEL_TRANSPORT_ATTEMPTS=3;
 export const MAX_INHERITED_DEPENDENCY_RESULTS=24;
 export const THRESHOLD_EVIDENCE_POLICY=Object.freeze({
   PASS:'Use PASS only when supplied evidence explicitly satisfies the stated threshold.',
