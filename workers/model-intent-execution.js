@@ -2081,14 +2081,16 @@ async function cognitionStepCheckpoint({agentId,intentExecutionId,assignmentKey,
 }
 
 async function completeDeepJson(model, messages, maxTokens, audit) {
+  const requestedThinking=String(audit?.thinkingMode||'on').toLowerCase()!=='off';
   const result = await callWithCognitionIntegrity(() => modelChatCompletion({
-    model,messages,maxTokens,temperature:0.1,jsonMode:true,enableThinking:true,timeoutMs:900000,runtimeRole:'agent',
+    model,messages,maxTokens,temperature:0.1,jsonMode:true,enableThinking:requestedThinking,timeoutMs:900000,runtimeRole:'agent',
     usageContext:audit,
     idempotencyKey:audit?.transportIdempotencyKey||null,
     transportAttempt:Number(audit?.transportAttempt||1),
   }), audit);
   const explicitReasoningTokens=result?.usage?.completion_tokens_details?.reasoning_tokens;
-  if(explicitReasoningTokens!==undefined&&explicitReasoningTokens!==null
+  if(requestedThinking
+     &&explicitReasoningTokens!==undefined&&explicitReasoningTokens!==null
      &&Number.isFinite(Number(explicitReasoningTokens))
      &&Number(explicitReasoningTokens)<=0){
     await recordRejectedCognition(audit,{
@@ -2134,13 +2136,13 @@ async function completeDeepJson(model, messages, maxTokens, audit) {
 }
 
 async function completeRoutingJson(model, messages, maxTokens, audit) {
-  // Recursive discovery/routing is substantive agent cognition, not a mechanical
-  // control-plane operation. Keep the same bound model with thinking enabled.
-  // The runtime still only validates/persists/routes the agent-authored decision.
+  // Recursive discovery/routing is substantive agent cognition. Thinking remains
+  // ON by default, but an explicit agent-authored per-attempt mode may override it.
   const requested=Math.max(1800,Number(maxTokens)||1800);
+  const requestedThinking=String(audit?.thinkingMode||'on').toLowerCase()!=='off';
   const result = await callWithCognitionIntegrity(() => modelChatCompletion({
     model,messages,maxTokens:requested,
-    temperature:0.1,jsonMode:true,enableThinking:true,timeoutMs:900000,runtimeRole:'agent',
+    temperature:0.1,jsonMode:true,enableThinking:requestedThinking,timeoutMs:900000,runtimeRole:'agent',
     usageContext:audit,
     idempotencyKey:audit?.transportIdempotencyKey||null,
     transportAttempt:Number(audit?.transportAttempt||1),
@@ -2344,6 +2346,7 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
         transportIdempotencyKey:transport.idempotencyKey||null,
         transportAttempt:Number(transport.attempt||1),
         transportRetryContract:transport.contract||null,
+        thinkingMode:transport.thinkingMode||null,
       }
     ),
     completeSerializeJson:(messages,maxTokens,phase,transport={})=>completeProtocolSerializeJson(
@@ -2352,6 +2355,7 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
         transportIdempotencyKey:transport.idempotencyKey||null,
         transportAttempt:Number(transport.attempt||1),
         transportRetryContract:transport.contract||null,
+        thinkingMode:transport.thinkingMode||null,
       }
     ),
     completeJson:(messages,maxTokens,phase,transport={})=>completeDeepJson(
@@ -2360,6 +2364,7 @@ async function runDeepCognition(model, packet, modeInfo, agentId, intentExecutio
         transportIdempotencyKey:transport.idempotencyKey||null,
         transportAttempt:Number(transport.attempt||1),
         transportRetryContract:transport.contract||null,
+        thinkingMode:transport.thinkingMode||null,
       }
     ),
   });
