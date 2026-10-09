@@ -120,6 +120,16 @@ begin
          'intent_pending',false,
          'between_cognition_ticks',false,
          'inactive_between_wakes',false,
+         'provider_transport_sleep',false,
+         'provider_transport_woke_at',
+           case
+             when coalesce((v_q.metadata->>'provider_transport_recovery_pending')::boolean,false)
+               then now()
+             else coalesce(
+               nullif(state_payload->>'provider_transport_woke_at','')::timestamptz,
+               now()
+             )
+           end,
          'last_wake_at',now()
        ),
        updated_at=now()
