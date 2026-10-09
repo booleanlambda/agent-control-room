@@ -1046,12 +1046,18 @@ declare
   v_payload jsonb;
   v_dual_enabled boolean := false;
   v_allowlist jsonb := '[]'::jsonb;
+  v_provider_recovery_resume boolean := false;
 begin
   select * into v_agent from agent_lab.agents where agent_id=p_agent_id and status<>'archived';
   if v_agent.agent_id is null then raise exception 'agent_missing_or_archived'; end if;
   if nullif(btrim(coalesce(v_agent.primary_model_provider,'')),'') is null or nullif(btrim(coalesce(v_agent.primary_model_id,'')),'') is null then raise exception 'agent_model_binding_missing'; end if;
   select * into v_run from agent_lab.autonomous_lifecycle_runs where agent_id=p_agent_id;
   if v_run.run_id is null then raise exception 'autonomous_lifecycle_missing'; end if;
+
+  select coalesce((s.state_payload->>'provider_transport_attempts_exhausted')::boolean,false)
+    into v_provider_recovery_resume
+    from agent_lab.state s
+   where s.agent_id=p_agent_id;
   -- Two-agent experimental mode is an explicit, exact-ID allowlist; all
   -- other agents retain the isolated single-agent restart guard.
   select coalesce((metadata->>'dual_agent_mode_enabled')::boolean,false),
@@ -1105,7 +1111,26 @@ begin
     else jsonb_build_object('reason','Administrator resumed autonomous lifecycle from Agent Control Room.') end;
 
   insert into agent_lab.wake_queue(agent_id,source_kind,trigger_type,priority,status,due_at,payload,metadata)
-  values(p_agent_id,'manual',v_trigger,1,'queued',now(),v_payload,jsonb_build_object('autonomous_lifecycle',true,'operator_resume',true,'admin_chat',v_message_id is not null,'admin_chat_message_id',v_message_id,'protocol_version','next_intent_protocol_v0_1','intent_timing_version','intent_timing_v0_2','operator_control_room',true))
+  values(
+    p_agent_id,'manual',v_trigger,1,'queued',now(),v_payload,
+    jsonb_build_object(
+      'autonomous_lifecycle',true,
+      'operator_resume',true,
+      'admin_chat',v_message_id is not null,
+      'admin_chat_message_id',v_message_id,
+      'protocol_version','next_intent_protocol_v0_1',
+      'intent_timing_version','intent_timing_v0_2',
+      'operator_control_room',true
+    )
+    ||case when v_provider_recovery_resume then jsonb_build_object(
+      'provider_transport_recovery_pending',true,
+      'provider_transport_recovery_contract','provider_transport_window_v0_1',
+      'provider_transport_batch_count',0,
+      'provider_transport_total_attempts',0,
+      'provider_failure_not_cognition_failure',true,
+      'provider_operator_resume',true
+    ) else '{}'::jsonb end
+  )
   returning wake_request_id into v_wake_id;
 
   if v_message_id is not null then
@@ -1127,11 +1152,71 @@ begin
           'resumed_by','agent_control_room_admin',
           'admin_control_version','admin_control_v0_2',
           'last_repair_cleared_at',now(),
-          'last_repair_clear_reason','explicit_admin_unpause'
+          'last_repair_clear_reason','explicit_admin_unpause',
+          'provider_operator_resume',v_provider_recovery_resume,
+          'provider_operator_resume_wake_request_id',
+            case when v_provider_recovery_resume then v_wake_id else null end
         ),
       updated_at=now()
   where agent_id=p_agent_id;
-  update agent_lab.state set state_payload=(coalesce(state_payload,'{}'::jsonb)-'paused_at'-'pause_reason'-'repair_pause_reason')||jsonb_build_object('system_paused',false,'awake',true,'sleeping',false,'wake_pending',true,'intent_pending',true,'between_cognition_ticks',false,'inactive_between_wakes',false,'wake_pending_since',now(),'intent_pending_since',now(),'admin_control_version','admin_control_v0_2'),updated_at=now() where agent_id=p_agent_id;
+  update agent_lab.state
+     set state_payload=(
+           coalesce(state_payload,'{}'::jsonb)
+           -'paused_at'-'pause_reason'-'repair_pause_reason'
+           -'semantic_runtime_terminal_code'-'semantic_runtime_terminal_at'
+         )
+         ||jsonb_build_object(
+           'system_paused',false,
+           'awake',true,
+           'sleeping',false,
+           'wake_pending',true,
+           'intent_pending',true,
+           'between_cognition_ticks',false,
+           'inactive_between_wakes',false,
+           'wake_pending_since',now(),
+           'intent_pending_since',now(),
+           'admin_control_version','admin_control_v0_2'
+         )
+         ||case when v_provider_recovery_resume then jsonb_build_object(
+           'provider_transport_recovery_pending',true,
+           'provider_transport_attempts_exhausted',false,
+           'provider_transport_recovery_wake_request_id',v_wake_id,
+           'provider_transport_batch_count',0,
+           'provider_transport_total_attempts',0,
+           'provider_transport_recovery_contract','provider_transport_window_v0_1',
+           'provider_failure_not_cognition_failure',true,
+           'provider_operator_resume_at',now()
+         ) else '{}'::jsonb end,
+         updated_at=now()
+   where agent_id=p_agent_id;
+
+  if v_provider_recovery_resume then
+    update agent_lab.cognition_assignment_runtime r
+       set status='active',
+           metadata=(
+             coalesce(r.metadata,'{}'::jsonb)
+             -'block_reason'
+             -'repeat_count'
+             -'repeated_state_fingerprint'
+           ) || jsonb_build_object(
+             'provider_operator_resume_at',now(),
+             'provider_operator_resume_wake_request_id',v_wake_id,
+             'provider_transport_recovery_contract','provider_transport_window_v0_1',
+             'provider_failure_not_cognition_failure',true,
+             'provider_cycle_guard_reopened',true,
+             'history_preserved',true,
+             'budget_preserved',true
+           ),
+           updated_at=now()
+     where r.runtime_id=(
+       select r2.runtime_id
+       from agent_lab.cognition_assignment_runtime r2
+       where r2.agent_id=p_agent_id
+       order by r2.epoch_no desc
+       limit 1
+     )
+       and r.status='blocked';
+  end if;
   update agent_lab.agent_existence_accounts
   set account_state='current',levy_enabled=true,next_due_at=now()+interval '1 minute',
       metadata=(coalesce(metadata,'{}'::jsonb)-'suspended_reason'-'suspended_at'-'failed_wake_request_id')
@@ -1154,7 +1239,16 @@ begin
     and status='open';
   update agent_lab.runtime_config set metadata=coalesce(metadata,'{}'::jsonb)||jsonb_build_object('current_experimental_agent_id',p_agent_id,'current_experimental_agent_label',v_agent.internal_label,'current_runtime_mode',case when v_dual_enabled then 'dual_agent_autonomous_model_serial' else 'single_agent_autonomous_model' end,'experimental_intent_loop_state','running','experimental_intent_loop_reason',null,'global_pause',true,'admin_control_version','admin_control_v0_2','intent_timing_version','intent_timing_v0_2','minimum_time_intent_delay_minutes',5),updated_at=now() where config_id=1;
 
-  return jsonb_build_object('status','running','agent_id',p_agent_id,'wake_request_id',v_wake_id,'trigger_type',v_trigger,'pending_chat',v_message_id is not null,'dual_agent_mode',v_dual_enabled);
+  return jsonb_build_object(
+    'status','running',
+    'agent_id',p_agent_id,
+    'wake_request_id',v_wake_id,
+    'trigger_type',v_trigger,
+    'pending_chat',v_message_id is not null,
+    'dual_agent_mode',v_dual_enabled,
+    'provider_recovery_resume',v_provider_recovery_resume,
+    'admin_resume_contract','admin_resume_owner_bound_active_wake_reuse_v0_3_provider_recovery'
+  );
 end;
 $function$
 
