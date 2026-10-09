@@ -3894,15 +3894,18 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
           }));
           return null;
         });
-        console.warn('AAU_MODEL_TRANSPORT_DURABLE_CONTINUATION',JSON.stringify({
+        console.warn('AAU_MODEL_PROVIDER_RECOVERY_WINDOW',JSON.stringify({
           intent_execution_id:requestedIntentExecutionId,
           transport_kind:transportFailure.transport_kind||null,
           transport_status:transportFailure.transport_status||null,
-          continuation_result:transportContinuation,
+          recovery_result:transportContinuation,
+          recovery_status:transportContinuation?.status||null,
+          provider_transport_batch_count:transportContinuation?.provider_transport_batch_count||null,
+          provider_transport_total_attempts:transportContinuation?.provider_transport_total_attempts||null,
+          retry_due_at:transportContinuation?.due_at||null,
           semantic_state_preserved:true,
-          account_suspension_forbidden:true,
-          counter_source:'durable_no_progress_guard_not_wake_attempts',
-          contract:'provider_transport_durable_continuation_v0_1',
+          semantic_cycle_lock_excluded:true,
+          contract:'provider_transport_window_v0_1',
         }));
       } else if (cognitionRuntimeFault) {
         await rpc('aau_bridge_hold_cognition_runtime_fault_v0_1',{
