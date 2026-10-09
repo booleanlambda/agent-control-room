@@ -205,6 +205,26 @@ begin
      where agent_id=v_agent_id
        and status in ('starting','running','degraded','paused');
 
+    update agent_lab.agent_existence_accounts
+       set metadata=coalesce(metadata,'{}'::jsonb)||jsonb_build_object(
+             'provider_cooldown_previous_account_state',
+               case
+                 when account_state='suspended'
+                   then coalesce(nullif(metadata->>'provider_cooldown_previous_account_state',''),'current')
+                 else account_state
+               end,
+             'provider_cooldown_sleep_started_at',now(),
+             'provider_cooldown_until',v_due,
+             'provider_cooldown_freezes_existence_levy',true,
+             'provider_cooldown_elapsed_time_billed',false,
+             'provider_cooldown_contract','provider_transport_sleep_v0_1'
+           ),
+           account_state='suspended',
+           levy_enabled=false,
+           next_due_at=null,
+           updated_at=now()
+     where agent_id=v_agent_id;
+
     update agent_lab.state
        set state_payload=(
              coalesce(state_payload,'{}'::jsonb)
