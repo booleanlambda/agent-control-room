@@ -8112,10 +8112,49 @@ export async function runAutonomousRequirementCognition({
       // a missing/invalid check-packaging contract BEFORE asking the serializer
       // to repair coverage. A serializer must never be asked to manufacture a
       // different expression merely to make an incorrect claimed result pass.
+      const frozenArtifactChecks=qdaVerifiedPythonChecksFromArtifact(artifactObject);
+      const frozenArtifactRows=
+        frozenArtifactChecks?.type_ok===true
+          ?asArray(frozenArtifactChecks.value)
+          :[];
+      const uniqueFrozenCheckForTarget=target=>{
+        const targetValue=
+          typeof target?.claimed_result==='number'&&Number.isFinite(target.claimed_result)
+            ?target.claimed_result
+            :typeof target?.stated_result==='number'&&Number.isFinite(target.stated_result)
+              ?target.stated_result
+              :null;
+        if(targetValue===null)return null;
+        const tolerance=Math.max(0.005,Math.abs(targetValue)*1e-9);
+        const candidates=frozenArtifactRows.filter(check=>{
+          const claimed=check?.claimed_result;
+          return (
+            typeof claimed==='number'
+            &&Number.isFinite(claimed)
+            &&Math.abs(claimed-targetValue)<=tolerance
+            &&text(check?.expression)
+          );
+        });
+        return candidates.length===1?candidates[0]:null;
+      };
+
       const substantiveMismatches=[];
       for(const target of materialTargets){
-        const expression=text(target?.deterministic_expression);
-        const claimedResult=target?.claimed_result;
+        let expression=text(target?.deterministic_expression);
+        let claimedResult=target?.claimed_result;
+        let evidenceSource='material_target_expression';
+        if(
+          (!expression||typeof claimedResult!=='number'||!Number.isFinite(claimedResult))
+          &&typeof target?.stated_result==='number'
+          &&Number.isFinite(target.stated_result)
+        ){
+          const frozenCandidate=uniqueFrozenCheckForTarget(target);
+          if(frozenCandidate){
+            expression=text(frozenCandidate.expression);
+            claimedResult=target.stated_result;
+            evidenceSource='frozen_artifact_python_check';
+          }
+        }
         if(!expression||typeof claimedResult!=='number'||!Number.isFinite(claimedResult)){
           continue;
         }
@@ -8144,6 +8183,7 @@ export async function runAutonomousRequirementCognition({
             absolute_tolerance:row.absolute_tolerance??null,
             relative_tolerance:row.relative_tolerance??null,
             error_code:row.error_code??null,
+            evidence_source:evidenceSource,
           });
         }
       }
@@ -8238,11 +8278,7 @@ export async function runAutonomousRequirementCognition({
           }
         }
 
-        const existingVerifiedChecks=qdaVerifiedPythonChecksFromArtifact(artifactObject);
-        const existingVerifiedRows=
-          existingVerifiedChecks?.type_ok===true
-            ?asArray(existingVerifiedChecks.value)
-            :[];
+        const existingVerifiedRows=frozenArtifactRows;
 
         const matchingFrozenCheckForTarget=target=>{
           const targetValue=
