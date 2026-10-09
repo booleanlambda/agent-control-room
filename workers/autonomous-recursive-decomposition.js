@@ -5117,7 +5117,11 @@ export async function runAutonomousRequirementCognition({
 
   async function callWithChargedTransportRetry(
     fn,messages,maxTokens,phase,kind,
-    {thinkingMode=null,clearProviderRecoveryOnSuccess=true}={}
+    {
+      thinkingMode=null,
+      clearProviderRecoveryOnSuccess=true,
+      transportWindow=null,
+    }={}
   ){
     let lastError=null;
     const transportRequestKey='aau-'+sha256({
@@ -5146,6 +5150,11 @@ export async function runAutonomousRequirementCognition({
           thinkingMode,
         });
         await settleModelCall(reservation,{response});
+        if(transportWindow&&typeof transportWindow==='object'){
+          transportWindow.consecutive_failures=0;
+          transportWindow.last_success_phase=phase;
+          transportWindow.last_success_at=new Date().toISOString();
+        }
         if(providerTransportRecoveryWake&&clearProviderRecoveryOnSuccess){
           await rpc('aau_bridge_clear_model_provider_transport_recovery_v0_1',{
             p_intent_execution_id:intentExecutionId,
@@ -5171,6 +5180,47 @@ export async function runAutonomousRequirementCognition({
       }catch(error){
         lastError=error;
         await settleModelCall(reservation,{error});
+        const transportTransient=retryableModelTransportError(error);
+        if(
+          transportTransient
+          &&transportWindow
+          &&typeof transportWindow==='object'
+        ){
+          const windowLimit=Math.max(
+            1,
+            Math.floor(Number(transportWindow.max_consecutive_failures)||MAX_MODEL_TRANSPORT_ATTEMPTS)
+          );
+          transportWindow.consecutive_failures=
+            Math.max(0,Number(transportWindow.consecutive_failures)||0)+1;
+          transportWindow.total_failures=
+            Math.max(0,Number(transportWindow.total_failures)||0)+1;
+          transportWindow.last_failure_phase=phase;
+          transportWindow.last_failure_at=new Date().toISOString();
+          transportWindow.last_failure_error=String(error?.message||error).slice(0,500);
+          if(transportWindow.consecutive_failures>=windowLimit){
+            error.providerTransportWindowExhausted=true;
+            error.providerTransportWindow={
+              contract:'shared_verification_transport_window_v0_1',
+              label:text(transportWindow.label)||null,
+              max_consecutive_failures:windowLimit,
+              consecutive_failures:transportWindow.consecutive_failures,
+              total_failures:transportWindow.total_failures,
+              last_failure_phase:phase,
+            };
+            console.warn('AAU_PROVIDER_TRANSPORT_WINDOW_EXHAUSTED',JSON.stringify({
+              agent_id:agentId,
+              intent_execution_id:intentExecutionId,
+              assignment_key:assignmentKey,
+              phase,
+              label:text(transportWindow.label)||null,
+              consecutive_failures:transportWindow.consecutive_failures,
+              total_failures:transportWindow.total_failures,
+              max_consecutive_failures:windowLimit,
+              policy:'shared_verification_transport_window_v0_1',
+            }));
+            throw error;
+          }
+        }
         const retryPolicy=modelTransportRetryPolicy({
           error,
           attempt,
@@ -7678,6 +7728,12 @@ export async function runAutonomousRequirementCognition({
       failure:verification.error,
       contract:'qda_statistical_analysis_contract_repair_v0_2',
     });
+    const verificationTransportWindow={
+      label:'qda_statistical_analysis_contract_repair',
+      max_consecutive_failures:MAX_MODEL_TRANSPORT_ATTEMPTS,
+      consecutive_failures:0,
+      total_failures:0,
+    };
     const durable=await loadJsonPhaseCheckpoint(
       node.node_path,'STATISTICAL_ANALYSIS_CONTRACT_REPAIR',repairIdentity
     );
@@ -7785,7 +7841,8 @@ export async function runAutonomousRequirementCognition({
             compact_repair_attempt:compactAttempt,
           })},
         ],stageBudgets.atomic_execution,
-        'req_'+node.node_path.replaceAll('.','_')+'_statistics_contract_repair_'+compactAttempt);
+        'req_'+node.node_path.replaceAll('.','_')+'_statistics_contract_repair_'+compactAttempt,
+        {transportWindow:verificationTransportWindow});
 
         analyses=normalizeAnalyses(response?.parsed?.python_analyses);
         verified=verifyAnalyses(analyses);
@@ -7883,6 +7940,12 @@ export async function runAutonomousRequirementCognition({
       required_check_count:requiredCheckCount,
       contract:'qda_math_check_contract_repair_v0_2_batched',
     });
+    const verificationTransportWindow={
+      label:'qda_math_check_contract_repair',
+      max_consecutive_failures:MAX_MODEL_TRANSPORT_ATTEMPTS,
+      consecutive_failures:0,
+      total_failures:0,
+    };
     const durable=await loadJsonPhaseCheckpoint(
       node.node_path,'MATH_CHECK_CONTRACT_REPAIR',repairIdentity
     );
@@ -8215,7 +8278,9 @@ export async function runAutonomousRequirementCognition({
           // Math-check repair is a protocol packaging task. It is permanently
           // serializer-only: no path may escalate a single check into deep
           // cognition or a multi-thousand-token response.
-          const response=await callSerialize(messages,900,phase);
+          const response=await callSerialize(
+            messages,900,phase,{transportWindow:verificationTransportWindow}
+          );
           const normalized=qdaNormalizeMathCheckBatchResponse(
             response?.parsed,targetSubset.length
           );
@@ -8269,6 +8334,7 @@ export async function runAutonomousRequirementCognition({
             try{
               one=await callBatch([target],'_single_'+String(index+1));
             }catch(firstError){
+              if(firstError?.providerTransportWindowExhausted===true)throw firstError;
               // One bounded serializer retry may use verifier feedback. Never
               // escalate deterministic packaging into deep reasoning.
               console.warn('AAU_QDA_MATH_CHECK_SINGLE_SERIALIZER_RETRY',JSON.stringify({
@@ -8287,6 +8353,7 @@ export async function runAutonomousRequirementCognition({
                   firstError?.verification||{error:clip(String(firstError?.message||firstError),300)}
                 );
               }catch(secondError){
+                if(secondError?.providerTransportWindowExhausted===true)throw secondError;
                 const error=new Error('qda_math_check_singleton_bounded_repair_exhausted');
                 error.code='QDA_MATH_CHECK_SINGLETON_REPAIR_EXHAUSTED';
                 error.cause=secondError;
@@ -8322,6 +8389,7 @@ export async function runAutonomousRequirementCognition({
             batchChecks=await callBatch(batchTargets,'');
           }
         }catch(error){
+          if(error?.providerTransportWindowExhausted===true)throw error;
           const singletonBatch=batchTargets.length===1;
           console.warn(
             singletonBatch
