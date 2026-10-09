@@ -29,7 +29,10 @@ import {
   calculatePythonMathExpressions,
 } from './python-math.js';
 import { runPythonStatisticalAnalysesChunked } from './python-quant.js';
-import { materializeQda601UnitFromVerifiedChildren } from './qda601-runtime.js';
+import {
+  materializeQda601UnitFromVerifiedChildren,
+  qdaVerifiedPythonChecksFromArtifact,
+} from './qda601-runtime.js';
 
 // AAU autonomous recursive decomposition v0.1
 // The bound agent authors decomposition. Runtime only persists/routes/checkpoints.
@@ -8235,7 +8238,52 @@ export async function runAutonomousRequirementCognition({
           }
         }
 
+        const existingVerifiedChecks=qdaVerifiedPythonChecksFromArtifact(artifactObject);
+        const existingVerifiedRows=
+          existingVerifiedChecks?.type_ok===true
+            ?asArray(existingVerifiedChecks.value)
+            :[];
+
+        const matchingFrozenCheckForTarget=target=>{
+          const targetValue=
+            typeof target?.claimed_result==='number'&&Number.isFinite(target.claimed_result)
+              ?target.claimed_result
+              :typeof target?.stated_result==='number'&&Number.isFinite(target.stated_result)
+                ?target.stated_result
+                :null;
+          if(targetValue===null)return null;
+
+          const tolerance=Math.max(0.005,Math.abs(targetValue)*1e-9);
+          const candidates=existingVerifiedRows.filter(check=>{
+            const claimed=check?.claimed_result;
+            return (
+              typeof claimed==='number'
+              &&Number.isFinite(claimed)
+              &&Math.abs(claimed-targetValue)<=tolerance
+              &&text(check?.expression)
+            );
+          });
+          for(const candidate of candidates){
+            const rebound={
+              ...asObject(candidate),
+              label:text(target?.path)+' :: '+(text(candidate?.label)||'frozen deterministic calculation'),
+              problem:text(target?.path),
+              claimed_result:targetValue,
+            };
+            const verification=verifyPythonMathChecksChunked(
+              [rebound],{absoluteTolerance:0.005,relativeTolerance:1e-9}
+            );
+            if(verification.ok===true&&verification.all_match===true){
+              return rebound;
+            }
+          }
+          return null;
+        };
+
         const localCheckForTarget=target=>{
+          const frozenMatch=matchingFrozenCheckForTarget(target);
+          if(frozenMatch)return frozenMatch;
+
           const expression=text(target?.deterministic_expression);
           const claimedResult=target?.claimed_result;
           if(!expression||typeof claimedResult!=='number'||!Number.isFinite(claimedResult)){
