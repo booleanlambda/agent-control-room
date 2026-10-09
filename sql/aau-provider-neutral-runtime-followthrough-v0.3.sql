@@ -1211,7 +1211,9 @@ begin
      where r.runtime_id=(
        select r2.runtime_id
        from agent_lab.cognition_assignment_runtime r2
+       join agent_lab.state s2 on s2.agent_id=r2.agent_id
        where r2.agent_id=p_agent_id
+         and r2.assignment_key=s2.state_payload->>'semantic_runtime_active_assignment_key'
        order by r2.epoch_no desc
        limit 1
      )
