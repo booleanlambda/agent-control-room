@@ -124,11 +124,8 @@ begin
          'provider_transport_woke_at',
            case
              when coalesce((v_q.metadata->>'provider_transport_recovery_pending')::boolean,false)
-               then now()
-             else coalesce(
-               nullif(state_payload->>'provider_transport_woke_at','')::timestamptz,
-               now()
-             )
+               then now()::text
+             else state_payload->>'provider_transport_woke_at'
            end,
          'last_wake_at',now()
        ),
