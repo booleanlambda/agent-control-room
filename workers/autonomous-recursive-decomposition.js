@@ -10061,6 +10061,23 @@ export async function runAutonomousRequirementCognition({
     }
     const resultArtifact=JSON.stringify({artifact,handoff});
     const completionDecisionPayload={...(node.decision_payload||{})};
+    // Completion retains immutable phase checkpoints and authoritative artifact.
+    // Avoid re-persisting all previous routing/transport attempts in the
+    // strictly bounded cognition node decision payload.
+    for(const key of [
+      'routing_discovery_checkpoint','routing_discovery_checkpointed',
+      'routing_discovery_checkpointed_at','routing_discovery_reused',
+      'routing_commit_serialized','sibling_overlap_validation',
+      'context_resource_state','context_resource_after_round',
+      'prior_atomic_rejection','atomic_overflow_recovery',
+      'discovery_loop_guard','context_requests','research_queries',
+      'research_urls','context_supplied','autonomous_evidence_window',
+      'evidence_ceiling_resolution','structured_scope_validation',
+      'force_reconsider','convergence_similarity',
+      'thinking_mode_decision','provenance_review','atomic_execution_failures'
+    ]) delete completionDecisionPayload[key];
+    completionDecisionPayload.completion_state_compaction=
+      'atomic_verified_checkpoint_references_v0_1';
     const completionContextPayload={...(node.context_payload||{})};
     if(!finalMathVerification.required){
       for(const key of [
@@ -10089,7 +10106,8 @@ export async function runAutonomousRequirementCognition({
         ...(finalMathVerification.required?{
           deterministic_math_verified:true,
           deterministic_math_check_count:finalMathVerification.check_count,
-          deterministic_math_verification:finalMathVerification,
+          deterministic_math_verification:
+            compactMathVerificationForPersistence(finalMathVerification),
         }:{}),
         ...(finalStatisticsVerification.required?{
           deterministic_statistics_verified:true,
