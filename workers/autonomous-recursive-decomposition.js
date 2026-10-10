@@ -32,6 +32,7 @@ import { runPythonStatisticalAnalysesChunked } from './python-quant.js';
 import { reconcileEvidenceClaims } from './claim-evidence-continuity.js';
 import { claimEvidenceContractForRequirement, projectDeclaredSynthesisInputs } from './claim-evidence-contracts.js';
 import { normalizeDeclaredEvidenceSourceRows, selectDeclaredEvidenceSourceChildren } from './claim-evidence-source-adapter.js';
+import { projectDeclaredVerifiedChecks } from './claim-evidence-check-transport.js';
 import {
   encodeNodeDecisionPayload,
   decodeNodeDecisionPayload,
@@ -10749,7 +10750,7 @@ export async function runAutonomousRequirementCognition({
       deterministic_guard:'verified_child_quantitative_evidence_v0_1',
     };
   }
-  async function materializeQdaQuantitativeFromVerifiedDescendants(node,artifact){
+  async function materializeQdaQuantitativeFromVerifiedDescendants(node,artifact,childRows=[]){
     // Quantitative verification is subtree-scoped, not depth-scoped. Any QDA
     // split node may inherit deterministic evidence from verified atomic leaves
     // beneath it, regardless of how deeply the bound agent decomposed the work.
@@ -10770,6 +10771,52 @@ export async function runAutonomousRequirementCognition({
       )
     );
     if(projectedTaskInputs)parsed=projectedTaskInputs;
+    const checksContract=claimEvidenceContractForRequirement(packet,node);
+    if(checksContract?.contract_id===
+      'qda601_m10_u2_problem2_verified_calculation_with_checks_v0_2'){
+      // This parent has an independent checks-only child. Do not traverse
+      // calculation descendants and duplicate or re-prefix verified checks.
+      const calcSources=normalizeDeclaredEvidenceSourceRows(
+        selectDeclaredEvidenceSourceChildren(childRows,checksContract,node.node_path),
+        checksContract
+      );
+      const preflight=reconcileEvidenceClaims({
+        contract:checksContract,children:calcSources,
+        candidate:{calculation:[]},transfer:true,
+      });
+      if(!['PATCHED','VERIFIED'].includes(preflight.status)){
+        const error=new Error('declared_verified_calculation_unresolved:'+
+          (preflight.reason||preflight.status)+':'+node.node_path);
+        error.code='COGNITION_RUNTIME_FAULT';
+        throw error;
+      }
+      const checksProjection=projectDeclaredVerifiedChecks({
+        contract:checksContract,parentPath:node.node_path,
+        children:childRows,candidate:parsed,
+        expectedRows:preflight.artifact.calculation,
+      });
+      if(checksProjection.status!=='PATCHED'){
+        const error=new Error('declared_verified_checks_unresolved:'+
+          (checksProjection.reason||checksProjection.status)+':'+node.node_path);
+        error.code='COGNITION_RUNTIME_FAULT';
+        throw error;
+      }
+      const verified=verifyPythonMathChecksChunked(
+        checksProjection.artifact.python_checks,
+        {absoluteTolerance:0.005,relativeTolerance:1e-9}
+      );
+      if(verified.ok!==true||verified.all_match!==true){
+        const error=new Error('declared_verified_checks_python_reverification_failed:'+
+          node.node_path);
+        error.code='COGNITION_RUNTIME_FAULT';
+        throw error;
+      }
+      return {
+        artifact:checksProjection.artifact,
+        materialized:true,check_count:24,
+        sources:checksProjection.sources,verification:verified,
+      };
+    }
     if([
          'qda_problem_verified_descendant_materialization_v0_1',
          'qda_verified_descendant_materialization_v0_2_recursive',
@@ -10829,7 +10876,9 @@ export async function runAutonomousRequirementCognition({
           ){
             childChecks.forEach(check=>checks.push({
               ...check,
-              label:String(child.node_path)+':'+String(check?.label||'check'),
+              label:String(check?.label||'check').startsWith(String(child.node_path)+':')
+                ?String(check.label)
+                :String(child.node_path)+':'+String(check?.label||'check'),
             }));
             sources.push({
               node_path:child.node_path,
@@ -11704,7 +11753,7 @@ export async function runAutonomousRequirementCognition({
         if(candidateOutcome==='COMPLETE'&&qdaQuantitativeAtomicRequirement(packet,node)){
           const preReviewMaterialization=
             await materializeQdaQuantitativeFromVerifiedDescendants(
-              node,finalCandidate.artifact
+              node,finalCandidate.artifact,childRows
             );
           if(preReviewMaterialization?.artifact){
             finalCandidate.artifact=preReviewMaterialization.artifact;
