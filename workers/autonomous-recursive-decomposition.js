@@ -29,6 +29,8 @@ import {
   calculatePythonMathExpressions,
 } from './python-math.js';
 import { runPythonStatisticalAnalysesChunked } from './python-quant.js';
+import { reconcileEvidenceClaims } from './claim-evidence-continuity.js';
+import { claimEvidenceContractForRequirement } from './claim-evidence-contracts.js';
 import {
   materializeQda601UnitFromVerifiedChildren,
   qdaVerifiedPythonChecksFromArtifact,
