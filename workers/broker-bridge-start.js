@@ -2054,6 +2054,17 @@ if (isEnabled('AAU_REVIEWER_ENDPOINT_SMOKE')) {
 
 await import('./broker-bridge-envcheck.js');
 
+// Synthetic, deterministic state-machine regression. No provider, agent data,
+// DB writes or wakes. Visible failure is nonfatal to broker startup.
+try {
+  const {probeCompletedSplitSynthesisRecovery}=await import('./agent-synthesis-recovery-regression-probe.js');
+  console.log('AAU_SYNTHESIS_RECOVERY_REGRESSION',JSON.stringify(probeCompletedSplitSynthesisRecovery()));
+} catch(error) {
+  console.error('AAU_SYNTHESIS_RECOVERY_REGRESSION_FAILED',JSON.stringify({
+    name:error?.name||null,message:String(error?.message||error).slice(0,300),
+  }));
+}
+
 if (isEnabled('AAU_KIMI_LATENCY_REVIEW')) {
   // Read-only one-shot Kimi review of observed cognition latency. No agent mutation.
   void import('./kimi-cognition-latency-review.js')
