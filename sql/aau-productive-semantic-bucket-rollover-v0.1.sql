@@ -22,10 +22,13 @@ declare
   v_rollovers integer:=0;
   v_max_rollovers integer:=2;
   v_bucket text:=lower(coalesce(p_budget_bucket,''));
+  v_final_checkpoint_id uuid;
 begin
   perform agent_lab.assert_broker_bridge_token(p_bridge_token);
 
-  if v_bucket not in ('reasoning','verification','transport_retry','orchestration') then
+  -- Finalization is a protected budget: permit its rollover only through
+  -- the durable, already-completed final synthesis checkpoint guard below.
+  if v_bucket not in ('reasoning','verification','transport_retry','orchestration','finalization') then
     raise exception 'semantic_bucket_rollover_invalid_bucket';
   end if;
 
@@ -59,6 +62,32 @@ begin
     raise exception 'semantic_bucket_rollover_agent_mismatch';
   end if;
 
+  -- Do not reopen finalization merely because an LLM requested tokens.
+  -- The exact active wake must already have durably committed a nonempty,
+  -- terminal COMPLETE synthesis checkpoint. Provenance and submission still
+  -- run normally on replay; neither is bypassed by the rollover.
+  if v_bucket='finalization' then
+    select c.step_checkpoint_id into v_final_checkpoint_id
+    from agent_lab.cognition_step_checkpoints c
+    where c.agent_id=v_prev.agent_id
+      and c.assignment_key=v_prev.assignment_key
+      and c.source_wake_request_id=v_wake.wake_request_id
+      and c.step_metadata->>'phase'='FINAL_SYNTHESIS'
+      and c.step_metadata->>'synthesis_outcome'='COMPLETE'
+      and c.step_metadata->>'immutable_completed_phase'='true'
+      and length(coalesce(c.artifact,''))>0
+    order by c.created_at desc
+    limit 1;
+    if v_final_checkpoint_id is null then
+      return jsonb_build_object(
+        'status','denied',
+        'reason','finalization_completed_checkpoint_required',
+        'budget_bucket',v_bucket,
+        'runtime_id',v_prev.runtime_id
+      );
+    end if;
+  end if;
+
   if exists(
     select 1
     from agent_lab.cognition_assignment_runtime r
@@ -74,12 +103,26 @@ begin
     );
   end if;
 
-  select count(*)::integer into v_rollovers
-  from agent_lab.cognition_assignment_runtime r
-  where r.agent_id=v_prev.agent_id
-    and r.assignment_key=v_prev.assignment_key
-    and r.model_id=v_prev.model_id
-    and coalesce(r.metadata->>'automatic_bucket_rollover','false')='true';
+  if v_bucket='finalization' then
+    -- This is a separate, one-time, checkpoint-proven completion recovery.
+    -- Do not loosen the existing transport/reasoning rollover policy or
+    -- debit the previous epoch's finalization reserve for the transition.
+    v_max_rollovers:=1;
+    select count(*)::integer into v_rollovers
+    from agent_lab.cognition_assignment_runtime r
+    where r.agent_id=v_prev.agent_id
+      and r.assignment_key=v_prev.assignment_key
+      and r.model_id=v_prev.model_id
+      and r.metadata->>'rollover_bucket'='finalization'
+      and r.metadata->>'rolled_over_from_runtime_id' is not null;
+  else
+    select count(*)::integer into v_rollovers
+    from agent_lab.cognition_assignment_runtime r
+    where r.agent_id=v_prev.agent_id
+      and r.assignment_key=v_prev.assignment_key
+      and r.model_id=v_prev.model_id
+      and coalesce(r.metadata->>'automatic_bucket_rollover','false')='true';
+  end if;
 
   if v_rollovers>=v_max_rollovers then
     return jsonb_build_object(
@@ -139,6 +182,8 @@ begin
       'automatic_bucket_rollover',true,
       'automatic_bucket_rollover_index',v_rollovers+1,
       'rollover_bucket',v_bucket,
+      'finalization_checkpoint_recovery',v_bucket='finalization',
+      'finalization_checkpoint_id',v_final_checkpoint_id,
       'rollover_reason',left(coalesce(p_reason,''),500),
       'rolled_over_at',now(),
       'rolled_over_from_runtime_id',v_prev.runtime_id,
@@ -160,6 +205,8 @@ begin
     'agent_id',v_prev.agent_id,
     'assignment_key',v_prev.assignment_key,
     'budget_bucket',v_bucket,
+    'finalization_checkpoint_recovery',v_bucket='finalization',
+    'finalization_checkpoint_id',v_final_checkpoint_id,
     'previous_runtime_id',v_prev.runtime_id,
     'previous_epoch_no',v_prev.epoch_no,
     'previous_remaining_budget_units',v_prev.remaining_budget_units,
