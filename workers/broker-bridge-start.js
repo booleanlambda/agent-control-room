@@ -1941,7 +1941,17 @@ try {
 }
 
 // Open health and start the broker BEFORE optional embodiment/file workers can delay startup.
-await import('./broker-bridge-envcheck.js');
+if (isEnabled('AAU_BROKER_DISABLED')) {
+  // Keep secondary canary inert with its disabled health server.
+  await import('./broker-bridge-envcheck.js');
+} else {
+  // Production listener is already bound. Unbounded external diagnostics must
+  // never delay cognition workers or other recovery services.
+  void import('./broker-bridge-envcheck.js').catch(error=>
+    console.error('AAU_BROKER_NONBLOCKING_DIAGNOSTICS_FAILED',
+      String(error?.message||error).slice(0,900))
+  );
+}
 
 if (isEnabled('AAU_EMBODIMENT_RENDERER_ENABLED')) {
   try {
@@ -2072,7 +2082,7 @@ if (isEnabled('AAU_REVIEWER_ENDPOINT_SMOKE')) {
   }
 }
 
-await import('./broker-bridge-envcheck.js');
+
 
 // Synthetic, deterministic state-machine regression. No provider, agent data,
 // DB writes or wakes. Visible failure is nonfatal to broker startup.
