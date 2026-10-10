@@ -2181,7 +2181,7 @@ async function completeProtocolSerializeJson(model, messages, maxTokens, audit) 
   // been made and durably checkpointed by the same bound model with Thinking ON.
   const result = await callWithCognitionIntegrity(() => modelChatCompletion({
     model,messages,maxTokens:Math.min(Math.max(300,Number(maxTokens)||700),900),
-    temperature:0,jsonMode:true,enableThinking:false,timeoutMs:120000,runtimeRole:'serializer',
+    temperature:0,jsonMode:true,enableThinking:false,timeoutMs:300000,runtimeRole:'serializer',
     usageContext:audit,
     idempotencyKey:audit?.transportIdempotencyKey||null,
     transportAttempt:Number(audit?.transportAttempt||1),
