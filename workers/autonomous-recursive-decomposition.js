@@ -5209,8 +5209,12 @@ export async function runAutonomousRequirementCognition({
       requestedOutputTokens:maxTokens,
       quantumTokens:semanticRuntime.quantum_tokens,
     });
+    // Reservations are per wake, even if the model prompts are identical.
+    // Reusing a reservation from a canceled wake makes its settlement
+    // obsolete_wake_audit_only, which must never degrade the new execution.
     const eventKey='modelreserve:'+sha256({
       assignment_key:assignmentKey,epoch_no:semanticRuntime.epoch_no,
+      wake_request_id:intentExecutionId,
       phase,attempt,fingerprint,
     }).slice(0,64);
     const budgetClass=semanticModelBudgetClass({phase,kind,attempt});
@@ -5292,8 +5296,20 @@ export async function runAutonomousRequirementCognition({
         error_message:error?String(error?.message||error).slice(0,500):null,
       },
     });
+    if(row?.status==='obsolete_wake_audit_only'){
+      // The DB correctly refused to refund/modify a superseded wake. This is
+      // neither a provider failure nor a failure of the active agent.
+      console.warn('AAU_SUPERSEDED_WAKE_SETTLEMENT_AUDITED',JSON.stringify({
+        agent_id:agentId,intent_execution_id:intentExecutionId,
+        phase:reservation.phase,reservation_event_id:reservation.reservationEventId,
+        authoritative_runtime_mutation:false,
+      }));
+      const e=new Error('cognition_superseded_wake_settlement_audit_only:'+reservation.phase);
+      e.code='COGNITION_SUPERSEDED_WAKE'; throw e;
+    }
     if(row?.status!=='ready'){
-      const e=new Error('autonomous_decomposition_model_call_settlement_failed:'+reservation.phase);
+      const e=new Error('autonomous_decomposition_model_call_settlement_failed:'+reservation.phase+
+        ':status='+String(row?.status||'missing'));
       e.code='COGNITION_RUNTIME_ACCOUNTING_FAULT'; throw e;
     }
     semanticRuntimeSnapshot=row;
