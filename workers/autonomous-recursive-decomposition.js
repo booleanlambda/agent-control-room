@@ -2321,6 +2321,60 @@ export function normalizeExistingSplitDiscoveryDecision(
   return {decision:raw,normalized:false,normalization:null};
 }
 
+
+// A failed final synthesis does not erase an agent-authored, completed split.
+// Permit a *continuation*, not a new decomposition, only when every existing
+// resolved child still matches the failure's durable evidence fingerprints.
+export function eligibleCompletedSplitSynthesisRecovery(failure,continuation,childRows=[]){
+  const problem=asObject(failure);
+  const children=asArray(childRows).filter(row=>
+    String(row?.status||row?.node_status||'').toLowerCase()!=='cancelled'
+  );
+  const expected=asArray(problem.child_result_hashes);
+  if(!Object.keys(problem).length||continuation?.available!==true
+     ||!children.length||expected.length!==children.length)return false;
+  const observed=new Map(children.map(row=>[
+    text(row?.node_path),
+    {
+      status:text(row?.status||row?.node_status).toLowerCase(),
+      result_hash:text(row?.result_hash),
+    },
+  ]));
+  if(observed.size!==children.length)return false;
+  if(!children.every(row=>['completed','blocked'].includes(
+    text(row?.status||row?.node_status).toLowerCase()
+  )))return false;
+  return expected.every(row=>{
+    const found=observed.get(text(row?.path));
+    return Boolean(found&&found.status===text(row?.status).toLowerCase()
+      &&found.result_hash&&found.result_hash===text(row?.result_hash));
+  });
+}
+
+export function synthesisRecoveryAvailableDecisions({
+  remediationAvailable=false,existingCompletedSplit=false,evidenceAcquisitionClosed=false
+}={}){
+  return [
+    ...(remediationAvailable?['REMEDIATE']:[]),
+    ...(existingCompletedSplit?['SPLIT']:[]),
+    ...(!evidenceAcquisitionClosed?['NEED_CONTEXT']:[]),
+    'BLOCKED',
+  ];
+}
+
+// A committed recovery split bypasses the *one* discovery-precedence redirect
+// for the same synthesis failure. A subsequent failure gets a new failed_at,
+// and must go back through the agent's recovery decision again.
+export function failedSynthesisNeedsDiscovery(node){
+  const payload=asObject(node?.decision_payload);
+  const failure=asObject(payload.synthesis_failure);
+  if(!Object.keys(failure).length)return false;
+  const resume=asObject(payload.synthesis_recovery_existing_split_committed);
+  return !(resume.contract==='existing_split_synthesis_recovery_v0_1'
+    &&text(resume.failure_at)
+    &&text(resume.failure_at)===text(failure.failed_at));
+}
+
 export function budgetConstrainedSplitAction(authoredCount,currentChildCapacity){
   const authored=Math.max(0,Math.floor(Number(authoredCount)||0));
   const capacity=Math.floor(Number(currentChildCapacity)||0);
@@ -5428,15 +5482,21 @@ export async function runAutonomousRequirementCognition({
         node,durableRoutingChildren
       );
       // A synthesis failure is downstream of successful decomposition. An old
-      // atomic-overflow marker must not force the already-resolved parent back
-      // into SPLIT or hide REMEDIATE. At this boundary the agent owns recovery:
-      // repair the synthesis, request genuinely missing context, or conclude BLOCKED.
+      // atomic-overflow marker must not force new child authoring or hide
+      // REMEDIATE. Existing resolved children can be resumed via SPLIT when
+      // their hashes match the failed-synthesis checkpoint.
+      const existingCompletedSplitRecovery=synthesisRecoveryRouting
+        &&eligibleCompletedSplitSynthesisRecovery(
+          synthesisFailure,existingSplitContinuation,durableRoutingChildren
+        );
+      // Recovery and completed-split continuation must offer the same legal
+      // action. SPLIT here reuses preserved children; it never authors new ones.
       const availableDecisions=synthesisRecoveryRouting
-        ? [
-            ...(remediationAvailable?['REMEDIATE']:[]),
-            ...(!evidenceAcquisitionClosed?['NEED_CONTEXT']:[]),
-            'BLOCKED',
-          ]
+        ? synthesisRecoveryAvailableDecisions({
+            remediationAvailable,
+            existingCompletedSplit:existingCompletedSplitRecovery,
+            evidenceAcquisitionClosed,
+          })
         : atomicOverflowRecovery
           ? ['SPLIT']
           : [
@@ -6277,9 +6337,13 @@ export async function runAutonomousRequirementCognition({
       }
 
       const admissionReasons=[];
-      if(decision==='SPLIT'&&!storageDepthAvailable)
+      // Continuing an already-completed split creates no new children and
+      // therefore requires neither additional branch capacity nor tree depth.
+      const resumingCompletedSplit=decision==='SPLIT'
+        &&existingCompletedSplitRecovery;
+      if(decision==='SPLIT'&&!resumingCompletedSplit&&!storageDepthAvailable)
         admissionReasons.push('emergency_storage_path_depth_reached');
-      if(decision==='SPLIT'&&availableChildCapacity<1)
+      if(decision==='SPLIT'&&!resumingCompletedSplit&&availableChildCapacity<1)
         admissionReasons.push('insufficient_branch_lifecycle_budget');
       if(decision==='ATOMIC'&&atomicUnavailable)
         admissionReasons.push('bounded_atomic_execution_admission_exhausted');
@@ -6741,7 +6805,19 @@ export async function runAutonomousRequirementCognition({
         sourceRef:node.source_ref,
         status:decision==='SPLIT'?'split':'executing',
         decisionType:decision,
-        decisionPayload:finalDecisionPayload,
+        decisionPayload:resumingCompletedSplit
+          ?{
+              ...finalDecisionPayload,
+              synthesis_recovery_existing_split_committed:{
+                contract:'existing_split_synthesis_recovery_v0_1',
+                failure_at:text(synthesisFailure.failed_at),
+                child_paths:existingSplitContinuation.child_paths,
+                child_result_hashes:asArray(synthesisFailure.child_result_hashes),
+                no_new_child_authoring:true,
+                committed_at:new Date().toISOString(),
+              },
+            }
+          :finalDecisionPayload,
         contextPayload,
         resultArtifact:node.result_artifact||null,
       });
@@ -11269,6 +11345,9 @@ export async function runAutonomousRequirementCognition({
       delete nextPayload.synthesis_reason;
       delete nextPayload.synthesis_provenance_review;
       delete nextPayload.self_remediation_in_progress;
+      // A fresh failure must receive a fresh bound-agent routing decision;
+      // never let a prior SPLIT continuation marker bypass that decision.
+      delete nextPayload.synthesis_recovery_existing_split_committed;
       if(activeSynthesisRemediation){
         nextPayload.last_self_remediation={
           remediation_id:activeSynthesisRemediation.remediation_id,
@@ -11393,6 +11472,7 @@ export async function runAutonomousRequirementCognition({
             'Choose BLOCKED only when a substantive evidence/dependency gap prevents truthful satisfaction of the parent requirement; never choose BLOCKED merely because synthesis, formatting, or submission remains to be performed.',
             'When a lifecycle stage contract applies, keep artifact as a concise semantic synthesis. Do NOT embed or stringify the contract object here; the next runtime-owned materialization phase will produce the exact JSON object.',
             'If any essential child gap prevents the parent requirement from being satisfied, choose BLOCKED and preserve the unresolved gap.',
+            'FINAL ARTIFACT CONTRACT: artifact must be nonempty. If the resolved children support the parent, provide a real JSON object with the parent required fields, even when the child evidence is large. Keep the synthesis concise and preserve numerical facts. Verified descendant calculations/checks are materialized and checked by the runtime after your nonempty semantic synthesis; do not return an empty artifact just because detailed verification is extensive. If a substantive gap prevents honest completion, choose BLOCKED with a nonempty explanatory artifact instead.',
             'Return JSON only: {"outcome":"COMPLETE|BLOCKED","reason":"auditable reason","artifact":"concise semantic parent result OR a real nested JSON object when the parent requirement or prior provenance guidance requires structured fields","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
             'STRUCTURED ARTIFACT RULE: when the parent requirement or prior_provenance_revision_guidance names required fields/schema, artifact MUST be the actual nested JSON object with those fields. Do not encode that object as a string, prose blob, markdown, or JSON-inside-a-string.',
             'When prior provenance guidance requests a shape correction, the corrected shape is authoritative for this synthesis attempt and must be reflected directly in artifact.',
@@ -12264,7 +12344,7 @@ export async function runAutonomousRequirementCognition({
         node?.decision_payload?.synthesis_remediation_nonce
       );
       if(
-        Object.keys(pendingSynthesisFailure).length
+        failedSynthesisNeedsDiscovery(node)
         &&!Object.keys(synthesisRemediationInProgress).length
         &&!synthesisRemediationNonce
         &&(node.node_status==='split'||node.decision_type==='SPLIT')
