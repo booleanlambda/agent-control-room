@@ -8,6 +8,9 @@ const M10_U2_P2_MRR_GP=declaredArrayProjectionContract({
   identityField:'month',
   fields:['mrr','gross_profit'],
   expectedIds:Array.from({length:12},(_,i)=>i+1),
+  // Direct child .001 owns the verified month table; .002 owns python_checks
+  // and is deliberately NOT a calculation-row source.
+  sourceChildOrdinals:[1],
   // The exercise pack supplies monthly ARPA 255 and gross margin 0.72.
   // No ad hoc conversion is authorized here; values copy identically.
   units:{},
