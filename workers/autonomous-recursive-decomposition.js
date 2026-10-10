@@ -12077,7 +12077,7 @@ export async function runAutonomousRequirementCognition({
       : artifactText(rawFinalArtifact);
     if(!artifactText(artifact))throw new Error('autonomous_decomposition_synthesis_empty:'+node.node_path);
     const qdaProblemMaterialization=outcome==='COMPLETE'
-      ?await materializeQdaQuantitativeFromVerifiedDescendants(node,artifact)
+      ?await materializeQdaQuantitativeFromVerifiedDescendants(node,artifact,childRows)
       :{artifact,materialized:false,check_count:0};
     artifact=qdaProblemMaterialization.artifact;
 
@@ -12498,7 +12498,7 @@ export async function runAutonomousRequirementCognition({
         if(!legacyChild){
           const parts=resultParts(node.result_artifact);
           const qdaMaterialization=await materializeQdaQuantitativeFromVerifiedDescendants(
-            node,parts.artifact
+            node,parts.artifact,existingChildren
           );
           if(qdaMaterialization.materialized===true){
             const repaired=await saveNode({
