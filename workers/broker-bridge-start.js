@@ -1921,6 +1921,20 @@ if (isEnabled('AAU_ENTREPRENEURSHIP_ASSESSOR_ENABLED')) {
   }
 }
 
+// Run this pure regression even on the inert canary, before the bridge entrypoint.
+// Claim-evidence verification is a pure, synthetic startup regression.
+try {
+  const {probeClaimEvidenceContinuity}=await import('./claim-evidence-continuity-probe.js');
+  console.log('AAU_CLAIM_EVIDENCE_REGRESSION',JSON.stringify(probeClaimEvidenceContinuity()));
+} catch(error) {
+  console.error('AAU_CLAIM_EVIDENCE_REGRESSION_FAILED',JSON.stringify({
+    name:error?.name||null,message:String(error?.message||error).slice(0,500),
+  }));
+}
+
+// Open health and start the broker BEFORE optional embodiment/file workers can delay startup.
+await import('./broker-bridge-envcheck.js');
+
 if (isEnabled('AAU_EMBODIMENT_RENDERER_ENABLED')) {
   try {
     const { startEmbodimentRenderWorker } = await import('./embodiment-render-worker.js');
@@ -1941,19 +1955,6 @@ if (isEnabled('AAU_AGENT_FILE_VISION_ENABLED')) {
   }
 }
 
-// Run this pure regression even on the inert canary, before the bridge entrypoint.
-// Claim-evidence verification is a pure, synthetic startup regression.
-try {
-  const {probeClaimEvidenceContinuity}=await import('./claim-evidence-continuity-probe.js');
-  console.log('AAU_CLAIM_EVIDENCE_REGRESSION',JSON.stringify(probeClaimEvidenceContinuity()));
-} catch(error) {
-  console.error('AAU_CLAIM_EVIDENCE_REGRESSION_FAILED',JSON.stringify({
-    name:error?.name||null,message:String(error?.message||error).slice(0,500),
-  }));
-}
-
-// Open the health endpoint before any optional startup cognition can block on a model/provider.
-await import('./broker-bridge-envcheck.js');
 
 try {
   const { moonshotConfigStatus } = await import('./providers/moonshot.js');
