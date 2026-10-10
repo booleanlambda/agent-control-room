@@ -76,6 +76,24 @@ export function probeClaimEvidenceContinuity(){
   eq(result.findings.filter(x=>x.kind==='TRANSCRIPTION_DRIFT').length,16,'eight months with two incorrect fields');
   eq(result.artifact.calculation,rows,'all 12 months exact after patch');
   eq(result.findings.every(x=>x.fingerprint?.length===64),true,'stable contradiction fingerprint');
+  // A completed, provenance-accepted SPLIT result is a verified source
+  // under the same contract used by the academic runtime and renewal guard.
+  const acceptedSplit={...children[1],decision_type:'SPLIT',decision_payload:{
+    synthesis_outcome:'COMPLETE',
+    synthesis_provenance_review:{status:'ACCEPT'},
+  }};
+  const mixed=reconcileEvidenceClaims({
+    contract,children:[children[0],acceptedSplit],candidate:boundary,
+  });
+  eq(mixed.status,'PATCHED','accepted SPLIT source and ATOMIC source reconcile');
+  eq(mixed.artifact.calculation,rows,'mixed verified lineage copies all 12 rows');
+  const rejectedSplit={...acceptedSplit,decision_payload:{
+    synthesis_outcome:'COMPLETE',
+    synthesis_provenance_review:{status:'REVISE'},
+  }};
+  eq(reconcileEvidenceClaims({
+    contract,children:[children[0],rejectedSplit],candidate:boundary,
+  }).reason,'child_not_verified','rejected SPLIT source cannot be transferred');
   // Source trust and conflict handling.
   const unverified={...children[0],decision_payload:{deterministic_math_verified:false}};
   eq(reconcileEvidenceClaims({contract,children:[unverified,children[1]],candidate:boundary}).status,
