@@ -250,6 +250,17 @@ export function probeClaimEvidenceContinuity(){
   ),true,'post-provenance close must carry verified child rows');
   eq(runtimeSource.includes('node,parts.artifact,existingChildren'),true,
     'completed split-parent recheck must carry hydrated verified children');
+  // Canceled wakes must never reuse an earlier reservation or degrade a new
+  // active wake after the DB returns an audit-only settlement.
+  eq(runtimeSource.includes('wake_request_id:intentExecutionId,'),true,
+    'model reservation idempotency keys are scoped to the active wake');
+  eq(runtimeSource.includes("row?.status==='obsolete_wake_audit_only'"),true,
+    'obsolete model settlement is a canceled-wake audit event');
+  eq(runtimeSource.includes("error?.code==='COGNITION_SUPERSEDED_WAKE'"),true,
+    'stale settlement is not double-settled as a provider error');
+  const executionSource=readFileSync(new URL('./model-intent-execution.js',import.meta.url),'utf8');
+  eq(executionSource.includes("if(supersededWake){"),true,
+    'a superseded wake cannot mark the active lifecycle as degraded');
   return {ok:true,checks,synthetic:true,provider_calls:0,agent_wakes:0,
     contract:'claim_evidence_continuity_regression_v0_1'};
 }
