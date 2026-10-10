@@ -20,7 +20,10 @@ export function claimEvidenceContractForRequirement(packet,node){
   const source=String(node?.source_ref||'');
   // Problem-specific opt-in, not a universal schema assumption.
   if(unit==='QDA601-M10-U2'
-    &&source.includes('#QDA601-M10-U2')
+    &&(
+      /exercise_pack_ref[^\n]*curriculum\/qda601-exercise-packs-v0\.1\.json#QDA601-M10-U2/i.test(requirement)
+      ||source.includes('curriculum/qda601-exercise-packs-v0.1.json#QDA601-M10-U2')
+    )
     &&/\bMRR\b/i.test(requirement)
     &&/\bgross\s+profit\b/i.test(requirement)
     &&/12[- ]month/i.test(requirement))return M10_U2_P2_MRR_GP;
