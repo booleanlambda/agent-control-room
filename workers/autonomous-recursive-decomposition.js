@@ -3863,6 +3863,24 @@ export async function runAutonomousRequirementCognition({
   }
 
   async function nodeRpc(action,args={}){
+    // Database decision state is separately bounded from the RPC envelope.
+    // Log only byte counts and key names to diagnose oversized replay state.
+    if(action==='save'){
+      const decision=asObject(args.decisionPayload);
+      const size=bytes(decision);
+      if(size>16000){
+        console.log('AAU_NODE_DECISION_PAYLOAD_SIZE',JSON.stringify({
+          node_path:args.nodePath||'R',
+          status:args.status||null,
+          decision_type:args.decisionType||null,
+          bytes:size,
+          key_bytes:Object.keys(decision)
+            .map(key=>({key,bytes:bytes(decision[key])}))
+            .sort((a,b)=>b.bytes-a.bytes).slice(0,12),
+          contract:'decision_payload_bounded_diagnostic_v0_1',
+        }));
+      }
+    }
     const base={
       p_agent_id:agentId,
       p_wake_request_id:intentExecutionId,
