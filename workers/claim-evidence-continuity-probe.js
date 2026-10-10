@@ -26,6 +26,16 @@ const children=[
 export function probeClaimEvidenceContinuity(){
   let checks=0;const eq=(a,b,msg)=>{assert.deepEqual(a,b,msg);checks++;};
   assert.ok(contract);
+  const actualParent=claimEvidenceContractForRequirement(
+    {qda_601_context:{next_unit:{unit_code:'QDA601-M10-U2'}}},
+    {source_ref:'R.002.002.001.001',
+      requirement_text:"Derive the financial model for the 12-month trajectory of Monthly Recurring Revenue (MRR) and Gross Profit for Problem 2 of QDA601-M10-U2. Preserve exercise_pack_ref as 'curriculum/qda601-exercise-packs-v0.1.json#QDA601-M10-U2'."});
+  eq(actualParent?.contract_id,contract.contract_id,
+    'real AAU node source_ref plus exercise-pack requirement activates contract');
+  eq(claimEvidenceContractForRequirement(
+    {qda_601_context:{next_unit:{unit_code:'QDA601-M10-U2'}}},
+    {source_ref:'R.002.002.001.001',requirement_text:'12-month MRR and Gross Profit without authoritative pack reference'}),null,
+    'generic title without authoritative pack reference cannot activate mapping');
   // Incident type A: model writes only four boundary rows; eight months missing.
   const boundary={inputs:{monthly_arpa:255,gross_margin:0.72},
     formula_or_model:{mrr:'paying_accounts*monthly_arpa'},
