@@ -135,6 +135,7 @@ export function probeClaimEvidenceContinuity(){
       synthesis_provenance_review:{status:'ACCEPT'}},
     result_artifact:JSON.stringify({artifact:{calculation:rows,units:'USD'}})};
   const checksChild={...children[1],node_path:parentPath+'.002',
+    decision_type:'ATOMIC',
     result_artifact:JSON.stringify({artifact:{python_checks:[{label:'mrr_m1',claimed_result:rows[0].mrr}]}})};
   const sourceChecks=rows.flatMap(row=>[
     {label:parentPath+'.002:mrr_m'+row.month,expression:String(row.mrr),claimed_result:row.mrr},
