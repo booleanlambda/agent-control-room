@@ -110,7 +110,8 @@ export function reconcileEvidenceClaims({contract,children=[],candidate,transfer
       }else projected.set(id,{row,proof});
     }
     sourceManifest.push({node_path:child.node_path,result_hash:child.result_hash,
-      row_ids:[...seenLocal].sort((a,b)=>a-b)});
+      row_ids:[...seenLocal].sort((a,b)=>a-b),
+      units:data.units===undefined?null:JSON.stringify(data.units)});
   }
   if(findings.some(x=>x.kind==='EVIDENCE_CONFLICT'))
     return {status:'EVIDENCE_CONFLICT',reason:'incompatible_verified_children',
