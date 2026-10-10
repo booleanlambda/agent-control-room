@@ -75,6 +75,11 @@ export function reconcileEvidenceClaims({contract,children=[],candidate,transfer
     if(!Array.isArray(rows))
       return {status:'UNRESOLVED',reason:'child_calculation_schema_unmapped',node_path:child.node_path,findings:[]};
     const units=object(data.units);
+    const currentUnits=data.units===undefined?null:JSON.stringify(data.units);
+    if(currentUnits!==null&&sourceManifest.some(prior=>
+      prior.units!==null&&prior.units!==currentUnits))
+      return {status:'UNRESOLVED',reason:'verified_source_units_conflict',
+        node_path:child.node_path,findings:[]};
     for(const field of fields){
       if(units&&Object.hasOwn(units,field)
         &&contract.units?.[field]!=null&&units[field]!==contract.units[field]){
