@@ -71,6 +71,11 @@ export function probeClaimEvidenceContinuity(){
     rows[0],rows[0],...rows.slice(1,6)]}})};
   eq(reconcileEvidenceClaims({contract,children:[duplicateSource,children[1]],candidate:boundary}).reason,
      'invalid_or_duplicate_child_row','ambiguous child row not transferred');
+  const unitConflict={...children[1],result_artifact:JSON.stringify({
+    artifact:{calculation:rows.slice(6),units:{mrr:'EUR/month',gross_profit:'EUR/month'}}
+  })};
+  eq(reconcileEvidenceClaims({contract,children:[children[0],unitConflict],candidate:boundary}).reason,
+    'verified_source_units_conflict','unit disagreement cannot be silently transferred');
   const newVersion={...children[1],result_hash:hash(44)};
   const newResult=reconcileEvidenceClaims({contract,children:[children[0],newVersion],candidate:boundary});
   eq(newResult.patch_id!==partial.patch_id,true,'source evidence version changes patch identity');
