@@ -24,10 +24,18 @@ const actualStatus=c=>String(c?.node_status||c?.status||'').toLowerCase();
 const verifiedSource=c=>{
   const d=object(c?.decision_payload)||{};
   const proof=object(d.deterministic_math_verification)||{};
-  return actualStatus(c)==='completed'
+  const decision=String(c?.decision_type||'ATOMIC').toUpperCase();
+  const atomicVerified=decision==='ATOMIC'
     &&d.deterministic_math_verified===true
     &&proof.ok===true
-    &&proof.all_match===true
+    &&proof.all_match===true;
+  // Completed SPLIT children already pass the runtime's provenance acceptance
+  // boundary. They must not be rejected merely for lacking ATOMIC math flags.
+  const splitVerified=decision==='SPLIT'
+    &&d.synthesis_outcome==='COMPLETE'
+    &&object(d.synthesis_provenance_review)?.status==='ACCEPT';
+  return actualStatus(c)==='completed'
+    &&(atomicVerified||splitVerified)
     &&typeof c.result_hash==='string'&&c.result_hash.length>=32;
 };
 const validId=(v,expected)=>Number.isInteger(v)&&expected.includes(v);
