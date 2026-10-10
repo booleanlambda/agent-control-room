@@ -3,6 +3,7 @@
 import { strict as assert } from 'node:assert';
 import { reconcileEvidenceClaims } from './claim-evidence-continuity.js';
 import { claimEvidenceContractForRequirement } from './claim-evidence-contracts.js';
+import { normalizeDeclaredEvidenceSourceRows } from './claim-evidence-source-adapter.js';
 
 const hash=n=>String(n).padStart(64,String(n));
 const contract=claimEvidenceContractForRequirement(
@@ -86,6 +87,31 @@ export function probeClaimEvidenceContinuity(){
   })};
   eq(reconcileEvidenceClaims({contract,children:[children[0],unitConflict],candidate:boundary}).reason,
     'verified_source_units_conflict','unit disagreement cannot be silently transferred');
+  const nestedKeyedSources=children.map(c=>{
+    const inner=JSON.parse(c.result_artifact).artifact;
+    const keyed=Object.fromEntries(inner.calculation.map(row=>[
+      'month_'+row.month,{mrr:row.mrr,gross_profit:row.gross_profit}
+    ]));
+    return {...c,result_artifact:JSON.stringify({
+      artifact:JSON.stringify({...inner,calculation:keyed,units:'USD'})
+    })};
+  });
+  const mappedKeyed=normalizeDeclaredEvidenceSourceRows(nestedKeyedSources,contract);
+  const keyedResult=reconcileEvidenceClaims({
+    contract,children:mappedKeyed,candidate:{calculation:[]}
+  });
+  eq(keyedResult.status,'PATCHED','real nested keyed-month source layout transfers');
+  eq(keyedResult.artifact.calculation,rows,'verified keyed object exactly reproduces all months');
+  eq(mappedKeyed[0].result_hash,nestedKeyedSources[0].result_hash,
+    'adapting source representation preserves immutable result hash');
+  eq(nestedKeyedSources[0].result_artifact.includes('month_1'),true,
+    'read-only adapter does not modify source artifact');
+  const malformedKeyed={...nestedKeyedSources[0],
+    result_artifact:JSON.stringify({artifact:{calculation:{
+      month_1:{mrr:1,gross_profit:1},month_99:{mrr:2,gross_profit:2}
+    }}})};
+  eq(normalizeDeclaredEvidenceSourceRows([malformedKeyed],contract)[0].result_artifact,
+    malformedKeyed.result_artifact,'unknown period does not get silently mapped');
   const newVersion={...children[1],result_hash:hash(44)};
   const newResult=reconcileEvidenceClaims({contract,children:[children[0],newVersion],candidate:boundary});
   eq(newResult.patch_id!==partial.patch_id,true,'source evidence version changes patch identity');
