@@ -40,7 +40,8 @@ const issue=(kind,claimId,expected,actual,sources=[],note='')=>({
 });
 
 export function declaredArrayProjectionContract({
-  contractId,collection,identityField,fields,expectedIds,units={},expectedSourceRef=null
+  contractId,collection,identityField,fields,expectedIds,units={},expectedSourceRef=null,
+  sourceLayout='array',sourceKeyPrefix=null
 }={}){
   const ids=Array.isArray(expectedIds)?expectedIds:[];
   const names=Array.isArray(fields)?fields:[];
