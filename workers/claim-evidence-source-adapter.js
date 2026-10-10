@@ -13,6 +13,24 @@ const unwrap=raw=>{
     return obj(d);
   }catch{return null;}
 };
+// Selection is based on an explicit contract and exact direct-child paths,
+// never field names, prose, or an inferred similarity between artifacts.
+// A missing or ambiguous declared source fails closed; no evidence is guessed.
+export function selectDeclaredEvidenceSourceChildren(children,contract,parentNodePath){
+  const source=Array.isArray(children)?children:[];
+  const ordinals=contract?.source_child_ordinals;
+  if(ordinals==null)return source;
+  if(!Array.isArray(ordinals)||!ordinals.length||!parentNodePath)return [];
+  const selected=[];
+  for(const ordinal of ordinals){
+    const path=String(parentNodePath)+'.'+String(ordinal).padStart(3,'0');
+    const matching=source.filter(child=>child?.node_path===path);
+    if(matching.length!==1)return [];
+    selected.push(matching[0]);
+  }
+  return selected;
+}
+
 export function normalizeDeclaredEvidenceSourceRows(children,contract){
   if(contract?.contract_id!=='qda601_m10_u2_problem2_mrr_gp_12_month_projection_v0_1')
     return children;
