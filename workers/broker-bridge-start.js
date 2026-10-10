@@ -2075,6 +2075,19 @@ try {
   }));
 }
 
+// Regression for lossless decision payload overflow checkpoints.
+try {
+  const {probeCognitionNodePayloadSpillover}=await import(
+    './cognition-node-payload-spillover-probe.js'
+  );
+  console.log('AAU_NODE_DECISION_SPILLOVER_REGRESSION',
+    JSON.stringify(probeCognitionNodePayloadSpillover()));
+} catch(error) {
+  console.error('AAU_NODE_DECISION_SPILLOVER_REGRESSION_FAILED',JSON.stringify({
+    name:error?.name||null,message:String(error?.message||error).slice(0,500),
+  }));
+}
+
 if (isEnabled('AAU_KIMI_LATENCY_REVIEW')) {
   // Read-only one-shot Kimi review of observed cognition latency. No agent mutation.
   void import('./kimi-cognition-latency-review.js')
