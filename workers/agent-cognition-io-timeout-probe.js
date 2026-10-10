@@ -30,20 +30,24 @@ function validResult(text,count){
     parsed.items.every((v,i)=>v===i+1);
   return {json:true,markers,items,status:parsed?.status==='synthetic_complete'};
 }
-async function runCase(label, inputChars, count, maxTokens, timeoutMs){
+async function runCase(label, inputChars, count, maxTokens, timeoutMs, runtimeRole='generic'){
   const user=packet(inputChars,count);
   const start=Date.now();
   const requestHash=HASH(SYSTEM+'\n'+user);
   try{
     const result=await modelChatCompletion({
       model:MODEL,messages:[{role:'system',content:SYSTEM},{role:'user',content:user}],
-      maxTokens,timeoutMs,temperature:0,jsonMode:true,enableThinking:false
+      maxTokens,timeoutMs,temperature:0,jsonMode:true,enableThinking:false,runtimeRole
     });
     const checks=validResult(result.content,count);
     const stop=result.finish_reason==='stop';
     return {
       label,model_requested:MODEL,model_returned:result.model_returned,
-      input_chars:SYSTEM.length+user.length,input_sha256:requestHash,
+      input_chars:SYSTEM.length+user.length,input_sha256:requestHash,runtime_role:runtimeRole,
+      effective_timeout_ms:result.runtime_contract?.effective_timeout_ms??null,
+      estimated_input_tokens:result.runtime_contract?.estimated_input_tokens??null,
+      thinking:result.runtime_contract?.thinking??null,
+      json_mode:result.runtime_contract?.json_mode??null,
       requested_output_tokens:maxTokens,adapter_max_tokens:Math.min(maxTokens,4096),
       timeout_ms:timeoutMs,elapsed_ms:Date.now()-start,output_chars:String(result.content||'').length,
       prompt_tokens:result.usage?.prompt_tokens??null,completion_tokens:result.usage?.completion_tokens??null,
@@ -51,7 +55,7 @@ async function runCase(label, inputChars, count, maxTokens, timeoutMs){
       strict_complete:stop&&checks.json&&checks.markers&&checks.items&&checks.status&&result.model_returned===MODEL
     };
   }catch(e){
-    return {label,model_requested:MODEL,input_chars:SYSTEM.length+user.length,input_sha256:requestHash,
+    return {label,model_requested:MODEL,input_chars:SYSTEM.length+user.length,input_sha256:requestHash,runtime_role:runtimeRole,
       requested_output_tokens:maxTokens,adapter_max_tokens:Math.min(maxTokens,4096),
       timeout_ms:timeoutMs,elapsed_ms:Date.now()-start,error_code:e?.code||e?.name||'error',
       error_summary:String(e?.message||e).slice(0,130),strict_complete:false};
@@ -59,8 +63,11 @@ async function runCase(label, inputChars, count, maxTokens, timeoutMs){
 }
 export async function probeAgentCognitionIoTimeout(){
   try{if(modelProviderConfigStatus().ready!==true)return {status:'unavailable',reason:'model_provider_unavailable'};}catch{return {status:'unavailable',reason:'model_provider_unavailable'};}
-  console.log('AAU_AGENT_IO_TEST_BEGIN',JSON.stringify({model:MODEL,synthetic:true,agent_data_accessed:false}));
-  const cases=[
+  const serializerExtended=String(process.env.AAU_SERIALIZER_EXTENDED_TIMEOUT_TEST||'').trim()==='true';
+  console.log('AAU_AGENT_IO_TEST_BEGIN',JSON.stringify({model:MODEL,synthetic:true,agent_data_accessed:false,mode:serializerExtended?'serializer_extended_300s':'standard'}));
+  const cases=serializerExtended
+    ? [['serializer_extended_300s',760,3,700,300000,'serializer']]
+    : [
     ['medium_input_standard_output',24500,120,2600,60000],
     ['large_input_complete_coverage',95000,16,600,120000],
     ['output_above_adapter_cap',8500,220,6000,120000],
@@ -68,8 +75,8 @@ export async function probeAgentCognitionIoTimeout(){
     ['short_timeout_guard',24500,350,4096,5000]
   ];
   const tests=[];
-  for(const [label,size,items,maxTokens,timeoutMs] of cases){
-    const one=await runCase(label,size,items,maxTokens,timeoutMs);
+  for(const [label,size,items,maxTokens,timeoutMs,runtimeRole] of cases){
+    const one=await runCase(label,size,items,maxTokens,timeoutMs,runtimeRole||'generic');
     tests.push(one);console.log('AAU_AGENT_IO_TEST_RESULT',JSON.stringify(one));
   }
   const summary={status:'complete',synthetic:true,agent_data_accessed:false,
