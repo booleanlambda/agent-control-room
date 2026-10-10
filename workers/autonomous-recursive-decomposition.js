@@ -11645,7 +11645,18 @@ export async function runAutonomousRequirementCognition({
           final?.parsed,
           authoritativeVerifiedNumericalEvidence
         );
-        if(deterministicEvidenceLedger){
+        const mappedConflict=asObject(final?.parsed?.claim_evidence_continuity);
+        if(mappedConflict.status==='EVIDENCE_CONFLICT'){
+          synthesisProvenanceReview={
+            status:'REVISE',
+            reason:'Verified child sources disagree on an explicitly mapped claim.',
+            issues:asArray(mappedConflict.findings)
+              .map(f=>String(f.kind)+': '+String(f.claim_id)).slice(0,24),
+            evidence_bindings:[],
+            revision_guidance:'Challenge or reconcile the named contradictory child evidence, do not silently choose one value.',
+            contract:'claim_evidence_conflict_review_v0_1',
+          };
+        }else if(deterministicEvidenceLedger){
           synthesisProvenanceReview=deterministicEvidenceLedger.provenance_review;
           console.log('AAU_DETERMINISTIC_EVIDENCE_LEDGER_MATERIALIZED',JSON.stringify({
             agent_id:agentId,
