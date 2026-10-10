@@ -2,6 +2,14 @@ const isEnabled = (name) => ['1', 'true', 'yes', 'on'].includes(
   String(process.env[name] || '').trim().toLowerCase(),
 );
 
+// Start the production HTTP health listener before optional diagnostics and
+// external credential probes. The disabled canary remains strictly inert.
+// The later envcheck imports this same module from cache (no second listener).
+if (!isEnabled('AAU_BROKER_DISABLED')) {
+  await import('./broker-bridge-render.js');
+  console.log('AAU_BROKER_HTTP_INITIALIZED_EARLY');
+}
+
 try {
   const { verifyPythonMathChecks } = await import('./python-math.js');
   const probe = verifyPythonMathChecks([
