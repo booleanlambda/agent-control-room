@@ -31,6 +31,7 @@ import {
 import { runPythonStatisticalAnalysesChunked } from './python-quant.js';
 import { reconcileEvidenceClaims } from './claim-evidence-continuity.js';
 import { claimEvidenceContractForRequirement } from './claim-evidence-contracts.js';
+import { normalizeDeclaredEvidenceSourceRows } from './claim-evidence-source-adapter.js';
 import {
   materializeQda601UnitFromVerifiedChildren,
   qdaVerifiedPythonChecksFromArtifact,
@@ -11597,7 +11598,8 @@ export async function runAutonomousRequirementCognition({
           ?claimEvidenceContractForRequirement(packet,node):null;
         if(evidenceContract){
           const projection=reconcileEvidenceClaims({
-            contract:evidenceContract,children:childRows,
+            contract:evidenceContract,
+            children:normalizeDeclaredEvidenceSourceRows(childRows,evidenceContract),
             candidate:finalCandidate.artifact,transfer:true,
           });
           const continuityState={
