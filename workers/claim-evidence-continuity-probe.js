@@ -6,6 +6,7 @@ import { reconcileEvidenceClaims } from './claim-evidence-continuity.js';
 import { claimEvidenceContractForRequirement, projectDeclaredSynthesisInputs } from './claim-evidence-contracts.js';
 import { normalizeDeclaredEvidenceSourceRows, selectDeclaredEvidenceSourceChildren } from './claim-evidence-source-adapter.js';
 import { projectDeclaredVerifiedChecks } from './claim-evidence-check-transport.js';
+import { declaredVerifiedCheckTransportCoverage, atomicMaterialCalculationCount } from './autonomous-recursive-decomposition.js';
 
 const hash=n=>String(n).padStart(64,String(n));
 const contract=claimEvidenceContractForRequirement(
@@ -150,6 +151,26 @@ export function probeClaimEvidenceContinuity(){
     candidate:{calculation:[],interpretation:'Agent-owned analytic conclusion'},
     expectedRows:rows,
   });
+  const parentFixture={node_path:parentPath,
+    requirement_text:'Calculate the 12-month trajectory of Monthly Recurring Revenue (MRR) and Gross Profit for Problem 2 of QDA601-M10-U2.',
+    source_ref:'curriculum/qda601-exercise-packs-v0.1.json#QDA601-M10-U2'};
+  const parentPacket={qda_601_context:{next_unit:{unit_code:'QDA601-M10-U2'}}};
+  const authoritativeArtifact={...verifiedChecks.artifact,calculation:rows};
+  eq(atomicMaterialCalculationCount(authoritativeArtifact),36,
+    'table month indices are 12 numeric presentation leaves beyond the 24 mathematical claims');
+  eq(declaredVerifiedCheckTransportCoverage(parentPacket,parentFixture,authoritativeArtifact),true,
+    'declared 24-check provenance covers both verified financial metrics for all 12 months');
+  const corruptedTransport={...authoritativeArtifact,
+    python_checks:authoritativeArtifact.python_checks.map((check,index)=>index===0
+      ?{...check,claimed_result:check.claimed_result+10}:check)};
+  eq(declaredVerifiedCheckTransportCoverage(parentPacket,parentFixture,corruptedTransport),false,
+    'tampered claimed result rejects declared coverage authority');
+  eq(declaredVerifiedCheckTransportCoverage(parentPacket,parentFixture,{
+    ...authoritativeArtifact,runtime_verified_descendant_materialization:{
+      ...authoritativeArtifact.runtime_verified_descendant_materialization,
+      descendants:[{...authoritativeArtifact.runtime_verified_descendant_materialization.descendants[0],
+        result_hash:'tampered_hash'}]}}),false,
+    'invalid source hash fails closed instead of lowering coverage');
   eq(verifiedChecks.status,'PATCHED','24 authoritative checks materialized exactly once');
   eq(verifiedChecks.artifact.python_checks,sourceChecks,'preserves complete original check labels and order');
   eq(verifiedChecks.artifact.interpretation,'Agent-owned analytic conclusion','semantic conclusions untouched by checks transport');
