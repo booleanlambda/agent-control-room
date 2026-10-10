@@ -4,6 +4,7 @@ import { strict as assert } from 'node:assert';
 import { reconcileEvidenceClaims } from './claim-evidence-continuity.js';
 import { claimEvidenceContractForRequirement, projectDeclaredSynthesisInputs } from './claim-evidence-contracts.js';
 import { normalizeDeclaredEvidenceSourceRows, selectDeclaredEvidenceSourceChildren } from './claim-evidence-source-adapter.js';
+import { projectDeclaredVerifiedChecks } from './claim-evidence-check-transport.js';
 
 const hash=n=>String(n).padStart(64,String(n));
 const contract=claimEvidenceContractForRequirement(
@@ -135,6 +136,44 @@ export function probeClaimEvidenceContinuity(){
     result_artifact:JSON.stringify({artifact:{calculation:rows,units:'USD'}})};
   const checksChild={...children[1],node_path:parentPath+'.002',
     result_artifact:JSON.stringify({artifact:{python_checks:[{label:'mrr_m1',claimed_result:rows[0].mrr}]}})};
+  const sourceChecks=rows.flatMap(row=>[
+    {label:parentPath+'.002:mrr_m'+row.month,expression:String(row.mrr),claimed_result:row.mrr},
+    {label:parentPath+'.002:gp_m'+row.month,expression:String(row.gross_profit),claimed_result:row.gross_profit},
+  ]);
+  const fullChecksChild={...checksChild,
+    result_artifact:JSON.stringify({artifact:JSON.stringify({python_checks:sourceChecks})})};
+  const verifiedChecks=projectDeclaredVerifiedChecks({
+    contract:parentContract,parentPath,
+    children:[calculationChild,fullChecksChild],
+    candidate:{calculation:[],interpretation:'Agent-owned analytic conclusion'},
+    expectedRows:rows,
+  });
+  eq(verifiedChecks.status,'PATCHED','24 authoritative checks materialized exactly once');
+  eq(verifiedChecks.artifact.python_checks,sourceChecks,'preserves complete original check labels and order');
+  eq(verifiedChecks.artifact.interpretation,'Agent-owned analytic conclusion','semantic conclusions untouched by checks transport');
+  eq(verifiedChecks.sources[0].result_hash,fullChecksChild.result_hash,'independent check source hash preserved');
+  const badCheck={...fullChecksChild,
+    result_artifact:JSON.stringify({artifact:{python_checks:[
+      {...sourceChecks[0],label:sourceChecks[0].label+':duplicate'},
+      ...sourceChecks.slice(1)
+    ]}})};
+  eq(projectDeclaredVerifiedChecks({contract:parentContract,parentPath,
+    children:[calculationChild,badCheck],candidate:{},expectedRows:rows}).reason,
+    'checks_source_label_mismatch','corrupted label rejected rather than normalized');
+  const duplicatedCheck={...fullChecksChild,result_artifact:JSON.stringify({
+    artifact:{python_checks:[sourceChecks[0],sourceChecks[0],...sourceChecks.slice(2)]}})};
+  eq(projectDeclaredVerifiedChecks({contract:parentContract,parentPath,
+    children:[calculationChild,duplicatedCheck],candidate:{},expectedRows:rows}).reason,
+    'verified_checks_schema_invalid','duplicated check label rejected');
+  const inconsistentChecks={...fullChecksChild,result_artifact:JSON.stringify({
+    artifact:{python_checks:[{...sourceChecks[0],claimed_result:sourceChecks[0].claimed_result+10},
+      ...sourceChecks.slice(1)]}})};
+  eq(projectDeclaredVerifiedChecks({contract:parentContract,parentPath,
+    children:[calculationChild,inconsistentChecks],candidate:{},expectedRows:rows}).status,
+    'EVIDENCE_CONFLICT','mismatched independent check is not silently corrected');
+  eq(projectDeclaredVerifiedChecks({contract,parentPath,
+    children:[calculationChild,fullChecksChild],candidate:{},expectedRows:rows}).status,
+    'NOT_APPLICABLE','financial-model child does not inherit parent checks contract');
   const selected=selectDeclaredEvidenceSourceChildren([calculationChild,checksChild],parentContract,parentPath);
   eq(selected.length,1,'only the declared calculation source child is selected');
   eq(selected[0].node_path,calculationChild.node_path,'source path is exact');
