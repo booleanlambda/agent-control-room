@@ -108,7 +108,11 @@ begin
       raise exception 'semantic_runtime_meter_event_key_conflict';
     end if;
     if p_event_fingerprint is not null then
-      select count(*)::integer into v_repeat
+      -- A technical reclaim increments wake_queue.attempts and creates an audit
+      -- record, but it is not a new autonomous cognition cycle.
+      -- Distinct wakes with identical material fingerprints still hit the guard.
+      select count(distinct case when p_event_kind='wake_resume'
+           then wake_request_id else event_id end)::integer into v_repeat
       from agent_lab.cognition_runtime_events
       where runtime_id=v_runtime.runtime_id
         and event_kind=p_event_kind
@@ -163,7 +167,11 @@ begin
   returning * into v_runtime;
 
   if p_event_fingerprint is not null then
-    select count(*)::integer into v_repeat
+    -- A technical reclaim increments wake_queue.attempts and creates an audit
+      -- record, but it is not a new autonomous cognition cycle.
+      -- Distinct wakes with identical material fingerprints still hit the guard.
+      select count(distinct case when p_event_kind='wake_resume'
+           then wake_request_id else event_id end)::integer into v_repeat
     from agent_lab.cognition_runtime_events
     where runtime_id=v_runtime.runtime_id
       and event_kind=p_event_kind
