@@ -11587,6 +11587,49 @@ export async function runAutonomousRequirementCognition({
           }
         }
 
+        // Explicit schema contract: preserve completed child claims exactly.
+        // Do not touch semantic conclusions, unknown units, or unverified data.
+        const evidenceContract=candidateOutcome==='COMPLETE'
+          ?claimEvidenceContractForRequirement(packet,node):null;
+        if(evidenceContract){
+          const projection=reconcileEvidenceClaims({
+            contract:evidenceContract,children:childRows,
+            candidate:finalCandidate.artifact,transfer:true,
+          });
+          const continuityState={
+            contract:'claim_evidence_continuity_v0_1',
+            status:projection.status,reason:projection.reason||null,
+            projection_contract:evidenceContract.contract_id,
+            source_manifest:asArray(projection.source_manifest),
+            findings:asArray(projection.findings).slice(0,64),
+            patch_id:projection.patch_id||null,
+            artifact_hash_before:projection.artifact_hash_before||null,
+            artifact_hash_after:projection.artifact_hash_after||null,
+            semantic_decision_unchanged:true,
+          };
+          await saveJsonPhaseCheckpoint(node.node_path,'CLAIM_EVIDENCE',sha256({
+            contract:evidenceContract.contract_id,
+            source_hashes:currentChildResultHashes,
+            candidate_hash:sha256(artifactText(finalCandidate.artifact)),
+          }),continuityState,{
+            projection_status:projection.status,
+            issue_count:continuityState.findings.length,
+            projection_contract:evidenceContract.contract_id,
+          });
+          finalCandidate.claim_evidence_continuity=continuityState;
+          if(projection.status==='PATCHED'||projection.status==='VERIFIED'){
+            finalCandidate.artifact=projection.artifact;
+            final={...final,parsed:finalCandidate};
+          }
+          console.log('AAU_CLAIM_EVIDENCE_CONTINUITY',JSON.stringify({
+            agent_id:agentId,intent_execution_id:intentExecutionId,
+            node_path:node.node_path,status:projection.status,
+            reason:projection.reason||null,
+            issue_count:continuityState.findings.length,
+            policy:'verified_child_exact_claim_projection_v0_1',
+          }));
+        }
+
         if(!durableFinal.parsed){
           await saveJsonPhaseCheckpoint(
             node.node_path,'FINAL_SYNTHESIS',finalSemanticIdentity,finalCandidate,{
