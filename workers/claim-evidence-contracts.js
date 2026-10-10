@@ -29,3 +29,25 @@ export function claimEvidenceContractForRequirement(packet,node){
     &&/12[- ]month/i.test(requirement))return M10_U2_P2_MRR_GP;
   return null;
 }
+
+const M10_U2_MODEL_INPUT_KEYS=Object.freeze([
+  'monthly_arpa','gross_margin','paying_account_trajectory_ref',
+]);
+
+// Only contract-declared task inputs may be transported to this parent.
+// This is field-preserving presentation normalization, not new cognition.
+export function projectDeclaredSynthesisInputs(packet,node,artifact,caseInputs={}){
+  const contract=claimEvidenceContractForRequirement(packet,node);
+  if(!contract||!artifact||typeof artifact!=='object'||Array.isArray(artifact))
+    return null;
+  const source=artifact.inputs&&typeof artifact.inputs==='object'
+    &&!Array.isArray(artifact.inputs)?artifact.inputs:{};
+  const caseData=caseInputs&&typeof caseInputs==='object'&&!Array.isArray(caseInputs)
+    ?caseInputs:{};
+  const inputs={};
+  for(const key of M10_U2_MODEL_INPUT_KEYS){
+    if(Object.hasOwn(caseData,key))inputs[key]=caseData[key];
+    else if(Object.hasOwn(source,key))inputs[key]=source[key];
+  }
+  return {...artifact,inputs};
+}
