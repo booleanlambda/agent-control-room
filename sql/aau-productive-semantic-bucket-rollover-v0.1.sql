@@ -71,7 +71,39 @@ begin
     from agent_lab.cognition_step_checkpoints c
     where c.agent_id=v_prev.agent_id
       and c.assignment_key=v_prev.assignment_key
-      and c.source_wake_request_id=v_wake.wake_request_id
+      -- A resumed wake gets a new wake_request_id. An immutable checkpoint
+      -- from its prior wake is eligible only if the bound parent's completed
+      -- child evidence still matches the already-committed recovery route.
+      and (
+        c.source_wake_request_id=v_wake.wake_request_id
+        or exists (
+          select 1
+          from agent_lab.cognition_requirement_nodes parent
+          where parent.agent_id=v_prev.agent_id
+            and parent.assignment_key=v_prev.assignment_key
+            and parent.node_path=c.step_metadata->>'node_path'
+            and parent.decision_payload->'synthesis_recovery_existing_split_committed'->>'contract'
+                ='existing_split_synthesis_recovery_v0_1'
+            and parent.decision_payload->'synthesis_recovery_existing_split_committed'->>'no_new_child_authoring'='true'
+            and jsonb_array_length(coalesce(
+              parent.decision_payload->'synthesis_recovery_existing_split_committed'->'child_result_hashes',
+              '[]'::jsonb
+            ))>0
+            and not exists (
+              select 1
+              from jsonb_array_elements(
+                parent.decision_payload->'synthesis_recovery_existing_split_committed'->'child_result_hashes'
+              ) expected
+              left join agent_lab.cognition_requirement_nodes child
+                on child.agent_id=parent.agent_id
+               and child.assignment_key=parent.assignment_key
+               and child.node_path=expected->>'path'
+               and child.status=expected->>'status'
+               and child.result_hash=expected->>'result_hash'
+              where child.node_id is null
+            )
+        )
+      )
       and c.step_metadata->>'phase'='FINAL_SYNTHESIS'
       and c.step_metadata->>'synthesis_outcome'='COMPLETE'
       and c.step_metadata->>'immutable_completed_phase'='true'
