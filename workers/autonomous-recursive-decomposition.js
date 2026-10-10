@@ -944,6 +944,53 @@ export function atomicMaterialCalculationCount(artifact){
   }
   return Math.max(1,materialCalculationLeafCount(obj.calculation,'calculation'));
 }
+// Trust the 24-check transport only for an explicitly mapped M10-U2 parent,
+// after checking its immutable source manifest and each numeric table claim.
+// Month identifiers are not separate arithmetic claims.
+export function declaredVerifiedCheckTransportCoverage(packet,node,artifact){
+  const obj=quantitativeArtifactBody(artifact);
+  const meta=asObject(obj.runtime_verified_descendant_materialization);
+  const parentPath=text(node?.node_path);
+  if(meta.contract!=='qda_declared_verified_checks_transport_v0_1'
+    ||claimEvidenceContractForRequirement(packet,node)?.contract_id!==
+      'qda601_m10_u2_problem2_verified_calculation_with_checks_v0_2'
+    ||!parentPath||text(meta.materialized_node_path)!==parentPath
+    ||meta.source!=='completed_verified_atomic_checks_child'
+    ||meta.preserved_source_labels!==true
+    ||Number(meta.verified_calculation_claim_count)!==24)return false;
+  const manifest=asArray(meta.descendants);
+  if(manifest.length!==1||text(manifest[0].node_path)!==parentPath+'.002'
+    ||!/^[a-f0-9]{64}$/.test(text(manifest[0].result_hash))
+    ||Number(manifest[0].check_count)!==24)return false;
+  const rows=asArray(obj.calculation);
+  const checks=pythonChecksFromArtifact(obj);
+  if(rows.length!==12||checks.type_ok!==true
+    ||asArray(checks.value).length!==24)return false;
+  const months=new Map();
+  for(const raw of rows){
+    const row=asObject(raw);
+    if(!Number.isInteger(row.month)||row.month<1||row.month>12
+      ||months.has(row.month)||!Number.isFinite(row.mrr)
+      ||!Number.isFinite(row.gross_profit))return false;
+    months.set(row.month,row);
+  }
+  const seen=new Set();
+  const prefix=parentPath+'.002:';
+  for(const check of checks.value){
+    const label=text(check?.label);
+    if(!label.startsWith(prefix)||seen.has(label)
+      ||!Number.isFinite(check?.claimed_result)||!text(check?.expression))
+      return false;
+    const match=/^(mrr|gp)_m(1[0-2]|[1-9])$/.exec(label.slice(prefix.length));
+    if(!match)return false;
+    const row=months.get(Number(match[2]));
+    const expected=match[1]==='mrr'?row?.mrr:row?.gross_profit;
+    if(!Number.isFinite(expected)
+      ||Math.abs(check.claimed_result-expected)>0.005)return false;
+    seen.add(label);
+  }
+  return months.size===12&&seen.size===24;
+}
 function deterministicMathVerification(packet,node,artifact){
   if(!qdaQuantitativeAtomicRequirement(packet,node))return {required:false,ok:true,all_match:true,check_count:0,results:[]};
   const checkField=pythonChecksFromArtifact(artifact);
@@ -953,7 +1000,8 @@ function deterministicMathVerification(packet,node,artifact){
   const verifiedDescendantCoverage=[
     'qda_problem_verified_descendant_materialization_v0_1',
     'qda_verified_descendant_materialization_v0_2_recursive',
-  ].includes(descendantMaterialization.contract);
+  ].includes(descendantMaterialization.contract)
+    ||declaredVerifiedCheckTransportCoverage(packet,node,artifact);
 
   // For a split QDA parent, the durable atomic descendants are the arithmetic
   // execution boundary. Their structured checks are already fail-closed and are
