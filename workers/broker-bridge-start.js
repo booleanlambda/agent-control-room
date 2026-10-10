@@ -2065,6 +2065,16 @@ try {
   }));
 }
 
+// Claim-evidence verification is a pure, synthetic startup regression.
+try {
+  const {probeClaimEvidenceContinuity}=await import('./claim-evidence-continuity-probe.js');
+  console.log('AAU_CLAIM_EVIDENCE_REGRESSION',JSON.stringify(probeClaimEvidenceContinuity()));
+} catch(error) {
+  console.error('AAU_CLAIM_EVIDENCE_REGRESSION_FAILED',JSON.stringify({
+    name:error?.name||null,message:String(error?.message||error).slice(0,500),
+  }));
+}
+
 if (isEnabled('AAU_KIMI_LATENCY_REVIEW')) {
   // Read-only one-shot Kimi review of observed cognition latency. No agent mutation.
   void import('./kimi-cognition-latency-review.js')
