@@ -1,6 +1,7 @@
 // Deterministic contract regression; completely synthetic fixture based on
 // the shape of the QDA601-M10-U2 failure. No live agent data or model calls.
 import { strict as assert } from 'node:assert';
+import { readFileSync } from 'node:fs';
 import { reconcileEvidenceClaims } from './claim-evidence-continuity.js';
 import { claimEvidenceContractForRequirement, projectDeclaredSynthesisInputs } from './claim-evidence-contracts.js';
 import { normalizeDeclaredEvidenceSourceRows, selectDeclaredEvidenceSourceChildren } from './claim-evidence-source-adapter.js';
@@ -219,6 +220,15 @@ export function probeClaimEvidenceContinuity(){
   eq(claimEvidenceContractForRequirement({qda_601_context:{next_unit:{unit_code:'QDA601-M3-U1'}}},
     {requirement_text:'12-month trajectory of MRR and Gross Profit',source_ref:'curriculum/qda601-exercise-packs-v0.1.json#QDA601-M3-U1'}),null,
     'different assignment does not receive M10 schema');
+  // Ensure the runtime supplies the verified children not only pre-provenance
+  // but also AFTER independent review and when rechecking completed parents.
+  // This regression prevents the production handoff that dropped childRows.
+  const runtimeSource=readFileSync(new URL('./autonomous-recursive-decomposition.js',import.meta.url),'utf8');
+  eq(runtimeSource.includes(
+    '?await materializeQdaQuantitativeFromVerifiedDescendants(node,artifact,childRows)'
+  ),true,'post-provenance close must carry verified child rows');
+  eq(runtimeSource.includes('node,parts.artifact,existingChildren'),true,
+    'completed split-parent recheck must carry hydrated verified children');
   return {ok:true,checks,synthetic:true,provider_calls:0,agent_wakes:0,
     contract:'claim_evidence_continuity_regression_v0_1'};
 }
