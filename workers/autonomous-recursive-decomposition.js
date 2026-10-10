@@ -33,6 +33,10 @@ import { reconcileEvidenceClaims } from './claim-evidence-continuity.js';
 import { claimEvidenceContractForRequirement, projectDeclaredSynthesisInputs } from './claim-evidence-contracts.js';
 import { normalizeDeclaredEvidenceSourceRows } from './claim-evidence-source-adapter.js';
 import {
+  encodeNodeDecisionPayload,
+  decodeNodeDecisionPayload,
+} from './cognition-node-payload-spillover.js';
+import {
   materializeQda601UnitFromVerifiedChildren,
   qdaVerifiedPythonChecksFromArtifact,
 } from './qda601-runtime.js';
@@ -3863,6 +3867,35 @@ export async function runAutonomousRequirementCognition({
   }
 
   async function nodeRpc(action,args={}){
+    let wireDecisionPayload=args.decisionPayload??{};
+    if(action==='save'){
+      const snapshot=encodeNodeDecisionPayload(wireDecisionPayload,{
+        nodePath:args.nodePath||'R',
+      });
+      if(snapshot.archived){
+        // Durable, immutable copies must exist before committing the small
+        // reference to the bounded cognition-node row.
+        for(const part of snapshot.checkpoint_parts){
+          const saved=await cognitionStepRpc('save',part.step_key,part.artifact,{
+            contract:'node_decision_payload_checkpoint_v0_1',
+            node_path:args.nodePath||'R',
+            immutable_completed_phase:true,
+            original_bytes:snapshot.original_bytes,
+          });
+          if(saved?.status!=='ready'
+            ||saved?.artifact_hash!==part.artifact_hash)
+            throw new Error('node_decision_spillover_checkpoint_save_unverified');
+        }
+        wireDecisionPayload=snapshot.inline_payload;
+        console.log('AAU_NODE_DECISION_PAYLOAD_ARCHIVED',JSON.stringify({
+          node_path:args.nodePath||'R',
+          original_bytes:snapshot.original_bytes,
+          inline_bytes:bytes(wireDecisionPayload),
+          checkpoint_count:snapshot.checkpoint_parts.length,
+          contract:'node_decision_payload_checkpoint_v0_1',
+        }));
+      }
+    }
     // Database decision state is separately bounded from the RPC envelope.
     // Log only byte counts and key names to diagnose oversized replay state.
     if(action==='save'){
@@ -3895,7 +3928,7 @@ export async function runAutonomousRequirementCognition({
       p_source_ref:args.sourceRef??null,
       p_status:args.status??null,
       p_decision_type:args.decisionType??null,
-      p_decision_payload:args.decisionPayload??{},
+      p_decision_payload:wireDecisionPayload,
       p_result_artifact:args.resultArtifact??null,
     };
     const bridgeAndJsonReserve=8192;
@@ -3978,6 +4011,9 @@ export async function runAutonomousRequirementCognition({
     });
     return {
       ...row,
+      // All callers continue with full semantic state, never just its
+      // persistence reference. The on-disk reference is rehydrated on get.
+      decision_payload:asObject(args.decisionPayload),
       parent_path:args.parentPath??null,
       source_kind:row.source_kind||args.sourceKind||'requirement',
       source_ref:row.source_ref??args.sourceRef??null,
@@ -4127,13 +4163,36 @@ export async function runAutonomousRequirementCognition({
     return {save,evidence};
   }
 
+  async function restoreNodeDecisionState(row){
+    if(!row)return row;
+    const inline=asObject(row.decision_payload);
+    const ref=asObject(inline.decision_state_checkpoint_ref);
+    if(!Object.keys(ref).length)return row;
+    const parts=asArray(ref.parts);
+    if(!parts.length)throw new Error('node_decision_spillover_manifest_missing_parts');
+    const stored=[];
+    for(const part of parts){
+      const checkpoint=await cognitionStepRpc('get',part.step_key,null,{});
+      if(checkpoint?.status!=='ready')
+        throw new Error('node_decision_spillover_checkpoint_missing');
+      stored.push(checkpoint);
+    }
+    const recovered=decodeNodeDecisionPayload(inline,stored,{
+      nodePath:row.node_path,
+    });
+    return {...row,decision_payload:recovered};
+  }
+
   async function getNode(nodePath){
-    return nodeRpc('get',{nodePath});
+    const row=await nodeRpc('get',{nodePath});
+    if(row?.status!=='ready')return row;
+    return restoreNodeDecisionState(row);
   }
 
   async function children(nodePath){
     const row=await nodeRpc('children',{nodePath});
-    return asArray(row?.children);
+    const nodes=asArray(row?.children);
+    return Promise.all(nodes.map(restoreNodeDecisionState));
   }
 
   async function remediationRpc(action,nodePath,episode={}){
