@@ -31,7 +31,7 @@ import {
 import { runPythonStatisticalAnalysesChunked } from './python-quant.js';
 import { reconcileEvidenceClaims } from './claim-evidence-continuity.js';
 import { claimEvidenceContractForRequirement, projectDeclaredSynthesisInputs } from './claim-evidence-contracts.js';
-import { normalizeDeclaredEvidenceSourceRows } from './claim-evidence-source-adapter.js';
+import { normalizeDeclaredEvidenceSourceRows, selectDeclaredEvidenceSourceChildren } from './claim-evidence-source-adapter.js';
 import {
   encodeNodeDecisionPayload,
   decodeNodeDecisionPayload,
@@ -11427,6 +11427,13 @@ export async function runAutonomousRequirementCognition({
     }));
     const terminalStageContract=stageContractForRequirement(packet,node.requirement_text,node.node_path);
     const declaredParentProjectionContract=claimEvidenceContractForRequirement(packet,node);
+    const declaredEvidenceSources=declaredParentProjectionContract
+      ?normalizeDeclaredEvidenceSourceRows(
+        selectDeclaredEvidenceSourceChildren(
+          childRows,declaredParentProjectionContract,node.node_path
+        ),declaredParentProjectionContract
+      )
+      :null;
     const authoritativeVerifiedNumericalEvidence=synthesisQuantitativeEvidence(childRows);
     const synthesisRemediationEpisodes=await loadRemediationEpisodes(node.node_path);
     let activeSynthesisRemediation=latestActiveRemediation(
@@ -11543,6 +11550,30 @@ export async function runAutonomousRequirementCognition({
     let synthesisProvenanceGuidance=clip(priorProvenanceContinuation.revision_guidance,5000);
     let provenanceContinuationRound=Math.max(0,Number(priorProvenanceContinuation.continuation_round||0));
     const MAX_SYNTHESIS_PROVENANCE_CONTINUATION_ROUNDS=3;
+    // Preflight exact verified evidence before any FINAL_SYNTHESIS model call.
+    // Missing/ambiguous declared sources are runtime repair-holds, not a cue
+    // for repeated agent-authored synthesis or fresh semantic charges.
+    if(declaredParentProjectionContract
+      &&childStates.every(child=>text(child.status).toLowerCase()==='completed')){
+      const preflight=reconcileEvidenceClaims({
+        contract:declaredParentProjectionContract,
+        children:declaredEvidenceSources,
+        candidate:{[declaredParentProjectionContract.collection]:[]},
+        transfer:true,
+      });
+      if(preflight.status!=='PATCHED'&&preflight.status!=='VERIFIED'){
+        console.warn('AAU_CLAIM_EVIDENCE_SOURCE_PREFLIGHT_BLOCKED',JSON.stringify({
+          agent_id:agentId,intent_execution_id:intentExecutionId,
+          node_path:node.node_path,contract_id:declaredParentProjectionContract.contract_id,
+          status:preflight.status,reason:preflight.reason||null,
+          source_hashes:asArray(preflight.source_manifest).map(v=>v.result_hash),
+        }));
+        const error=new Error('claim_evidence_source_preflight_unresolved:'+
+          (preflight.reason||preflight.status)+':'+node.node_path);
+        error.code='COGNITION_RUNTIME_FAULT';
+        throw error;
+      }
+    }
     for(let attempt=1;attempt<=2;attempt++){
       try{
         const finalSemanticIdentity=sha256({
@@ -11706,7 +11737,7 @@ export async function runAutonomousRequirementCognition({
         if(evidenceContract){
           const projection=reconcileEvidenceClaims({
             contract:evidenceContract,
-            children:normalizeDeclaredEvidenceSourceRows(childRows,evidenceContract),
+            children:declaredEvidenceSources,
             candidate:finalCandidate.artifact,transfer:true,
           });
           const continuityState={
