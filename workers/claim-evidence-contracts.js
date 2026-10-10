@@ -8,12 +8,21 @@ const M10_U2_P2_MRR_GP=declaredArrayProjectionContract({
   identityField:'month',
   fields:['mrr','gross_profit'],
   expectedIds:Array.from({length:12},(_,i)=>i+1),
-  // Direct child .001 owns the verified month table; .002 owns python_checks
-  // and is deliberately NOT a calculation-row source.
-  sourceChildOrdinals:[1],
+  // A financial-model parent may have two independent month-range sources.
+  // The runtime validates both rather than inferring a source from its shape.
   // The exercise pack supplies monthly ARPA 255 and gross margin 0.72.
   // No ad hoc conversion is authorized here; values copy identically.
   units:{},
+  expectedSourceRef:'curriculum/qda601-exercise-packs-v0.1.json#QDA601-M10-U2',
+});
+
+const M10_U2_P2_CALCULATION_WITH_CHECKS=declaredArrayProjectionContract({
+  contractId:'qda601_m10_u2_problem2_verified_calculation_with_checks_v0_2',
+  collection:'calculation',identityField:'month',
+  fields:['mrr','gross_profit'],
+  expectedIds:Array.from({length:12},(_,i)=>i+1),
+  units:{},
+  sourceChildOrdinals:[1],
   expectedSourceRef:'curriculum/qda601-exercise-packs-v0.1.json#QDA601-M10-U2',
 });
 
@@ -29,7 +38,15 @@ export function claimEvidenceContractForRequirement(packet,node){
     )
     &&/\bMRR\b/i.test(requirement)
     &&/\bgross\s+profit\b/i.test(requirement)
-    &&/12[- ]month/i.test(requirement))return M10_U2_P2_MRR_GP;
+    &&/12[- ]month/i.test(requirement)){
+    // This declared parent asks for calculation alongside a separate checks
+    // branch; its .001 financial model is the calculation source, while .002
+    // is independent verification. Nested six-month model parents retain the
+    // two-source contract above and must reconcile both source children.
+    return /^\s*Calculate the 12-month trajectory of Monthly Recurring Revenue/i.test(requirement)
+      ?M10_U2_P2_CALCULATION_WITH_CHECKS
+      :M10_U2_P2_MRR_GP;
+  }
   return null;
 }
 
