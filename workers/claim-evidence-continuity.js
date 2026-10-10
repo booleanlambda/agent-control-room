@@ -49,10 +49,14 @@ const issue=(kind,claimId,expected,actual,sources=[],note='')=>({
 
 export function declaredArrayProjectionContract({
   contractId,collection,identityField,fields,expectedIds,units={},expectedSourceRef=null,
-  sourceLayout='array',sourceKeyPrefix=null
+  sourceLayout='array',sourceKeyPrefix=null,sourceChildOrdinals=null
 }={}){
   const ids=Array.isArray(expectedIds)?expectedIds:[];
   const names=Array.isArray(fields)?fields:[];
+  const ordinals=sourceChildOrdinals===null?null:
+    (Array.isArray(sourceChildOrdinals)?sourceChildOrdinals:[]);
+  if(ordinals!==null&&(!ordinals.length||new Set(ordinals).size!==ordinals.length
+    ||!ordinals.every(n=>Number.isInteger(n)&&n>=1&&n<=16)))return null;
   if(!contractId||!collection||!identityField
     ||!names.length||!ids.length||new Set(ids).size!==ids.length
     ||!ids.every(Number.isInteger)||!names.every(x=>typeof x==='string'&&x))return null;
@@ -61,6 +65,7 @@ export function declaredArrayProjectionContract({
     contract_id:contractId,collection,identity_field:identityField,
     fields:[...new Set(names)],expected_ids:[...ids],units,
     expected_source_ref:expectedSourceRef,
+    source_child_ordinals:ordinals,
   });
 }
 
