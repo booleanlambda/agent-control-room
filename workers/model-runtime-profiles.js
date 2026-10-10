@@ -214,7 +214,7 @@ export const MODEL_ROLE_POLICIES = Object.freeze({
     max_retries: 2,
   }),
   serializer: Object.freeze({
-    default_timeout_ms: 120000,
+    default_timeout_ms: 300000,
     default_output_tokens: 900,
     default_thinking: false,
     max_retries: 2,
