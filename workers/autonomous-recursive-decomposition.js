@@ -11318,6 +11318,7 @@ export async function runAutonomousRequirementCognition({
       decision_type:child.decision_type||null,
     }));
     const terminalStageContract=stageContractForRequirement(packet,node.requirement_text,node.node_path);
+    const declaredParentProjectionContract=claimEvidenceContractForRequirement(packet,node);
     const authoritativeVerifiedNumericalEvidence=synthesisQuantitativeEvidence(childRows);
     const synthesisRemediationEpisodes=await loadRemediationEpisodes(node.node_path);
     let activeSynthesisRemediation=latestActiveRemediation(
@@ -11478,6 +11479,9 @@ export async function runAutonomousRequirementCognition({
             'Return JSON only: {"outcome":"COMPLETE|BLOCKED","reason":"auditable reason","artifact":"concise semantic parent result OR a real nested JSON object when the parent requirement or prior provenance guidance requires structured fields","handoff":{"conclusions":[],"facts":[],"unresolved":[]}}.',
             'STRUCTURED ARTIFACT RULE: when the parent requirement or prior_provenance_revision_guidance names required fields/schema, artifact MUST be the actual nested JSON object with those fields. Do not encode that object as a string, prose blob, markdown, or JSON-inside-a-string.',
             'When prior provenance guidance requests a shape correction, the corrected shape is authoritative for this synthesis attempt and must be reflected directly in artifact.',
+            ...(declaredParentProjectionContract?[
+              'EXACT VERIFIED CLAIM TRANSFER: The declared projection contract '+declaredParentProjectionContract.contract_id+' assigns the month-by-month numerical calculation array to deterministic transfer from verified child artifacts. Do not retype or recalculate those monthly numerical rows. Put calculation: [] in your structured artifact, and the runtime will fill it only if every required child value is actually verified, complete and unambiguous. You still own COMPLETE versus BLOCKED, assumptions, formula interpretation, and any evidence challenge. Make the other required fields concise and truthful.',
+            ]:[]),
             ...(authoritativeVerifiedNumericalEvidence.length?[
               'AUTHORITATIVE VERIFIED NUMERICAL EVIDENCE is supplied below from completed child work that already passed deterministic/provenance checks. Treat these values as evidence, not as prompts to recalculate.',
               'When you repeat one of those numerical claims, preserve the established value at its displayed precision. Ordinary parent synthesis may interpret or summarize it but must not silently change it. If you believe a verified child value is wrong, preserve it and state the concern as unresolved rather than substituting a new number during synthesis.'
