@@ -122,23 +122,30 @@ export function probeClaimEvidenceContinuity(){
   // Production incident: parent has one accepted SPLIT calculation child and
   // one completed ATOMIC verification-only child with no calculation array.
   const parentPath='R.002.002.001.001';
+  const parentContract=claimEvidenceContractForRequirement(
+    {qda_601_context:{next_unit:{unit_code:'QDA601-M10-U2'}}},
+    {requirement_text:'Calculate the 12-month trajectory of Monthly Recurring Revenue (MRR) and Gross Profit for Problem 2 of QDA601-M10-U2. Preserve exercise_pack_ref as curriculum/qda601-exercise-packs-v0.1.json#QDA601-M10-U2'});
+  eq(parentContract?.source_child_ordinals,[1],
+    'parent with separate checks branch explicitly names calculation child');
+  eq(contract.source_child_ordinals,null,
+    'financial model with six-month sources must include both children');
   const calculationChild={...children[0],node_path:parentPath+'.001',
     decision_type:'SPLIT',decision_payload:{synthesis_outcome:'COMPLETE',
       synthesis_provenance_review:{status:'ACCEPT'}},
     result_artifact:JSON.stringify({artifact:{calculation:rows,units:'USD'}})};
   const checksChild={...children[1],node_path:parentPath+'.002',
     result_artifact:JSON.stringify({artifact:{python_checks:[{label:'mrr_m1',claimed_result:rows[0].mrr}]}})};
-  const selected=selectDeclaredEvidenceSourceChildren([calculationChild,checksChild],contract,parentPath);
+  const selected=selectDeclaredEvidenceSourceChildren([calculationChild,checksChild],parentContract,parentPath);
   eq(selected.length,1,'only the declared calculation source child is selected');
   eq(selected[0].node_path,calculationChild.node_path,'source path is exact');
   const incident=reconcileEvidenceClaims({contract,
-    children:normalizeDeclaredEvidenceSourceRows(selected,contract),candidate:{calculation:[]}});
+    children:normalizeDeclaredEvidenceSourceRows(selected,parentContract),candidate:{calculation:[]}});
   eq(incident.status,'PATCHED','verified months transfer without treating check-only child as a schema error');
   eq(incident.artifact.calculation,rows,'12 preserved verified rows from split child');
   eq(incident.source_manifest[0].result_hash,calculationChild.result_hash,'source hash preserved');
-  eq(selectDeclaredEvidenceSourceChildren([checksChild],contract,parentPath).length,0,
+  eq(selectDeclaredEvidenceSourceChildren([checksChild],parentContract,parentPath).length,0,
     'missing calculation source cannot be replaced with check-only source');
-  eq(selectDeclaredEvidenceSourceChildren([calculationChild,checksChild],contract,parentPath+'.999').length,0,
+  eq(selectDeclaredEvidenceSourceChildren([calculationChild,checksChild],parentContract,parentPath+'.999').length,0,
     'wrong parent path cannot authorize evidence transfer');
   const nestedKeyedSources=children.map(c=>{
     const inner=JSON.parse(c.result_artifact).artifact;
