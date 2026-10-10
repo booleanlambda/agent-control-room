@@ -5380,6 +5380,11 @@ export async function runAutonomousRequirementCognition({
         }
         return response;
       }catch(error){
+        // A settlement has already been attempted in the success path. Do not
+        // settle the same reservation again or disguise a canceled wake as a
+        // provider failure. An obsolete wake cannot alter the active lifecycle.
+        if(error?.code==='COGNITION_SUPERSEDED_WAKE'
+          ||error?.code==='COGNITION_RUNTIME_ACCOUNTING_FAULT')throw error;
         lastError=error;
         await settleModelCall(reservation,{error});
         const transportTransient=retryableModelTransportError(error);
