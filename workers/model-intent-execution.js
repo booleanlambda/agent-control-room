@@ -3689,6 +3689,7 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
       ['SEMANTIC_BUDGET_EXHAUSTED','SEMANTIC_RUNTIME_CYCLE_LOCK'].includes(String(error?.code||''))
         ? String(error.code)
         : null;
+    const supersededWake=String(error?.code||'')==='COGNITION_SUPERSEDED_WAKE';
     const cognitionAdmissionDeferred=String(error?.code||'')==='COGNITION_ADMISSION_DEFERRED';
     const cognitionProvenanceContinuationRequired=
       String(error?.code||'')==='COGNITION_PROVENANCE_CONTINUATION_REQUIRED';
@@ -3727,7 +3728,12 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
         && /^(?:autonomous_decomposition_|qda_(?:root|recursive)_)/i.test(message)
       );
     if (begun) {
-      if(postCommitAncillaryFailure){
+      if(supersededWake){
+        console.warn('AAU_SUPERSEDED_WAKE_FAILURE_SUPPRESSED',JSON.stringify({
+          intent_execution_id:requestedIntentExecutionId,
+          active_lifecycle_mutation:false,
+        }));
+      } else if(postCommitAncillaryFailure){
         console.error('AAU_POST_COMMIT_ANCILLARY_FAILURE_REPLAY_SUPPRESSED',JSON.stringify({
           intent_execution_id:requestedIntentExecutionId,
           activity_id:appliedCommit?.activity_id||null,
@@ -3943,6 +3949,7 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
       agent_id: requestedAgentId,
       error: message,
       terminal_semantic_runtime_code:terminalSemanticRuntimeCode,
+      superseded_wake:supersededWake,
       cognition_admission_deferred:cognitionAdmissionDeferred,
       cognition_provenance_continuation_required:cognitionProvenanceContinuationRequired,
       cognition_provenance_continuation_exhausted:cognitionProvenanceContinuationExhausted,
