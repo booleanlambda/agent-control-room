@@ -30,7 +30,7 @@ import {
 } from './python-math.js';
 import { runPythonStatisticalAnalysesChunked } from './python-quant.js';
 import { reconcileEvidenceClaims } from './claim-evidence-continuity.js';
-import { claimEvidenceContractForRequirement } from './claim-evidence-contracts.js';
+import { claimEvidenceContractForRequirement, projectDeclaredSynthesisInputs } from './claim-evidence-contracts.js';
 import { normalizeDeclaredEvidenceSourceRows } from './claim-evidence-source-adapter.js';
 import {
   materializeQda601UnitFromVerifiedChildren,
@@ -10661,12 +10661,20 @@ export async function runAutonomousRequirementCognition({
     if(!qdaQuantitativeAtomicRequirement(packet,node)){
       return {artifact,materialized:false,check_count:0};
     }
-    const parsed=typeof artifact==='string'
+    let parsed=typeof artifact==='string'
       ? (()=>{try{return JSON.parse(artifact);}catch{return null;}})()
       : artifact;
     if(!parsed || typeof parsed!=='object' || Array.isArray(parsed)){
       return {artifact,materialized:false,check_count:0};
     }
+    // This declared input projection runs EVEN on reused Python-check
+    // checkpoints: old completed syntheses carried unrelated case fields.
+    const projectedTaskInputs=projectDeclaredSynthesisInputs(
+      packet,node,parsed,asObject(
+        packet?.qda_601_context?.next_unit?.exercise_pack?.case_data
+      )
+    );
+    if(projectedTaskInputs)parsed=projectedTaskInputs;
     if([
          'qda_problem_verified_descendant_materialization_v0_1',
          'qda_verified_descendant_materialization_v0_2_recursive',
@@ -10793,9 +10801,13 @@ export async function runAutonomousRequirementCognition({
     const existingInputs=asObject(parsed.inputs);
     const normalized={
       ...parsed,
-      inputs:Object.keys(authoritativeCaseInputs).length
-        ?{...existingInputs,...authoritativeCaseInputs}
-        :parsed.inputs,
+      inputs:projectDeclaredSynthesisInputs(
+        packet,node,parsed,authoritativeCaseInputs
+      )?.inputs ?? (
+        Object.keys(authoritativeCaseInputs).length
+          ?{...existingInputs,...authoritativeCaseInputs}
+          :parsed.inputs
+      ),
       assumptions:Array.isArray(parsed.assumptions)
         ?parsed.assumptions
         :parsed.assumptions===null||parsed.assumptions===undefined
