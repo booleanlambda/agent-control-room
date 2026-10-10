@@ -45,17 +45,27 @@ begin
       where q.agent_id=p_agent_id and q.status in ('queued','claimed','running')) then
     raise exception 'operator_finalization_rejects_active_or_queued_wakes';
   end if;
-  if v_prev.status<>'active' or
-     v_prev.metadata->>'finalization_checkpoint_recovery'<>'true' then
+  if v_prev.status<>'active' or not (
+       v_prev.metadata->>'finalization_checkpoint_recovery'='true'
+       or v_prev.metadata->>'renewal_kind'='operator_explicit_finalization_bucket_recovery_v0_1'
+     ) then
     raise exception 'operator_finalization_expected_exhausted_active_rollover_epoch';
+  end if;
+  if v_prev.metadata->>'source_node_path'=p_node_path then
+    raise exception 'operator_finalization_same_node_repeated_renewal_forbidden';
   end if;
   select count(*)::integer,
          count(*) filter(where c.status='completed'
-           and c.decision_type='ATOMIC'
            and c.result_hash is not null
-           and c.decision_payload->>'deterministic_math_verified'='true'
-           and c.decision_payload->'deterministic_math_verification'->>'ok'='true'
-           and c.decision_payload->'deterministic_math_verification'->>'all_match'='true')::integer
+           and (
+             (c.decision_type='ATOMIC'
+               and c.decision_payload->>'deterministic_math_verified'='true'
+               and c.decision_payload->'deterministic_math_verification'->>'ok'='true'
+               and c.decision_payload->'deterministic_math_verification'->>'all_match'='true')
+             or (c.decision_type='SPLIT'
+               and c.decision_payload->>'synthesis_outcome'='COMPLETE'
+               and c.decision_payload->'synthesis_provenance_review'->>'status'='ACCEPT')
+           ))::integer
     into v_child_count,v_verified_count
     from agent_lab.cognition_requirement_nodes c
     where c.agent_id=p_agent_id and c.assignment_key=p_assignment_key
