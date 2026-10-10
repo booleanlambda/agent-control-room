@@ -3,7 +3,7 @@
 import { strict as assert } from 'node:assert';
 import { reconcileEvidenceClaims } from './claim-evidence-continuity.js';
 import { claimEvidenceContractForRequirement, projectDeclaredSynthesisInputs } from './claim-evidence-contracts.js';
-import { normalizeDeclaredEvidenceSourceRows } from './claim-evidence-source-adapter.js';
+import { normalizeDeclaredEvidenceSourceRows, selectDeclaredEvidenceSourceChildren } from './claim-evidence-source-adapter.js';
 
 const hash=n=>String(n).padStart(64,String(n));
 const contract=claimEvidenceContractForRequirement(
@@ -119,6 +119,27 @@ export function probeClaimEvidenceContinuity(){
   })};
   eq(reconcileEvidenceClaims({contract,children:[children[0],unitConflict],candidate:boundary}).reason,
     'verified_source_units_conflict','unit disagreement cannot be silently transferred');
+  // Production incident: parent has one accepted SPLIT calculation child and
+  // one completed ATOMIC verification-only child with no calculation array.
+  const parentPath='R.002.002.001.001';
+  const calculationChild={...children[0],node_path:parentPath+'.001',
+    decision_type:'SPLIT',decision_payload:{synthesis_outcome:'COMPLETE',
+      synthesis_provenance_review:{status:'ACCEPT'}},
+    result_artifact:JSON.stringify({artifact:{calculation:rows,units:'USD'}})};
+  const checksChild={...children[1],node_path:parentPath+'.002',
+    result_artifact:JSON.stringify({artifact:{python_checks:[{label:'mrr_m1',claimed_result:rows[0].mrr}]}})};
+  const selected=selectDeclaredEvidenceSourceChildren([calculationChild,checksChild],contract,parentPath);
+  eq(selected.length,1,'only the declared calculation source child is selected');
+  eq(selected[0].node_path,calculationChild.node_path,'source path is exact');
+  const incident=reconcileEvidenceClaims({contract,
+    children:normalizeDeclaredEvidenceSourceRows(selected,contract),candidate:{calculation:[]}});
+  eq(incident.status,'PATCHED','verified months transfer without treating check-only child as a schema error');
+  eq(incident.artifact.calculation,rows,'12 preserved verified rows from split child');
+  eq(incident.source_manifest[0].result_hash,calculationChild.result_hash,'source hash preserved');
+  eq(selectDeclaredEvidenceSourceChildren([checksChild],contract,parentPath).length,0,
+    'missing calculation source cannot be replaced with check-only source');
+  eq(selectDeclaredEvidenceSourceChildren([calculationChild,checksChild],contract,parentPath+'.999').length,0,
+    'wrong parent path cannot authorize evidence transfer');
   const nestedKeyedSources=children.map(c=>{
     const inner=JSON.parse(c.result_artifact).artifact;
     const keyed=Object.fromEntries(inner.calculation.map(row=>[
