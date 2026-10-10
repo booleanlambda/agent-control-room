@@ -2,7 +2,7 @@
 // the shape of the QDA601-M10-U2 failure. No live agent data or model calls.
 import { strict as assert } from 'node:assert';
 import { reconcileEvidenceClaims } from './claim-evidence-continuity.js';
-import { claimEvidenceContractForRequirement } from './claim-evidence-contracts.js';
+import { claimEvidenceContractForRequirement, projectDeclaredSynthesisInputs } from './claim-evidence-contracts.js';
 import { normalizeDeclaredEvidenceSourceRows } from './claim-evidence-source-adapter.js';
 
 const hash=n=>String(n).padStart(64,String(n));
@@ -27,6 +27,20 @@ const children=[
 export function probeClaimEvidenceContinuity(){
   let checks=0;const eq=(a,b,msg)=>{assert.deepEqual(a,b,msg);checks++;};
   assert.ok(contract);
+  const pruned=projectDeclaredSynthesisInputs(
+    {qda_601_context:{next_unit:{unit_code:'QDA601-M10-U2'}}},
+    {source_ref:'R.002.002.001.001',
+     requirement_text:"Derive the 12-month MRR and Gross Profit table; preserve exercise_pack_ref 'curriculum/qda601-exercise-packs-v0.1.json#QDA601-M10-U2'"},
+    {inputs:{monthly_arpa:255,gross_margin:0.72,paying_account_trajectory_ref:'R.002.001',
+      paying_accounts:6200,cac:950,opening_cash:5200000},calculation:[{month:1,mrr:1632765}]},
+    {monthly_arpa:255,gross_margin:0.72,paying_accounts:6200,cac:950}
+  );
+  eq(pruned?.inputs,{monthly_arpa:255,gross_margin:0.72,
+    paying_account_trajectory_ref:'R.002.001'},'declared parent inputs remove irrelevant baseline');
+  eq(pruned?.calculation,[{month:1,mrr:1632765}],'input projection does not alter calculations');
+  eq(projectDeclaredSynthesisInputs({qda_601_context:{next_unit:{unit_code:'QDA601-M3-U1'}}},
+    {requirement_text:'12-month MRR and Gross Profit',source_ref:'none'},
+    {inputs:{paying_accounts:6200}}),null,'unrelated task inputs are never projected');
   const actualParent=claimEvidenceContractForRequirement(
     {qda_601_context:{next_unit:{unit_code:'QDA601-M10-U2'}}},
     {source_ref:'R.002.002.001.001',
