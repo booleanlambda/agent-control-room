@@ -3585,6 +3585,14 @@ export function probeAauRuntimeErrorCatalogV1(){
       throw new Error('error_catalog_regression:'+code);
     checks++;
   }
+  // A named runtime fault must enter the existing terminal intervention
+  // lane; it cannot be missed merely because error.code was already set.
+  const namedFault={code:'COGNITION_RUNTIME_FAULT',message:
+    'declared_verified_checks_unresolved:checks_source_cardinality_invalid:R.002.002'};
+  const namedDiagnostic=classifyAauRuntimeErrorV1(namedFault);
+  if(namedDiagnostic.code!=='AAU-EVD-101'||namedDiagnostic.node_path!=='R.002.002')
+    throw new Error('explicit_runtime_fault_intervention_regression');
+  checks++;
   const transport=classifyAauRuntimeErrorV1({message:'service unavailable'},
     {provider_status_code:529,node_path:'R.002.002'});
   if(transport.code!=='AAU-PRV-401'||transport.node_path!=='R.002.002')
@@ -3817,7 +3825,8 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
     const providerTransient=transportFailure.failure_class==='model_transport_transient';
     const explicitErrorCode=String(error?.code||'').trim();
     const cognitionRuntimeFault=
-      deepCheckpointIntegrityFault
+      explicitErrorCode==='COGNITION_RUNTIME_FAULT'
+      ||deepCheckpointIntegrityFault
       ||childReconsiderationLimit
       ||packetModelBindingFault
       ||(
@@ -4028,15 +4037,32 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
           contract:'provider_transport_window_v0_1',
         }));
       } else if (cognitionRuntimeFault) {
-        await rpc('aau_bridge_hold_cognition_runtime_fault_v0_1',{
+        // Existing AAU Intervention Protocol v0.1 owns the terminal hold,
+        // levy suspension and idempotent system-authored remediation message.
+        // Never retry a deterministic evidence contract exception as transport.
+        const hold=await rpc('aau_bridge_hold_cognition_runtime_fault_v0_1',{
           p_intent_execution_id:requestedIntentExecutionId,
           p_error:message,
         }).catch((holdError)=>{
           console.error('AAU_COGNITION_RUNTIME_FAULT_HOLD_FAILED',JSON.stringify({
             intent_execution_id:requestedIntentExecutionId,
+            diagnostic_error_code:diagnostic.code,
             error:String(holdError?.message||holdError).slice(0,800),
           }));
+          return null;
         });
+        console.log('AAU_RUNTIME_FAULT_INTERVENTION_DISPATCH',JSON.stringify({
+          agent_id:requestedAgentId,
+          intent_execution_id:requestedIntentExecutionId,
+          diagnostic_error_code:diagnostic.code,
+          hold_status:hold?.status||null,
+          intervention_status:hold?.intervention_status||null,
+          authenticated_admin_message:hold?.intervention_status==='queued_for_authorized_resume'
+            ||hold?.intervention_status==='already_recorded',
+          agent_model_replaced:false,
+          completed_artifacts_mutated:false,
+          agent_self_remediation_awarded:false,
+        }));
       } else if (failureDetails) {
         await rpc('aau_bridge_fail_model_intent_execution_detailed', {
           p_intent_execution_id: requestedIntentExecutionId,
