@@ -1938,6 +1938,16 @@ try {
   }));
 }
 
+// This failure originated in recursive parent presentation, after all atomic
+// checks passed. Enforce proof-bound, non-destructive reconciliation on boot.
+const {probeQdaRecursivePresentationCheckAliasV1}=
+  await import('./qda-recursive-presentation-check-alias.js');
+const qdaPresentationProbe=probeQdaRecursivePresentationCheckAliasV1();
+if(qdaPresentationProbe.ok!==true||qdaPresentationProbe.checks<12)
+  throw new Error('AAU_QDA_RECURSIVE_PARENT_CHECK_ALIAS_REGRESSION_NOT_GREEN');
+console.log('AAU_QDA_RECURSIVE_PARENT_CHECK_ALIAS_REGRESSION',
+  JSON.stringify(qdaPresentationProbe));
+
 // Fail fast for deterministic overlap-contract regressions. Never mutate agents.
 const { probeQdaOutputObligationV1 } = await import('./qda-output-obligation-regression.js');
 const qdaOutputProbe = probeQdaOutputObligationV1();
