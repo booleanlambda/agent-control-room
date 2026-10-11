@@ -10282,9 +10282,12 @@ export async function runAutonomousRequirementCognition({
 
   async function reviewSynthesisProvenance(node,childRows,accumulator,proposedFinal,revisionGuidance=''){
     const directChildManifest=directChildProvenanceManifest(node.node_path,childRows);
-    const boundGuidance=boundProvenanceRevisionGuidance(
-      node.node_path,childRows,revisionGuidance
-    );
+    const exactDirectChecksParent=
+      claimEvidenceContractForRequirement(packet,node)?.contract_id===
+        'qda601_m10_u2_problem2_verified_calculation_with_checks_v0_2';
+    const boundGuidance=exactDirectChecksParent
+      ?boundProvenanceRevisionGuidance(node.node_path,childRows,revisionGuidance)
+      :{guidance:revisionGuidance||'',stale:false};
     const manifestAudit=auditDeclaredProvenanceManifest(
       node.node_path,childRows,proposedFinal?.artifact
     );
@@ -10331,7 +10334,11 @@ export async function runAutonomousRequirementCognition({
         'You are the same bound autonomous agent auditing YOUR OWN proposed parent synthesis before it becomes durable.',
         'This is a provenance-preservation review, not a new task or a runtime verdict.',
         'Compare every number, unit, date, forecast period, source/value relationship, scope claim, and derived conclusion in the proposed synthesis against the resolved child evidence.',
-        'EXACT SOURCE HASH BINDING: result_hash entries in runtime_verified_descendant_materialization must match exact node_path entries in direct_child_provenance_manifest. Never substitute a nested descendant hash for direct checks child .002, even when both are valid. Contradictory prior corrections are stale. A direct hash that matches the manifest is not a provenance error.',
+        ...(exactDirectChecksParent?[
+          'EXACT CHECK-SOURCE HASH BINDING: this parent uses the declared direct .002 check producer. Its result_hash must match the exact direct child node_path in direct_child_provenance_manifest. Never replace it with a nested check hash.',
+        ]:[
+          'RECURSIVE VERIFIED EVIDENCE: a completed split calculation child may preserve the immutable hash of its nested verified atomic check source. Such a descendant need not be a direct child of this parent. Follow the verified calculation_source lineage and exact source node_path; do not substitute the direct analytical audit sibling .002 for the nested check producer.',
+        ]),
         'REVISE if the synthesis swaps values between sources, silently changes a source/value pairing, changes units or time horizons, converts a derived scenario into a sourced fact, or strengthens uncertainty beyond what the children support.',
         'Derived calculations and scenarios are allowed only when explicitly labeled as derived, their exact source inputs remain correctly paired, and the transformation/formula is stated.',
         'BLOCKED child gaps must remain visible when they are material to the parent requirement.',
@@ -11751,9 +11758,13 @@ export async function runAutonomousRequirementCognition({
         ?deterministicEvidenceLedgerSynthesis(packet,node,childRows)
         :null;
     const priorProvenanceContinuation=asObject(node?.decision_payload?.synthesis_provenance_pending);
-    const boundContinuationGuidance=boundProvenanceRevisionGuidance(
-      node.node_path,childRows,clip(priorProvenanceContinuation.revision_guidance,5000)
-    );
+    const directChecksParent=
+      claimEvidenceContractForRequirement(packet,node)?.contract_id===
+        'qda601_m10_u2_problem2_verified_calculation_with_checks_v0_2';
+    const boundContinuationGuidance=directChecksParent
+      ?boundProvenanceRevisionGuidance(
+        node.node_path,childRows,clip(priorProvenanceContinuation.revision_guidance,5000))
+      :{guidance:clip(priorProvenanceContinuation.revision_guidance,5000),stale:false};
     let synthesisProvenanceGuidance=boundContinuationGuidance.guidance;
     let provenanceContinuationRound=boundContinuationGuidance.stale?0:
       Math.max(0,Number(priorProvenanceContinuation.continuation_round||0));
