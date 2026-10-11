@@ -21,12 +21,12 @@ end
 $patch$;
 do $patch$
 declare v_def text;
-  v_declaration text := E'  v_new_wake_id uuid;\\nbegin';
-  v_insert text := E'  v_new_wake_id uuid;\\n  v_intervention jsonb:=null;\\nbegin';
+  v_declaration text := E'  v_new_wake_id uuid;\nbegin';
+  v_insert text := E'  v_new_wake_id uuid;\n  v_intervention jsonb:=null;\nbegin';
   v_guard text := E'  v_node_path:=substring(';
-  v_guarded text := E'  if v_status not in (''claimed'',''running'',''queued'') then\\n    return jsonb_build_object(''status'',''stale_wake_unchanged'',''intent_execution_id'',p_intent_execution_id);\\n  end if;\\n\\n  v_node_path:=substring(';
-  v_return text := E'  return jsonb_build_object(\\n    ''status'',''runtime_fault_held'',';
-  v_new_return text := E'  begin\\n    v_intervention:=agent_lab.queue_intervention_admin_message_v0_1(\\n      v_agent_id,p_intent_execution_id,''cognition_runtime_fault'',\\n      case when v_error like ''declared_verified_checks_unresolved:checks_source_cardinality_invalid:%''\\n        then ''AAU-EVD-101: ''||v_error else v_error end,\\n      coalesce((select attempts from agent_lab.wake_queue where wake_request_id=p_intent_execution_id),0)\\n    );\\n  exception when others then\\n    raise warning ''cognition_runtime_intervention_enqueue_failed: %'',sqlerrm;\\n  end;\\n\\n  return jsonb_build_object(\\n    ''status'',''runtime_fault_held'',\\n    ''intervention_status'',coalesce(v_intervention->>''status'',''queue_failed''),';
+  v_guarded text := E'  if v_status not in (''claimed'',''running'',''queued'') then\n    return jsonb_build_object(''status'',''stale_wake_unchanged'',''intent_execution_id'',p_intent_execution_id);\n  end if;\n\n  v_node_path:=substring(';
+  v_return text := E'  return jsonb_build_object(\n    ''status'',''runtime_fault_held'',';
+  v_new_return text := E'  begin\n    v_intervention:=agent_lab.queue_intervention_admin_message_v0_1(\n      v_agent_id,p_intent_execution_id,''cognition_runtime_fault'',\n      case when v_error like ''declared_verified_checks_unresolved:checks_source_cardinality_invalid:%''\n        then ''AAU-EVD-101: ''||v_error else v_error end,\n      coalesce((select attempts from agent_lab.wake_queue where wake_request_id=p_intent_execution_id),0)\n    );\n  exception when others then\n    raise warning ''cognition_runtime_intervention_enqueue_failed: %'',sqlerrm;\n  end;\n\n  return jsonb_build_object(\n    ''status'',''runtime_fault_held'',\n    ''intervention_status'',coalesce(v_intervention->>''status'',''queue_failed''),';
 begin
   select pg_get_functiondef(p.oid) into v_def
   from pg_proc p join pg_namespace n on n.oid=p.pronamespace
