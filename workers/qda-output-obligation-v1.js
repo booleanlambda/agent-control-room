@@ -53,7 +53,8 @@ export function qdaFinancialOutputScopeV1(child){
   if(!QDA_UNIT.test(requirement))return null;
   const clause=titleOutputClause(requirement);
   if(!clause)return null;
-  const metrics=METRICS.filter(([_,pattern])=>pattern.test(clause)).map(([id])=>id);
+  const metricClause=clause.replace(/[-–—_]+/g,' ');
+  const metrics=METRICS.filter(([_,pattern])=>pattern.test(metricClause)).map(([id])=>id);
   if(!metrics.length)return null;
   // A declaration alone is not trusted. It must agree with this closed,
   // source-text-only metric registry. Do not infer outputs from the dependency.
