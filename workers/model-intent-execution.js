@@ -3507,6 +3507,8 @@ export const AAU_RUNTIME_ERROR_CATALOG_V1=Object.freeze({
   'AAU-BUD-203':['budget','replay','runtime','investigate_cycle','Repeated semantic cycle lock'],
   'AAU-CGN-301':['cognition','provenance','agent','durable_continuation','Provenance continuation required'],
   'AAU-CGN-302':['cognition','response_contract','model','bounded_repair','Invalid model response contract'],
+  'AAU-DECOMP-401':['decomposition','child_overlap','runtime','agent_reconsideration','Proposed child overlaps an existing output obligation'],
+  'AAU-DECOMP-402':['decomposition','reconsideration_limit','runtime','operator_intervention','Child-authoring reconsideration limit exhausted'],
   'AAU-PRV-401':['provider','transport','provider','existing_transport_policy','Transient provider failure'],
   'AAU-SCH-501':['scheduler','next_wake','scheduler','inspect_queue','No next wake detected'],
   'AAU-RUN-601':['runtime','checkpoint','runtime','repair_checkpoint','Durable checkpoint fault'],
@@ -3539,6 +3541,11 @@ export function classifyAauRuntimeErrorV1(error,context={}){
     message.startsWith('cognition_provenance_continuation_required:'))
     code='AAU-CGN-301';
   else if(raw==='COGNITION_RESPONSE_REJECTED')code='AAU-CGN-302';
+  else if(raw==='COGNITION_CHILD_OVERLAP'||message.startsWith('autonomous_decomposition_overlapping_child:'))
+    code='AAU-DECOMP-401';
+  else if(raw==='COGNITION_CHILD_RECONSIDERATION_LIMIT'
+    ||message.startsWith('autonomous_decomposition_child_reconsideration_limit:'))
+    code='AAU-DECOMP-402';
   else if(raw==='MODEL_TRANSPORT_TRANSIENT'||httpStatus===504||httpStatus===529)
     code='AAU-PRV-401';
   else if(message.startsWith('monitor_detected_no_next_wake'))code='AAU-SCH-501';
@@ -3567,6 +3574,8 @@ export function probeAauRuntimeErrorCatalogV1(){
     ['semantic_bucket_rollover_denied:semantic_budget_bucket_exhausted:finalization:bucket_limit_exhausted','AAU-BUD-201',null],
     ['semantic_runtime_cycle_lock:req:cycle','AAU-BUD-203',null],
     ['cognition_provenance_continuation_required:R.002.002.001','AAU-CGN-301','R.002.002.001'],
+    ['autonomous_decomposition_child_reconsideration_limit:R.002.003.002','AAU-DECOMP-402','R.002.003.002'],
+    ['autonomous_decomposition_overlapping_child:R.002.003.002','AAU-DECOMP-401','R.002.003.002'],
     ['monitor_detected_no_next_wake','AAU-SCH-501',null],
     ['unrecognized failure text','AAU-UNK-000',null],
   ];
