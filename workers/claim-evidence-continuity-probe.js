@@ -6,6 +6,10 @@ import { reconcileEvidenceClaims } from './claim-evidence-continuity.js';
 import { claimEvidenceContractForRequirement, projectDeclaredSynthesisInputs } from './claim-evidence-contracts.js';
 import { normalizeDeclaredEvidenceSourceRows, selectDeclaredEvidenceSourceChildren } from './claim-evidence-source-adapter.js';
 import { projectDeclaredVerifiedChecks } from './claim-evidence-check-transport.js';
+import {
+  directChildProvenanceManifest, boundProvenanceRevisionGuidance,
+  auditDeclaredProvenanceManifest, dismissFalseDirectChildHashRejection,
+} from './provenance-source-binding.js';
 import { declaredVerifiedCheckTransportCoverage, atomicMaterialCalculationCount } from './autonomous-recursive-decomposition.js';
 
 const hash=n=>String(n).padStart(64,String(n));
@@ -258,6 +262,60 @@ export function probeClaimEvidenceContinuity(){
     'obsolete model settlement is a canceled-wake audit event');
   eq(runtimeSource.includes("error?.code==='COGNITION_SUPERSEDED_WAKE'"),true,
     'stale settlement is not double-settled as a provider error');
+  // Production regression: direct .002 checks hash is not a nested .001.002 hash.
+  const collisionParent='R.002.002.001';
+  const correctDirectHash='78169d338ba76e7a2b778d642fbd9607e22f6a2d5bb3c620d112f9f6d1e15a0a';
+  const nestedHash='66b668c294d55e8ce916c2af426574cbb4225a6f228ddae0ae1e2121a19a406b';
+  const collisionRows=[
+    {node_path:collisionParent+'.001',node_status:'completed',
+      decision_type:'SPLIT',result_hash:hash(100)},
+    {node_path:collisionParent+'.002',node_status:'completed',
+      decision_type:'ATOMIC',result_hash:correctDirectHash},
+    {node_path:collisionParent+'.003',node_status:'completed',
+      decision_type:'ATOMIC',result_hash:hash(101)},
+    {node_path:collisionParent+'.001.002',node_status:'completed',
+      decision_type:'ATOMIC',result_hash:nestedHash},
+  ];
+  const exactManifest={
+    runtime_verified_descendant_materialization:{
+      contract:'qda_declared_verified_checks_transport_v0_1',
+      descendants:[{node_path:collisionParent+'.002',result_hash:correctDirectHash}],
+    },
+  };
+  const falseReview={
+    status:'REVISE',
+    issues:['proposed_final.artifact.runtime_verified_descendant_materialization.descendants[0].result_hash should use '+nestedHash],
+    revision_guidance:'Update proposed_final.artifact.runtime_verified_descendant_materialization.descendants[0].result_hash to '+nestedHash,
+  };
+  eq(directChildProvenanceManifest(collisionParent,collisionRows).length,3,
+    'exact manifest excludes nested descendants');
+  eq(boundProvenanceRevisionGuidance(collisionParent,collisionRows,falseReview.revision_guidance).stale,true,
+    'stale nested hash guidance is discarded before synthesis');
+  eq(auditDeclaredProvenanceManifest(collisionParent,collisionRows,exactManifest).status,'VERIFIED',
+    'direct check hash is verified by node path');
+  eq(dismissFalseDirectChildHashRejection(collisionParent,collisionRows,exactManifest,falseReview).status,'ACCEPT',
+    'incorrect reviewer hash-only rejection cannot cause an endless resynthesis');
+  const tamperedManifest={
+    runtime_verified_descendant_materialization:{
+      ...exactManifest.runtime_verified_descendant_materialization,
+      descendants:[{node_path:collisionParent+'.002',result_hash:nestedHash}],
+    },
+  };
+  eq(auditDeclaredProvenanceManifest(collisionParent,collisionRows,tamperedManifest).status,'EVIDENCE_CONFLICT',
+    'genuine hash substitution remains fail closed');
+  eq(dismissFalseDirectChildHashRejection(collisionParent,collisionRows,tamperedManifest,falseReview).status,'REVISE',
+    'tampered source cannot be accepted by false-positive filter');
+  eq(dismissFalseDirectChildHashRejection(collisionParent,collisionRows,exactManifest,{
+    ...falseReview,issues:[...falseReview.issues,'Missing Month 11 gross profit']}).status,'REVISE',
+    'semantic issues must not be suppressed by direct hash verification');
+  eq(boundProvenanceRevisionGuidance(collisionParent,collisionRows,'Revise interpretation').stale,false,
+    'unrelated semantic revision guidance remains in force');
+  eq(directChildProvenanceManifest(collisionParent,[...collisionRows,collisionRows[1]]).length,0,
+    'ambiguous duplicate direct source is never chosen by order');
+  eq(runtimeSource.includes("provenance_source_binding_contract:'exact_direct_child_provenance_hash_v0_1'"),true,
+    'new provenance binding contract versions the checkpoint');
+  eq(runtimeSource.includes('direct_child_provenance_manifest:directChildManifest'),true,
+    'reviewer receives path-bound immutable source manifest');
   const executionSource=readFileSync(new URL('./model-intent-execution.js',import.meta.url),'utf8');
   eq(executionSource.includes("if(supersededWake){"),true,
     'a superseded wake cannot mark the active lifecycle as degraded');
