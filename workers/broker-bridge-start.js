@@ -1929,6 +1929,15 @@ if (isEnabled('AAU_ENTREPRENEURSHIP_ASSESSOR_ENABLED')) {
   }
 }
 
+try {
+  const {probeAauRuntimeErrorCatalogV1}=await import('./model-intent-execution.js');
+  console.log('AAU_RUNTIME_ERROR_CATALOG_REGRESSION',JSON.stringify(probeAauRuntimeErrorCatalogV1()));
+} catch(error){
+  console.error('AAU_RUNTIME_ERROR_CATALOG_REGRESSION_FAILED',JSON.stringify({
+    message:String(error?.message||error).slice(0,500)
+  }));
+}
+
 // Run this pure regression even on the inert canary, before the bridge entrypoint.
 // Claim-evidence verification is a pure, synthetic startup regression.
 try {
