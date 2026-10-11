@@ -245,6 +245,7 @@ export function probeClaimEvidenceContinuity(){
   eq(claimEvidenceContractForRequirement({qda_601_context:{next_unit:{unit_code:'QDA601-M3-U1'}}},
     {requirement_text:'12-month trajectory of MRR and Gross Profit',source_ref:'curriculum/qda601-exercise-packs-v0.1.json#QDA601-M3-U1'}),null,
     'different assignment does not receive M10 schema');
+  const runtimeSource=readFileSync(new URL('./autonomous-recursive-decomposition.js',import.meta.url),'utf8');
   // Outer parent has .001 verified calculation plus .002 independent audit;
   // the audit is NOT a second standalone 24-check producer.
   const outerPath='R.002.002';
@@ -290,7 +291,7 @@ export function probeClaimEvidenceContinuity(){
   // Ensure the runtime supplies the verified children not only pre-provenance
   // but also AFTER independent review and when rechecking completed parents.
   // This regression prevents the production handoff that dropped childRows.
-  const runtimeSource=readFileSync(new URL('./autonomous-recursive-decomposition.js',import.meta.url),'utf8');
+
   eq(runtimeSource.includes(
     '?await materializeQdaQuantitativeFromVerifiedDescendants(node,artifact,childRows)'
   ),true,'post-provenance close must carry verified child rows');
