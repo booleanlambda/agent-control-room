@@ -83,3 +83,23 @@ export function compareQdaOutputObligationsV1(candidate,sibling){
     return {verdict:'disjoint',reason:'distinct_canonical_scenarios',candidate_scope:a,sibling_scope:b};
   return {verdict:'overlap',reason:'canonical_output_scope_intersection',candidate_scope:a,sibling_scope:b};
 }
+
+export function qdaSiblingOverlapGateV1({
+  output_scope=null,
+  similarity=0,
+  explicit_instance_disjoint=false,
+  explicit_partition_disjoint=false,
+  canonical_instance_disjoint=false,
+  structured_scope_disjoint=false,
+}={}){
+  const verdict=output_scope?.verdict||'unknown';
+  if(verdict==='overlap')return {reject:true,basis:'canonical_output_scope'};
+  if(verdict==='disjoint')return {reject:false,basis:'canonical_disjoint_output_scope'};
+  // Byte-equivalent to the prior fallback: no threshold or exception change.
+  const reject=Number(similarity)>=0.78
+    &&!explicit_instance_disjoint
+    &&!explicit_partition_disjoint
+    &&!canonical_instance_disjoint
+    &&!structured_scope_disjoint;
+  return {reject,basis:reject?'legacy_lexical_overlap':'legacy_lexical_allowed'};
+}
