@@ -3502,6 +3502,7 @@ export const AAU_RUNTIME_ERROR_CATALOG_V1=Object.freeze({
   'AAU-EVD-102':['evidence','source_binding','runtime','repair_contract','Verified source missing or ambiguous'],
   'AAU-EVD-103':['evidence','parent_handoff','runtime','repair_contract','Verified child evidence handoff failed'],
   'AAU-EVD-104':['evidence','provenance','runtime','repair_contract','Source manifest failed integrity check'],
+  'AAU-EVD-105':['evidence','recursive_parent_materialization','runtime','repair_contract','Parent presentation Python-check schema conflicted with verified descendants'],
   'AAU-BUD-201':['budget','finalization','runtime','audit_and_renew','Protected finalization budget exhausted'],
   'AAU-BUD-202':['budget','semantic','runtime','audit_budget','Semantic budget exhausted'],
   'AAU-BUD-203':['budget','replay','runtime','investigate_cycle','Repeated semantic cycle lock'],
@@ -3527,6 +3528,7 @@ export function classifyAauRuntimeErrorV1(error,context={}){
   else if(message.startsWith('declared_verified_checks_unresolved:')||
     message.startsWith('declared_verified_calculation_unresolved:'))code='AAU-EVD-102';
   else if(message.startsWith('declared_audit_parent_'))code='AAU-EVD-103';
+  else if(message.startsWith('qda_recursive_verified_descendant_materialization_invalid:')||message.startsWith('qda_recursive_presentation_check_alias_invalid:'))code='AAU-EVD-105';
   else if(message.startsWith('provenance_direct_child_manifest_unresolved:')||
     message.startsWith('claim_evidence_source_preflight_unresolved:'))code='AAU-EVD-104';
   else if(message.startsWith('semantic_bucket_rollover_denied:semantic_budget_bucket_exhausted:finalization:')||
@@ -3576,6 +3578,8 @@ export function probeAauRuntimeErrorCatalogV1(){
     ['cognition_provenance_continuation_required:R.002.002.001','AAU-CGN-301','R.002.002.001'],
     ['autonomous_decomposition_child_reconsideration_limit:R.002.003.002','AAU-DECOMP-402','R.002.003.002'],
     ['autonomous_decomposition_overlapping_child:R.002.003.002','AAU-DECOMP-401','R.002.003.002'],
+    ['qda_recursive_verified_descendant_materialization_invalid:R.002.003.002:calculation.python_checks_must_be_array','AAU-EVD-105',null],
+    ['qda_recursive_presentation_check_alias_invalid:R.002.003.002:unverified_manifest','AAU-EVD-105',null],
     ['monitor_detected_no_next_wake','AAU-SCH-501',null],
     ['unrecognized failure text','AAU-UNK-000',null],
   ];
