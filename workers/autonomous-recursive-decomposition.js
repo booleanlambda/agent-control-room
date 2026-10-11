@@ -33,7 +33,7 @@ import { reconcileEvidenceClaims } from './claim-evidence-continuity.js';
 import { claimEvidenceContractForRequirement, projectDeclaredSynthesisInputs } from './claim-evidence-contracts.js';
 import { normalizeDeclaredEvidenceSourceRows, selectDeclaredEvidenceSourceChildren } from './claim-evidence-source-adapter.js';
 import { projectDeclaredVerifiedChecks } from './claim-evidence-check-transport.js';
-import { compareQdaOutputObligationsV1 } from './qda-output-obligation-v1.js';
+import { compareQdaOutputObligationsV1, qdaSiblingOverlapGateV1 } from './qda-output-obligation-v1.js';
 import {
   directChildProvenanceManifest, boundProvenanceRevisionGuidance,
   auditDeclaredProvenanceManifest, dismissFalseDirectChildHashRejection,
@@ -7512,21 +7512,11 @@ export async function runAutonomousRequirementCognition({
                     )
                   ),
                 }))
+                .map(v=>({...v,output_gate:qdaSiblingOverlapGateV1(v)}))
                 .sort((a,b)=>b.similarity-a.similarity);
-              // For resolved QDA output identities, metric ownership has priority
-              // over repeated prompt boilerplate. Unknown identities retain
-              // exactly the legacy 0.78 lexical/partition gate.
-              const blockingSibling=siblingOverlaps.find(v=>
-                v.output_scope?.verdict==='overlap'
-                ||(
-                  v.output_scope?.verdict!=='disjoint'
-                  &&v.similarity>=0.78
-                  &&!v.explicit_instance_disjoint
-                  &&!v.explicit_partition_disjoint
-                  &&!v.canonical_instance_disjoint
-                  &&!v.structured_scope_disjoint
-                )
-              )||null;
+              // Confirmed QDA output identities take priority over repeated
+              // boilerplate; unknowns retain the original 0.78/legacy guards.
+              const blockingSibling=siblingOverlaps.find(v=>v.output_gate.reject)||null;
               const siblingOverlap=blockingSibling||siblingOverlaps[0]||null;
               const candidateInstanceId=explicitRepeatedInstanceId(candidate);
               if(blockingSibling){
