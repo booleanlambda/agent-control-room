@@ -5,13 +5,13 @@
 const QDA_UNIT=/\bQDA601-M10-U2\b/i;
 const VERBS=/^\s*(?:calculate|compute|derive|project|determine|produce|model|estimate)\b/i;
 const METRICS=Object.freeze([
-  ['ending_cash_balance',/\b(?:ending\s+cash\s+balance|end(?:ing)?\s+cash\s+balance|cash\s+balance|closing\s+cash\s+balance)\b/gi],
-  ['net_burn',/\b(?:monthly\s+net\s+cash\s+burn(?:\s+rate)?|net\s+cash\s+burn(?:\s+rate)?|net\s+burn(?:\s+rate)?|monthly\s+cash\s+burn(?:\s+rate)?|cash\s+burn(?:\s+rate)?)\b/gi],
-  ['total_opex',/\b(?:total\s+operating\s+expenses?|total\s+opex|total\s+operating\s+costs?)\b/gi],
-  ['acquisition_spend',/\b(?:acquisition\s+spend|customer\s+acquisition\s+spend)\b/gi],
-  ['gross_profit',/\b(?:gross\s+profit)\b/gi],
-  ['paying_accounts',/\b(?:paying\s+accounts?|paying\s+customers?)\b/gi],
-  ['new_accounts',/\b(?:new\s+accounts?|new\s+customer\s+accounts?)\b/gi],
+  ['ending_cash_balance',/\b(?:ending\s+cash\s+balance|end(?:ing)?\s+cash\s+balance|cash\s+balance|closing\s+cash\s+balance)\b/i],
+  ['net_burn',/\b(?:monthly\s+net\s+cash\s+burn(?:\s+rate)?|net\s+cash\s+burn(?:\s+rate)?|net\s+burn(?:\s+rate)?|monthly\s+cash\s+burn(?:\s+rate)?|cash\s+burn(?:\s+rate)?)\b/i],
+  ['total_opex',/\b(?:total\s+operating\s+expenses?|total\s+opex|total\s+operating\s+costs?)\b/i],
+  ['acquisition_spend',/\b(?:acquisition\s+spend|customer\s+acquisition\s+spend)\b/i],
+  ['gross_profit',/\b(?:gross\s+profit)\b/i],
+  ['paying_accounts',/\b(?:paying\s+accounts?|paying\s+customers?)\b/i],
+  ['new_accounts',/\b(?:new\s+accounts?|new\s+customer\s+accounts?)\b/i],
 ]);
 function sourceText(v){return String(v?.requirement||v?.requirement_text||'').trim()}
 function titleOutputClause(requirement){
