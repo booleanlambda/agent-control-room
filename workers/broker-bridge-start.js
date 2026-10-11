@@ -1938,6 +1938,16 @@ try {
   }));
 }
 
+// Fail fast for deterministic overlap-contract regressions. Never mutate agents.
+const { probeQdaOutputObligationV1 } = await import('./qda-output-obligation-regression.js');
+const qdaOutputProbe = probeQdaOutputObligationV1();
+if(qdaOutputProbe.ok!==true || qdaOutputProbe.checks<23)
+  throw new Error('AAU_QDA_OUTPUT_SCOPE_REGRESSION_NOT_GREEN');
+console.log('AAU_QDA_OUTPUT_SCOPE_REGRESSION',JSON.stringify({
+  ok:true,checks:qdaOutputProbe.checks,provider_calls:0,agent_wakes:0,
+  contract:qdaOutputProbe.contract,
+}));
+
 // Run this pure regression even on the inert canary, before the bridge entrypoint.
 // Claim-evidence verification is a pure, synthetic startup regression.
 try {
