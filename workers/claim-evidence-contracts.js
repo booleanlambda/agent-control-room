@@ -53,6 +53,7 @@ export function claimEvidenceContractForRequirement(packet,node){
     if(/^\s*Calculate the 12-month trajectory of Monthly Recurring Revenue/i.test(requirement)){
       if(source==='R.002')return M10_U2_P2_CALCULATION_WITH_AUDIT;
       if(source==='R.002.002')return M10_U2_P2_CALCULATION_WITH_CHECKS;
+      if(source==='R.002.002.001')return M10_U2_P2_MRR_GP;
       return null;
     }
     return M10_U2_P2_MRR_GP;
