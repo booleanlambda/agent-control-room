@@ -131,7 +131,7 @@ export function probeClaimEvidenceContinuity(){
   const parentPath='R.002.002.001.001';
   const parentContract=claimEvidenceContractForRequirement(
     {qda_601_context:{next_unit:{unit_code:'QDA601-M10-U2'}}},
-    {requirement_text:'Calculate the 12-month trajectory of Monthly Recurring Revenue (MRR) and Gross Profit for Problem 2 of QDA601-M10-U2. Preserve exercise_pack_ref as curriculum/qda601-exercise-packs-v0.1.json#QDA601-M10-U2'});
+    {requirement_text:'Calculate the 12-month trajectory of Monthly Recurring Revenue (MRR) and Gross Profit for Problem 2 of QDA601-M10-U2. Preserve exercise_pack_ref as curriculum/qda601-exercise-packs-v0.1.json#QDA601-M10-U2',source_ref:'R.002.002'});
   eq(parentContract?.source_child_ordinals,[1],
     'parent with separate checks branch explicitly names calculation child');
   eq(contract.source_child_ordinals,null,
@@ -156,8 +156,8 @@ export function probeClaimEvidenceContinuity(){
     expectedRows:rows,
   });
   const parentFixture={node_path:parentPath,
-    requirement_text:'Calculate the 12-month trajectory of Monthly Recurring Revenue (MRR) and Gross Profit for Problem 2 of QDA601-M10-U2.',
-    source_ref:'curriculum/qda601-exercise-packs-v0.1.json#QDA601-M10-U2'};
+    requirement_text:'Calculate the 12-month trajectory of Monthly Recurring Revenue (MRR) and Gross Profit for Problem 2 of QDA601-M10-U2. Preserve exercise_pack_ref as curriculum/qda601-exercise-packs-v0.1.json#QDA601-M10-U2',
+    source_ref:'R.002.002'};
   const parentPacket={qda_601_context:{next_unit:{unit_code:'QDA601-M10-U2'}}};
   const authoritativeArtifact={...verifiedChecks.artifact,calculation:rows};
   eq(atomicMaterialCalculationCount(authoritativeArtifact),36,
@@ -245,6 +245,43 @@ export function probeClaimEvidenceContinuity(){
   eq(claimEvidenceContractForRequirement({qda_601_context:{next_unit:{unit_code:'QDA601-M3-U1'}}},
     {requirement_text:'12-month trajectory of MRR and Gross Profit',source_ref:'curriculum/qda601-exercise-packs-v0.1.json#QDA601-M3-U1'}),null,
     'different assignment does not receive M10 schema');
+  // Outer parent has .001 verified calculation plus .002 independent audit;
+  // the audit is NOT a second standalone 24-check producer.
+  const outerPath='R.002.002';
+  const outerFixture={...parentFixture,node_path:outerPath,source_ref:'R.002'};
+  const outerContract=claimEvidenceContractForRequirement(parentPacket,outerFixture);
+  eq(outerContract?.contract_id,
+    'qda601_m10_u2_problem2_verified_calculation_with_audit_v0_3',
+    'parent audit gets its own exact source layout');
+  eq(parentContract?.contract_id,
+    'qda601_m10_u2_problem2_verified_calculation_with_checks_v0_2',
+    'inner calculation keeps its separate checks-only child');
+  const outerCalc={...calculationChild,node_path:outerPath+'.001',
+    result_hash:hash(301)};
+  const outerAudit={...fullChecksChild,node_path:outerPath+'.002',
+    result_hash:hash(302),result_artifact:JSON.stringify({artifact:{
+      self_audit:{pass_a:'accepted',pass_b:'independent'},
+      python_checks:[{label:'audit:not_a_24_check_source',claimed_result:1}]
+    }})};
+  const outerSources=selectDeclaredEvidenceSourceChildren(
+    [outerCalc,outerAudit],outerContract,outerPath);
+  eq(outerSources.length,1,'outer projection selects only completed calculation');
+  eq(outerSources[0].node_path,outerPath+'.001','audit is not calculation source');
+  const outerProjection=reconcileEvidenceClaims({
+    contract:outerContract,children:outerSources,
+    candidate:{calculation:[]},transfer:true
+  });
+  eq(outerProjection.status,'PATCHED','outer 12-month calculation transfers directly');
+  eq(outerProjection.artifact.calculation,rows,'audit cannot alter checked financial trajectory');
+  eq(projectDeclaredVerifiedChecks({contract:outerContract,parentPath:outerPath,
+    children:[outerCalc,outerAudit],candidate:{},expectedRows:rows}).status,
+    'NOT_APPLICABLE','outer audit is never treated as 24-check generator');
+  eq(claimEvidenceContractForRequirement(parentPacket,{
+    ...parentFixture,node_path:'R.009',source_ref:'R.008'}),null,
+    'unknown ancestry fails closed rather than inventing a check source');
+  eq(runtimeSource.includes(
+    "qda601_m10_u2_problem2_verified_calculation_with_audit_v0_3"),true,
+    'outer quantitative materialization has explicit verified-child handoff');
   // Ensure the runtime supplies the verified children not only pre-provenance
   // but also AFTER independent review and when rechecking completed parents.
   // This regression prevents the production handoff that dropped childRows.
