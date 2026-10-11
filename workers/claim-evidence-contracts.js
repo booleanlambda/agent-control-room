@@ -26,6 +26,13 @@ const M10_U2_P2_CALCULATION_WITH_CHECKS=declaredArrayProjectionContract({
   expectedSourceRef:'curriculum/qda601-exercise-packs-v0.1.json#QDA601-M10-U2',
 });
 
+const M10_U2_P2_CALCULATION_WITH_AUDIT=declaredArrayProjectionContract({
+  contractId:'qda601_m10_u2_problem2_verified_calculation_with_audit_v0_3',
+  collection:'calculation',identityField:'month',
+  fields:['mrr','gross_profit'],expectedIds:Array.from({length:12},(_,i)=>i+1),
+  sourceChildOrdinals:[1],expectedSourceRef:'curriculum/qda601-exercise-packs-v0.1.json#QDA601-M10-U2',
+});
+
 export function claimEvidenceContractForRequirement(packet,node){
   const unit=String(packet?.qda_601_context?.next_unit?.unit_code||'').toUpperCase();
   const requirement=String(node?.requirement_text||'');
@@ -43,9 +50,12 @@ export function claimEvidenceContractForRequirement(packet,node){
     // branch; its .001 financial model is the calculation source, while .002
     // is independent verification. Nested six-month model parents retain the
     // two-source contract above and must reconcile both source children.
-    return /^\s*Calculate the 12-month trajectory of Monthly Recurring Revenue/i.test(requirement)
-      ?M10_U2_P2_CALCULATION_WITH_CHECKS
-      :M10_U2_P2_MRR_GP;
+    if(/^\s*Calculate the 12-month trajectory of Monthly Recurring Revenue/i.test(requirement)){
+      if(source==='R.002')return M10_U2_P2_CALCULATION_WITH_AUDIT;
+      if(source==='R.002.002')return M10_U2_P2_CALCULATION_WITH_CHECKS;
+      return null;
+    }
+    return M10_U2_P2_MRR_GP;
   }
   return null;
 }
