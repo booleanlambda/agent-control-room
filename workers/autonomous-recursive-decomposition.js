@@ -33,6 +33,7 @@ import { reconcileEvidenceClaims } from './claim-evidence-continuity.js';
 import { claimEvidenceContractForRequirement, projectDeclaredSynthesisInputs } from './claim-evidence-contracts.js';
 import { normalizeDeclaredEvidenceSourceRows, selectDeclaredEvidenceSourceChildren } from './claim-evidence-source-adapter.js';
 import { projectDeclaredVerifiedChecks } from './claim-evidence-check-transport.js';
+import { compareQdaOutputObligationsV1 } from './qda-output-obligation-v1.js';
 import {
   directChildProvenanceManifest, boundProvenanceRevisionGuidance,
   auditDeclaredProvenanceManifest, dismissFalseDirectChildHashRejection,
@@ -4437,6 +4438,10 @@ export async function runAutonomousRequirementCognition({
         structured_scope_candidate:siblingOverlap?.structured_scope_candidate??[],
         structured_scope_sibling:siblingOverlap?.structured_scope_sibling??[],
         structured_scope_disjoint:Boolean(siblingOverlap?.structured_scope_disjoint),
+        output_scope_verdict:siblingOverlap?.output_scope?.verdict||'unknown',
+        output_scope_reason:siblingOverlap?.output_scope?.reason||null,
+        output_scope_candidate:siblingOverlap?.output_scope?.candidate_scope||null,
+        output_scope_sibling:siblingOverlap?.output_scope?.sibling_scope||null,
       },
       prior_children_signature:childProposalSiblingSignature(previous),
       recorded_at:new Date().toISOString(),
@@ -4447,6 +4452,7 @@ export async function runAutonomousRequirementCognition({
       node_path:node.node_path,
       ordinal,
       rejection_reason:'COGNITION_CHILD_OVERLAP',
+      output_scope_verdict:siblingOverlap?.output_scope?.verdict||'unknown',
       similarity:Number(siblingOverlap?.similarity||0),
       rejection_threshold:0.78,
       prior_children_signature:childProposalSiblingSignature(previous),
@@ -4464,6 +4470,7 @@ export async function runAutonomousRequirementCognition({
       step_key:stepKey,
       checkpoint_id:row.step_checkpoint_id||null,
       rejection_reason:'COGNITION_CHILD_OVERLAP',
+      output_scope_verdict:siblingOverlap?.output_scope?.verdict||'unknown',
       similarity:Number(siblingOverlap?.similarity||0),
       rejection_threshold:0.78,
       sibling_ordinal:Number(siblingOverlap?.ordinal||0),
@@ -7458,7 +7465,7 @@ export async function runAutonomousRequirementCognition({
               const candidateCanonicalIdentity=canonicalCandidateIdentity(
                 candidate,childContextView.suppliedContext
               );
-              const siblingOverlap=previous
+              const siblingOverlaps=previous
                 .map(v=>({
                   node_path:text(v?.node_path)||null,
                   ordinal:Number(v?.ordinal||0),
@@ -7467,6 +7474,7 @@ export async function runAutonomousRequirementCognition({
                   scope_removed:text(v?.scope_removed)||null,
                   completion_criterion:text(v?.completion_criterion)||null,
                   similarity:requirementSimilarity(candidate.requirement,v?.requirement),
+                  output_scope:compareQdaOutputObligationsV1(candidate,v),
                   explicit_instance_id:explicitRepeatedInstanceId(v),
                   explicit_instance_disjoint:explicitRepeatedInstancesDisjoint(candidate,v),
                   explicit_partition_disjoint:explicitPartitionsDisjoint(candidate,v),
@@ -7504,19 +7512,38 @@ export async function runAutonomousRequirementCognition({
                     )
                   ),
                 }))
-                .sort((a,b)=>b.similarity-a.similarity)[0]||null;
+                .sort((a,b)=>b.similarity-a.similarity);
+              // For resolved QDA output identities, metric ownership has priority
+              // over repeated prompt boilerplate. Unknown identities retain
+              // exactly the legacy 0.78 lexical/partition gate.
+              const blockingSibling=siblingOverlaps.find(v=>
+                v.output_scope?.verdict==='overlap'
+                ||(
+                  v.output_scope?.verdict!=='disjoint'
+                  &&v.similarity>=0.78
+                  &&!v.explicit_instance_disjoint
+                  &&!v.explicit_partition_disjoint
+                  &&!v.canonical_instance_disjoint
+                  &&!v.structured_scope_disjoint
+                )
+              )||null;
+              const siblingOverlap=blockingSibling||siblingOverlaps[0]||null;
               const candidateInstanceId=explicitRepeatedInstanceId(candidate);
-              if(
-                siblingOverlap
-                &&siblingOverlap.similarity>=0.78
-                &&!siblingOverlap.explicit_instance_disjoint
-                &&!siblingOverlap.explicit_partition_disjoint
-                &&!siblingOverlap.canonical_instance_disjoint
-                &&!siblingOverlap.structured_scope_disjoint
-              ){
+              if(blockingSibling){
                 await persistChildProposalRejection(
                   node,ordinal,candidate,siblingOverlap,previous
                 );
+                console.warn('AAU_QDA_OUTPUT_SCOPE_OVERLAP_GATE',JSON.stringify({
+                  agent_id:agentId,
+                  intent_execution_id:intentExecutionId,
+                  node_path:node.node_path,
+                  ordinal,
+                  blocking_child_path:blockingSibling.node_path,
+                  verdict:blockingSibling.output_scope?.verdict||'unknown',
+                  reason:blockingSibling.output_scope?.reason||'legacy_lexical',
+                  similarity:blockingSibling.similarity,
+                  policy:'qda_financial_output_scope_v0_1',
+                }));
                 provenanceRevisionGuidance=
                   'The proposed child overlaps accepted child ordinal '
                   +siblingOverlap.ordinal
@@ -7543,6 +7570,9 @@ export async function runAutonomousRequirementCognition({
                 structured_scope_disjoint:Boolean(
                   siblingOverlap?.structured_scope_disjoint
                 ),
+                output_scope_verdict:siblingOverlap?.output_scope?.verdict||'unknown',
+                output_scope_reason:siblingOverlap?.output_scope?.reason||null,
+                output_scope_contract:'qda_financial_output_scope_v0_1',
                 disjoint_repeated_instance_override:Boolean(
                   siblingOverlap?.similarity>=0.78
                   &&(
