@@ -10922,6 +10922,56 @@ export async function runAutonomousRequirementCognition({
         sources:checksProjection.sources,verification:verified,
       };
     }
+    if(checksContract?.contract_id==='qda601_m10_u2_problem2_verified_calculation_with_audit_v0_3'){
+      const calcSources=selectDeclaredEvidenceSourceChildren(childRows,checksContract,node.node_path);
+      const projection=reconcileEvidenceClaims({contract:checksContract,
+        children:calcSources,candidate:{calculation:[]},transfer:true});
+      if(calcSources.length!==1||!['PATCHED','VERIFIED'].includes(projection.status)){
+        const error=new Error('declared_audit_parent_calculation_unresolved:'+projection.reason+':'+node.node_path);
+        error.code='COGNITION_RUNTIME_FAULT';throw error;
+      }
+      const producer=calcSources[0];
+      const sourceArtifact=quantitativeArtifactBody(resultParts(producer.result_artifact).artifact);
+      const checks=pythonChecksFromArtifact(sourceArtifact);
+      const manifest=asArray(sourceArtifact?.runtime_verified_descendant_materialization?.descendants);
+      const expectedPath=producer.node_path+'.002';
+      const verified=manifest.length===1&&text(manifest[0].node_path)===expectedPath
+        ?await getNode(expectedPath):null;
+      const proof=asObject(verified?.decision_payload);
+      const mathProof=asObject(proof.deterministic_math_verification);
+      if(!declaredVerifiedCheckTransportCoverage(packet,producer,sourceArtifact)
+        ||checks.type_ok!==true||asArray(checks.value).length!==24
+        ||verified?.status!=='ready'||text(verified.node_status)!=='completed'
+        ||text(verified.result_hash)!==text(manifest[0].result_hash)
+        ||proof.deterministic_math_verified!==true
+        ||mathProof.ok!==true||mathProof.all_match!==true){
+        const error=new Error('declared_audit_parent_verified_child_handoff_invalid:'+node.node_path);
+        error.code='COGNITION_RUNTIME_FAULT';throw error;
+      }
+      const normalized={...parsed,calculation:projection.artifact.calculation,
+        python_checks:checks.value.map(check=>({...check})),
+        runtime_verified_descendant_materialization:{
+          contract:'qda_verified_descendant_materialization_v0_2_recursive',
+          arithmetic_recomputation_forbidden:true,
+          aggregation_scope:'declared_verified_split_child',
+          materialized_node_path:node.node_path,
+          materialized_node_depth:pathDepth(node.node_path),
+          source:'completed_verified_split_child_with_atomic_checks',
+          verified_calculation_source:{node_path:producer.node_path,result_hash:producer.result_hash},
+          descendants:manifest.map(source=>({...source})),
+        }};
+      const verification=deterministicMathVerification(packet,node,normalized);
+      if(verification.required===true&&(verification.ok!==true||verification.all_match!==true)){
+        const error=new Error('declared_audit_parent_python_reverification_failed:'+node.node_path);
+        error.code='COGNITION_RUNTIME_FAULT';throw error;
+      }
+      console.log('AAU_QDA_AUDIT_PARENT_VERIFIED_CHECKS_INHERITED',JSON.stringify({
+        agent_id:agentId,intent_execution_id:intentExecutionId,node_path:node.node_path,
+        calculation_child:producer.node_path,check_source:expectedPath,check_count:24,
+      }));
+      return {artifact:normalized,materialized:true,check_count:24,
+        sources:manifest.map(source=>({...source})),verification};
+    }
     if([
          'qda_problem_verified_descendant_materialization_v0_1',
          'qda_verified_descendant_materialization_v0_2_recursive',
