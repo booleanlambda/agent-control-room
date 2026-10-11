@@ -3554,6 +3554,10 @@ export function classifyAauRuntimeErrorV1(error,context={}){
     provider_status_code:httpStatus,policy_applied:false,completed_evidence_mutated:false};
 }
 
+export function explicitlyTaggedCognitionRuntimeFault(code){
+  return String(code||'').trim()==='COGNITION_RUNTIME_FAULT';
+}
+
 export function probeAauRuntimeErrorCatalogV1(){
   const fixtures=[
     ['declared_verified_checks_unresolved:checks_source_cardinality_invalid:R.002.002','AAU-EVD-101','R.002.002'],
@@ -3585,6 +3589,12 @@ export function probeAauRuntimeErrorCatalogV1(){
       throw new Error('error_catalog_regression:'+code);
     checks++;
   }
+  if(!explicitlyTaggedCognitionRuntimeFault('COGNITION_RUNTIME_FAULT')
+    ||explicitlyTaggedCognitionRuntimeFault('MODEL_TRANSPORT_TRANSIENT')
+    ||explicitlyTaggedCognitionRuntimeFault('SEMANTIC_RUNTIME_CYCLE_LOCK')){
+    throw new Error('explicit_runtime_fault_dispatch_predicate_regression');
+  }
+  checks++;
   // A named runtime fault must enter the existing terminal intervention
   // lane; it cannot be missed merely because error.code was already set.
   const namedFault={code:'COGNITION_RUNTIME_FAULT',message:
@@ -3825,7 +3835,7 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
     const providerTransient=transportFailure.failure_class==='model_transport_transient';
     const explicitErrorCode=String(error?.code||'').trim();
     const cognitionRuntimeFault=
-      explicitErrorCode==='COGNITION_RUNTIME_FAULT'
+      explicitlyTaggedCognitionRuntimeFault(explicitErrorCode)
       ||deepCheckpointIntegrityFault
       ||childReconsiderationLimit
       ||packetModelBindingFault
