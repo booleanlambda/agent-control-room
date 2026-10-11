@@ -11180,7 +11180,7 @@ export async function runAutonomousRequirementCognition({
     const verification=deterministicMathVerification(packet,node,verifiedParentArtifact);
     if(verification.required===true && (verification.ok!==true||verification.all_match!==true)){
       throw new Error(
-        'qda_recursive_verified_descendant_materialization_invalid:
+        'qda_recursive_verified_descendant_materialization_invalid:'
         +node.node_path+':'+String(verification.error||'verification_failed')
       );
     }
