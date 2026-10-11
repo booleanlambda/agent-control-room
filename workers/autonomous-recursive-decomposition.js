@@ -33,6 +33,7 @@ import { reconcileEvidenceClaims } from './claim-evidence-continuity.js';
 import { claimEvidenceContractForRequirement, projectDeclaredSynthesisInputs } from './claim-evidence-contracts.js';
 import { normalizeDeclaredEvidenceSourceRows, selectDeclaredEvidenceSourceChildren } from './claim-evidence-source-adapter.js';
 import { projectDeclaredVerifiedChecks } from './claim-evidence-check-transport.js';
+import { reconcileQdaRecursivePresentationCheckAliasV1 } from './qda-recursive-presentation-check-alias.js';
 import { compareQdaOutputObligationsV1, qdaSiblingOverlapGateV1 } from './qda-output-obligation-v1.js';
 import {
   directChildProvenanceManifest, boundProvenanceRevisionGuidance,
@@ -11155,15 +11156,36 @@ export async function runAutonomousRequirementCognition({
         descendants:sources,
       },
     };
-    const verification=deterministicMathVerification(packet,node,normalized);
+    // Executable checks are reconstructed from independently verified atomic
+    // children, not from the parent's prose. A parent may describe those
+    // checks under calculation.python_checks using a scalar. Preserve that
+    // description as an annotation instead of treating it as executable checks.
+    // Only do this for a complete, hash-bound descendant manifest.
+    const alias=reconcileQdaRecursivePresentationCheckAliasV1(normalized);
+    if(['unverified_manifest','unsafe_check_structure','alias_conflict'].includes(alias.status)){
+      const fault=new Error('qda_recursive_presentation_check_alias_invalid:'
+        +node.node_path+':'+alias.status);
+      fault.code='COGNITION_RUNTIME_FAULT';
+      throw fault;
+    }
+    if(alias.changed)console.log('AAU_QDA_RECURSIVE_PARENT_CHECK_ALIAS_RECONCILED',JSON.stringify({
+      agent_id:agentId,intent_execution_id:intentExecutionId,
+      node_path:node.node_path,
+      check_count:checks.length,source_count:sources.length,
+      alias_contract:'qda_recursive_presentation_python_checks_alias_v0_1',
+      original_presentation_preserved:true,
+      verified_descendants_unchanged:true,
+    }));
+    const verifiedParentArtifact=alias.artifact;
+    const verification=deterministicMathVerification(packet,node,verifiedParentArtifact);
     if(verification.required===true && (verification.ok!==true||verification.all_match!==true)){
       throw new Error(
-        'qda_recursive_verified_descendant_materialization_invalid:'
+        'qda_recursive_verified_descendant_materialization_invalid:
         +node.node_path+':'+String(verification.error||'verification_failed')
       );
     }
     return {
-      artifact:normalized,
+      artifact:verifiedParentArtifact,
       materialized:true,
       check_count:checks.length,
       sources,
