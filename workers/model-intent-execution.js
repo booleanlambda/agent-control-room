@@ -3545,13 +3545,53 @@ export function classifyAauRuntimeErrorV1(error,context={}){
   else if(raw==='DEEP_CHECKPOINT_INTEGRITY_FAULT')code='AAU-RUN-601';
   else if(raw==='COGNITION_RUNTIME_FAULT')code='AAU-RUN-602';
   const [domain,stage,owner,retry_advice,summary]=AAU_RUNTIME_ERROR_CATALOG_V1[code];
-  const tail=message.match(/(?:^|:)(R(?:\\.\\d{3}){0,16})$/);
+  const tail=message.match(/(?:^|:)(R(?:\.\d{3}){0,16})$/);
   const suppliedNode=String(context.node_path||'');
-  const node_path=/^R(?:\\.\\d{3}){0,16}$/.test(suppliedNode)
+  const node_path=/^R(?:\.\d{3}){0,16}$/.test(suppliedNode)
     ?suppliedNode:(tail?.[1]||null);
   return {contract:'aau_runtime_error_catalog_v1',code,domain,stage,owner,
     retry_advice,summary,node_path,legacy_error_code:raw||null,
     provider_status_code:httpStatus,policy_applied:false,completed_evidence_mutated:false};
+}
+
+export function probeAauRuntimeErrorCatalogV1(){
+  const fixtures=[
+    ['declared_verified_checks_unresolved:checks_source_cardinality_invalid:R.002.002','AAU-EVD-101','R.002.002'],
+    ['declared_verified_checks_unresolved:verified_checks_child_missing_or_ambiguous:R.002.002.001','AAU-EVD-102','R.002.002.001'],
+    ['declared_audit_parent_verified_child_handoff_invalid:R.002.002','AAU-EVD-103','R.002.002'],
+    ['provenance_direct_child_manifest_unresolved:wrong_hash:R.002.002.001','AAU-EVD-104','R.002.002.001'],
+    ['semantic_bucket_rollover_denied:semantic_budget_bucket_exhausted:finalization:bucket_limit_exhausted','AAU-BUD-201',null],
+    ['semantic_runtime_cycle_lock:req:cycle','AAU-BUD-203',null],
+    ['cognition_provenance_continuation_required:R.002.002.001','AAU-CGN-301','R.002.002.001'],
+    ['monitor_detected_no_next_wake','AAU-SCH-501',null],
+    ['unrecognized failure text','AAU-UNK-000',null],
+  ];
+  let checks=0;
+  for(const [message,code,node] of fixtures){
+    const d=classifyAauRuntimeErrorV1(new Error(message));
+    if(d.code!==code||d.node_path!==node||d.policy_applied!==false
+      ||d.completed_evidence_mutated!==false)throw new Error('error_catalog_regression:'+code);
+    checks++;
+  }
+  const extra=[
+    [{code:'SEMANTIC_BUDGET_EXHAUSTED',message:'budget'},'AAU-BUD-202'],
+    [{code:'COGNITION_RESPONSE_REJECTED',message:'contract'},'AAU-CGN-302'],
+    [{code:'DEEP_CHECKPOINT_INTEGRITY_FAULT',message:'checkpoint'},'AAU-RUN-601'],
+    [{code:'COGNITION_RUNTIME_FAULT',message:'unknown runtime'},'AAU-RUN-602'],
+    [{code:'MODEL_TRANSPORT_TRANSIENT',message:'provider timeout'},'AAU-PRV-401'],
+  ];
+  for(const [error,code] of extra){
+    if(classifyAauRuntimeErrorV1(error).code!==code)
+      throw new Error('error_catalog_regression:'+code);
+    checks++;
+  }
+  const transport=classifyAauRuntimeErrorV1({message:'service unavailable'},
+    {provider_status_code:529,node_path:'R.002.002'});
+  if(transport.code!=='AAU-PRV-401'||transport.node_path!=='R.002.002')
+    throw new Error('error_catalog_provider_context_regression');
+  checks++;
+  return {ok:true,checks,synthetic:true,provider_calls:0,agent_wakes:0,
+    contract:'aau_runtime_error_catalog_v1'};
 }
 
 export async function runModelIntentExecution({ intentExecutionId, agentId, workerId = null } = {}) {
