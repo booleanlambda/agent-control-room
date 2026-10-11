@@ -5,6 +5,14 @@ Status: architectural protocol recorded 2026-09-20. Individual mechanisms are im
 ## Purpose
 Preserve agent continuity, action evidence, authorized model identity, and finite resources when execution fails, stalls, or becomes uncertain. An infrastructure incident is **not** an expertise or product assessment verdict.
 
+## Mandatory repair acceptance gate (2026-10-11 amendment)
+
+The canonical **AAU Repair Acceptance Standard v1.0** at [AAU_REPAIR_ACCEPTANCE_STANDARD_v1.0.md](./AAU_REPAIR_ACCEPTANCE_STANDARD_v1.0.md) applies to every repair described in this protocol. Its R0–R6 evidence requirements and verdict labels take precedence over informal statements that an incident is “fixed” or “done.”
+
+**Closure condition:** reproduce/characterize the original failing path, correct the causal defect, pass regression and integration tests, successfully replay the affected operation end-to-end, verify durable output and preserved invariants, and record an evidence-linked acceptance receipt. A probe, successful build, diagnosis, error-code remapping, deployment, or queued wake alone never satisfies closure. If provider outage or deployment authorization prevents real replay, keep the repair explicitly `BLOCKED_EXTERNAL` or `PATCHED_UNVERIFIED`, not complete. Do not change retry, checkpoint, identity, budget, or levy semantics simply to force a pass.
+
+This amendment is an **operational requirement**. It does not claim that database-enforced acceptance transitions, CI policy checks or product-wide deployment gates have already been implemented.
+
 ## Intervention lifecycle
 1. **Detect** a failure, expired lease, conflicting external state, prolonged no-progress loop, or safety/permission condition. Record error class, run/wake ID, agent ID, worker, model, attempt count, timestamp, and relevant evidence.
 2. **Reconcile** the authoritative database, external service state, and last durable checkpoint. Never duplicate a potentially committed external action merely because its response timed out. Do not overwrite a completed, failed, or cancelled run based on a late worker response.
