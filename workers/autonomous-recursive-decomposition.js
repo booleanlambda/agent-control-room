@@ -34,6 +34,10 @@ import { claimEvidenceContractForRequirement, projectDeclaredSynthesisInputs } f
 import { normalizeDeclaredEvidenceSourceRows, selectDeclaredEvidenceSourceChildren } from './claim-evidence-source-adapter.js';
 import { projectDeclaredVerifiedChecks } from './claim-evidence-check-transport.js';
 import {
+  directChildProvenanceManifest, boundProvenanceRevisionGuidance,
+  auditDeclaredProvenanceManifest, dismissFalseDirectChildHashRejection,
+} from './provenance-source-binding.js';
+import {
   encodeNodeDecisionPayload,
   decodeNodeDecisionPayload,
 } from './cognition-node-payload-spillover.js';
@@ -10277,10 +10281,24 @@ export async function runAutonomousRequirementCognition({
   }
 
   async function reviewSynthesisProvenance(node,childRows,accumulator,proposedFinal,revisionGuidance=''){
+    const directChildManifest=directChildProvenanceManifest(node.node_path,childRows);
+    const boundGuidance=boundProvenanceRevisionGuidance(
+      node.node_path,childRows,revisionGuidance
+    );
+    const manifestAudit=auditDeclaredProvenanceManifest(
+      node.node_path,childRows,proposedFinal?.artifact
+    );
+    if(['EVIDENCE_CONFLICT','UNRESOLVED'].includes(manifestAudit.status)){
+      const error=new Error('provenance_direct_child_manifest_unresolved:'+
+        (manifestAudit.reason||manifestAudit.status)+':'+node.node_path);
+      error.code='COGNITION_RUNTIME_FAULT';
+      throw error;
+    }
     const childEvidence=childRows.map(child=>{
       const parts=resultParts(child.result_artifact);
       return {
         path:child.node_path,
+        result_hash:child.result_hash||null,
         status:child.node_status||child.status||null,
         decision_type:child.decision_type||null,
         requirement:child.requirement_text,
@@ -10291,13 +10309,15 @@ export async function runAutonomousRequirementCognition({
     const provenanceSemanticIdentity=sha256({
       parent_path:node.node_path,
       parent_requirement:node.requirement_text,
+      provenance_source_binding_contract:'exact_direct_child_provenance_hash_v0_1',
+      direct_child_manifest:directChildManifest,
       child_evidence:childEvidence.map(v=>({
         path:v.path,status:v.status,decision_type:v.decision_type,
         artifact_hash:sha256(v.artifact||''),handoff:v.handoff,
       })),
       accumulator,
       proposed_final:proposedFinal,
-      revision_guidance:revisionGuidance||null,
+      revision_guidance:boundGuidance.guidance||null,
       terminal_synthesis_ownership_version:TERMINAL_SYNTHESIS_OWNERSHIP_VERSION,
       lifecycle_stage_contract:lifecycleStageContract(packet),
     });
@@ -10311,6 +10331,7 @@ export async function runAutonomousRequirementCognition({
         'You are the same bound autonomous agent auditing YOUR OWN proposed parent synthesis before it becomes durable.',
         'This is a provenance-preservation review, not a new task or a runtime verdict.',
         'Compare every number, unit, date, forecast period, source/value relationship, scope claim, and derived conclusion in the proposed synthesis against the resolved child evidence.',
+        'EXACT SOURCE HASH BINDING: result_hash entries in runtime_verified_descendant_materialization must match exact node_path entries in direct_child_provenance_manifest. Never substitute a nested descendant hash for direct checks child .002, even when both are valid. Contradictory prior corrections are stale. A direct hash that matches the manifest is not a provenance error.',
         'REVISE if the synthesis swaps values between sources, silently changes a source/value pairing, changes units or time horizons, converts a derived scenario into a sourced fact, or strengthens uncertainty beyond what the children support.',
         'Derived calculations and scenarios are allowed only when explicitly labeled as derived, their exact source inputs remain correctly paired, and the transformation/formula is stated.',
         'BLOCKED child gaps must remain visible when they are material to the parent requirement.',
@@ -10322,6 +10343,8 @@ export async function runAutonomousRequirementCognition({
         parent_requirement:node.requirement_text,
         agent_authored_discovery_state:agentDiscoveryState(node),
         resolved_child_evidence:childEvidence,
+        direct_child_provenance_manifest:directChildManifest,
+        provenance_manifest_audit:manifestAudit,
         cumulative_synthesis:accumulator,
         terminal_synthesis_ownership:{
           version:TERMINAL_SYNTHESIS_OWNERSHIP_VERSION,
@@ -10333,7 +10356,8 @@ export async function runAutonomousRequirementCognition({
           artifact:proposedFinal?.artifact,
           handoff:asObject(proposedFinal?.handoff),
         },
-        prior_provenance_revision_guidance:revisionGuidance||null,
+        prior_provenance_revision_guidance:boundGuidance.guidance||null,
+        discarded_stale_hash_guidance:boundGuidance.stale===true,
       })},
     ],stageBudgets.synthesis_provenance_review,'req_'+node.node_path.replaceAll('.','_')+'_synthesis_provenance');
 
@@ -10348,7 +10372,7 @@ export async function runAutonomousRequirementCognition({
         }
       );
     }
-    return {
+    const reviewResult={
       status,
       reason:clip(candidate.reason,2400),
       issues:asArray(candidate.issues).map(v=>clip(v,800)).filter(Boolean).slice(0,16),
@@ -10360,6 +10384,18 @@ export async function runAutonomousRequirementCognition({
       revision_guidance:clip(candidate.revision_guidance,2400),
       agent_authored:true,
     };
+    const checkedReview=dismissFalseDirectChildHashRejection(
+      node.node_path,childRows,proposedFinal?.artifact,reviewResult
+    );
+    if(checkedReview.model_review_overruled_only_for_false_hash_binding===true){
+      console.warn('AAU_PROVENANCE_FALSE_DIRECT_CHILD_HASH_REJECTION',JSON.stringify({
+        agent_id:agentId,node_path:node.node_path,
+        source_path:checkedReview.source_path,
+        source_hash:checkedReview.source_hash,
+        deterministic_guard:checkedReview.deterministic_guard,
+      }));
+    }
+    return checkedReview;
   }
 
   async function materializeTerminalStageContract(
@@ -11665,8 +11701,20 @@ export async function runAutonomousRequirementCognition({
         ?deterministicEvidenceLedgerSynthesis(packet,node,childRows)
         :null;
     const priorProvenanceContinuation=asObject(node?.decision_payload?.synthesis_provenance_pending);
-    let synthesisProvenanceGuidance=clip(priorProvenanceContinuation.revision_guidance,5000);
-    let provenanceContinuationRound=Math.max(0,Number(priorProvenanceContinuation.continuation_round||0));
+    const boundContinuationGuidance=boundProvenanceRevisionGuidance(
+      node.node_path,childRows,clip(priorProvenanceContinuation.revision_guidance,5000)
+    );
+    let synthesisProvenanceGuidance=boundContinuationGuidance.guidance;
+    let provenanceContinuationRound=boundContinuationGuidance.stale?0:
+      Math.max(0,Number(priorProvenanceContinuation.continuation_round||0));
+    if(boundContinuationGuidance.stale){
+      console.warn('AAU_STALE_PROVENANCE_HASH_GUIDANCE_DISCARDED',JSON.stringify({
+        agent_id:agentId,node_path:node.node_path,
+        source_path:boundContinuationGuidance.expected_source_path,
+        source_hash:boundContinuationGuidance.expected_source_hash,
+        semantic_child_artifacts_preserved:true,
+      }));
+    }
     const MAX_SYNTHESIS_PROVENANCE_CONTINUATION_ROUNDS=3;
     // Preflight exact verified evidence before any FINAL_SYNTHESIS model call.
     // Missing/ambiguous declared sources are runtime repair-holds, not a cue
