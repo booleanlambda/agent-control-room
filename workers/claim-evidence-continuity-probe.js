@@ -277,6 +277,11 @@ export function probeClaimEvidenceContinuity(){
     children:[outerCalc,outerAudit],candidate:{},expectedRows:rows}).status,
     'NOT_APPLICABLE','outer audit is never treated as 24-check generator');
   eq(claimEvidenceContractForRequirement(parentPacket,{
+    ...parentFixture,node_path:'R.002.002.001.001',
+    source_ref:'R.002.002.001'})?.contract_id,
+    'qda601_m10_u2_problem2_mrr_gp_12_month_projection_v0_1',
+    'nested six-month sources preserve existing two-source contract');
+  eq(claimEvidenceContractForRequirement(parentPacket,{
     ...parentFixture,node_path:'R.009',source_ref:'R.008'}),null,
     'unknown ancestry fails closed rather than inventing a check source');
   eq(runtimeSource.includes(
