@@ -3494,6 +3494,66 @@ async function getDecision(packet, model, agentId, intentExecutionId) {
   };
 }
 
+
+/* Stable AAU incident IDs v1. Diagnostic metadata only: these must not drive
+ * retry, pause, settlement or semantic classification until separately audited. */
+export const AAU_RUNTIME_ERROR_CATALOG_V1=Object.freeze({
+  'AAU-EVD-101':['evidence','check_transport','runtime','repair_contract','Check-source cardinality or scope mismatch'],
+  'AAU-EVD-102':['evidence','source_binding','runtime','repair_contract','Verified source missing or ambiguous'],
+  'AAU-EVD-103':['evidence','parent_handoff','runtime','repair_contract','Verified child evidence handoff failed'],
+  'AAU-EVD-104':['evidence','provenance','runtime','repair_contract','Source manifest failed integrity check'],
+  'AAU-BUD-201':['budget','finalization','runtime','audit_and_renew','Protected finalization budget exhausted'],
+  'AAU-BUD-202':['budget','semantic','runtime','audit_budget','Semantic budget exhausted'],
+  'AAU-BUD-203':['budget','replay','runtime','investigate_cycle','Repeated semantic cycle lock'],
+  'AAU-CGN-301':['cognition','provenance','agent','durable_continuation','Provenance continuation required'],
+  'AAU-CGN-302':['cognition','response_contract','model','bounded_repair','Invalid model response contract'],
+  'AAU-PRV-401':['provider','transport','provider','existing_transport_policy','Transient provider failure'],
+  'AAU-SCH-501':['scheduler','next_wake','scheduler','inspect_queue','No next wake detected'],
+  'AAU-RUN-601':['runtime','checkpoint','runtime','repair_checkpoint','Durable checkpoint fault'],
+  'AAU-RUN-602':['runtime','execution','runtime','operator_diagnosis','Generic runtime execution fault'],
+  'AAU-UNK-000':['unknown','unknown','unknown','operator_diagnosis','Unclassified failure'],
+});
+export function classifyAauRuntimeErrorV1(error,context={}){
+  const message=String(error?.message||error||'').slice(0,4000);
+  const raw=String(error?.code||'').slice(0,100);
+  const responseStatus=Number(context.provider_status_code??error?.transport_status??error?.providerStatus);
+  const httpStatus=Number.isInteger(responseStatus)&&responseStatus>=100&&responseStatus<=599
+    ?responseStatus:null;
+  let code='AAU-UNK-000';
+  if(message.startsWith('declared_verified_checks_unresolved:checks_source_cardinality_invalid:'))
+    code='AAU-EVD-101';
+  else if(message.startsWith('declared_verified_checks_unresolved:')||
+    message.startsWith('declared_verified_calculation_unresolved:'))code='AAU-EVD-102';
+  else if(message.startsWith('declared_audit_parent_'))code='AAU-EVD-103';
+  else if(message.startsWith('provenance_direct_child_manifest_unresolved:')||
+    message.startsWith('claim_evidence_source_preflight_unresolved:'))code='AAU-EVD-104';
+  else if(message.startsWith('semantic_bucket_rollover_denied:semantic_budget_bucket_exhausted:finalization:')||
+    (raw==='SEMANTIC_BUDGET_BUCKET_EXHAUSTED'&&error?.budgetAdmission?.budget_bucket==='finalization'))
+    code='AAU-BUD-201';
+  else if(raw==='SEMANTIC_BUDGET_EXHAUSTED'||raw==='SEMANTIC_BUDGET_BUCKET_EXHAUSTED')
+    code='AAU-BUD-202';
+  else if(raw==='SEMANTIC_RUNTIME_CYCLE_LOCK'||message.startsWith('semantic_runtime_cycle_lock:'))
+    code='AAU-BUD-203';
+  else if(raw==='COGNITION_PROVENANCE_CONTINUATION_REQUIRED'||
+    raw==='COGNITION_PROVENANCE_CONTINUATION_EXHAUSTED'||
+    message.startsWith('cognition_provenance_continuation_required:'))
+    code='AAU-CGN-301';
+  else if(raw==='COGNITION_RESPONSE_REJECTED')code='AAU-CGN-302';
+  else if(raw==='MODEL_TRANSPORT_TRANSIENT'||httpStatus===504||httpStatus===529)
+    code='AAU-PRV-401';
+  else if(message.startsWith('monitor_detected_no_next_wake'))code='AAU-SCH-501';
+  else if(raw==='DEEP_CHECKPOINT_INTEGRITY_FAULT')code='AAU-RUN-601';
+  else if(raw==='COGNITION_RUNTIME_FAULT')code='AAU-RUN-602';
+  const [domain,stage,owner,retry_advice,summary]=AAU_RUNTIME_ERROR_CATALOG_V1[code];
+  const tail=message.match(/(?:^|:)(R(?:\\.\\d{3}){0,16})$/);
+  const suppliedNode=String(context.node_path||'');
+  const node_path=/^R(?:\\.\\d{3}){0,16}$/.test(suppliedNode)
+    ?suppliedNode:(tail?.[1]||null);
+  return {contract:'aau_runtime_error_catalog_v1',code,domain,stage,owner,
+    retry_advice,summary,node_path,legacy_error_code:raw||null,
+    provider_status_code:httpStatus,policy_applied:false,completed_evidence_mutated:false};
+}
+
 export async function runModelIntentExecution({ intentExecutionId, agentId, workerId = null } = {}) {
   const requestedIntentExecutionId = String(intentExecutionId || '').trim();
   const requestedAgentId = String(agentId || '').trim();
@@ -3684,6 +3744,10 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
     return report;
   } catch (error) {
     const message = String(error?.message || error).slice(0,3000);
+    const diagnostic=classifyAauRuntimeErrorV1(error);
+    console.error('AAU_ERROR_CLASSIFIED',JSON.stringify({
+      agent_id:requestedAgentId,intent_execution_id:requestedIntentExecutionId,...diagnostic,
+    }));
     const failureDetails = error?.failureDetails && typeof error.failureDetails === 'object' ? error.failureDetails : null;
     const terminalSemanticRuntimeCode=
       ['SEMANTIC_BUDGET_EXHAUSTED','SEMANTIC_RUNTIME_CYCLE_LOCK'].includes(String(error?.code||''))
@@ -3948,6 +4012,8 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
       intent_execution_id: requestedIntentExecutionId,
       agent_id: requestedAgentId,
       error: message,
+      diagnostic_error_code:diagnostic.code,
+      diagnostic_error:diagnostic,
       terminal_semantic_runtime_code:terminalSemanticRuntimeCode,
       superseded_wake:supersededWake,
       cognition_admission_deferred:cognitionAdmissionDeferred,
@@ -3967,6 +4033,7 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
     }));
     const wrapped = new Error(message);
     wrapped.cause = error;
+    wrapped.diagnostic=diagnostic;
     wrapped.code = terminalSemanticRuntimeCode
       || (cognitionAdmissionDeferred?'COGNITION_ADMISSION_DEFERRED':null)
       || (cognitionProvenanceContinuationRequired?'COGNITION_PROVENANCE_CONTINUATION_REQUIRED':null)
