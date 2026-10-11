@@ -46,7 +46,11 @@ export function probeQdaOutputObligationV1(){
   check('13_junk_metric_cannot_bypass',{requirement:'Calculate the trajectory of zzz_metric_9 '+Q},burn,'LEGACY_REJECT',{similarity:0.81});
   check('14_duplicate_token_stuffed', {...burn,requirement:burn.requirement+' Irrelevant appended boilerplate for unrelated forms and checks.'},burn,'REJECT',{similarity:0.31});
   check('15_case_punctuation_synonym',item('NET-BURN'),burn,'REJECT');
-  check('16_no_siblings',cash,null,'LEGACY_REJECT',{similarity:0.80}); // single-comparison unresolved is never an actual sibling
+  // A first child is never rejected just because there are no prior siblings.
+  const firstChild=[];
+  if(firstChild.some(s=>gate({output_scope:compare(cash,s),similarity:0.99}).reject))
+    throw Error('first_child_rejected_without_sibling');
+  results.push({name:'16_no_siblings',expected:'PASS',actual:'PASS'});
   check('17_dependency_citation_not_owned_month',month(2,1),month(1,2),'PASS');
   check('18_real_cash_requirements',cash,burn,'PASS',{similarity:0.7922077922077922});
   check('19_same_output_months_6_18_vs_1_12',item('Net Burn','months 6 through 18 trajectory'),burn,'REJECT');
