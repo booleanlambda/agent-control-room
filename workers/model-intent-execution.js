@@ -3,6 +3,7 @@ import { modelChatCompletion, withModelProviderContext } from './providers/model
 import { classifyModelTransportFailure } from './semantic-runtime-controls.js';
 import { researchWeb } from './web-research.js';
 import { runAutonomousRequirementCognition } from './autonomous-recursive-decomposition.js';
+import { classifySemanticBucketRollover, SEMANTIC_BUCKET_DISPOSITION } from './semantic-bucket-rollover-policy.js';
 import { augmentPacketWithQda601, qda601DecisionValidation, qda601Correction, stampQda601Progress, normalizeQda601FileAssociations, applyAuthoritativeQda601DeepArtifact } from './qda601-runtime.js';
 
 const SB = String(process.env.AAU_SUPABASE_URL || 'https://mgtilfgygzymxiyixjit.supabase.co').replace(/\/$/, '');
@@ -3534,7 +3535,8 @@ export function classifyAauRuntimeErrorV1(error,context={}){
   else if(message.startsWith('semantic_bucket_rollover_denied:semantic_budget_bucket_exhausted:finalization:')||
     (raw==='SEMANTIC_BUDGET_BUCKET_EXHAUSTED'&&error?.budgetAdmission?.budget_bucket==='finalization'))
     code='AAU-BUD-201';
-  else if(raw==='SEMANTIC_BUDGET_EXHAUSTED'||raw==='SEMANTIC_BUDGET_BUCKET_EXHAUSTED')
+  else if(raw==='SEMANTIC_BUDGET_EXHAUSTED'||raw==='SEMANTIC_BUDGET_BUCKET_EXHAUSTED'
+    ||message.startsWith('semantic_bucket_rollover_denied:semantic_budget_bucket_exhausted:'))
     code='AAU-BUD-202';
   else if(raw==='SEMANTIC_RUNTIME_CYCLE_LOCK'||message.startsWith('semantic_runtime_cycle_lock:'))
     code='AAU-BUD-203';
@@ -3574,6 +3576,7 @@ export function probeAauRuntimeErrorCatalogV1(){
     ['declared_audit_parent_verified_child_handoff_invalid:R.002.002','AAU-EVD-103','R.002.002'],
     ['provenance_direct_child_manifest_unresolved:wrong_hash:R.002.002.001','AAU-EVD-104','R.002.002.001'],
     ['semantic_bucket_rollover_denied:semantic_budget_bucket_exhausted:finalization:bucket_limit_exhausted','AAU-BUD-201',null],
+    ['semantic_bucket_rollover_denied:semantic_budget_bucket_exhausted:reasoning:bucket_limit_exhausted','AAU-BUD-202',null],
     ['semantic_runtime_cycle_lock:req:cycle','AAU-BUD-203',null],
     ['cognition_provenance_continuation_required:R.002.002.001','AAU-CGN-301','R.002.002.001'],
     ['autonomous_decomposition_child_reconsideration_limit:R.002.003.002','AAU-DECOMP-402','R.002.003.002'],
@@ -3927,7 +3930,8 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
               return null;
             })
           :null;
-        if(rolloverResult?.status==='renewed'||rolloverResult?.status==='superseded'){
+        const rolloverDisposition=classifySemanticBucketRollover(rolloverResult);
+        if(rolloverDisposition===SEMANTIC_BUCKET_DISPOSITION.CONTINUE){
           const continuationResult=await rpc(
             'aau_bridge_continue_model_intent_execution_v0_1',{
               p_intent_execution_id:requestedIntentExecutionId,
@@ -3952,15 +3956,42 @@ export async function runModelIntentExecution({ intentExecutionId, agentId, work
             continuation_result:continuationResult,
             durable_state_preserved:true,
           }));
+        }else if(rolloverDisposition===SEMANTIC_BUCKET_DISPOSITION.STALE_WAKE){
+          // A finished/superseded wake must never pause a newer valid wake.
+          console.warn('AAU_SEMANTIC_BUCKET_ROLLOVER_STALE_WAKE',JSON.stringify({
+            intent_execution_id:requestedIntentExecutionId,
+            rollover_status:rolloverResult?.status||null,
+            active_lifecycle_mutation:false,
+          }));
         }else{
-          await rpc('aau_bridge_hold_cognition_runtime_fault_v0_1',{
+          // A confirmed budget denial is a bounded operator hold, not proof
+          // of a cognitive defect. Do NOT call the budget-terminal RPC here:
+          // some deployed versions auto-create another full execution epoch.
+          // On an unknown transport result, fail closed via the same safe hold.
+          const budgetDenied=rolloverDisposition===SEMANTIC_BUCKET_DISPOSITION.BUDGET_HOLD;
+          const holdError=(budgetDenied
+            ?'semantic_bucket_rollover_denied:'
+            :'semantic_bucket_rollover_unresolved:')+message;
+          const hold=await rpc('aau_bridge_hold_cognition_runtime_fault_v0_1',{
             p_intent_execution_id:requestedIntentExecutionId,
-            p_error:('semantic_bucket_rollover_denied:'+message).slice(0,1200),
-          }).catch(()=>{});
-          console.warn('AAU_SEMANTIC_BUCKET_ROLLOVER_DENIED',JSON.stringify({
+            p_error:holdError.slice(0,1200),
+          }).catch((holdFailure)=>{
+            console.error('AAU_SEMANTIC_BUCKET_BOUNDARY_HOLD_FAILED',JSON.stringify({
+              intent_execution_id:requestedIntentExecutionId,
+              error:String(holdFailure?.message||holdFailure).slice(0,800),
+            }));
+            return null;
+          });
+          console.warn('AAU_SEMANTIC_BUCKET_ROLLOVER_STOPPED',JSON.stringify({
             intent_execution_id:requestedIntentExecutionId,
             budget_bucket:budgetBucket||null,
-            rollover_result:rolloverResult,
+            disposition:rolloverDisposition,
+            rollover_status:rolloverResult?.status||null,
+            rollover_reason:rolloverResult?.reason||null,
+            hold_status:hold?.status||null,
+            epoch_renewed:false,
+            operator_review_required:true,
+            durable_state_preserved:true,
           }));
         }
       } else if (terminalSemanticRuntimeCode) {
