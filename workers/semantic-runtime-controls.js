@@ -410,7 +410,9 @@ export function classifyModelTransportFailure(error){
       transport_kind:'timeout',
       transport_status:null,
       transport_code:code||name,
-      immediate_retryable:true,
+      // Timeout/abort may leave provider work in flight. Durable wake recovery
+      // owns the bounded retry; never duplicate it inside the same call.
+      immediate_retryable:false,
       cognition_fault:false,
     });
   }
