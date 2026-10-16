@@ -73,6 +73,20 @@ export async function claim(p,run,path,worker,{leaseMs=500}={}){
     const n=q.rows[0];
     if(n.status==='split'||n.status==='complete')return {status:'already_accepted'};
     if(n.status!=='pending')return {status:'blocked'};
+    // Provider-side execution can outlive a DB outage. A durable request
+    // intent prevents even an otherwise valid broker redelivery from
+    // blindly creating a second external generation and charge.
+    // The relation is optional so older/independent CI experiments keep
+    // their original schema and behavior without migrations.
+    const relation=await c.query("SELECT to_regclass('recursion_ci.provider_requests') AS reg");
+    if(relation.rows[0]?.reg){
+      const pendingProvider=await c.query(`SELECT state FROM recursion_ci.provider_requests
+        WHERE run_id=$1 AND path=$2`,[run,path]);
+      if(pendingProvider.rowCount){
+        return {status:'external_request_reconciliation_required',
+          providerState:pendingProvider.rows[0].state};
+      }
+    }
     if(n.leased_until&&new Date(n.leased_until).getTime()>Date.now())return {status:'busy'};
     const generation=n.generation+1;
     const response=await c.query('SELECT answer FROM recursion_ci.inbox WHERE run_id=$1 AND path=$2',[run,path]);
