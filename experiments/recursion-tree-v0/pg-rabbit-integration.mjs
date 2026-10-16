@@ -129,7 +129,9 @@ async function work(){
   const audit=auditCognitiveTree(t);
   assert.equal(audit.complete,true);assert.equal(audit.acceptedLeaves,11);
   assert.equal(audit.acceptedParents,10);
-  assert.equal(audit.rootDigest,SOURCE.rootDigest);
+  // The default audit uses a scripted parent summary. Its digest is
+  // intentionally different from Kimi's model-authored parent summaries.
+  // Only the persisted recorded Kimi syntheses may be compared to Kimi's root.
   const synth=await synthesize(p);
   assert.equal(synth.parents,10);assert.equal(synth.rootDigest,SOURCE.rootDigest);
   assert.equal((await metrics(p)).syntheses,10);
@@ -161,7 +163,7 @@ async function work(){
   return {status:'success',transport:'real_RabbitMQ_and_PostgreSQL',
     workerProcesses:proc.length,concurrentHealthyWorkers:2,
     redispatchesFromQueue:true,crashEvents:events,
-    ...state,rootDigest:audit.rootDigest,
+    ...state,rootDigest:synth.rootDigest,
     authenticatedParents:10,authenticatedLeaves:11,
     rootMatchesRealKimi:true,
     claimsRace:[r1.status,r2.status],
