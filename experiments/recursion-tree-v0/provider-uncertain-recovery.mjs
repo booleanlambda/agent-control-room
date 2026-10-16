@@ -169,6 +169,9 @@ async function recoverOrHold(run,queue){
     assert.equal(q.rowCount,1);
     const requestId=q.rows[0].request_id;
     assert.equal(q.rows[0].state,'sent');
+    const naive=await claim(p,run,'R','unguarded-broker-redelivery',{leaseMs:1000});
+    assert.equal(naive.status,'external_request_reconciliation_required');
+    assert.equal(naive.providerState,'sent');
     const response=await fetch(provider.endpoint+'/v1/responses/'+encodeURIComponent(requestId));
     if(run==='recoverable'){
       assert.equal(response.status,200,'provider request-ID lookup should succeed');
@@ -263,6 +266,12 @@ async function run(){
   const held=await p.query(`SELECT state,recovery_method FROM recursion_ci.provider_requests
     WHERE run_id='opaque'`);
   assert.equal(held.rows[0].state,'manual_hold');
+  // The ordinary generic claim routine MUST refuse the held request; no
+  // accidental reissue by another worker following broker redelivery.
+  const unsafe=await claim(p,'opaque','R','second-ordinary-worker',{leaseMs:1000});
+  assert.equal(unsafe.status,'external_request_reconciliation_required');
+  assert.equal(unsafe.providerState,'manual_hold');
+  assert.equal((await metrics(p,'opaque')).providerCalls,1);
   const stats=provider.stats();
   assert.equal(stats.newChargedExecutions,2,'each provider-side run billed exactly once');
   assert.equal(stats.postRequests,2,'no duplicate HTTP calls were sent');
