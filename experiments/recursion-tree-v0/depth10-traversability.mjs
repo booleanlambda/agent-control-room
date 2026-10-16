@@ -11,7 +11,7 @@ export const deepConfig=(shape='balanced',budget=1800000)=> {
 };
 const fingerprint=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const item=i=>({id:'CASE-'+String(i+1).padStart(4,'0'),error:CASES[i%CASES.length].error,
-  expected:CASES[i%CASES.length].expected});
+  expected:CASES[i%CASES.length].expected,sourceTemplate:i%CASES.length});
 export function newDeepTree(config=deepConfig()){
   return {config,spent:0,calls:0,seq:0,ledger:[],queue:['R'],nodes:{
     R:{path:'R',parent:null,depth:0,start:0,end:config.caseCount,
@@ -48,9 +48,11 @@ export async function nextDeep(s,model=lightModelDouble,{fault=null,stale=false}
   const path=s.queue.shift();if(!path)return null;
   const n=s.nodes[path];if(!n||n.status!=='pending')return {status:'stale',path};
   if(stale){s.queue.unshift(path);event(s,path,'stale');return {status:'stale',path};}
+  // Same fixed-size descriptor and conservative reserve as the local explorer.
   const prompt={path,depth:n.depth,start:n.start,end:n.end,
-    item:n.end-n.start===1?item(n.start):null};
-  const charge=Math.ceil(JSON.stringify(prompt).length/3.2)+s.config.outputCap+140;
+    fixture:n.end-n.start===1?item(n.start):null,
+    limits:{depth:s.config.depthLimit,output:s.config.outputCap}};
+  const charge=Math.ceil(JSON.stringify(prompt).length/3.2)+s.config.outputCap+90;
   if(s.spent+charge>s.config.budget||s.calls>=s.config.maxCalls){
     n.status='blocked';event(s,path,'budget_denied');return {status:'budget_denied',path};
   }
