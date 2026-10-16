@@ -1,0 +1,73 @@
+name: AAU Experimental Recursion Tree v0
+
+on:
+  push:
+    branches:
+      - experiment/recursive-tree-nemotron-v0
+    paths:
+      - 'experiments/recursion-tree-v0/**'
+      - '.github/workflows/experimental-recursion-tree.yml'
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: 'Explicit live depth stage (1 is the safe default)'
+        required: true
+        default: '1'
+        type: choice
+        options: ['1','2','3']
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Syntax and invariant tests
+        run: |
+          node --check experiments/recursion-tree-v0/engine.mjs
+          node --check experiments/recursion-tree-v0/run.mjs
+          node --test experiments/recursion-tree-v0/engine.test.mjs
+      - name: Simulated stage 1 tree
+        working-directory: experiments/recursion-tree-v0
+        run: node run.mjs --mode=mock --stage=1
+      - name: Silas-derived 100-event injection
+        working-directory: experiments/recursion-tree-v0
+        run: node run.mjs --mode=stress --stage=1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aau-recursion-deterministic-v0
+          path: experiments/recursion-tree-v0/recursion-tree-*.json
+
+  lightweight-model:
+    needs: deterministic
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+      LAB_STAGE: ${{ github.event.inputs.stage || '1' }}
+      AAU_EXPERIMENT_DEEPER_STAGE: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Real lightweight NVIDIA Nemotron recursive stage
+        working-directory: experiments/recursion-tree-v0
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${NVIDIA_API_KEY:-}" ]]; then
+            echo "LIVE_RECURSION_BLOCKED=NVIDIA_API_KEY_SECRET_MISSING"
+            exit 1
+          fi
+          node run.mjs --mode=live --stage="$LAB_STAGE"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aau-recursion-live-v0
+          path: experiments/recursion-tree-v0/recursion-tree-live-*.json
+          if-no-files-found: ignore
