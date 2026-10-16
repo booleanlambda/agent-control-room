@@ -14,7 +14,7 @@ for(const provider of ['moonshot-chat','nvidia-nim-chat']){
     assert.equal(recoveryPolicy({provider,state:'journaled'}).action,'commit_existing_journal');
   });
   test(provider+' never resends a sent or uncertain completion automatically',()=>{
-    for(const state of ['sent','uncertain','manual_hold']){
+    for(const state of ['sent','uncertain','incomplete_response','manual_hold']){
       const r=recoveryPolicy({provider,state,requestId:'trace-id-123'});
       assert.equal(r.action,'manual_hold');
       assert.equal(r.operatorReviewRequired,true);
