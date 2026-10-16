@@ -59,6 +59,9 @@ jobs:
           path: experiments/recursion-tree-v0/recursion-tree-*.json
 
   lightweight-model:
+    # Inference is a separately authorized paid/credentialed experiment.
+    # Branch pushes and PRs only run deterministic bounded verification.
+    if: github.event_name == 'workflow_dispatch'
     needs: deterministic
     runs-on: ubuntu-latest
     timeout-minutes: 10
