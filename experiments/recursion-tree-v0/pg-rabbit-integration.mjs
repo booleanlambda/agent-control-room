@@ -33,7 +33,7 @@ function worker(role,name,{commitCrash=false}={}){
       if(!line.trim())continue;
       rec.logs.push(line.slice(0,300));
       if(line.includes('INTEGRATION_READY'))rec.ready=true;
-      if(line.includes('INJECTED_'))events.push({worker:name,record:line.slice(0,120)});
+      if(line.includes('INJECTED_')||line.includes('INTEGRATION_REDELIVERED'))events.push({worker:name,record:line.slice(0,120)});
     }
   }
   child.stdout.on('data',handle);child.stderr.on('data',handle);
@@ -124,6 +124,8 @@ async function work(){
   assert.ok(events.some(e=>e.record.includes('INJECTED_SQL_TRANSACTION_CRASH_BEFORE_COMMIT')));
   assert.ok(events.some(e=>e.record.includes('INJECTED_CRASH_AFTER_DATABASE_COMMIT_BEFORE_RABBIT_ACK')),
     'must actually lose ACK after committed DB transaction');
+  assert.ok(events.some(e=>e.record.includes('INTEGRATION_REDELIVERED')),
+    'RabbitMQ must truly redeliver unacknowledged messages');
 
   const t=await reconstructedTree(p);
   const audit=auditCognitiveTree(t);
@@ -134,7 +136,8 @@ async function work(){
   // Only the persisted recorded Kimi syntheses may be compared to Kimi's root.
   const synth=await synthesize(p);
   assert.equal(synth.parents,10);assert.equal(synth.rootDigest,SOURCE.rootDigest);
-  assert.equal((await metrics(p)).syntheses,10);
+  const finalRunMetrics=await metrics(p);
+  assert.equal(finalRunMetrics.syntheses,10);
 
   // (D) Prove two *independent* SQL connections cannot both acquire root.
   await seed(p,'race-two-clients');
@@ -163,7 +166,8 @@ async function work(){
   return {status:'success',transport:'real_RabbitMQ_and_PostgreSQL',
     workerProcesses:proc.length,concurrentHealthyWorkers:2,
     redispatchesFromQueue:true,crashEvents:events,
-    ...state,rootDigest:synth.rootDigest,
+    ...state,syntheses:finalRunMetrics.syntheses,rootDigest:synth.rootDigest,
+    observedRabbitRedeliveries:events.filter(e=>e.record.includes('INTEGRATION_REDELIVERED')).length,
     authenticatedParents:10,authenticatedLeaves:11,
     rootMatchesRealKimi:true,
     claimsRace:[r1.status,r2.status],
