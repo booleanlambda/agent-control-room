@@ -4,6 +4,7 @@
 import {writeFileSync} from 'node:fs';
 import {newDeepTree,deepConfig,nextDeep,lightModelDouble} from './depth10-traversability.mjs';
 import {auditCognitiveTree,scriptedSynthesis} from './cognitive-integrity.mjs';
+import {bindAndAuthenticateSynthesis} from './synthesis-slots.mjs';
 
 const MODEL='nvidia/nemotron-3.5-lightning-30b-a3b';
 const KEY=String(process.env.NVIDIA_API_KEY||'').trim();
@@ -90,17 +91,20 @@ async function generateSynthesis(){
        usageTotal>=MAX_REAL_TOKENS)return {status:'bounded_stop',at:node.path};
     const children=node.children.map(p=>proofs.get(p));
     if(children.some(c=>!c))return {status:'missing_child_proof',at:node.path};
-    const reference=scriptedSynthesis(node,children);
     let answer;
     try {
       answer=await api([
-        {role:'system',content:`You are a lightweight AAU synthesis worker. Return a single JSON object, no markdown or other text. You must preserve the 2 exact child paths and sha256 digests, sum all classification counts exactly, set covered to the sum, and provide a short nonempty summary. Only the provided verified child records count as evidence. Return {"summary":"...","children":[{"path":"...","digest":"..."}],"covered":NUMBER,"counts":{"budget":0,"provider":0,"cognition":0,"evidence":0,"scheduler":0,"unknown":0}}. Do NOT change any digest or invent evidence.`},
-        {role:'user',content:JSON.stringify({path:node.path,range:[node.start,node.end],
-          children:children.map(c=>({path:c.path,digest:c.digest,covered:c.covered,counts:c.counts}))})},
+        {role:'system',content:`You are a lightweight AAU synthesis worker. Return exactly ONE strict JSON object without markdown: {"summary":"...", "slots":[0,1], "covered":NUMBER, "counts":{"budget":0,"provider":0,"cognition":0,"evidence":0,"scheduler":0,"unknown":0}}. The only two possible child references are slot 0 and slot 1, each exactly once and in that order. NEVER output any child path, sha256 digest, parent ID, children array or evidence hash. Runtime will bind verified child references itself. Your task is to add classification counts from both slots, set covered to their sum and produce a short meaningful summary. Do not fabricate numbers or child records.`},
+        {role:'user',content:JSON.stringify({parentDepth:node.depth,rangeCount:node.end-node.start,
+          slots:children.map((c,index)=>({slot:index,covered:c.covered,counts:c.counts}))})},
       ],'synthesis',node.path,450);
       synthCalls.push({path:node.path,reply:answer});
-      synthesisMap.set(node.path,answer);
     }catch(e){return {status:'provider_error',at:node.path,error:compactError(e)};}
+    const bound=bindAndAuthenticateSynthesis(node,answer,children);
+    if(!bound.ok)return {status:'auth_rejected',at:node.path,reason:bound.reason};
+    // The canonical evidence paths and digests come from verified runtime
+    // proofs, not model-generated transcriptions of ten-level identifiers.
+    synthesisMap.set(node.path,bound.proposal);
     // Validate immediately, do not use faulty claim as dependency proof.
     const audit=auditCognitiveTree(state,{proposeSynthesis:(n,c)=>
       synthesisMap.get(n.path)||scriptedSynthesis(n,c)});
@@ -130,7 +134,7 @@ finally{
   const audit=auditCognitiveTree(state,{proposeSynthesis:(node,children)=>
     synthesisMap.get(node.path)||{summary:'',children:[],covered:0,counts:{}}});
   const output={
-    experiment:'AAU_LIVE_NEMOTRON_DEPTH10_SPINE_V1',model:MODEL,simulated:false,
+    experiment:'AAU_LIVE_NEMOTRON_DEPTH10_SPINE_SLOTS_V2',model:MODEL,simulated:false,
     shape:'10 consecutive nested splits, 21 nodes and 11 diagnostic leaves',
     callCeiling:NODE_CALL_LIMIT+SYNTH_CALL_LIMIT,actualTokenCeiling:MAX_REAL_TOKENS,
     calls:realCalls,reportedTokens:usageTotal,estimatedBudget:state.config.budget,
