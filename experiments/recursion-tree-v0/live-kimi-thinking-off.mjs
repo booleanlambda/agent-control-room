@@ -9,8 +9,8 @@ import {bindAndAuthenticateSynthesis} from './synthesis-slots.mjs';
 const MODEL='kimi-k2.5';
 const THINKING={type:'disabled'};
 const ENDPOINT=String(process.env.MOONSHOT_ENDPOINT||'https://api.moonshot.ai/v1').replace(/\/+$/,'').replace(/\/chat\/completions$/,'')+'/chat/completions';
-const KEY=String(process.env.MOONSHOT_APIKEY||'').trim();
-if(!KEY)throw Error('MOONSHOT_APIKEY_MISSING');
+const KEY=String(process.env.MOONSHOT_API_KEY||process.env.MOONSHOT_APIKEY||'').trim();
+if(!KEY)throw Error('MOONSHOT_API_KEY_OR_MOONSHOT_APIKEY_MISSING');
 const NODE_CALL_LIMIT=30;
 const SYNTH_CALL_LIMIT=12;
 const MAX_REAL_TOKENS=30000;
@@ -39,7 +39,7 @@ async function api(messages,kind,path,maxTokens){
       headers:{authorization:'Bearer '+KEY,'content-type':'application/json',accept:'application/json'},
       signal:controller.signal,
       body:JSON.stringify({model:MODEL,messages,max_tokens:maxTokens,
-        stream:false,response_format:{type:'json_object'},thinking:THINKING}),
+        stream:false,temperature:0.6,response_format:{type:'json_object'},thinking:THINKING}),
     });
     if(!response.ok)throw Error('MOONSHOT_HTTP_'+response.status+':'+(await response.text()).slice(0,180));
     reply=await response.json();
