@@ -38,9 +38,18 @@ jobs:
           node --check experiments/recursion-tree-v0/engine.mjs
           node --check experiments/recursion-tree-v0/run.mjs
           node --test experiments/recursion-tree-v0/engine.test.mjs
+          node --check experiments/recursion-tree-v0/depth10-traversability.mjs
+          node --check experiments/recursion-tree-v0/depth10-run.mjs
+          node --test experiments/recursion-tree-v0/depth10-traversability.test.mjs
       - name: Simulated stage 1 tree
         working-directory: experiments/recursion-tree-v0
         run: node run.mjs --mode=mock --stage=1
+      - name: Run all 2047 nodes and verify every path traversable
+        working-directory: experiments/recursion-tree-v0
+        run: node depth10-run.mjs --shape=balanced
+      - name: Run ten consecutive deep splits and traverse their 21 nodes
+        working-directory: experiments/recursion-tree-v0
+        run: node depth10-run.mjs --shape=spine --node=R.002.002
       - name: Silas-derived 100-event injection
         working-directory: experiments/recursion-tree-v0
         run: node run.mjs --mode=stress --stage=1
