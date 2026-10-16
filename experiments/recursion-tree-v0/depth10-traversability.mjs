@@ -67,9 +67,16 @@ export async function nextDeep(s,model=lightModelDouble,{fault=null,stale=false}
     if(fault)throw Error(fault);
     answer=await model({...n,item:n.end-n.start===1?item(n.start):null},s.config);
   }catch(e){
-    event(s,path,'transport',0,{message:String(e.message).slice(0,100)});
-    if(n.attempts<s.config.maxAttempts)s.queue.push(path);else n.status='blocked';
-    return {status:n.status==='blocked'?'blocked':'retry',path};
+    const msg=String(e?.message||e);
+    // Permanent missing-model, invalid-request and auth failures must NOT
+    // be retried as though they were transient 504 or timeout errors.
+    const permanent=/(?:NVIDIA|MOONSHOT)_HTTP_(?:400|401|403|404|422)(?:\\b|:)|MODEL_NOT_AVAILABLE|MODEL_REQUEST_INVALID/.test(msg);
+    event(s,path,permanent?'permanent_provider_error':'transport',0,{message:msg.slice(0,220)});
+    if(permanent)n.status='blocked';
+    else if(n.attempts<s.config.maxAttempts)s.queue.push(path);
+    else n.status='blocked';
+    return {status:permanent?'permanent_provider_failure':
+      n.status==='blocked'?'blocked':'retry',path};
   }
   const v=authenticateDeep(n,answer,s.config);
   if(!v.ok){
