@@ -146,6 +146,13 @@ export async function commit(p,receipt){
     }
     await c.query('INSERT INTO recursion_ci.commits(run_id,path,kind,digest,worker_id) VALUES($1,$2,$3,$4,$5)',
       [receipt.run,receipt.path,v.action,v.action==='ATOMIC'?v.hash:null,receipt.worker]);
+    // Terminate the actual worker OS process before COMMIT; PostgreSQL must
+    // rollback parent/children/outbox/event changes atomically.
+    if(receipt.path==='R'&&process.env.AAU_INJECT_SQL_CRASH==='yes'&&
+      process.env.AAU_DISPOSABLE_CI_DB==='yes'){
+      console.log('INJECTED_SQL_TRANSACTION_CRASH_BEFORE_COMMIT');
+      process.exit(89);
+    }
     return {status:v.action==='SPLIT'?'split':'complete'};
   });
 }
