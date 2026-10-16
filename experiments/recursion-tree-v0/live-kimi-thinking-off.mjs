@@ -16,18 +16,29 @@ const SYNTH_CALL_LIMIT=12;
 const MAX_REAL_TOKENS=30000;
 const MAX_RESERVED_OUTPUT_TOKENS=NODE_CALL_LIMIT*320+SYNTH_CALL_LIMIT*450;
 if(MAX_RESERVED_OUTPUT_TOKENS>MAX_REAL_TOKENS)throw Error('output_budget_exceeds_cap');
-const HARD_DEADLINE=Date.now()+10*60*1000;
+const HARD_DEADLINE=Date.now()+20*60*1000;
+// The account exposes a hard organization limit of 3 requests per minute.
+// 23 seconds between *starts* gives headroom for a rolling-minute limit;
+// initial 65s cooldown protects against requests made by the earlier probe.
+const REQUEST_GAP_MS=23000;
+let nextAllowedRequestAt=Date.now()+65000;
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 let realCalls=0,usageTotal=0;
 const calls=[],decisions=[];
 const config={...deepConfig('spine',40000),maxCalls:NODE_CALL_LIMIT,maxAttempts:2,outputCap:320};
 const state=newDeepTree(config);
 const outputFile='recursion-live-kimi-k26-thinking-off-report.json';
-const compactError=e=>String(e?.message||e).slice(0,220);
+const compactError=e=>String(e?.message||e).replace(/org-[a-z0-9-]+/gi,'org-redacted').replace(/ak-[^\\s>]+/gi,'key-redacted').slice(0,180);
 
 async function api(messages,kind,path,maxTokens){
   if(Date.now()>HARD_DEADLINE)throw Error('campaign_deadline_exhausted');
   if(realCalls>=NODE_CALL_LIMIT+SYNTH_CALL_LIMIT)throw Error('campaign_call_ceiling');
   if(usageTotal>=MAX_REAL_TOKENS)throw Error('campaign_actual_token_ceiling');
+  // Transport admission is independent of semantic child creation.
+  const delay=Math.max(0,nextAllowedRequestAt-Date.now());
+  if(Date.now()+delay>HARD_DEADLINE)throw Error('campaign_deadline_before_rate_slot');
+  if(delay)await sleep(delay);
+  nextAllowedRequestAt=Date.now()+REQUEST_GAP_MS;
   const attempt=++realCalls;
   const controller=new AbortController();
   const timeout=setTimeout(()=>controller.abort(),70000);
@@ -41,7 +52,12 @@ async function api(messages,kind,path,maxTokens){
       body:JSON.stringify({model:MODEL,messages,max_tokens:maxTokens,
         stream:false,temperature:0.6,response_format:{type:'json_object'},thinking:THINKING}),
     });
-    if(!response.ok)throw Error('MOONSHOT_HTTP_'+response.status+':'+(await response.text()).slice(0,180));
+    if(!response.ok){
+      let body={};try{body=await response.json()}catch{}
+      const code=String(body?.error?.type||body?.error?.code||'unknown').slice(0,60);
+      if(response.status===429)nextAllowedRequestAt=Math.max(nextAllowedRequestAt,Date.now()+REQUEST_GAP_MS);
+      throw Error('MOONSHOT_HTTP_'+response.status+':'+code);
+    }
     reply=await response.json();
     if(reply?.choices?.[0]?.finish_reason!=='stop')
       throw Error('model_incomplete:'+reply?.choices?.[0]?.finish_reason);
