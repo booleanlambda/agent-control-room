@@ -144,7 +144,7 @@ async function pump(p,{until=Date.now()+30000}={}){
 }
 async function run(){
   await ensureDisposableContainers();
-  p=pool();await setup(p);await seed(p);
+  p=pool();p.on('error',()=>{});await setup(p);await seed(p);
   await channel();
   await publish('R');
   assert.equal((await ch.checkQueue(QUEUE)).messageCount,1);
@@ -174,7 +174,9 @@ async function run(){
   await dockerCmd('start',postgres);
   // Old pooled connections can be stale after restart; a fresh pool is the
   // client-side reconnect boundary. The DB rows survive Docker stop/start.
-  const recoveredPool=pool();
+  const previousPool=p;
+  const recoveredPool=pool();recoveredPool.on('error',()=>{});
+  previousPool.end().catch(()=>{});
   await retry(()=>recoveredPool.query('SELECT 1'),'postgres_reconnect');
   const recovered=await metrics(recoveredPool);
   assert.equal(recovered.journaled,1);
@@ -191,7 +193,7 @@ async function run(){
   assert.equal(m.commits,21);
   assert.equal(m.journaled,21);
   assert.equal(m.chargeCount,21);
-  assert.equal(m.calls,m.chargeCount); // removed below if metrics shape differs
+  assert.equal(m.providerCalls,m.chargeCount);
   assert.equal(m.chargeSum,m.spent);
   assert.equal(m.spent,12600);
   assert.ok(m.distinctCommitWorkers>=2);
