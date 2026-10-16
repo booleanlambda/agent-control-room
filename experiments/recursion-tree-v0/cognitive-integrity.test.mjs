@@ -62,7 +62,7 @@ test('model-provided incomplete child manifest at depths 0,3,7,9 is rejected ins
   for(const depth of [0,3,7,9]){
     const {s,target}=await injectDecision(depth,node=>({
       action:'SPLIT',splitAt:Math.floor((node.start+node.end)/2),
-      children:[{path:target+'.001'}],
+      children:[{path:node.path+'.001'}],
     }));
     const rejects=s.ledger.filter(e=>e.kind==='rejected'&&e.path===target);
     assert.ok(rejects.every(e=>e.reason==='unexpected_children_payload'));
