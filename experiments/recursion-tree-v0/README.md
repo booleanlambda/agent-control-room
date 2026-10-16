@@ -138,3 +138,59 @@ argument is correct. Parent "summary" content is checked for presence and
 correct provenance/counts, not semantic truth. No live model-generated
 synthesis was evaluated, no provider calls were made, and this gate is not
 yet installed in Silas's production runtime.
+
+
+## Real NVIDIA inference campaign — October 16, 2026
+
+The GitHub Actions `NVIDIA_API_KEY` is present and was accepted for real
+`nvidia/nemotron-3.5-lightning-30b-a3b` endpoint requests (thinking disabled).
+No production agent, worker, deployment or Supabase state was changed.
+
+1. First live stage 1: five model calls; root proposed an oversized atomic
+   output before correctly splitting; one child gave the wrong classifier on
+   two attempts, and was correctly held. The other child completed.
+   Artifact: GitHub Action run 38895377036, artifact 12046208006.
+2. Prompt-contract revision on the same fixed oracle: **stage 1 passed** in
+   three real calls with zero rejections and 2 authenticated leaves;
+   reserve budget 2,919/9,000. GitHub Action run 38903464352,
+   artifact 12046958932.
+3. First live **ten consecutive splits**: 21/21 executed, 10 split decisions
+   and 11/11 leaf classifications authenticated. 22 provider calls total,
+   7,305 provider-reported tokens, 9,767/40,000 estimated reserve units.
+   Initial parent synthesis failed because the model omitted a segment while
+   copying a deeply nested child path; aggregate classification counts were
+   correct. This failure was *correctly rejected* and propagated all the way
+   up, without invalidating already completed leaves. Run 38903464352,
+   artifact 12046809115.
+4. Design revision: model returns slots `[0,1]`, summary and classification
+   aggregates. The runtime, not the model, stamps trusted child path and
+   SHA-256 digest references. The original parent authenticator still checks
+   exact verified child evidence. Six adversarial slot tests pass in isolated
+   CI.
+5. Two follow-up live **slot-based** jobs were inconclusive: each made two
+   calls to the NVIDIA endpoint that hit a 30s local abort before receiving
+   an answer. Each run registered zero provider-reported tokens, though actual
+   provider billing could differ. No node was admitted, and these must be
+   categorized as transport timeout rather than cognitive invalidity.
+   Runs 38904379634 and 38904379561, artifacts 12047725453 and
+   12047850899.
+
+### Experiment guard after campaign
+
+Two temporary paid-inference PR-triggered workflow files were removed from
+the experimental branch in a single commit, because GitHub pull_request
+`paths` examines the cumulative PR diff and could unexpectedly repeat paid
+tests on later commits. The permanent
+`.github/workflows/experimental-recursion-tree.yml` runs only deterministic
+regression tests on PR/push; its optional model job remains limited to
+explicit manual dispatch. The real test runner and all fixtures remain
+available, but no inference job will be triggered automatically.
+
+**Conclusion:** Model-generated ten-level decompositions and terminal
+classification were demonstrated. Deep identifier-copy error was demonstrated
+at the first real parent synthesis. The short-slot replacement passed
+deterministic tests, but no complete live ten-level synthesized root was
+authenticated. Do not merge or promote this experiment as production-safe on
+this evidence alone. Run multi-seed depth and synthesis trials once NVIDIA
+transport stability is independently verified, and preserve bounded
+transport-retry policy with no semantic re-splitting for timeouts.
