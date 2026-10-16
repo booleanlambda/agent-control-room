@@ -302,3 +302,66 @@ The once-only paid-inference workflow was deleted from the experimental PR
 after dispatch. The isolated source remains available, and the production
 Silas agent was never started. **No experiment is approved for production
 merge simply because this constrained test passed.**
+
+
+## Execution-integrity fault campaign — October 16, 2026
+
+The next experimental stage targets **provider failures, abandoned wakes,
+continuation/replay and duplicate deliveries**, rather than reasoning accuracy.
+This stage runs the standalone `execution-integrity.mjs` lease/inbox simulator,
+NOT the production broker. No actual model requests are required.
+
+The simulator persists immutable-ish event entries with unique IDs, finite
+reserved token-equivalent charges, claim leases with fencing tokens, a durable
+provider-response inbox, and commit-once semantics for semantic node acceptance.
+Failures are classified as transport, permanent provider, admission throttle
+or cognitive rejection; only accepted cognition can split a node. Provider
+timeouts follow the separately established **3 attempts → 60-minute cooldown →
+3 attempts → bounded stop** policy. Cooldowns use a simulated clock; tests do
+not sleep. Status, journal, queue, leases, reservations and accepted hashes are
+restored from JSON checkpoints. Real HTTP 404 stops immediately and HTTP 429
+defers independently of the cognitive attempt counter.
+
+**15 new tests** cover:
+- depth-7 abandoned wake/lease expiry and bounded retry;
+- depth-10 crash after response was journaled, restart, reuse of answer with
+  no duplicate provider charge or semantic commit;
+- distinct lease fencing tokens, stale/duplicate work deliveries;
+- the 60-minute cooldown and six-timeout terminal bound;
+- 504, 429 and permanent 404 transport classification;
+- budget preservation, queue corruption and cognitive rejection isolation;
+- all ten parent synthesis records surviving an interruption, duplicate
+  response and checkpoint reload;
+- the complete 2,047-node binary tree at depth 10 with transport faults
+  injected at depths 0, 3, 7 and 10.
+
+**Three additional tests** replay normalized actual Kimi K2.6 decisions and
+the exact model-authored parent summary strings from GitHub Actions run
+38908384102 (artifact 12048914961). With no new provider calls, both the
+clean replay and the replay containing injected 504, 429, orphaned wake and
+post-response crash achieve exactly the same original authenticated root:
+
+`ec166d8915f7f54e6825e38891ae43a54b4b2d8a280d21ca1aa09096741ba483`
+
+The third replays an interrupted parent-synthesis chain and checks recovery
+without reissuing a model call. The normalized fixture preserves the semantic
+decisions and original summary strings; it is *not* a second live experiment.
+
+Validation: **57/57 deterministic tests passed** (11 original engine, 11 depth
+traversability, 11 cognitive, 6 slot, 15 execution integrity, 3 recorded Kimi
+replay). See GitHub Actions run 38912155651.
+
+### Scope and limitations
+
+The model-independent simulator demonstrates **exact-once accepted semantic
+state in a single-process deterministic fault model**, NOT real concurrent
+transactional exactly-once execution. A provider request that times out
+without a journaled answer may still consume billed provider tokens; the
+simulator conservatively debits another bounded reservation before reissue.
+Provider-side idempotency support, true PostgreSQL transaction isolation,
+RabbitMQ at-least-once delivery, distributed lease races, and production
+worker crash-consistency remain to be tested in a subsequent integration
+campaign. The synthetic charge ledger is not provider billing.
+
+No changes to Silas's production cognition, levy, deployment or worker have
+been made.
