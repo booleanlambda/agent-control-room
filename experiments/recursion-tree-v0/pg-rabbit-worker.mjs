@@ -19,6 +19,8 @@ await channel.consume(queue,async msg=>{
   if(!msg)return;
   try{
     const {path,run}=JSON.parse(msg.content.toString());
+    if(msg.fields.redelivered)
+      console.log('INTEGRATION_REDELIVERED '+JSON.stringify({worker:name,path}));
     if(run!==RUN){channel.ack(msg);return;}
     const receipt=await claim(pg,run,path,name,{leaseMs:role==='journal_crasher'?1000:5000});
     if(receipt.status==='busy'||receipt.status==='already_accepted'||receipt.status==='blocked'){
