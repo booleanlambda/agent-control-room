@@ -105,3 +105,34 @@ test('orphan, duplicate event ID and excess debit are detected',async()=>{
   const b=clone();b.spent++;
   assert.throws(()=>verifyDeepTree(b),/budget_or_event_ledger_corrupt/);
 });
+
+
+test('404 model routing is permanent and never repeats an impossible provider call',async()=>{
+  const s=newDeepTree(deepConfig('spine',50000));
+  let calls=0;
+  const failing=async()=>{calls++;throw Error('NVIDIA_HTTP_404:Function not found for account');};
+  const r=await nextDeep(s,failing);
+  assert.equal(r.status,'permanent_provider_failure');
+  assert.equal(calls,1);
+  assert.equal(s.nodes.R.status,'blocked');
+  assert.equal(s.queue.length,0);
+  assert.equal(s.ledger.filter(e=>e.kind==='permanent_provider_error').length,1);
+  assert.equal(s.nodes.R.children.length,0);
+});
+
+test('transient HTTP 504 still allows one bounded retry with no ghost node',async()=>{
+  const s=newDeepTree(deepConfig('spine',50000));
+  let calls=0;
+  const flaky=async(n,c)=>{
+    calls++;
+    if(calls===1)throw Error('NVIDIA_HTTP_504:Gateway Timeout');
+    return lightModelDouble(n,c);
+  };
+  const first=await nextDeep(s,flaky);
+  assert.equal(first.status,'retry');
+  assert.equal(Object.keys(s.nodes).length,1);
+  const second=await nextDeep(s,flaky);
+  assert.equal(second.status,'split');
+  assert.equal(calls,2);
+  assert.equal(Object.keys(s.nodes).length,3);
+});
