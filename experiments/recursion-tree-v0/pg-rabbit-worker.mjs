@@ -22,7 +22,7 @@ await channel.consume(queue,async msg=>{
     if(msg.fields.redelivered)
       console.log('INTEGRATION_REDELIVERED '+JSON.stringify({worker:name,path}));
     if(run!==RUN){channel.ack(msg);return;}
-    const receipt=await claim(pg,run,path,name,{leaseMs:['journal_crasher','partition_after_journal'].includes(role)?1000:5000});
+    const receipt=await claim(pg,run,path,name,{leaseMs:['journal_crasher','partition_after_journal','hold_unacked'].includes(role)?1200:5000});
     if(receipt.status==='busy'||receipt.status==='already_accepted'||receipt.status==='blocked'){
       channel.ack(msg);return;
     }
@@ -34,6 +34,15 @@ await channel.consume(queue,async msg=>{
       const saved=await journal(pg,receipt,reply);
       if(!['journaled','already_journaled'].includes(saved.status))
         throw Error('JOURNAL_REJECTED:'+saved.status);
+    }
+    // Real broker-outage campaign: two separate OS consumers have already
+    // journaled answers, but deliberately do NOT commit/ACK their messages.
+    // This leaves genuine RabbitMQ 'messages_unacknowledged' at restart.
+    if(role==='hold_unacked' && ['R.001','R.002'].includes(path) &&
+       process.env.GITHUB_ACTIONS==='true' &&
+       process.env.AAU_DISPOSABLE_CI_DB==='yes'){
+      console.log('INFLIGHT_UNACKED_JOURNALED '+JSON.stringify({worker:name,path}));
+      await new Promise(resolve=>setTimeout(resolve,30000));
     }
     if(role==='partition_after_journal'&&path==='R'){
       console.log('NETWORK_PARTITION_ARMED_AFTER_JOURNAL');
