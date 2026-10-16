@@ -41,6 +41,9 @@ jobs:
           node --check experiments/recursion-tree-v0/depth10-traversability.mjs
           node --check experiments/recursion-tree-v0/depth10-run.mjs
           node --test experiments/recursion-tree-v0/depth10-traversability.test.mjs
+          node --check experiments/recursion-tree-v0/cognitive-integrity.mjs
+          node --check experiments/recursion-tree-v0/cognitive-integrity-run.mjs
+          node --test experiments/recursion-tree-v0/cognitive-integrity.test.mjs
       - name: Simulated stage 1 tree
         working-directory: experiments/recursion-tree-v0
         run: node run.mjs --mode=mock --stage=1
@@ -50,13 +53,18 @@ jobs:
       - name: Run ten consecutive deep splits and traverse their 21 nodes
         working-directory: experiments/recursion-tree-v0
         run: node depth10-run.mjs --shape=spine --node=R.002.002
+      - name: Cognitive failure injections and parent synthesis attestation
+        working-directory: experiments/recursion-tree-v0
+        run: node cognitive-integrity-run.mjs
       - name: Silas-derived 100-event injection
         working-directory: experiments/recursion-tree-v0
         run: node run.mjs --mode=stress --stage=1
       - uses: actions/upload-artifact@v4
         with:
           name: aau-recursion-deterministic-v0
-          path: experiments/recursion-tree-v0/recursion-tree-*.json
+          path: |
+            experiments/recursion-tree-v0/recursion-tree-*.json
+            experiments/recursion-tree-v0/cognitive-integrity-fault-report.json
 
   lightweight-model:
     # Inference is a separately authorized paid/credentialed experiment.
