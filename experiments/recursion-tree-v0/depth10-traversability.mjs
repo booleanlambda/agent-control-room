@@ -130,7 +130,8 @@ export function verifyDeepTree(s,{requireComplete=true}={}){
   }
   if(bfs.length!==dfs.length||new Set(dfs).size!==all.length)throw Error('traversal_inconsistent');
   if(s.ledger.reduce((a,e)=>a+e.units,0)!==s.spent||
-    s.spent>s.config.budget||s.calls>s.config.maxCalls||s.seq!==s.ledger.length)
+    s.spent>s.config.budget||s.calls>s.config.maxCalls||s.seq!==s.ledger.length||
+    new Set(s.ledger.map(e=>e.id)).size!==s.ledger.length)
     throw Error('budget_or_event_ledger_corrupt');
   return {reachable:bfs.length,depth:Math.max(...all.map(p=>s.nodes[p].depth)),
     nodes:all.length,splits:all.filter(p=>s.nodes[p].status==='split').length,
