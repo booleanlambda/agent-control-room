@@ -481,3 +481,62 @@ to a replica. The test uses a single RabbitMQ node, not a quorum queue or
 broker cluster. It does not establish recovery from simultaneous multi-node
 partitions, provider billing idempotence, or production service reliability.
 No production deployment is authorized by this isolated pass.
+
+
+## Actual RabbitMQ restart during *two unacknowledged in-flight deliveries* — October 16, 2026
+
+**Independent integration gate passed:** [GitHub Actions 38958076207](https://github.com/booleanlambda/agent-control-room/actions/runs/38958076207). Its full JSON audit is uploaded as
+`aau-inflight-broker-restart-evidence` (artifact 12071017890).
+
+This closes a different gap from the earlier test, which restarted the broker
+with a message merely queued. Here **two separate OS worker processes held
+real RabbitMQ deliveries** at paths `R.001` and `R.002` without acknowledging
+them. Both received known-good prerecorded Kimi decisions and committed their
+answers to the PostgreSQL inbox, but had not committed semantic results.
+
+The controller queried RabbitMQ's own `rabbitmqctl list_queues` before
+restart and verified **2 messages_unacknowledged / 0 messages_ready**.
+It then actually restarted the disposable RabbitMQ 3.13 container. After
+reconnection the queue had **0 unacknowledged / 2 ready**. The original
+workers were terminated. Two new OS processes recovered the pending work;
+RabbitMQ marked **both `R.001` and `R.002` as `redelivered=true`**.
+
+**Evidence after recovery:**
+
+| Field | Observed |
+|---|---:|
+| Originally in-flight broker deliveries | 2 |
+| Durable messages restored ready after restart | 2 |
+| Messages explicitly marked redelivered | Both |
+| Recovered worker A accepted node commits | 10 |
+| Recovered worker B accepted node commits | 10 |
+| Root accepted before broker failure | 1 |
+| Total persisted node commits | 21 (10 splits, 11 leaves) |
+| Persisted PostgreSQL response journals | 21 |
+| Unique synthetic debit records | 21 |
+| Duplicate acceptance / debit for either rescued node | 0 |
+| Budget reservation units | 12,600/55,000 |
+| Authenticated parent syntheses | 10 |
+| Real new provider API calls | 0 |
+
+The root SHA exactly matched the original *live* Kimi K2.6 thinking-off
+answer and synthesis chain:
+
+`ec166d8915f7f54e6825e38891ae43a54b4b2d8a280d21ca1aa09096741ba483`.
+
+**Reproducible code:**
+`pg-rabbit-inflight-restart.mjs`,
+`pg-rabbit-worker.mjs` (disposable CI-only `hold_unacked` injection), and
+`.github/workflows/experimental-rabbit-inflight-restart.yml`. The RabbitMQ
+queue is durable, both messages are persistent, and the service container
+restart is checked against the exact expected image and a disposable CI guard.
+Production Silas, Render, Supabase, and production RabbitMQ were not touched.
+
+**Remaining limitations:** A **single RabbitMQ node** was restarted with two
+journaled-but-uncommitted messages, rather than a RabbitMQ quorum/cluster
+leader failing over. PostgreSQL's client and data remained online in this
+specific run (Postgres outage is covered in the preceding separate test).
+Provider billing on uncertain timeout, quorum splits, WAN partitions, and
+unjournaled external model responses have not been validated by this test.
+This proves a narrow transactional and broker redelivery property, not
+exactly-once remote inference or production readiness.
