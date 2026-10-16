@@ -1,0 +1,43 @@
+name: AAU Kimi K2.6 Moonshot Thinking-Off Ten-Deep Test
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ['.github/workflows/moonshot-k26-recursion-once.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  authenticated-kimi-k26:
+    if: github.head_ref == 'experiment/recursive-tree-nemotron-v0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 13
+    env:
+      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+      MOONSHOT_APIKEY: ${{ secrets.MOONSHOT_APIKEY }}
+      MOONSHOT_ID: ${{ secrets.MOONSHOT_ID }}
+      MOONSHOT_ENDPOINT: ${{ secrets.MOONSHOT_ENDPOINT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Deterministic verifier regression checks
+        working-directory: experiments/recursion-tree-v0
+        run: |
+          node --check moonshot-k25-probe.mjs
+          node --check live-kimi-thinking-off.mjs
+          node --test synthesis-slots.test.mjs
+      - name: Real Kimi K2.6 thinking-disabled API probe
+        working-directory: experiments/recursion-tree-v0
+        run: node moonshot-k25-probe.mjs
+      - name: Real ten-deep Kimi K2.6 recursion with model-authored parent syntheses
+        working-directory: experiments/recursion-tree-v0
+        run: node live-kimi-thinking-off.mjs
+      - name: Preserve complete model decisions and proof failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-kimi-k26-moonshot-thinking-off-depth10
+          path: experiments/recursion-tree-v0/recursion-live-kimi-k26-thinking-off-report.json
+          if-no-files-found: ignore
