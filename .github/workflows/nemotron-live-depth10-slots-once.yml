@@ -1,0 +1,41 @@
+name: AAU One-time Live 10-level Slot Synthesis
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/nemotron-live-depth10-slots-once.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  live-depth-ten-slots:
+    if: github.head_ref == 'experiment/recursive-tree-nemotron-v0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Test deterministic slot binding including malicious field attempts
+        working-directory: experiments/recursion-tree-v0
+        run: |
+          node --check synthesis-slots.mjs
+          node --check live-depth10.mjs
+          node --test synthesis-slots.test.mjs
+      - name: Repeat live ten-deep recursion and certify 10 parent syntheses
+        working-directory: experiments/recursion-tree-v0
+        run: |
+          set -euo pipefail
+          test -n "${NVIDIA_API_KEY:-}" || { echo "NVIDIA_GITHUB_SECRET_MISSING"; exit 1; }
+          node live-depth10.mjs
+      - name: Preserve full model decisions and verifier findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-live-depth10-slot-synthesis
+          path: experiments/recursion-tree-v0/recursion-live-depth10-report.json
+          if-no-files-found: ignore
