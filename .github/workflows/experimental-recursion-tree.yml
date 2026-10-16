@@ -49,6 +49,8 @@ jobs:
           node --test experiments/recursion-tree-v0/synthesis-slots.test.mjs
           node --check experiments/recursion-tree-v0/execution-integrity.mjs
           node --test experiments/recursion-tree-v0/execution-integrity.test.mjs
+          node --check experiments/recursion-tree-v0/kimi-k26-recorded-replay.mjs
+          node --test experiments/recursion-tree-v0/kimi-k26-recorded-replay.test.mjs
       - name: Simulated stage 1 tree
         working-directory: experiments/recursion-tree-v0
         run: node run.mjs --mode=mock --stage=1
