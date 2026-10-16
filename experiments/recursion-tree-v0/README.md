@@ -422,3 +422,62 @@ production-grade correctness are warranted from this test alone.
 
 Production's existing **Systemic Runtime Tree CI** continues to fail
 independently. PR #45 remains draft and unmerged.
+
+
+## Disposable service-restart and network fault campaign — October 16, 2026
+
+**Run:** [GitHub Actions 38930823935](https://github.com/booleanlambda/agent-control-room/actions/runs/38930823935)
+(artifact `aau-broker-restart-postgres-outage-tcp-partition`).
+
+This stage uses **actual PostgreSQL 16 and RabbitMQ 3.13 Docker containers**
+on a disposable GitHub Actions runner. The code refuses non-loopback or
+non-lab database addresses and verifies the exact Docker container image
+before issuing any stop/restart command. Production Supabase, Render,
+RabbitMQ, Silas, and their credentials remain untouched.
+
+The campaign injects these separate failures before recovering a full
+10-level, 21-node Kimi-derived tree:
+
+1. A root task is delivered to a **durable RabbitMQ queue**, with persistent
+   message delivery mode, and the entire RabbitMQ container is restarted.
+   The root message is still present after reconnection.
+2. A live worker receives the root, validates and durably journals its
+   known-good model answer to PostgreSQL, then its actual forwarded TCP
+   connection to RabbitMQ is severed using a temporary local TCP proxy.
+   The worker disconnects; the database's response journal is preserved.
+3. PostgreSQL itself is stopped. A real SQL query fails during the outage.
+   PostgreSQL is then restarted and a new client pool reconnects. The
+   previously journaled answer, one original debit and no accepted root
+   commit are confirmed intact.
+4. Two independent replacement worker processes consume actual RabbitMQ
+   messages, reconcile pending work from PostgreSQL's transactional outbox,
+   retry eligible work under lease fencing, and finish the entire tree.
+   The broker records a genuine redelivery. Both replacement workers
+   commit accepted nodes.
+
+**Measured result:** pass. The durable queue survived restart; one active
+TCP connection was cut; the PostgreSQL outage was observed; 21/21 nodes,
+10/10 parent proofs and 11/11 leaves were accepted. There are precisely
+21 response journals and 21 synthetic debits, totaling **12,600/55,000**.
+The authenticated root remains exactly the original real Kimi K2.6
+thinking-off proof:
+
+`ec166d8915f7f54e6825e38891ae43a54b4b2d8a280d21ca1aa09096741ba483`.
+
+**Source:** `pg-rabbit-resilience.mjs`, plus the deliberately scoped
+durable-queue and worker-fault controls in `pg-rabbit-worker.mjs).
+The stable CI workflow is
+`.github/workflows/experimental-postgres-rabbit-resilience.yml`.
+These tests replay earlier recorded Kimi decisions and parent summaries;
+**zero new model API calls**, and budget debits represent synthetic
+reservations, not provider billing.
+
+**Precise limitations:** The broker restarts while the original persistent
+task is *queued*, not while it is being processed; the later TCP cut occurs
+*during* active processing. This is a real single-worker TCP interruption,
+not a distributed multi-host network partition. PostgreSQL is restarted as
+the same Docker container with its existing data volume, not failed over
+to a replica. The test uses a single RabbitMQ node, not a quorum queue or
+broker cluster. It does not establish recovery from simultaneous multi-node
+partitions, provider billing idempotence, or production service reliability.
+No production deployment is authorized by this isolated pass.
