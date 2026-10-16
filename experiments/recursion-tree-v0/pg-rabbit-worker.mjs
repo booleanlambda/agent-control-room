@@ -12,7 +12,7 @@ if(!queue||!process.env.AAU_DISPOSABLE_CI_DB)throw Error('INTEGRATION_ENV_MISSIN
 const pg=pool();
 const conn=await amqp.connect(process.env.TEST_RABBIT_URL||'amqp://guest:guest@127.0.0.1:5672');
 const channel=await conn.createChannel();
-await channel.assertQueue(queue,{durable:false});
+await channel.assertQueue(queue,{durable:process.env.AAU_DURABLE_QUEUE==='yes'});
 await channel.prefetch(1);
 let events=0;
 await channel.consume(queue,async msg=>{
@@ -22,7 +22,7 @@ await channel.consume(queue,async msg=>{
     if(msg.fields.redelivered)
       console.log('INTEGRATION_REDELIVERED '+JSON.stringify({worker:name,path}));
     if(run!==RUN){channel.ack(msg);return;}
-    const receipt=await claim(pg,run,path,name,{leaseMs:role==='journal_crasher'?1000:5000});
+    const receipt=await claim(pg,run,path,name,{leaseMs:['journal_crasher','partition_after_journal'].includes(role)?1000:5000});
     if(receipt.status==='busy'||receipt.status==='already_accepted'||receipt.status==='blocked'){
       channel.ack(msg);return;
     }
@@ -34,6 +34,10 @@ await channel.consume(queue,async msg=>{
       const saved=await journal(pg,receipt,reply);
       if(!['journaled','already_journaled'].includes(saved.status))
         throw Error('JOURNAL_REJECTED:'+saved.status);
+    }
+    if(role==='partition_after_journal'&&path==='R'){
+      console.log('NETWORK_PARTITION_ARMED_AFTER_JOURNAL');
+      await new Promise(resolve=>setTimeout(resolve,10000));
     }
     if(role==='journal_crasher'&&path==='R'){
       console.log('INJECTED_CRASH_AFTER_DURABLE_JOURNAL');
