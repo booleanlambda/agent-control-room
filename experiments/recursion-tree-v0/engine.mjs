@@ -143,6 +143,10 @@ export async function step(s,model,{injectedFailure=null,stale=false}={}){
     else node.status='blocked';
     invariant(s);return {status:node.status==='blocked'?'blocked':'retryable',path};
   }
+  // Retain the exact limited JSON decision for diagnosis. The error-fixture
+  // runner has no private agent memory or API credentials in these outputs.
+  record(s,'model_decision_received',path,0,{attempt:node.attempts,
+    answer:JSON.stringify(answer).slice(0,2400)});
   const verdict=authenticate(node,answer,s.config);
   if(!verdict.ok){
     node.lastError=verdict.reason;node.status='pending';
