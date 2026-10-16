@@ -540,3 +540,69 @@ Provider billing on uncertain timeout, quorum splits, WAN partitions, and
 unjournaled external model responses have not been validated by this test.
 This proves a narrow transactional and broker redelivery property, not
 exactly-once remote inference or production readiness.
+
+
+## HTTP provider returned, PostgreSQL unavailable before journaling — October 16, 2026
+
+**Final verified CI:** [AAU Provider Response SQL Journal Failure Safety — run 38975945059](https://github.com/booleanlambda/agent-control-room/actions/runs/38975945059), artifact `aau-provider-response-journal-gap-evidence` (12079385997).
+
+This stage exercises the hardest single-process boundary: an external
+provider returns a valid HTTP answer, but a real PostgreSQL 16 container is
+stopped *before the process can persist that answer*. The process terminates
+with the response only in its now-lost memory. An actual RabbitMQ 3.13
+persistent message is redelivered to a replacement consumer. Two separate
+disposable runs are executed with a local **HTTP provider simulator**, which
+maintains an independent provider-side request and simulated billing ledger.
+
+Before contacting the provider, the runtime durably records a unique
+`request_id` and state `sent` alongside one bounded synthetic reservation.
+When PostgreSQL becomes available again:
+
+1. **Provider with request-ID result lookup:** the runtime queries the
+   pre-existing provider-side result, retrieves the original answer, renews
+   the fenced lease **without another generation request or second debit**,
+   journals the response and commits the node. Using the recorded Kimi fixture
+   for the remaining work, the tree reaches **21 committed nodes, 21 durable
+   answers, 21 distinct synthetic charges, 10 parent syntheses** and the
+   original Kimi root SHA:
+   `ec166d8915f7f54e6825e38891ae43a54b4b2d8a280d21ca1aa09096741ba483`.
+2. **Provider without a result-lookup feature:** the provider returns
+   `lookup_not_supported`. The runtime records `manual_hold`, acknowledges
+   the broker delivery only after that durable state is saved, and **does
+   not automatically issue another generation request**. The root is not
+   certified and has zero accepted semantic commits. The single initial
+   reservation remains in the ledger and billing certainty remains unresolved.
+
+**Observed actual local-HTTP simulator calls:** exactly **2 generation
+requests**, one per scenario; 2 lookup attempts (one successful, one
+unsupported); **0 repeat generation requests**; the simulator records one
+possible charge per scenario. PostgreSQL was physically stopped and restarted
+twice, and the successful-but-unjournaled response was genuinely lost with
+the original OS worker.
+
+One more anti-bypass guard is part of this stage: *every ordinary broker
+claim*, not just the special reconciliation path, checks for the durable
+provider request intent before admitting a new model request. Both `sent`
+and `manual_hold` states yield
+`external_request_reconciliation_required` without a new reservation.
+This guard is contained in the isolated experimental PostgreSQL contract,
+and the legacy transaction suites still run with the provider-intent relation
+absent.
+
+**Sources:** `provider-uncertain-http.mjs` (disposable local HTTP service and
+simulated provider billing), `provider-uncertain-worker.mjs` (lost-response
+worker), `provider-uncertain-recovery.mjs` (two recovery policies),
+`pg-rabbit-contract.mjs` (generic claim fence), and
+`.github/workflows/experimental-provider-uncertain-journal.yml`.
+
+**Interpretation, not overclaim:** This test uses real HTTP, actual
+PostgreSQL stop/start and actual RabbitMQ delivery, but the HTTP service is a
+*local provider simulator*, not Moonshot or NVIDIA, and it replays the same
+known Kimi classification result. There are **zero new paid LLM calls** and
+no measured real-world provider bills. Real provider support for idempotency
+keys, result lookup and charge retrieval must be independently verified
+before enabling reconciliation. Where such retrieval is unsupported,
+automatic retry after a possibly completed inference remains inherently
+billing-uncertain. `manual_hold` is an intentional bounded safety stop,
+not proof that work completed. Production Silas was not modified, woken
+or redeployed, and PR #45 is still research-only and unmerged.
