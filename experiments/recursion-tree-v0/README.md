@@ -58,3 +58,43 @@ Generated JSON includes actual tree paths, classification decisions, accepted re
 - A 30B/3B-active model is lightweight in active parameters but still remotely hosted, not on-device or offline.
 - This is a new isolated engine; it does not yet measure direct production AAU worker parity.
 - NVIDIA availability, rate limits and repo secret configuration must be observed in the live GitHub Actions run; no fallback from a failed live call to a deterministic test double.
+
+
+## Ten-level traversable stress experiment (October 16)
+
+A separate deterministic test-double harness now tests **both** 10 consecutive splits and
+a full binary 10-level tree. This is not a live NVIDIA inference result.
+
+| Shape | Split nodes | Leaves | Total nodes | Simulated ceiling |
+|---|---:|---:|---:|---:|
+| Balanced 10-level binary | 1,023 | 1,024 | 2,047 | 1,800,000 token-equivalent units |
+| Spine with 10 consecutive splits | 10 | 11 | 21 | 50,000 token-equivalent units |
+
+All node IDs are canonical (`R`, `R.001`, `R.001.002`, etc.). Every accepted
+branch has two exact, disjoint, contiguous ranges. The deterministic authenticator
+checks the full partition and leaf classification; every accepted leaf has a hash.
+The verifier independently checks BFS and DFS reachability, parent-child round trips,
+unique event IDs, committed budget, maximum depth, and absence of orphaned nodes.
+Injected HTTP 504, invalid split boundaries, stale wake, low budget, corrupted parent
+links, changed evidence hashes, orphan nodes, and replay are covered by tests.
+
+Run via:
+
+```bash
+node --test experiments/recursion-tree-v0/depth10-traversability.test.mjs
+cd experiments/recursion-tree-v0
+node depth10-run.mjs --shape=balanced
+node depth10-run.mjs --shape=spine --node=R.002.002
+```
+
+CI produces `recursion-depth10-balanced.json` and `recursion-depth10-spine.json`
+alongside the existing stage-1/stress test artifacts. The companion standalone HTML
+explorer is in the conversation download artifact, and supports jumps by path,
+breadcrumbs, parent/child traversal, and DFS previous/next through all nodes.
+
+**Important:** 1,024 synthetic items are created by repeating the 16 reduced
+Silas diagnostic templates; they are not 1,024 distinct observed runtime failures.
+The simulated token-equivalent reserve is not measured API usage. A real
+lightweight model would require available NVIDIA credentials and a separate,
+explicitly budget-capped campaign. No 2,047 provider calls were attempted;
+Silas's real cognition state and levy are unchanged.
