@@ -6,7 +6,7 @@ import {newDeepTree,deepConfig,nextDeep,lightModelDouble} from './depth10-traver
 import {auditCognitiveTree,scriptedSynthesis} from './cognitive-integrity.mjs';
 import {bindAndAuthenticateSynthesis} from './synthesis-slots.mjs';
 
-const MODEL='kimi-k2.5';
+const MODEL='kimi-k2.6';
 const THINKING={type:'disabled'};
 const ENDPOINT=String(process.env.MOONSHOT_ENDPOINT||'https://api.moonshot.ai/v1').replace(/\/+$/,'').replace(/\/chat\/completions$/,'')+'/chat/completions';
 const KEY=String(process.env.MOONSHOT_API_KEY||process.env.MOONSHOT_APIKEY||'').trim();
@@ -21,7 +21,7 @@ let realCalls=0,usageTotal=0;
 const calls=[],decisions=[];
 const config={...deepConfig('spine',40000),maxCalls:NODE_CALL_LIMIT,maxAttempts:2,outputCap:320};
 const state=newDeepTree(config);
-const outputFile='recursion-live-kimi-k25-thinking-off-report.json';
+const outputFile='recursion-live-kimi-k26-thinking-off-report.json';
 const compactError=e=>String(e?.message||e).slice(0,220);
 
 async function api(messages,kind,path,maxTokens){
@@ -139,7 +139,7 @@ finally{
   const audit=auditCognitiveTree(state,{proposeSynthesis:(node,children)=>
     synthesisMap.get(node.path)||{summary:'',children:[],covered:0,counts:{}}});
   const output={
-    experiment:'AAU_LIVE_KIMI_K25_THINKING_OFF_DEPTH10_SLOTS_V1',model:MODEL,thinking:THINKING,simulated:false,
+    experiment:'AAU_LIVE_KIMI_K26_THINKING_OFF_DEPTH10_SLOTS_V1',model:MODEL,thinking:THINKING,simulated:false,
     shape:'10 consecutive nested splits, 21 nodes and 11 diagnostic leaves',
     callCeiling:NODE_CALL_LIMIT+SYNTH_CALL_LIMIT,actualTokenCeiling:MAX_REAL_TOKENS,
     calls:realCalls,reportedTokens:usageTotal,estimatedBudget:state.config.budget,
