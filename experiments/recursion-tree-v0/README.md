@@ -365,3 +365,60 @@ campaign. The synthetic charge ledger is not provider billing.
 
 No changes to Silas's production cognition, levy, deployment or worker have
 been made.
+
+
+## Real two-worker concurrency and PostgreSQL/RabbitMQ integration — October 16, 2026
+
+This is a **real** integration test with disposable PostgreSQL 16 and RabbitMQ
+3.13 Docker service containers inside GitHub Actions, separate from production
+Supabase, production RabbitMQ, Render, and Silas. The SQL client hard-rejects
+non-loopback databases and requires a disposable `recursion_lab` DB plus
+`AAU_DISPOSABLE_CI_DB=yes`. No production credentials are loaded.
+
+**Validated in CI run 38917470653**, with artifact
+`aau-real-two-worker-transaction-integrity`:
+
+- **Four OS worker processes** were started: a worker terminated immediately
+  after journaling a response, a worker forcibly terminated inside an
+  uncommitted PostgreSQL semantic-commit transaction, and two actual
+  concurrently running RabbitMQ consumers competing for all later tasks.
+- A competing consumer committed `R.001` and then exited *before RabbitMQ
+  message ACK*. Another recovered from broker redelivery. The broker's
+  `redelivered` flag was observed on **3 real messages**, not inferred.
+- The pre-commit crash rolled back the root's uncommitted **parent, children,
+  outbox and commit-record changes** together; the previous independently
+  journaled answer survived and was reused, with no second provider debit.
+- PostgreSQL `SELECT ... FOR UPDATE` admitted only **one** of two
+  simultaneous claimants of an isolated test root (`claimed` / `busy`).
+  Expired-lease fencing rejected a stale worker's journal and semantic commit.
+- **21/21 accepted node commits**, comprising 10 splits and 11 leaves;
+  **21 durable response records** and **21 unique model-equivalent debits**.
+  Both healthy concurrent workers actually committed nodes. No duplicate
+  semantic commit/child/outbox entry; total synthetic debit **12,600/55,000**.
+- **10/10 persisted parent synthesis proofs**; exact restored root SHA:
+  `ec166d8915f7f54e6825e38891ae43a54b4b2d8a280d21ca1aa09096741ba483`.
+  This matches the prior **live Kimi K2.6 thinking-off** run.
+- Test source files: `pg-rabbit-contract.mjs`, `pg-rabbit-worker.mjs`,
+  `pg-rabbit-integration.mjs`; persistent, deterministic, non-paid CI gate:
+  `.github/workflows/experimental-postgres-rabbit-integrity.yml`.
+
+The test replays the exact verified Kimi decisions and model-authored
+summaries. **No new LLM calls were made**; the 21 `providerCalls` in the
+disposable SQL run are synthetic debit reservations (one per original
+model-equivalent node), not 21 actual new provider requests. This is an
+integration test for distributed execution integrity, not comparative
+reasoning accuracy or provider-side billing idempotency.
+
+### Remaining work before any production change
+
+Test more than two workers, network partitions where the broker and DB
+disagree, delayed ACK beyond lease expiry, injected PostgreSQL unavailability,
+RabbitMQ reconnection/leader failover, cross-machine replay of durable
+checkpoints, and substantive mathematics/research with independent verifiers.
+The CI containers were disposable and the RabbitMQ queue was non-durable
+because the test targets worker and DB transaction recovery, not *broker
+node persistence*. No claims of exactly-once provider billing or
+production-grade correctness are warranted from this test alone.
+
+Production's existing **Systemic Runtime Tree CI** continues to fail
+independently. PR #45 remains draft and unmerged.
