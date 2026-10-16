@@ -606,3 +606,86 @@ automatic retry after a possibly completed inference remains inherently
 billing-uncertain. `manual_hold` is an intentional bounded safety stop,
 not proof that work completed. Production Silas was not modified, woken
 or redeployed, and PR #45 is still research-only and unmerged.
+
+
+## Real Moonshot and NVIDIA response retrieval contract — October 16, 2026
+
+**Purpose:** establish whether we may automatically resume a synchronous model
+request that the provider may have completed before the client could journal
+the output. A response `id` or request-trace ID is **not an idempotency key**
+and is not evidence that a later POST is safe.
+
+**Primary references** (current provider docs):
+- Moonshot sync chat creation: https://platform.kimi.ai/docs/api/chat
+- Moonshot Responses API creation: https://platform.kimi.ai/docs/api/responses
+- Moonshot separately recoverable *batch jobs*:
+  https://platform.kimi.ai/docs/guide/use-batch-api and
+  https://platform.kimi.ai/docs/api/batch-retrieve
+- NVIDIA NIM hosted API:
+  https://docs.api.nvidia.com/nim/reference/llm-apis
+  Some NIM model references document `202` pending invocation/polling by
+  requestId; do not confuse a pending asynchronous invocation with an
+  arbitrary already completed synchronous chat-completion lookup.
+
+**Authenticated live read-only lookup probes**, in fully isolated GitHub
+Actions, with credentials held only in Actions secrets:
+- [Provider capabilities run 38983964294](https://github.com/booleanlambda/agent-control-room/actions/runs/38983964294),
+  artifact `aau-moonshot-nvidia-response-retrieval-capabilities`.
+  Direct Moonshot `kimi-k2.6` nonthinking accepted **one** tiny completion
+  (HTTP 200, provider-reported **29 tokens**, completion ID present).
+  Both `GET /v1/chat/completions/{completion_id}` and
+  `GET /v1/responses/{completion_id}` returned **HTTP 404**.
+  NVIDIA's initial tiny request returned HTTP 200 and 82 reported tokens but
+  failed the strict response-shape gate (no accepted finished text + ID pair).
+- [NVIDIA response-shape run 38984097532](https://github.com/booleanlambda/agent-control-room/actions/runs/38984097532),
+  artifact `aau-nvidia-response-id-retrieval`. A separate **new, never
+  repeated** tiny `nvidia/nemotron-3.5-lightning-30b-a3b` invocation
+  returned HTTP 200 with a completion ID and 190 reported tokens, but
+  `finish_reason: length` with `message.content: null`. The result was
+  explicitly **not authenticated as a completed cognitive answer**.
+  Both read-only GET routes above again returned **404** for its exact ID.
+- **No duplicate generation POSTs were submitted.** A one-time GitHub Actions
+  trigger for each paid probe was removed immediately after dispatch.
+  Response IDs, full response texts, authorization tokens and sensitive
+  header values were not logged; only metadata and SHA-256 hashes appear
+  in evidence.
+- **Empirical result:** neither tested provider exposes a verified completed
+  synchronous-chat retrieval path through the two standard URL shapes used
+  here. This does **not** prove there is no other proprietary vendor API or
+  future feature, and does **not** prove or disprove provider-side charging
+  rules or asynchronous NIM `202` polling.
+- No general idempotent `POST /v1/chat/completions` replay guarantee was
+  found in the inspected provider reference material. Never infer
+  idempotency from a trace ID or a same-body reissue.
+
+**Implemented experimental fail-closed recovery policy:**
+`provider-recovery-policy.mjs` and its **11 deterministic regression tests**
+(`provider-recovery-policy.test.mjs`):
+1. If the job was prepared but **definitively not dispatched**, allow the
+   first send under an authorized compute reservation.
+2. If the response is durably journaled, commit it without inference.
+3. For `sent`, `uncertain`, `incomplete_response`, or `manual_hold`
+   where a trustworthy provider retrieval/idempotency contract is **not
+   established**, persist `manual_hold` and **never automatically POST again**.
+4. Any decision to intentionally issue a *new* potentially paid attempt
+   requires explicit operator authorization, bounded remaining attempts,
+   and additional reserved compute. Billing may still be duplicated at
+   the external provider: the authorization is a risk decision, not a
+   claim of provider-side exactly once.
+5. Never infer a valid semantic node from HTTP 200 with `finish_reason:
+   length` or empty content. HTTP transport success is not cognitive
+   verification.
+6. The previous generic "3 timeouts -> 60min -> 3 attempts" policy does
+   **not** authorize duplicate model submissions after a possibly completed
+   and unjournaled request; apply transport scheduling only when dispatch
+   did not occur or the provider explicitly guarantees idempotent replay.
+7. Moonshot **Batch API** is separately documented to retain batch job
+   status and results via the durable `batch_id` and output file. It can
+   be evaluated for independent, nonurgent subjobs when the batch ID is
+   persisted. It is not a synchronous request-retrieval guarantee or
+   a way to deduplicate uncertain batch *creation*.
+
+**Limits and containment:** This policy is isolated code in draft PR #45.
+It is not applied to Silas's production workers, has not been merged or
+deployed, and is not a statement of production provider contract terms.
+No real account billing guarantees were asserted.
