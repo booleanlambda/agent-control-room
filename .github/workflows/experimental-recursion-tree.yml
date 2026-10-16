@@ -7,6 +7,12 @@ on:
     paths:
       - 'experiments/recursion-tree-v0/**'
       - '.github/workflows/experimental-recursion-tree.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'experiments/recursion-tree-v0/**'
+      - '.github/workflows/experimental-recursion-tree.yml'
   workflow_dispatch:
     inputs:
       stage:
