@@ -14,7 +14,7 @@ export function recoveryPolicy({provider,state,requestId,lookupResult=null,
   if(state==='accepted')return {action:'no_op',reason:'already_accepted'};
   if(state==='journaled')return {action:'commit_existing_journal',reason:'reply_is_durable'};
   if(state==='prepared_not_sent')return {action:'dispatch_once',reason:'no_request_dispatched'};
-  if(!['sent','uncertain','manual_hold'].includes(state))
+  if(!['sent','uncertain','incomplete_response','manual_hold'].includes(state))
     return {action:'manual_hold',reason:'invalid_request_state'};
   if(!safe(requestId))return {action:'manual_hold',reason:'request_id_required'};
   if(signedProviderGuarantee&&cap.resultLookupGuaranteed&&
