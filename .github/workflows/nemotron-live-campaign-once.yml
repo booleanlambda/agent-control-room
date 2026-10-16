@@ -1,8 +1,8 @@
 name: AAU One-time Nemotron Live Recursion Campaign
 
 on:
-  push:
-    branches: [experiment/recursive-tree-nemotron-v0]
+  pull_request:
+    branches: [main]
     paths:
       - '.github/workflows/nemotron-live-campaign-once.yml'
 
@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   live-small-tree:
+    if: github.head_ref == 'experiment/recursive-tree-nemotron-v0'
     runs-on: ubuntu-latest
     timeout-minutes: 7
     env:
