@@ -194,3 +194,41 @@ authenticated. Do not merge or promote this experiment as production-safe on
 this evidence alone. Run multi-seed depth and synthesis trials once NVIDIA
 transport stability is independently verified, and preserve bounded
 transport-retry policy with no semantic re-splitting for timeouts.
+
+## Kimi no-thinking provider comparison — 2026-10-16
+
+The target is deliberately the same ten-level spine, leaf oracle and exact
+positional child-synthesis authenticator used by Nemotron.
+
+- Hosted Moonshot **Kimi K3 cannot turn reasoning off** (its lowest setting is
+  `reasoning_effort: low`). For a true no-thinking comparison, target
+  `kimi-k2.5` with `thinking: {"type":"disabled"}` on the direct Moonshot
+  API or NVIDIA-hosted `moonshotai/kimi-k2.5` with
+  `chat_template_kwargs: {"thinking":false}`. NVIDIA K2.6 accepts the same
+  chat template parameter.
+- GitHub Actions contains `NVIDIA_API_KEY`, but **not**
+  `MOONSHOT_APIKEY`. The direct-Moonshot K2.5 experiment was blocked in the
+  credentials preflight **before any inference** (Actions 38905981785).
+- NVIDIA K2.5 gave HTTP **404 page not found** on two probe attempts and no
+  tokens / tree nodes (Actions 38906230153).
+- NVIDIA K2.6 gave HTTP **404 function not found for account** on two calls,
+  again **no provider tokens / tree nodes** (Actions 38906432179). This is
+  model-routing or provider account availability, **not cognitive performance**.
+- Both paid-inference PR workflow triggers were removed after their runs;
+  model-specific comparison runners remain in this directory. The direct
+  Moonshot runner `live-kimi-thinking-off.mjs` requires credentials in the
+  environment where it actually executes, and still enforces no
+  `reasoning_content` response, max 42 calls and model-provenance attestation.
+- Fixed an experiment-only anti-pattern: HTTP 400/401/403/404/422 missing-model
+  or request errors fail permanently after one call, while genuine provider
+  504s remain bounded-retryable; two new deterministic regression tests verify
+  this. The fix does not modify production workers.
+
+**Conclusion:** The hypothesis that deterministic node/provenance management
+should be model-independent is supported by the existing cross-provider
+simulations, but *Kimi's live correctness* remains unmeasured. To get a clean
+Kimi no-thinking outcome, make the already-configured Moonshot credential
+available to the isolated runner (e.g. `MOONSHOT_APIKEY` in GitHub Actions
+repository secrets) and re-execute the direct provider test with the
+`thinking: {"type":"disabled"}` switch. Never expose credentials in artifacts,
+chat, or source files. No production Silas state was touched.
