@@ -27,6 +27,11 @@ export function authenticateDeep(node,answer,config){
   if(!answer||typeof answer!=='object'||Array.isArray(answer))
     return {ok:false,reason:'invalid_response'};
   if(answer.action==='SPLIT'){
+    // Compact stage-10 protocol accepts one split boundary only. If the model
+    // also supplies an explicit (possibly incomplete) child manifest, reject
+    // it rather than silently ignoring the contradictory claim.
+    if(Object.prototype.hasOwnProperty.call(answer,'children'))
+      return {ok:false,reason:'unexpected_children_payload'};
     if(node.depth>=config.depthLimit)return {ok:false,reason:'depth_limit'};
     if(!Number.isSafeInteger(answer.splitAt)||answer.splitAt<=node.start||answer.splitAt>=node.end)
       return {ok:false,reason:'invalid_partition'};
