@@ -98,3 +98,43 @@ The simulated token-equivalent reserve is not measured API usage. A real
 lightweight model would require available NVIDIA credentials and a separate,
 explicitly budget-capped campaign. No 2,047 provider calls were attempted;
 Silas's real cognition state and levy are unchanged.
+
+## Cognitive integrity adversarial campaign — stage 1
+
+After creating a traversable 10-level tree, a **separate read-only proof audit**
+certifies leaf truth against the known Silas error fixture oracle and certifies
+each parent **bottom-up**, checking both direct child proof hashes, exact parent
+coverage, unique provenance references, verified classification counts and
+nonempty synthesis output. A parent's existence or `split` status alone never
+certifies synthesis. An ancestor can be sealed only if its children are sealed.
+Accepted siblings retain their independent proofs when another branch fails.
+
+Injected attacks include:
+- invalid action and malformed / explicitly incomplete split declarations at
+  root and depths 3, 7 and 9 (two rejected attempts, no phantom children);
+- child physically absent from a finished tree at depths 1, 5 and 10;
+- empty/whitespace synthesis at depths 0, 3, 7 and 9;
+- forged child digest, duplicated child provenance, false classification totals
+  or incomplete synthesis references;
+- incorrect leaf classification at depth 10;
+- damaged execution ledger and JSON checkpoint reload.
+
+Run:
+```bash
+node --test experiments/recursion-tree-v0/cognitive-integrity.test.mjs
+cd experiments/recursion-tree-v0
+node cognitive-integrity-run.mjs
+```
+
+CI stores `cognitive-integrity-fault-report.json` with every failure-case
+rejection and the accepted root digest for the unmodified case. The report's
+`certified` field is the **stronger cognitive-provenance closure**, not the
+original `tree.complete` execution flag.
+
+**Limitations:** This is a fully deterministic oracle for known diagnostic
+classification fixtures and a model **test double**. The proof does not
+establish that an unstructured narrative summary is true or a mathematical
+argument is correct. Parent "summary" content is checked for presence and
+correct provenance/counts, not semantic truth. No live model-generated
+synthesis was evaluated, no provider calls were made, and this gate is not
+yet installed in Silas's production runtime.
