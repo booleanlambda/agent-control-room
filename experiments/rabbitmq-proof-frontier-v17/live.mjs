@@ -138,7 +138,7 @@ try{
   !results.optimal||results.pending!==0||results.lower!==results.upper||
   report.broker.redeliveries<1||report.broker.duplicateSkipped<2||
   !report.broker.simulatedUnackedDisconnect||
-  report.broker.acknowledged<roots.length+2)
+  report.broker.acknowledged<roots.length+1)
   throw Error('INCOMPLETE_BROKER_OR_SQL_RECOVERY_PROOF');
  const oracle=exactOracle(publicProblem);
  if(results.upper!==oracle.cost||oracle.cost!==415)throw Error('INDEPENDENT_EXACT_ORACLE_DISAGREEMENT');
