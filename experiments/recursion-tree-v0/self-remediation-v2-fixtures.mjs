@@ -71,6 +71,7 @@ export function scriptedResponse(phase,scenario='success'){
  throw Error('INVALID_FIXTURE_PHASE');
 }
 export function simulateResponse(phase,scenario='success',attempt=1){
+ if(scenario==='test_only_repair')return {answer:scriptedResponse(phase,phase==='tests'&&attempt===1?'weak_tests':'success'),usage:165,http:200,finish:'stop',elapsedMs:1};
  if(scenario==='truncated')throw Object.assign(new Error('model_incomplete_length'),
    {telemetry:{http:200,usage:2288,finish:'length',elapsedMs:20,received:false}});
  if(scenario==='transport_unknown')throw Object.assign(new Error('simulated_transport_ambiguous'),
