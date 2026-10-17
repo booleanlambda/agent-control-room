@@ -1,0 +1,140 @@
+name: AAU V18B Cross-Runner Artifact Proof No Secrets
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - experiment/rabbitmq-proof-frontier-v17
+    paths:
+      - 'experiments/broker-cross-runner-v18/artifact-handoff.mjs'
+      - '.github/workflows/broker-artifact-cross-runner-v18b.yml'
+
+permissions:
+  contents: read
+concurrency:
+  group: aau-v18b-artifact-proof
+  cancel-in-progress: false
+jobs:
+  init:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      AAU_V18_ARTIFACT_ONLY: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify one deterministic root or final exact proof without broker access
+        working-directory: experiments/broker-cross-runner-v18
+        run: node artifact-handoff.mjs init
+      - name: Preserve immutable SQLite proof checkpoint as Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: v18b-snapshot-0
+          path: experiments/broker-cross-runner-v18/state/
+          if-no-files-found: error
+          retention-days: 7
+  root1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    needs: init
+    env:
+      AAU_V18_ARTIFACT_ONLY: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Restore verified SQLite snapshot from previous independent runner
+        uses: actions/download-artifact@v4
+        with:
+          name: v18b-snapshot-0
+          path: experiments/broker-cross-runner-v18/state
+      - name: Verify one deterministic root or final exact proof without broker access
+        working-directory: experiments/broker-cross-runner-v18
+        run: node artifact-handoff.mjs root1
+      - name: Preserve immutable SQLite proof checkpoint as Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: v18b-snapshot-1
+          path: experiments/broker-cross-runner-v18/state/
+          if-no-files-found: error
+          retention-days: 7
+  root2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    needs: root1
+    env:
+      AAU_V18_ARTIFACT_ONLY: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Restore verified SQLite snapshot from previous independent runner
+        uses: actions/download-artifact@v4
+        with:
+          name: v18b-snapshot-1
+          path: experiments/broker-cross-runner-v18/state
+      - name: Verify one deterministic root or final exact proof without broker access
+        working-directory: experiments/broker-cross-runner-v18
+        run: node artifact-handoff.mjs root2
+      - name: Preserve immutable SQLite proof checkpoint as Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: v18b-snapshot-2
+          path: experiments/broker-cross-runner-v18/state/
+          if-no-files-found: error
+          retention-days: 7
+  root3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    needs: root2
+    env:
+      AAU_V18_ARTIFACT_ONLY: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Restore verified SQLite snapshot from previous independent runner
+        uses: actions/download-artifact@v4
+        with:
+          name: v18b-snapshot-2
+          path: experiments/broker-cross-runner-v18/state
+      - name: Verify one deterministic root or final exact proof without broker access
+        working-directory: experiments/broker-cross-runner-v18
+        run: node artifact-handoff.mjs root3
+      - name: Preserve immutable SQLite proof checkpoint as Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: v18b-snapshot-3
+          path: experiments/broker-cross-runner-v18/state/
+          if-no-files-found: error
+          retention-days: 7
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    needs: root3
+    env:
+      AAU_V18_ARTIFACT_ONLY: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Restore verified SQLite snapshot from previous independent runner
+        uses: actions/download-artifact@v4
+        with:
+          name: v18b-snapshot-3
+          path: experiments/broker-cross-runner-v18/state
+      - name: Verify one deterministic root or final exact proof without broker access
+        working-directory: experiments/broker-cross-runner-v18
+        run: node artifact-handoff.mjs verify
+      - name: Preserve immutable SQLite proof checkpoint as Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: v18b-verified-proof
+          path: experiments/broker-cross-runner-v18/state/
+          if-no-files-found: error
+          retention-days: 7

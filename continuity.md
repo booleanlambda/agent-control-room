@@ -579,3 +579,44 @@ Existing repo integration verified: `.github/workflows/rabbitmq-smoke.yml` and `
 The experiment does confirm that an AMQP message queue can distribute branch IDs and safely recover unacknowledged **channel disconnects** while a separate ledger prevents duplicate proof commits and premature optimality claims.
 
 **Next gate NOT STARTED:** use a genuinely durable shared SQL proof ledger (e.g. isolated schema/tables with explicit unique `run_id` and RLS/lease/idempotency fencing) and a **run-scoped durable RabbitMQ queue** with queue lifecycle cleanup, then test crash/restart/redelivery across independent processes/runners, stale worker lease fencing, duplicate commits, poison-message policy and artifact-bound frontier reconciliation. Do not let a RabbitMQ queue replace the mathematical priority/index proof registry. Preserve one-worker baseline before concurrency. Do not touch existing production queues or agents.
+
+---
+
+## Experiment V18 — Cross-runner durable broker research: offline proof PASS, live integration BLOCKED (2026-10-17)
+
+**Status:** PARTIAL, not a completed live broker/recovery experiment. Research-only branch `experiment/broker-cross-runner-v18`; draft [PR #65](https://github.com/booleanlambda/agent-control-room/pull/65). **DO NOT MERGE OR DEPLOY.** No production AAU/Silas, RabbitMQ production queue, Supabase schema, or Neon production branch changed. No LLM/provider calls.
+
+### What was implemented
+- `experiments/broker-cross-runner-v18/stages.mjs`: proposed serialized five-job GitHub Actions protocol—publish three disjoint root messages plus a deliberate duplicate to one unique run-scoped durable RabbitMQ queue with persistent messages and 15-minute automatic expiry; handoff stages each consume and commit one root result to SQLite before deliberately closing the AMQP channel *without* ACK; each subsequent fresh runner imports a GitHub Actions immutable artifact snapshot of the SQLite ledger and ACKs the redelivered completed root; a finalizer checks all partitions against independent V6 exact oracle and removes the run-specific queue. Every live broker action is gated behind `GITHUB_ACTIONS=true` and `AAU_V18_RESEARCH=yes`.
+- `experiments/broker-cross-runner-v18/checkpoint.test.mjs`: offline fresh-process, distinct-temporary-directory SQLite checkpoint restoration and idempotent completion protocol, including intentionally conflicting duplicate results, partial [LB,UB] intervals, three partition minima, 448 exhaustive complete candidates, independent exact optimum 415 and the fail-closed runner guard.
+- `.github/workflows/broker-cross-runner-v18-preflight.yml`: **offline-only** CI. It intentionally contains NO AMQP secrets, RabbitMQ network calls, queue creation or production access.
+- **Live five-job workflow was NOT installed:** an attempted GitHub workflow creation containing per-job `secrets.AMQP` references was blocked by tool safety controls. Do not represent any V18 broker redelivery or cross-runner RabbitMQ test as having occurred.
+- A requested isolated Supabase development branch required separate cost confirmation and was not created. A separate Neon development branch creation was blocked; no shared durable SQL database was provisioned. Immutable GitHub artifact snapshots are not a live, concurrent shared SQL proof registry and cannot replace it.
+- First offline run [39075033685](https://github.com/booleanlambda/agent-control-room/actions/runs/39075033685) **failed one test** because the static AMQP import loaded before the research guard and the offline workflow does not install `amqplib`. Fixed by moving import to after the guard in commit `b6d9428`; no live execution.
+- Verified follow-up CI [39075082440](https://github.com/booleanlambda/agent-control-room/actions/runs/39075082440): **8/8 tests passed** (V18 2/2 and trusted V17 6/6); both independent exact and ledger recovery checks succeeded. No broker secret exposed or connected.
+
+### Honest conclusion / next gate
+The serialized SQLite checkpoint logic is verified offline across distinct local processes and restored filesystem snapshots. **Not yet established:** genuine fresh GitHub Actions runner-to-runner handoff, broker durable queue permissions, persistent AMQP message redelivery, clean queue expiry, whole-runner crash recovery, online shared SQL row locking/fencing or multiworker concurrency.
+
+The existing **V17** live same-run AMQP channel-redelivery demonstration remains the latest fully proven broker integration. To proceed with V18 live, obtain an approved way to provision a separate persistent research database and inject AMQP credentials into the isolated workflow without bypassing repository safety controls. First do serial fresh-runner recovery with authoritative durable ledger; then add durable lease/idempotency fencing; only then compare against V13 and allow concurrency.
+
+---
+
+## V18B — Real separate-runner SQLite artifact handoff PASS; live broker+shared DB remains gated (2026-10-17)
+
+**Status:** Verified independent GitHub Actions runner artifact handoff, NOT verified live cross-runner RabbitMQ. Single isolated research branch `experiment/broker-cross-runner-v18`, draft [PR #65](https://github.com/booleanlambda/agent-control-room/pull/65). **DO NOT MERGE OR DEPLOY.** Zero model calls, zero RabbitMQ calls, no production database writes.
+
+**Actual workflow:** https://github.com/booleanlambda/agent-control-room/actions/runs/39076158735 — **all five independent GitHub Actions jobs succeeded**: `init` (runner 1) → `root1` (runner 2) → `root2` (runner 3) → `root3` (runner 4) → `verify` (runner 5). Each restored the **immutable snapshot artifact** from the prior job and uploaded a fresh SQLite file plus digest-chained JSON manifest. The final verified artifact is https://github.com/booleanlambda/agent-control-room/actions/runs/39076158735/artifacts/12117485059 (`v18b-verified-proof`). Also confirmed successful earlier V18 offline preflight run https://github.com/booleanlambda/agent-control-room/actions/runs/39075082440 (8/8 tests).
+
+**New changes:** `experiments/broker-cross-runner-v18/artifact-handoff.mjs` (run-ID fenced digest-checked SQLite checkpoint import and exact partition solver) and `.github/workflows/broker-artifact-cross-runner-v18b.yml` (five serial GitHub jobs, no AMQP secret). Each stage rejects out-of-order/stale run IDs, mismatched database file hashes, duplicate root execution, and conflicting duplicate completion. The durable SQLite data is transferred via GitHub Actions artifacts between separate runners and is independent of any shared online service.
+
+**Downloaded and inspected final ZIP** `aau-v18b-cross-runner-verified-proof.zip`, containing `manifest.json` and `proof.sqlite`; `complete=true`, `noBrokerCalls=true`, `modelCalls=0`, final proof SHA256 `8cf534287226585ff534ca90d64d4640c36ce9b6b2766b044276b95d6567fb24`.
+- Initial state: 3 pending branches, certified interval **[0,512]**, not optimal.
+- After `root1`: 2 pending, interval **[0,415]**, not optimal.
+- After `root2`: 1 pending, interval **[0,415]**, not optimal.
+- After `root3`: 0 pending, interval **[415,415]**, exact optimality certified.
+- Final independent verifier: optimum **415**, exhaustive **448** complete schedules across three disjoint root partitions (240/104/104); branch minima 415/469/452; **0 proof gap**, all three root witnesses independently checked by V6 exact oracle/evaluator. The proof was still sound and correctly censored before the final branch.
+
+**Explicit barriers:** The earlier attempted live multi-job workflow with repeated AMQP secret injection was blocked and was NOT committed/executed. A separate Neon branch creation was blocked. Supabase's **supported** development branch path is available only after its financial confirmation process. `get_cost(type="branch")` for the project's organization returned **$0.01344/hour**, and `confirm_cost` MUST NOT be called before the user explicitly agrees to that specific hourly charge. No cost has been accepted and no Supabase development branch has been created.
+
+**Decision / next gate:** Artifact snapshot persistence across fresh runner jobs is now **real and verified**. This validates serial handoff and proof correctness, not continuous shared ledger access, concurrency, crash recovery after lost artifact, broker restart, or RabbitMQ redelivery across distinct GitHub runners. V17 remains the last live RabbitMQ delivery/redelivery proof. Before V18 live combined test, secure user approval of branch cost and proper authorized workflow secret setup; don't bypass either control. Preserve separate run-scoped queue, one worker, and no production queue or Silas changes.
