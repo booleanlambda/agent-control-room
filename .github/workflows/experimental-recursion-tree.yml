@@ -57,6 +57,9 @@ jobs:
           node --check experiments/recursion-tree-v0/moonshot-batch-durable.mjs
           node --check experiments/recursion-tree-v0/batch-admission-recovery.mjs
           node --test experiments/recursion-tree-v0/batch-admission-recovery.test.mjs
+          node --check experiments/recursion-tree-v0/autonomous-engineering-benchmark.mjs
+          node --check experiments/recursion-tree-v0/autonomous-engineering-live.mjs
+          node --test experiments/recursion-tree-v0/autonomous-engineering-benchmark.test.mjs
       - name: Simulated stage 1 tree
         working-directory: experiments/recursion-tree-v0
         run: node run.mjs --mode=mock --stage=1
