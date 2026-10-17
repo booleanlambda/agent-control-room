@@ -99,12 +99,23 @@ try{
       assert.equal(cp(dir).phase,'repair');
     }
     run(dir,'cycle',name);
-    assert.equal(cp(dir).phase,'tests');
+    if(name==='bad_witness'){
+      const broken=cp(dir);
+      assert.equal(broken.phase,'diagnose',
+       'infeasible cost-only witness must NOT consume a tests model call');
+      assert.equal(broken.phaseHistory.at(-1).publicPassed,false);
+      const observed=JSON.parse(broken.feedback);
+      assert.equal(observed.publicOutput.cost,90);
+      assert.equal(observed.publicFeasible,false);
+      assert.equal(observed.diagnostic,'machine_capacity');
+    }else assert.equal(cp(dir).phase,'tests');
     run(dir,'cycle',name);
     const final=cp(dir);
     assert.equal(final.callsAttempted,3);
     assert.equal(final.phaseHistory.length,3);
-    assert.deepEqual(final.phaseHistory.map(x=>x.phase),['diagnose','repair','tests']);
+    assert.deepEqual(final.phaseHistory.map(x=>x.phase),
+      name==='bad_witness'?['diagnose','repair','diagnose']:
+       ['diagnose','repair','tests']);
     if(['success','journal_replay'].includes(name)){
       assert.equal(final.status,'passed');
       assert.equal(final.lastAssessment.public.pass,true);
@@ -113,11 +124,14 @@ try{
       assert.ok(Object.values(final.lastAssessment.tests).every(Boolean));
     }else if(name==='bad_witness'){
       assert.equal(final.status,'ready');
-      assert.equal(final.lastAssessment.public.correctObjective,true);
-      assert.equal(final.lastAssessment.public.feasible,false);
-      assert.equal(final.lastAssessment.public.pass,false);
-      assert.equal(final.lastAssessment.success,false);
-      assert.equal(final.lastAssessment.public.failureReason,'machine_capacity');
+      assert.equal(final.phase,'repair');
+      assert.equal(final.lastAssessment,null,
+       'failed public program must never enter hidden or property-test grading');
+      const observed=JSON.parse(final.feedback);
+      assert.equal(observed.publicOutput.cost,90);
+      assert.equal(observed.publicFeasible,false);
+      assert.equal(observed.publicExactOptimal,false);
+      assert.equal(observed.diagnostic,'machine_capacity');
     }else if(name==='weak_tests'){
       assert.equal(final.status,'ready');
       assert.equal(final.lastAssessment.public.pass,true);
@@ -144,8 +158,8 @@ try{
    sealedHiddenPass:result.allSixHiddenPassed,
    selfTests:result.ownTests,
    oldCostOnlyDefectDetected:name==='bad_witness'&&
-    cp(dir).lastAssessment.public.correctObjective===true&&
-    cp(dir).lastAssessment.public.feasible===false,
+    JSON.parse(cp(dir).feedback).publicOutput?.cost===90&&
+    JSON.parse(cp(dir).feedback).publicFeasible===false,
    journalRecoveryReusedCompletedAnswer:restartReplayVerified,
    knownTruncationUsageAccounted:name==='truncated'&&
     cp(dir).providerReportedTokens===2288});
