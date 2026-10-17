@@ -322,3 +322,93 @@ establishes that the next separately authorized live experiment can
 start with real traceback evidence and skip the repeated diagnosis
 output-bottleneck step. The live V4 attempt remains `manual_hold` and
 was not retried. No production or Silas changes.
+
+
+## LIVE Kimi K2.6 direct traceback self-repair — 2026-10-17
+
+**GitHub Actions:** [39038175797](https://github.com/booleanlambda/agent-control-room/actions/runs/39038175797)  
+**Immutable real evidence artifact:** `aau-kimi-direct-traceback-real-repair-evidence` (ID `12102617954`).
+
+**Verdict: model-authored ALGORITHM REPAIR SUCCEEDED, but full self-remediation certification FAILED.**
+
+The user authorized a fresh paid experiment (not a retry of old uncertain calls).
+The runner loaded the original failed Kimi source and model-authored V3
+crashing source from two separate prior immutable GitHub Actions artifacts.
+It reproduced the actual Python traceback, then began immediately with
+`repair` rather than a standalone diagnosis. The live workflow trigger
+was deleted after dispatch to avoid accidental reruns. Seven-call max,
+39,000 reported-token cap, thinking disabled, independent no-network
+Docker Python grader.
+
+**Actual model sequence:**
+
+| Call | Stage | Provider tokens reported for call | Result |
+|---|---|---:|---|
+| 1 | repair | 2,184 | First new predecessor-tuple fix still crashed public Python |
+| 2 | diagnose | 1,900 | With real Python KeyError traceback, identified that `par=npar` destroys predecessor maps from earlier job layers |
+| 3 | repair | 2,604 | **Successful** layer-indexed traceback restoration using `par_layers`; public exact optimality and feasible witness passed |
+| 4 | tests | 2,674 | Model-authored tests rejected a **valid optimal answer**; final acceptance rejected |
+| 5 | diagnose | 4,128 | HTTP 200, `finish_reason=length`, no accepted answer, `manual_hold` |
+| **Total** | | **13,490** | 5 real calls, 4 complete actions, 1 incomplete response |
+
+**Verified corrected solver outputs:** public 7-job assignment
+`[0,1,1,1,2,2,2]`, exact global cost **90**, and each of the SIX sealed
+variations independently passed witness-feasibility and optimum:
+- Held-out changed-job problem: cost **99**
+- Changed assignment prices: **91**
+- Changed activation penalties: **93**
+- Zero switching penalty: **77**
+- Changed machine capacities: **91**
+- Reordered job list: **90**
+
+The successful algorithm is **real Kimi-authored Python** (`codeHash:
+732f54bc7b428ef7d670c721c669060b2d0cf1741a339bdc0d33120862d5042b`),
+not the synthetic fixture repair. Its state/action path is auditable in
+the immutable Actions artifact. The independent grader and actual isolated
+Docker execution returned a feasible optimal assignment for each of the
+seven cases.
+
+**Why the entire test failed:** the model-authored property test contained
+a case-specific exception incorrectly labeling `[0,1,1,1,2,2,2]` as a
+known bad assignment, and commented that its true optimum should be **88**.
+Both assertions are wrong: the independent exhaustive verifier certifies
+that exact assignment is feasible and **90** is the global minimum.
+The property test therefore returned false on Kimi's newly repaired
+correct output; it correctly rejected the original all-machine-2
+witness and a tampered cost. Test audit:
+`acceptsCorrect=false`, `rejectsOld=true`,
+`rejectsCostTamper=true`. The fifth diagnosis response was
+incomplete (`finish_reason=length`) and the runner properly entered
+`manual_hold` without automatic repeat.
+
+**Failure attribution:** This is a **self-verification/test-design failure
+after a successful algorithmic repair**, not evidence of remaining
+incorrect mathematical optimization or a failed repaired witness.
+We cannot mark the entire autonomous-remediation protocol passed while
+the agent's own tests falsely reject the known-good output. We also
+cannot claim generality from only one problem and six variations.
+
+### No-cost workflow revision after the immutable LIVE test
+
+The research-only `self-remediation-kimi-v2.mjs` now separates
+`solverAccepted` (correct public and all six sealed variants) from
+`selfTestAccepted`. If the code is independently certified but its
+self-written test is wrong, the next phase becomes **`tests` again**,
+NOT `diagnose` or another code rewrite. Feedback identifies the exact
+public verified optimal output and states that an invented smaller
+optimum must not be hardcoded. Previously proven `manual_hold`
+handling still prevents any automatic repeat of ambiguous provider
+requests. These changes were NOT applied to the old immutable live
+artifact and have made **zero new Moonshot calls**.
+
+[No-cost CI 39038687537](https://github.com/booleanlambda/agent-control-room/actions/runs/39038687537)
+**passed 9/9 regression scenarios** (3 expected successes including a
+`diagnose → repair → tests → tests` synthetic self-test-only fix,
+6 expected rejections/holds) and a separate direct Kimi V3 traceback
+fixture. Actual Docker runs, process restarts and sealed grading were
+used, but all model turns in this *regression* were synthetic and must
+not be credited as live Kimi cognition.
+
+**Release boundary:** draft PR #45 remains unmerged. No Silas wake or
+production deploy. Independent production `Systemic Runtime Tree CI`
+continues to fail and blocks promotion.
