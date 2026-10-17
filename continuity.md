@@ -276,3 +276,32 @@ This demonstrates agent-guided candidate refinement and deterministic, independe
 **Remaining problem:** steepest-descent search stopped at a local minimum (459 vs 415); Kimi's second proposal did not beat original baseline. The trusted kernel already has `searchBestCandidate` for exact small-instance optimization, but V8 did NOT substitute its exact result for the bounded neighborhood improver, to preserve attribution.
 
 **Recommended next step (not launched):** add beam search or bounded multi-start exploration, or invoke exact branch-and-bound only for small instances, comparing compute cost against optimality gap. For larger schedules report a feasible incumbent and a defensible bound, not an unsupported 'optimal' badge. Preserve one worker and independent oracle; do not bring Silas into experiment until robustness and budget gating improve.
+
+---
+
+## Experiment V9 — Bounded beam and exact small-instance scheduling (2026-10-17)
+
+**Research branch:** `experiment/scheduler-beam-v9`, draft PR https://github.com/booleanlambda/agent-control-room/pull/56, DO NOT MERGE or deploy. **Verified one-worker live GitHub Actions run:** https://github.com/booleanlambda/agent-control-room/actions/runs/39063301365 (job conclusion SUCCESS). **Persisted full evidence artifact:** https://github.com/booleanlambda/agent-control-room/actions/runs/39063301365/artifacts/12112620386 (`aau-beam-and-exact-v9-evidence`). This is one isolated inference experiment, no Silas/AAU production changes.
+
+### Implementation
+- `experiments/scheduler-beam-v9/beam.mjs`: deterministic bounded **beam search** over machine reassignments, job relocations, and swaps, with global state deduplication, deterministic cost ordering, explicit width/depth/evaluation caps, provenance digest, and strict cost-improvement trace. It allows exploration of temporary non-improving states without certifying any infeasible schedule. The trusted V7 kernel still owns ALL job start/setup/maintenance/parent timing.
+- Same module's `exactSmall`: exhaustive small-instance search only when job count <=8; refuses larger instances. Independent V6 exact oracle remains separate and certifies cost; model proposals do NOT get credit for deterministic exact solve.
+- `beam.test.mjs`: 9 tests, including exact independent public+hidden comparisons, randomized 20 small instances, deterministic replay, strict budgets, no feasible seed, one invalid+one valid seed, and refusing false optimality for >8-job instance. V8 optimizer 10/10 and V7 scheduling kernel 13/13 tests also reran. **TOTAL 32/32 deterministic tests passed**.
+- `live.mjs`: Kimi K2.6, thinking disabled, single worker, max 2 strictly serial calls, 19k token reported budget, provider-reject/uncertain fail closed, no hidden-case contents or oracle answers in prompts. Compare historical baseline, bounded V8 local, bounded V9 beam without model, V9 beam using additional model seeds, and independent exactSmall reference. Model vs deterministic attribution preserved; final chosen public plan is evaluated on unchanged hidden variations.
+
+### Verified real live results
+- Two Kimi serial calls; **1,264 provider-reported tokens**; structured assignment proposal costs **735** then **512**. Kimi's second output improved its own first by 223 units, but **did not beat the historical 512 baseline**; model improvement versus historical baseline = **0**.
+- Public historical baseline **512**; V8 single-path local search **459** (78 evaluations; about **5.94 ms** measured for one CI run).
+- **V9 beam baseline-only reached the exact public optimum 415** using 1,200 evaluations, depth 5 (about **33.14 ms**). The augmented beam with Kimi seeds ALSO reached 415 with 1,200 evaluations, depth 4 (about **23.08 ms**). Kimi seeds did **not** improve final public cost.
+- Deterministic exactSmall enumerated **448 completed feasible assignment candidates**, reached **415**, about **37.31 ms** in this single CI run. Independent V6 exhaustive oracle certified **415** separately. These timings are observational, too few samples for robust speed comparison.
+- Selected winning source is **`v9_beam_baseline_only`**, selected public cost **415**, exact gap **0**. Machine assignment/order `J0@M0, J3@M0, J1@M0, J2@M1, J4@M0, J6@M0, J5@M1`; independent public feasibility and optimality certified. Search, model proposals, comparisons and verifier receipts included in evidence.
+- Public-optimized static order was applied without new optimization to the **withheld changed-timing cases**: both valid, but hidden1 **648 vs independent optimum 387** (gap **261**), hidden2 **925 vs optimum 582** (gap **343**). These outcomes are *not* Kimi failure to solve hidden cases (it never saw them); they show sensitivity of one publicly optimized fixed arrangement to changed conditions.
+- Hidden exactSmall instances were **separately** verified optimal by the independent oracle: hidden optima **387** and **582**. These results were not fed into model prompts and were not used to select the public winning candidate.
+- Root-proof SHA256 **`4a486664ec324c743a749e16ba0ba26c6a9c254ee82ddf490571c203e8142718`**, validated from retained evidence.
+
+### Interpretation / next gate
+**Confirmed:** the bounded beam overcame the V8 local minimum and independently achieved the small public exact optimum while scheduling legality stayed deterministic. Small exact fallback also worked. The success is credited to **deterministic search**, not Kimi reasoning. These specific task sizes may be small enough that exact search is practical; bounded beam is a heuristic and must NEVER claim optimality absent independent proof or a valid lower bound.
+
+**Not established:** robustness on unseen task families, scaling beyond eight jobs, model-led optimization gain over a baseline, reliable runtime/cost comparisons, transfer of static optimized order to changed timing conditions, or production readiness.
+
+**Recommended next research gate (NOT launched):** apply the same trusted kernel and bounded beam separately to each **new problem instance** (not one reused public plan), benchmark 9-12 job scaling with strictly enforced compute ceilings, and measure heuristic gap versus independent exact/lower bounds when available. Further model studies should test whether Kimi contributes useful high-level decomposition or diversification rather than scheduling arithmetic. Keep one worker, finite budgets, hash receipts and no production changes.
