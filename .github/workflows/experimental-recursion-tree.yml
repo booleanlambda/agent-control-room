@@ -65,6 +65,7 @@ jobs:
           node --check experiments/recursion-tree-v0/unseen-python-sandbox.mjs
           node --check experiments/recursion-tree-v0/unseen-python-live.mjs
           node --test experiments/recursion-tree-v0/unseen-python-benchmarks.test.mjs
+          node --check experiments/recursion-tree-v0/self-remediation-kimi.mjs
       - name: Simulated stage 1 tree
         working-directory: experiments/recursion-tree-v0
         run: node run.mjs --mode=mock --stage=1
