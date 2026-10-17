@@ -1,0 +1,122 @@
+name: AAU Experimental Recursion Tree v0
+
+on:
+  push:
+    branches:
+      - experiment/recursive-tree-nemotron-v0
+    paths:
+      - 'experiments/recursion-tree-v0/**'
+      - '.github/workflows/experimental-recursion-tree.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'experiments/recursion-tree-v0/**'
+      - '.github/workflows/experimental-recursion-tree.yml'
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: 'Explicit live depth stage (1 is the safe default)'
+        required: true
+        default: '1'
+        type: choice
+        options: ['1','2','3']
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Syntax and invariant tests
+        run: |
+          node --check experiments/recursion-tree-v0/engine.mjs
+          node --check experiments/recursion-tree-v0/run.mjs
+          node --test experiments/recursion-tree-v0/engine.test.mjs
+          node --check experiments/recursion-tree-v0/depth10-traversability.mjs
+          node --check experiments/recursion-tree-v0/depth10-run.mjs
+          node --test experiments/recursion-tree-v0/depth10-traversability.test.mjs
+          node --check experiments/recursion-tree-v0/cognitive-integrity.mjs
+          node --check experiments/recursion-tree-v0/cognitive-integrity-run.mjs
+          node --test experiments/recursion-tree-v0/cognitive-integrity.test.mjs
+          node --check experiments/recursion-tree-v0/synthesis-slots.mjs
+          node --check experiments/recursion-tree-v0/live-depth10.mjs
+          node --test experiments/recursion-tree-v0/synthesis-slots.test.mjs
+          node --check experiments/recursion-tree-v0/execution-integrity.mjs
+          node --test experiments/recursion-tree-v0/execution-integrity.test.mjs
+          node --check experiments/recursion-tree-v0/kimi-k26-recorded-replay.mjs
+          node --test experiments/recursion-tree-v0/kimi-k26-recorded-replay.test.mjs
+          node --check experiments/recursion-tree-v0/provider-recovery-policy.mjs
+          node --test experiments/recursion-tree-v0/provider-recovery-policy.test.mjs
+          node --check experiments/recursion-tree-v0/provider-real-capabilities.mjs
+          node --check experiments/recursion-tree-v0/moonshot-batch-durable.mjs
+          node --check experiments/recursion-tree-v0/batch-admission-recovery.mjs
+          node --test experiments/recursion-tree-v0/batch-admission-recovery.test.mjs
+          node --check experiments/recursion-tree-v0/autonomous-engineering-benchmark.mjs
+          node --check experiments/recursion-tree-v0/autonomous-engineering-live.mjs
+          node --test experiments/recursion-tree-v0/autonomous-engineering-benchmark.test.mjs
+          python3 experiments/recursion-tree-v0/autonomous-engineering-reference.py
+          node --check experiments/recursion-tree-v0/unseen-python-benchmarks.mjs
+          node --check experiments/recursion-tree-v0/unseen-python-sandbox.mjs
+          node --check experiments/recursion-tree-v0/unseen-python-live.mjs
+          node --test experiments/recursion-tree-v0/unseen-python-benchmarks.test.mjs
+          node --check experiments/recursion-tree-v0/self-remediation-kimi.mjs
+          node --check experiments/recursion-tree-v0/self-remediation-kimi-v2.mjs
+      - name: Simulated stage 1 tree
+        working-directory: experiments/recursion-tree-v0
+        run: node run.mjs --mode=mock --stage=1
+      - name: Run all 2047 nodes and verify every path traversable
+        working-directory: experiments/recursion-tree-v0
+        run: node depth10-run.mjs --shape=balanced
+      - name: Run ten consecutive deep splits and traverse their 21 nodes
+        working-directory: experiments/recursion-tree-v0
+        run: node depth10-run.mjs --shape=spine --node=R.002.002
+      - name: Cognitive failure injections and parent synthesis attestation
+        working-directory: experiments/recursion-tree-v0
+        run: node cognitive-integrity-run.mjs
+      - name: Silas-derived 100-event injection
+        working-directory: experiments/recursion-tree-v0
+        run: node run.mjs --mode=stress --stage=1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aau-recursion-deterministic-v0
+          path: |
+            experiments/recursion-tree-v0/recursion-tree-*.json
+            experiments/recursion-tree-v0/cognitive-integrity-fault-report.json
+
+  lightweight-model:
+    # Inference is a separately authorized paid/credentialed experiment.
+    # Branch pushes and PRs only run deterministic bounded verification.
+    if: github.event_name == 'workflow_dispatch'
+    needs: deterministic
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+      LAB_STAGE: ${{ github.event.inputs.stage || '1' }}
+      AAU_EXPERIMENT_DEEPER_STAGE: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Real lightweight NVIDIA Nemotron recursive stage
+        working-directory: experiments/recursion-tree-v0
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${NVIDIA_API_KEY:-}" ]]; then
+            echo "LIVE_RECURSION_BLOCKED=NVIDIA_API_KEY_SECRET_MISSING"
+            exit 1
+          fi
+          node run.mjs --mode=live --stage="$LAB_STAGE"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aau-recursion-live-v0
+          path: experiments/recursion-tree-v0/recursion-tree-live-*.json
+          if-no-files-found: ignore

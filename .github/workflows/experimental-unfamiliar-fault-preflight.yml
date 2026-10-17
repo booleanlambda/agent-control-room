@@ -1,0 +1,63 @@
+name: AAU Unfamiliar Faults No-Cost Preflight
+on:
+  push:
+    branches: [experiment/recursive-tree-nemotron-v0]
+    paths:
+      - 'experiments/recursion-tree-v0/unfamiliar-fault-*.mjs'
+      - '.github/workflows/experimental-unfamiliar-fault-preflight.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'experiments/recursion-tree-v0/unfamiliar-fault-*.mjs'
+      - '.github/workflows/experimental-unfamiliar-fault-preflight.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  original-sources-and-broken-examples:
+    if: github.head_ref == 'experiment/recursive-tree-nemotron-v0' || github.ref_name == 'experiment/recursive-tree-nemotron-v0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 13
+    env:
+      AAU_PYTHON_SANDBOX: 'yes'
+      MOONSHOT_API_KEY: ''
+      AAU_UNFAMILIAR_REAL_KIMI: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Retrieve original model-authored routing and math algorithms
+        uses: actions/download-artifact@v4
+        with:
+          name: aau-kimi-unseen-python-cognition-audit
+          run-id: 38994095805
+          repository: booleanlambda/agent-control-room
+          github-token: ${{ github.token }}
+          path: experiments/recursion-tree-v0
+      - name: Retrieve original verified model-authored factory algorithm
+        uses: actions/download-artifact@v4
+        with:
+          name: aau-kimi-direct-traceback-real-repair-evidence
+          run-id: 39038175797
+          repository: booleanlambda/agent-control-room
+          github-token: ${{ github.token }}
+          path: experiments/recursion-tree-v0/prior-v5
+      - name: No keys, all source SHA and program syntax checks
+        run: |
+          set -euo pipefail
+          test -z "${MOONSHOT_API_KEY:-}"
+          node --check experiments/recursion-tree-v0/unfamiliar-fault-cases.mjs
+          node --check experiments/recursion-tree-v0/unfamiliar-fault-live.mjs
+          node --test experiments/recursion-tree-v0/unseen-python-benchmarks.test.mjs
+          docker pull python:3.12-alpine
+      - name: Check all three healthy baselines and confirm each injected fault is observable
+        working-directory: experiments/recursion-tree-v0
+        run: node unfamiliar-fault-live.mjs preflight
+      - name: Preserve independent no-inference defect characterization
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-unfamiliar-fault-preflight
+          path: experiments/recursion-tree-v0/unfamiliar-fault-live-results.json
+          if-no-files-found: ignore
