@@ -96,3 +96,5 @@ export function grade(p,answer){
  if(!Number.isSafeInteger(answer.cost)||answer.cost!==v.cost)return {passed:false,reason:'wrong_claimed_cost',actual:v.cost};
  const exact=exactOracle(p);return {passed:exact.cost===v.cost,reason:exact.cost===v.cost?'optimal':'feasible_suboptimal',actual:v.cost,optimum:exact.cost};
 }
+
+export const TASKS=[{id:'maintenance_weighted_schedule_v5',name:'High-pressure scheduling with maintenance and switching',specification,publicInput:publicProblem,hiddenInputs:hiddenProblems,oracle:exactOracle,grade}];
