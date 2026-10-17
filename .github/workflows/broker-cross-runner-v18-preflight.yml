@@ -1,0 +1,33 @@
+name: AAU Cross Runner Ledger Preflight V18
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - experiment/rabbitmq-proof-frontier-v17
+    paths:
+      - 'experiments/broker-cross-runner-v18/**'
+      - '.github/workflows/broker-cross-runner-v18-preflight.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-v18-offline-proof-check
+  cancel-in-progress: false
+
+jobs:
+  offline-ledger-checkpoint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact oracle partition and cross-process durable snapshots offline
+        run: |
+          python3 -m py_compile experiments/rabbitmq-proof-frontier-v17/ledger.py
+          node --check experiments/broker-cross-runner-v18/stages.mjs
+          node --test experiments/broker-cross-runner-v18/checkpoint.test.mjs
+          node --test experiments/rabbitmq-proof-frontier-v17/frontier.test.mjs
