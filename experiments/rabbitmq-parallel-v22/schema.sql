@@ -75,7 +75,7 @@ begin
  if p_lower is null or p_upper is null or p_lower<0 or p_upper<p_lower or
  p_expanded is null or p_expanded<0 or p_expanded>max_nodes or
  p_cert is null or length(p_cert)<>64 or p_witness is null or length(p_witness)<>64 or
- p_ms is null or p_ms<0 or not isfinite(p_ms) then
+ p_ms is null or p_ms<0 or p_ms >= 'Infinity'::double precision then
   return 'INVALID_CERTIFICATE';
  end if;
  if r.status='done' then
