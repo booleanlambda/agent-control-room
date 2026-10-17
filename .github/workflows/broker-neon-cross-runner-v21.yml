@@ -1,0 +1,84 @@
+name: AAU V21 Actual Cross Runner Broker Neon Recovery
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - experiment/rabbitmq-neon-integrated-v20
+    paths:
+      - 'experiments/broker-neon-cross-runner-v21/**'
+      - '.github/workflows/broker-neon-cross-runner-v21.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  phase1_publisher_crash:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      AAU_V21_RESEARCH: 'yes'
+      AAU_V20_RESEARCH: 'yes'
+      AMQP_URL: ${{ secrets.AMQP }}
+      NEON_V19_DATABASE_URL: ${{ secrets.NEON_V19_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate independent oracle and scoped cross-runner protocol
+        run: |
+          node --check experiments/broker-neon-cross-runner-v21/phase1.mjs
+          node --check experiments/broker-neon-cross-runner-v21/phase2.mjs
+          node --test experiments/broker-neon-cross-runner-v21/cross-runner.test.mjs
+          node --test experiments/rabbitmq-neon-integrated-v20/integration.test.mjs
+          node --test experiments/neon-durable-proof-v19/receipt.test.mjs
+      - name: Install pinned broker and Postgres clients
+        run: npm install --no-save --ignore-scripts amqplib@0.10.9 pg@8.16.3
+      - name: Publish in own durable research queue and SIGKILL victim before ACK
+        working-directory: experiments/broker-neon-cross-runner-v21
+        run: node phase1.mjs
+      - name: Upload only nonsecret run manifest for separate runner
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-v21-phase1-handoff
+          path: experiments/broker-neon-cross-runner-v21/handoff/cross-runner-v21-phase1.json
+          if-no-files-found: error
+          retention-days: 7
+
+  phase2_independent_recovery:
+    needs: phase1_publisher_crash
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      AAU_V21_RESEARCH: 'yes'
+      AAU_V20_RESEARCH: 'yes'
+      AMQP_URL: ${{ secrets.AMQP }}
+      NEON_V19_DATABASE_URL: ${{ secrets.NEON_V19_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned broker and Postgres clients
+        run: npm install --no-save --ignore-scripts amqplib@0.10.9 pg@8.16.3
+      - name: Retrieve first runner's nonsecret handoff manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: aau-v21-phase1-handoff
+          path: experiments/broker-neon-cross-runner-v21/handoff
+      - name: Recover unacknowledged message, verify Neon proof, delete own queue
+        working-directory: experiments/broker-neon-cross-runner-v21
+        run: node phase2.mjs
+      - name: Preserve complete live cross-runner proof or exact failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-v21-cross-runner-proof
+          path: experiments/broker-neon-cross-runner-v21/handoff/cross-runner-v21-final.json
+          if-no-files-found: warn
+          retention-days: 7
