@@ -120,7 +120,10 @@ async function verifySelfTests(c,source,tests){
  for(const candidate of inputs){
   const result=await runIsolatedPython(tests,{input:c.public,output:candidate});
   responses.push({ran:result.ok,passed:result.ok?result.result?.passed:null,
-    error:result.error||null});
+    error:result.error||null,
+    // Only the PUBLIC test-script traceback, never hidden problem data.
+    publicStderr:result.ok?null:String(result.stderr||'').slice(0,1000),
+    contract:'read stdin JSON with keys input and output; evaluate the provided output; print one JSON object with boolean passed'});
  }
  return {passes:responses[0].passed===true&&responses.slice(1).every(x=>x.passed===false),
   acceptsCorrect:responses[0].passed===true,
@@ -216,7 +219,10 @@ async function one(c){
    if(t.pass){t.status='passed';persist();return t}
    msgs.push({role:'user',content:JSON.stringify({
     publicSelfTestFeedback:v,
-    next:'The repaired source is already verified on the public test and will not be changed. Correct only the verifier script; no hidden result will be shown.'})});
+    expectedTestInputShape:{input:'the public problem JSON previously supplied',
+      output:'the already validated public solver output previously supplied'},
+    requiredTestBehavior:'The test must evaluate the given input+output pair. Do NOT treat this wrapper as the bare problem, and do NOT ignore the candidate output by recomputing only the solver result.',
+    next:'The repaired source is already verified on the public test and will not be changed. Correct only the verifier script, using the public Python traceback when present; no hidden result will be shown.'})});
    persist();continue;
   }
   msgs.push({role:'user',content:'Invalid action. Choose diagnose, repair, tests or stop.'});
