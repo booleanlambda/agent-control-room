@@ -6,7 +6,7 @@ const fixture=(jobs,machines)=>({jobs,machines});
 const mach=(id,types,initialType,setup=0,activation=0,maintenance=[])=>({id,types,initialType,setup,activation,maintenance});
 const job=(id,type,duration,release=0,due=20,weight=1,parents=[])=>({id,type,duration,release,due,weight,parents});
 const run=(p,jobs)=>scheduleCandidate(p,{jobs});
-const score=(p,x)=>grade(p,{schedule:x.schedule,cost:x.cost});
+const score=(p,x)=>{const valid=evaluate(p,{schedule:x.schedule,cost:x.cost});if(!valid.ok||valid.cost!==x.cost)return {passed:false};return p.machines.length===2?grade(p,{schedule:x.schedule,cost:x.cost}):{passed:true};};
 test('V7 exact independent public and both hidden positive-cost benchmarks',()=>{
  for(const p of [publicProblem,...hiddenProblems]){
   const witness=searchBestCandidate(p);
