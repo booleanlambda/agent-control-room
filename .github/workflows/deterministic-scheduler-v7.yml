@@ -1,0 +1,44 @@
+name: AAU Deterministic Scheduler Kernel V7
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - experiment/precise-diagnostics-v6
+    paths:
+      - 'experiments/deterministic-scheduler-v7/**'
+      - '.github/workflows/deterministic-scheduler-v7.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  isolated-single-worker-kernel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      AAU_V7_LIVE: 'yes'
+      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Mandatory deterministic kernel and independent oracle preflight
+        run: |
+          node --check experiments/deterministic-scheduler-v7/kernel.mjs
+          node --check experiments/deterministic-scheduler-v7/live.mjs
+          node --test experiments/deterministic-scheduler-v7/kernel.test.mjs
+      - name: One worker Kimi assignments, deterministic schedule, independent certification
+        working-directory: experiments/deterministic-scheduler-v7
+        run: node live.mjs
+      - name: Preserve independent timing proof and actual agent decisions on every outcome
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-deterministic-scheduler-v7-evidence
+          path: experiments/deterministic-scheduler-v7/kernel-v7-evidence.json
+          if-no-files-found: warn
