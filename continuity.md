@@ -142,3 +142,15 @@ Model had to find the least-cost path through a cyclic directed graph respecting
 
 **Recommended next gate, NOT launched:** retest one-worker automatic remediation with **strictly positive optimal penalties**, held-out hard cases, and at least one model-authored wrong **executable** answer requiring logical repair. Keep cost ceilings, journaling and no hidden-answer leakage. After sufficient serial repetitions, test two workers separately and preserve independent production gates.
 
+
+---
+
+## Experiment 5 initial run — positive-cost scheduling, blocked by output truncation (2026-10-17)
+
+- Research branch `experiment/positive-logic-recovery-v5`, draft PR https://github.com/booleanlambda/agent-control-room/pull/51.
+- Actions run https://github.com/booleanlambda/agent-control-room/actions/runs/39058921207 **completed with failure**; evidence https://github.com/booleanlambda/agent-control-room/actions/runs/39058921207/artifacts/12110612531.
+- Benchmark `experiments/positive-logic-v5/benchmark.mjs` tests seven dependent jobs on two machines, hard maintenance blackouts, setup changes, machine activation fees and weighted tardiness. Independent preflight **8/8 passed**, including a strict assertion that each exact optimal cost is positive (>=15).
+- Kimi K2.6 thinking-off, single serial worker, 2 actual calls, 10,983 provider-reported total tokens. Planning call completed normally; initial source-generation request returned HTTP 200 with **`finish_reason=length`** and 8,000 configured max output tokens. Correctly entered `manual_hold` without sending again.
+- No complete solver was parsed or executed. **No logical/cognitive failure or repair was demonstrated**. This is a provider output ceiling / response truncation, not a failed independent math test.
+- The runner journaled one accepted root and four sequential model-authored plan steps; no solver, hidden grader results, or verified root.
+- Next controlled iteration: a newly authorized one-time branch/workflow with explicitly shorter source output instructions and a higher finite output cap. Keep one worker, fail-closed uncertain provider responses, zero hidden-answer leakage, no concurrent model requests and no production changes.
