@@ -14,9 +14,11 @@ if(!/^[a-f0-9-]{36}$/.test(run??'')||
    !/^aau\.research\.v20\.[a-f0-9]{32}$/.test(queue??'')||
    !['crash','recover'].includes(phase))throw Error('INVALID_RUN_SCOPED_WORKER');
 const roots=rootPartitions(publicProblem);
-const url=String(process.env.AMQP_URL||'');
-const parsed=new URL(url);
-if(parsed.protocol!=='amqps:')throw Error('AMQPS_REQUIRED');
+let url=String(process.env.AMQP_URL||'').trim().replace(/^AMQP(?:_URL)?\\s*=\\s*/i,'').trim();
+if ((url[0]==='"'&&url.at(-1)==='"')||(url[0]==="'"&&url.at(-1)==="'"))url=url.slice(1,-1).trim();
+let scheme;
+try{scheme=new URL(url).protocol}catch{throw Error('AMQP_URL_FORMAT_INVALID')}
+if(scheme!=='amqps:')throw Error('AMQPS_REQUIRED');
 const store=newStore(process.env.NEON_V19_DATABASE_URL);
 let conn,ch;
 const counters={consumed:0,redelivered:0,duplicates:0,acks:0,commits:0};
