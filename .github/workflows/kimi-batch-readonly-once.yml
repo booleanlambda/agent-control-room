@@ -1,0 +1,28 @@
+name: AAU Kimi Batch Access Read-Only Once
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/kimi-batch-readonly-once.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check-auth:
+    if: github.head_ref == 'experiment/recursive-tree-nemotron-v0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify GET files, batches and models; absolutely no POST
+        working-directory: experiments/recursion-tree-v0
+        run: |
+          node --check moonshot-batch-access-probe.mjs
+          node moonshot-batch-access-probe.mjs
