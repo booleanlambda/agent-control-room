@@ -107,3 +107,38 @@ Production AAU/Silas were untouched. Original production `Systemic Runtime Tree 
 
 **Recommended next gate, NOT launched:** one single-worker run where the model's own initial solver fails naturally, and a recovery node is automatically created without a workflow restart; repeat with multiple unfamiliar held-out problem families and explicit error budgets. Do not enable concurrency until serial recovery is robust across novel faults.
 
+
+---
+
+## Experiment 4 — Two new algorithm families, genuine model-authored failures, uninterrupted serial recovery (2026-10-17)
+
+**Scope:** one isolated GitHub CI worker; Kimi K2.6 thinking disabled; no artificial defect injection, no model concurrency, no production calls, no Silas state changes. Both problems were new to this research sequence. Draft research PR [#50](https://github.com/booleanlambda/agent-control-room/pull/50) must NOT be merged. Branch `experiment/organic-multifamily-v4`.
+
+- **Verified completed workflow:** https://github.com/booleanlambda/agent-control-room/actions/runs/39057888097 (single-worker job concluded **success**).
+- **Preserved full CI artifact:** https://github.com/booleanlambda/agent-control-room/actions/runs/39057888097/artifacts/12109309917 (`aau-serial-organic-v4-evidence`).
+- **Implementation:** `experiments/organic-multifamily-v4/{benchmark.mjs,benchmark.test.mjs,live.mjs}` and `.github/workflows/organic-multifamily-v4.yml`.
+- **No-model preflight:** 10/10 independent tests passed; reference oracles each generated witnesses for the public problem and two held-out variants.
+- **Real inference:** 7 sequential model calls, 24,226 reported tokens, max 1 in-flight model request. All seven returned HTTP 200 / complete `finish_reason=stop`. No uncertain paid request retried.
+- **Overall artifact state:** `passed`; root digest `b6a9d053817e6fb39c671f8f2a08400ff910d149361865c21e0d768f57656489`.
+
+### Task 1: Precedence machine scheduling — ORIGINAL FAILED, SELF-REPAIRED
+Model had to write an exact solver for two machine types, jobs with dependencies, machine type setup delays, release dates and weighted late-delivery penalties.
+- Initial Kimi model-authored source was **12,421 characters**, above the Python sandbox's **12,000-character code-size bound**. Sandbox refused execution (`code_size_bounds`): this is a **model-authored interface/resource compliance error, NOT a proven mathematical algorithm error**.
+- In this **same workflow**, deterministic public failure feedback caused Kimi to write its own diagnosis and then attempt repairs. First model-written replacement (4,936 chars) executed with `python_exit_1`; second replacement (3,389 chars) was accepted.
+- First completed valid repair passed independent **public + 2/2 hidden** instances with optimal costs **0, 0, 0**. This means the witnesses were correct, but the instance costs are trivially zero under the chosen due dates; future material must include positive-optimum / high-pressure settings.
+- 5 serial Kimi calls for this family: plan, initial solver, diagnosis, first repair, second repair.
+- Task root digest `e037550aa2fc9a4d4560fa3f80fedd0457e98fa74319c10999e152bff78b48a1`.
+
+### Task 2: Battery / toll / ordered-checkpoint directed graph — PASSED FIRST TRY
+Model had to find the least-cost path through a cyclic directed graph respecting finite battery, recharge time and count, a once-use toll waiver and checkpoints visited in order.
+- Initial model-authored Python passed the independent public optimum **33**, and two hidden-optimum checks **37** and **33**. All three were exact feasible witnesses.
+- No error arose, so self-remediation was **not** exercised in this case; only two Kimi calls (plan and solver).
+- Task root digest `1006abdd44a496484ca8a8233397b47d350841a8a40aeaa4d39922a0e1c582be`.
+
+### Interpretation and next experimental gate
+**New demonstrated capability:** a single live worker continued from an **organic model-output compliance failure** into model-authored diagnosis, two bounded repair attempts, independent exact revalidation and sealed hash-verified root—without an operator-started second run. Also demonstrated a fresh first-attempt optimum graph solver.
+
+**Do NOT overclaim:** This does not yet establish recovery from a genuine *logical/cognitive* error on a nontrivial positive-optimum scheduling instance. It also does not validate statistically reliable generalization or 2+ concurrent workers, and the job's top-level success hides the fact that one task used the entire two-repair budget. The sandbox error was initially code length, not an observed wrong algorithmic answer.
+
+**Recommended next gate, NOT launched:** retest one-worker automatic remediation with **strictly positive optimal penalties**, held-out hard cases, and at least one model-authored wrong **executable** answer requiring logical repair. Keep cost ceilings, journaling and no hidden-answer leakage. After sufficient serial repetitions, test two workers separately and preserve independent production gates.
+
