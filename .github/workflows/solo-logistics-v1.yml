@@ -1,0 +1,44 @@
+name: AAU One-Time Serial Logistics Cognition
+
+on:
+  push:
+    branches:
+      - experiment/solo-logistics-v1
+    paths:
+      - 'experiments/solo-logistics-v1/TRIGGER-ONCE.txt'
+
+permissions:
+  contents: read
+
+# One research job, no job matrix, no simultaneous requests in the runner.
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  single-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      AAU_SOLO_REAL_KIMI: 'yes'
+      AAU_PYTHON_SANDBOX: 'yes'
+      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Static syntax and independent no-model benchmark
+        run: |
+          node --check experiments/solo-logistics-v1/live.mjs
+          node --test experiments/solo-logistics-v1/benchmark.test.mjs
+      - name: Serial Kimi planning, coding, hidden verification and synthesis
+        working-directory: experiments/solo-logistics-v1
+        run: node live.mjs
+      - name: Preserve evidence even when the model is blocked
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-serial-logistics-v1-evidence
+          path: experiments/solo-logistics-v1/solo-logistics-evidence.json
+          if-no-files-found: warn
