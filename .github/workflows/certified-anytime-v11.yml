@@ -1,0 +1,44 @@
+name: AAU Certified Anytime Scaling V11
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - experiment/per-instance-scaling-v10
+    paths:
+      - 'experiments/certified-anytime-v11/**'
+      - '.github/workflows/certified-anytime-v11.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  deterministic-proof-single-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 17
+    env:
+      AAU_V11_ISOLATED: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Exact oracle and anytime bound regression preflight
+        run: |
+          node --check experiments/certified-anytime-v11/certifier.mjs
+          node --check experiments/certified-anytime-v11/live.mjs
+          node --test experiments/certified-anytime-v11/certifier.test.mjs
+          node --test experiments/per-instance-scaling-v10/bench.test.mjs
+      - name: Certify safe anytime bound intervals for six instances without provider calls
+        working-directory: experiments/certified-anytime-v11
+        run: node live.mjs
+      - name: Archive exact certificates, budgets and failure witnesses
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-certification-v11-evidence
+          path: experiments/certified-anytime-v11/anytime-v11-evidence.json
+          if-no-files-found: warn

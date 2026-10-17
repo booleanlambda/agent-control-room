@@ -345,3 +345,46 @@ All six results were verified independently feasible and obeyed machine setup, p
 - Timings recorded in artifact are one CI realization and should not be presented as stable performance comparisons.
 
 **Next experimental gate NOT started:** strengthen lower bounds through disjoint chains/machine workload relaxations or constraint programming, profile search with explicit time/evaluation ceilings on several seeded 9–12 job instances, and evaluate proof-backed anytime optimality gap vs computed feasible incumbents. Preserve hidden separation, serial model calls and production isolation.
+
+---
+
+## Experiment V11 — Provably bounded anytime search resolves exact optima through twelve jobs (2026-10-17)
+
+**Outcome:** PASS, isolated deterministic-only research branch `experiment/certified-anytime-v11`, draft PR https://github.com/booleanlambda/agent-control-room/pull/58. **DO NOT MERGE or deploy.** No Silas, AAU, Render, Supabase, brokers or production changes. No Moonshot calls or token spend.
+
+- Verified successful GitHub Actions run: https://github.com/booleanlambda/agent-control-room/actions/runs/39066390120.
+- Full evidence artifact: https://github.com/booleanlambda/agent-control-room/actions/runs/39066390120/artifacts/12113467349 (`aau-certification-v11-evidence`).
+- Root SHA256 ledger digest: `b6d2ee66b927f40c1351850631da1e81332117e6aefed3444775125a6af08a53`.
+- Implementation: `experiments/certified-anytime-v11/{certifier.mjs,certifier.test.mjs,live.mjs}`, `.github/workflows/certified-anytime-v11.yml`. Trusted V7 scheduling kernel, independent V6 feasibility/exact oracle and V10 fixture generator were unchanged.
+- Mandatory deterministic test gate: **9/9 new exact-certifier tests and 11/11 V10 tests passed**, 20/20 total. Includes independently checked exact 4/7-job proofs, randomized small instances, zero-expansion honest lower bounds, monotone upper bounds, error/budget fail-closed behavior and safe 9/10/12 schedules.
+- Provider use: **0 calls, 0 tokens**. One CI worker, no provider request secrets needed.
+
+### Mathematical certificate mechanism
+The algorithm enumerates still-feasible precedence-respecting job choices and eligible machine assignments via **best-first branch-and-bound**. Every partial transition computes real earliest legal start considering setup, predecessor completion, machine previous type/availability and downtime. At every partial state:
+1. Cost incurred is exact (activation already incurred and each finished job's weighted tardiness).
+2. For all remaining jobs, derive an admissible **optimistic** earliest finish by respecting releases and their predecessor finishes, plus each eligible machine's current availability/setup, while allowing unrealistically unlimited future machine capacity and ignoring maintenance.
+3. Add a **minimum unavoidable extra activation fee** for uncovered remaining job types; this cannot exceed the extra activation costs of any valid completion.
+4. The sum is a true lower bound for every extension of that partial state. Prune when lower bound is no better than a known, independently verified feasible incumbent upper bound.
+5. At interruption, `min(current verified upper bound, smallest surviving frontier lower bound)` is a certified global lower bound; `upper - lower` is a rigorous upper limit on the unknown optimality gap. If frontier exhausted/pruned with lower=upper, the incumbent is **certified optimal**.
+
+Priority queue retains the complete unexplored frontier, capped at 85,000 states; per-instance expansion caps are 16,000 for 7- or 12-job cases, 10,000 for 9, 12,000 for 10. No unexamined branches are silently dropped. The output includes the incumbent witness, independently checked by V6 `evaluate`, root/ledger hashes, node counts, pruning counts and exit reason. <=7 jobs also cross-checked against V6's separate brute-force **exact oracle**. >=9 optimality follows from the new certifier's admissible bound proof and exhausted/pruned frontier, **not** an independent pre-existing 9+ job exact oracle; this distinction is important.
+
+### Verified single-run results
+| Scenario | V10 feasible beam incumbent | V11 rigorously certified optimum | Nodes expanded | Surviving frontier |
+|---|---:|---:|---:|---:|
+| 7-job public | 415 | **415** | 38 | 0 |
+| 7-job hidden 1 | 387 | **387** | 35 | 0 |
+| 7-job hidden 2 | 582 | **582** | 22 | 0 |
+| New 9-job | 499 | **499** | 101 | 0 |
+| New 10-job | 420 | **420** | 58 | 0 |
+| New 12-job | 706 | **664** | 4,232 | 0 |
+
+Every case exited `proof_complete` with **certified lower = verified feasible upper**, gap=0. The new 12-job incumbent improves the previous 706 by **42 (~5.95%)** while proving 664 globally optimal under the benchmark's stated scheduling assumptions. One workflow computed all six with no budget exhaustion.
+
+### Interpretation and limits
+- The V10 large-instance optimality gap has now been resolved **for these particular deterministic fixtures** with actual search certificates, not guessed from weak static bounds.
+- These results demonstrate exact correctness and bounded proof search on ONE synthetic 2-machine family up to 12 jobs. They do **not** establish favorable scaling for larger job counts, other machine topologies, real-world operations, unbounded search, or autonomy of Kimi. The certifier intentionally caps jobs at 16, machines at 10 and total work by explicit limits.
+- The deterministic certifier depends on the established earliest-start dominance property for a fixed job order/machine assignment and integer nonnegative weighted tardiness/activation objective. This assumption should be reverified if objective, setup policy or resource model changes.
+- Any future change must keep validation independent, never turn a positive residual gap into an `optimal` claim and preserve proof frontier or fail closed.
+
+**Next research gate (NOT started):** audit proof and performance using multiple independently seeded 12–16-job fixtures, profile max-frontier and expansion exhaustion, and deliberately trigger censored/budgeted runs to verify that `[LB,UB]` remains sound. Explore whether agent-led decomposition improves search ordering only when a deterministic baseline and independent verifier have been established; no production integration or concurrency yet.
