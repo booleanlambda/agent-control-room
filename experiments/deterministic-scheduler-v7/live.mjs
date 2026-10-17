@@ -37,7 +37,7 @@ async function ask(label,payload,cap){
   const response=await fetch('https://api.moonshot.ai/v1/chat/completions',{
    method:'POST',signal:controller.signal,redirect:'manual',
    headers:{authorization:'Bearer '+apiKey,'content-type':'application/json',accept:'application/json'},
-   body:JSON.stringify({model:'kimi-k2.6',thinking:{type:'disabled'},temperature:0.45,
+   body:JSON.stringify({model:'kimi-k2.6',thinking:{type:'disabled'},temperature:0.6,
     response_format:{type:'json_object'},max_tokens:2200,stream:false,messages})});
   const packet=await response.json().catch(()=>({}));entry.http=response.status;
   const tokens=packet?.usage?.total_tokens;
