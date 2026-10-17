@@ -1,7 +1,7 @@
 // Never supply fault location or these hidden test data to the model.
 // The seeds are independently authored *defective* programs, not Kimi output.
 import {TASKS,grade,oracle} from './unseen-python-benchmarks.mjs';
-export const ROUTING_SEED=String.raw\`import json,sys,heapq
+export const ROUTING_SEED=String.raw`import json,sys,heapq
 d=json.load(sys.stdin)
 n=d["n"];cap=d["capacity"];initial=d["initial"]
 q=[(0,0,initial,[0],[0])]
@@ -27,8 +27,8 @@ while q:
             best[key]=newcost
             heapq.heappush(q,(newcost,v,battery-energy,path+[v],charges+[0]))
 else:
-    print(json.dumps({"cost":None,"path":[],"charges":[]}))\`;
-export const NUMBER_SEED=String.raw\`import json,sys
+    print(json.dumps({"cost":None,"path":[],"charges":[]}))`;
+export const NUMBER_SEED=String.raw`import json,sys
 d=json.load(sys.stdin)
 m=d["maxValue"];count=0
 best=None;winner=None
@@ -43,7 +43,7 @@ for x in range(m+1):
         score=2*x*x+3*y*y+z*z+5*abs(x-z)
         if best is None or score<best or (score==best and [x,y,z]<winner):
             best=score;winner=[x,y,z]
-print(json.dumps({"count":count,"score":best,"triple":winner}))\`;
+print(json.dumps({"count":count,"score":best,"triple":winner}))`;
 function variation(domain,publicInput){
  const p=structuredClone(publicInput);
  if(domain==='routing'){
