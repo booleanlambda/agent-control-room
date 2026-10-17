@@ -7,12 +7,14 @@ on:
       - 'experiments/recursion-tree-v0/self-remediation-v2-*.mjs'
       - 'experiments/recursion-tree-v0/self-remediation-kimi-v2.mjs'
       - '.github/workflows/experimental-self-remediation-fixture.yml'
+      - 'experiments/recursion-tree-v0/unseen-failure-*.mjs'
   pull_request:
     branches: [main]
     paths:
       - 'experiments/recursion-tree-v0/self-remediation-v2-*.mjs'
       - 'experiments/recursion-tree-v0/self-remediation-kimi-v2.mjs'
       - '.github/workflows/experimental-self-remediation-fixture.yml'
+      - 'experiments/recursion-tree-v0/unseen-failure-*.mjs'
 
 permissions:
   contents: read
@@ -78,6 +80,8 @@ jobs:
           node --check experiments/recursion-tree-v0/self-remediation-direct-traceback-fixture.mjs
           node --check experiments/recursion-tree-v0/self-remediation-tests-only-fixture.mjs
           node --check experiments/recursion-tree-v0/self-remediation-tests-only-adversarial.mjs
+          node --check experiments/recursion-tree-v0/unseen-failure-fixtures.mjs
+          node --check experiments/recursion-tree-v0/unseen-failure-live.mjs
           node --test experiments/recursion-tree-v0/unseen-python-benchmarks.test.mjs
           docker pull python:3.12-alpine
       - name: Eight genuine Docker and independent-process remediation replay scenarios
@@ -92,6 +96,9 @@ jobs:
       - name: Adversarially audit genuine Kimi-authored self-tests on 7 problems and 21 mutant witnesses
         working-directory: experiments/recursion-tree-v0
         run: node self-remediation-tests-only-adversarial.mjs
+      - name: Validate two new genuinely failing Python seeds and independent public hidden exact oracles
+        working-directory: experiments/recursion-tree-v0
+        run: node unseen-failure-live.mjs preflight
       - name: Archive synthetic vs live provenance and recovery evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -100,4 +107,5 @@ jobs:
           path: |
             experiments/recursion-tree-v0/self-remediation-v2-fixture-evidence.json
             experiments/recursion-tree-v0/test-only-kimi-adversarial-audit.json
+            experiments/recursion-tree-v0/unseen-failure-kimi-report.json
           if-no-files-found: ignore
