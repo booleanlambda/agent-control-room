@@ -1,0 +1,44 @@
+name: AAU Positive Logical Recovery V5B
+
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/positive-logic-recovery-v5
+    paths:
+      - 'experiments/positive-logic-v5/**'
+      - '.github/workflows/positive-logic-v5b.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  single-worker-positive-logic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 29
+    env:
+      AAU_ORGANIC_V4_AUTHORIZED: 'yes'
+      AAU_PYTHON_SANDBOX: 'yes'
+      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Zero-cost syntax and exact positive optimum preflight
+        run: |
+          node --check experiments/positive-logic-v5/live.mjs
+          node --test experiments/positive-logic-v5/benchmark.test.mjs
+      - name: Kimi natural executable logical-error repair single worker
+        working-directory: experiments/positive-logic-v5
+        run: node live.mjs
+      - name: Save complete journal and failed sources even on model failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-positive-logic-v5b-evidence
+          path: experiments/positive-logic-v5/positive-logic-v5b-evidence.json
+          if-no-files-found: warn

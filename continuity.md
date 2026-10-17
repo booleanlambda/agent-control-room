@@ -154,3 +154,22 @@ Model had to find the least-cost path through a cyclic directed graph respecting
 - No complete solver was parsed or executed. **No logical/cognitive failure or repair was demonstrated**. This is a provider output ceiling / response truncation, not a failed independent math test.
 - The runner journaled one accepted root and four sequential model-authored plan steps; no solver, hidden grader results, or verified root.
 - Next controlled iteration: a newly authorized one-time branch/workflow with explicitly shorter source output instructions and a higher finite output cap. Keep one worker, fail-closed uncertain provider responses, zero hidden-answer leakage, no concurrent model requests and no production changes.
+
+---
+
+## Experiment 5B — One-worker positive-cost scheduling, failed after two self-repairs (2026-10-17)
+
+**Scope:** isolated, serial-only, Kimi K2.6 thinking disabled; fresh controlled experiment, not a retry of an ambiguous provider call. No modifications to AAU, Silas, Render, brokers, or production databases.
+
+- Research draft PR: https://github.com/booleanlambda/agent-control-room/pull/52. Branch `experiment/positive-logic-v5b`. DO NOT MERGE.
+- Run: https://github.com/booleanlambda/agent-control-room/actions/runs/39059227910 — GitHub job **conclusion failure**, not success.
+- Complete evidence artifact: https://github.com/booleanlambda/agent-control-room/actions/runs/39059227910/artifacts/12110867393 (ZIP `aau-positive-logic-v5b-evidence`).
+- Independent positive-optimum preflight: **8/8 passed**. Benchmark has seven precedence-constrained jobs, sequence-dependent setup, two machines with hard maintenance intervals, release dates, weighted tardiness and machine activation fees. Public and two withheld instances each have an exact optimum >=15, though the live model never reached hidden verification.
+- Five **sequential** actual Kimi calls, **19,312 provider-reported tokens**; all five HTTP 200 and `finish_reason=stop`. No concurrency or ambiguous provider retries.
+- First model-written Python was complete and under the sandbox size cap (6,137 chars), but it crashed with `python_exit_1`: `NameError: best_cost` because a nested recursive function wrote `global best_cost` where `nonlocal best_cost` was required.
+- Kimi's own diagnosis correctly identified this Python closure scoping error. Repair attempt 1 (4,849 chars) executed and returned a schedule, but the independent public verifier rejected it for `release_dependency_or_setup`. Source inspection found it passed the **job start** `ws` rather than **job finish** `fin` as the updated machine completion clock on recursion.
+- Repair attempt 2 (4,879 chars) corrected that machine-clock advance to `fin`, but the public grader again rejected the executable schedule for `release_dependency_or_setup`. Code inspection shows the solver checks whether parent jobs have been enumerated, but sets work start based only on machine completion + setup and job release, **omitting actual parent completion times**. This is a plausible direct reason for the remaining rejection; the v5b grader exposed a category, not an item-specific counterexample.
+- **Correct classification:** a real model-authored execution failure was diagnosed, followed by **two executable, logically invalid model-authored attempted repairs**. Self-remediation did **NOT** succeed within the two-repair budget; state `completed_with_case_failures`, `public_failure_not_recovered`. **0 hidden cases graded and no root proof certified**. This does not meet the target of autonomously repairing a logically erroneous executable solver.
+- The earlier Experiment 5 initial run ended in `manual_hold` after 2 calls and 10,983 tokens because `finish_reason=length` on an 8,000-max-output coding request, with no solver returned. Its results are in the preceding continuity section. Across v5 plus v5b, two distinct isolated live runs used 7 calls and 30,295 provider-reported tokens; do NOT present this as one uninterrupted single run.
+- **Next action NOT started:** enhance deterministic public failure feedback to include the precise invalid job, required predecessor finish, actual work start, setup reservation and machine completion. Do not expose hidden oracle feedback. Add bounded unit tests proving the public diagnostic counterexample. Then run a separately authorized, single-thread experiment with a finite diagnosis/repair budget. Do not increase worker count or merge these drafts.
+
