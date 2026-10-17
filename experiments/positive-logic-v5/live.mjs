@@ -8,16 +8,16 @@ if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_PYTHON_SANDBOX!=='yes'||
  throw Error('ISOLATED_RESEARCH_CI_ONLY');
 const key=String(process.env.MOONSHOT_API_KEY||'').trim();
 if(!key)throw Error('PROVIDER_CREDENTIAL_MISSING');
-const report={experiment:'AAU_POSITIVE_LOGICAL_SELF_REPAIR_V5',
+const report={experiment:'AAU_POSITIVE_LOGICAL_SELF_REPAIR_V5B',
  model:'kimi-k2.6',thinking:'disabled',workerCount:1,maxConcurrentRequests:1,
  execution:'one_workflow_one_process_strictly_sequential',noInjectedDefects:true,goal:'repair_executable_logical_error_with_positive_optimal_cost',
- paidCalls:0,providerReportedTokens:0,maxPaidCalls:6,maxReportedTokens:48000,
- reservedUnits:0,maxReservedUnits:99000,noAutomaticRetryAfterUncertainProviderResult:true,
+ paidCalls:0,providerReportedTokens:0,maxPaidCalls:6,maxReportedTokens:54000,
+ reservedUnits:0,maxReservedUnits:105000,noAutomaticRetryAfterUncertainProviderResult:true,
  state:'running',api:[],cases:[],rootProof:null,
  limitations:['Single new harder scheduling family, not actual production errors',
  'Other workflows can share the Moonshot account; this locks only the research workflow slot',
  'Hidden failures never trigger retries with leaked oracle feedback']};
-const file='positive-logic-v5-evidence.json';
+const file='positive-logic-v5b-evidence.json';
 const save=()=>writeFileSync(file,JSON.stringify(report,null,2)+'\n');
 const digest=x=>createHash('sha256').update(typeof x==='string'?x:JSON.stringify(x)).digest('hex');
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -81,7 +81,7 @@ try{
   if(plan.action!=='plan'||!Array.isArray(plan.steps)||plan.steps.length<2||plan.steps.length>4||plan.steps.some(x=>typeof x.name!=='string'||typeof x.deliverable!=='string')){rec.state='invalid_plan';save();continue;}
   node(rec,'R',null,'root','accepted',{plan:plan.steps});let prev='R';
   for(let i=0;i<plan.steps.length;i++){const id='R.'+String(i+1).padStart(3,'0');node(rec,id,prev,'model_plan_step','accepted',{step:plan.steps[i]});prev=id;}
-  const authored=await kimi('author_solver',{instruction:'Write a COMPLETE GENERAL exact Python 3 solver satisfying the specification, not a hardcoded public example. Keep all Python code under 9000 characters. Read one JSON stdin and print only one JSON object stdout. Return {"action":"code","python":"ENTIRE PYTHON SOURCE","method":"..."}.',taskId:task.id,specification:task.specification,publicInput:task.publicInput,agentPlan:plan.steps},8000,rec);
+  const authored=await kimi('author_solver',{instruction:'Write a COMPLETE GENERAL exact Python 3 solver satisfying the specification, not a hardcoded public example. CRITICAL: Python source MUST be less than 6500 characters. Do not include comments, tests, diagnostics or verbose explanations in source. Use a short recursive exhaustive-search solver with pruning over jobs and eligible machines. No alternate solvers or long narrative. Reply with one compact JSON object ONLY, containing action code and python string. Read one JSON stdin and print only one JSON object stdout. Return {"action":"code","python":"ENTIRE PYTHON SOURCE","method":"..."}.',taskId:task.id,specification:task.specification,publicInput:task.publicInput,agentPlan:plan.steps},10000,rec);
   if(!authored){rec.state='provider_manual_hold';halt=true;break;}
   if(authored.action!=='code'||typeof authored.python!=='string'){rec.state='invalid_model_code';save();continue;}
   let source=authored.python,checked=await validate(task,source,task.publicInput);
@@ -99,7 +99,7 @@ try{
    node(rec,'R.diagnosis','R.failure','model_authored_diagnosis','accepted',{diagnosed});
    for(let k=1;k<=2;k++){
     const repaired=await kimi('repair_'+k,{instruction:'Correct YOUR OWN failed solver using root cause evidence; provide an entire general Python3 program. Return {"action":"repair","python":"ENTIRE CORRECTED SOURCE","explanation":"..."}. Hidden inputs will be evaluated only after a public pass; no oracle details will be revealed.',taskId:task.id,specification:task.specification,publicInput:task.publicInput,failedPython:source,
-     originalDiagnosis:diagnosed,observedPublicFailure:publicFeedback(checked),attempt:k,maxAttempts:2},8000,rec);
+     originalDiagnosis:diagnosed,observedPublicFailure:publicFeedback(checked),attempt:k,maxAttempts:2},9000,rec);
     if(!repaired){rec.state='provider_manual_hold';halt=true;break;}
     if(repaired.action!=='repair'||typeof repaired.python!=='string'){rec.state='repair_invalid';break;}
     source=repaired.python;checked=await validate(task,source,task.publicInput);rec.repairAttempts++;
@@ -124,7 +124,7 @@ try{
 }catch(e){report.state='runner_exception';report.exception=String(e?.message||e).slice(0,200);}
 finally{
  report.finishedAt=new Date().toISOString();save();
- console.log('AAU_POSITIVE_LOGIC_V5_FINAL='+JSON.stringify({state:report.state,modelCalls:report.paidCalls,
+ console.log('AAU_POSITIVE_LOGIC_V5B_FINAL='+JSON.stringify({state:report.state,modelCalls:report.paidCalls,
   providerTokens:report.providerReportedTokens,workerCount:1,rootProof:!!report.rootProof,
   cases:report.cases.map(x=>({id:x.id,state:x.state,initialFailure:!!x.originalFailure,initialFailureClass:x.initialFailureClass,
    selfRepairAttempts:x.repairAttempts,recovered:x.recovered,publicPass:x.finalPublic?.passed??false,
