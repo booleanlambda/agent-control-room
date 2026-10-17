@@ -1,0 +1,46 @@
+name: AAU Kimi Unfamiliar Failure Autorepair Once
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/kimi-unfamiliar-failure-once.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-kimi-unfamiliar-failure-once
+  cancel-in-progress: false
+
+jobs:
+  unfamiliar-repair:
+    if: github.head_ref == 'experiment/recursive-tree-nemotron-v0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 27
+    env:
+      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+      AAU_PYTHON_SANDBOX: 'yes'
+      AAU_UNFAMILIAR_FAILURE_LIVE: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Verify live-only configuration and independent grader first
+        run: |
+          set -euo pipefail
+          test -n "${MOONSHOT_API_KEY:-}" || { echo 'MOONSHOT_KEY_MISSING'; exit 3; }
+          node --check experiments/recursion-tree-v0/unseen-failure-live.mjs
+          node --check experiments/recursion-tree-v0/unseen-failure-fixtures.mjs
+          node --test experiments/recursion-tree-v0/unseen-python-benchmarks.test.mjs
+          docker pull python:3.12-alpine
+      - name: Execute genuine Kimi 2.6 self-directed diagnosis repair and testing on two unfamiliar defects
+        working-directory: experiments/recursion-tree-v0
+        run: node unseen-failure-live.mjs live
+      - name: Archive all live code hidden grades and reported token usage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-kimi-unfamiliar-failure-real-cognition
+          path: experiments/recursion-tree-v0/unseen-failure-kimi-report.json
+          if-no-files-found: ignore
