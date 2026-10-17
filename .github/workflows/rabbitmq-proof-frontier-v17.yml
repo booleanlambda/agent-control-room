@@ -1,0 +1,50 @@
+name: AAU Isolated RabbitMQ Proof Frontier V17
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - experiment/amqp-credential-probe-v16
+    paths:
+      - 'experiments/rabbitmq-proof-frontier-v17/**'
+      - '.github/workflows/rabbitmq-proof-frontier-v17.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  isolated-one-worker-broker-frontier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      AAU_V17_RESEARCH: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test exact partition oracle and SQLite proof-ledger invariants before contacting broker
+        run: |
+          python3 -m py_compile experiments/rabbitmq-proof-frontier-v17/ledger.py
+          node --check experiments/rabbitmq-proof-frontier-v17/partition.mjs
+          node --check experiments/rabbitmq-proof-frontier-v17/live.mjs
+          node --test experiments/rabbitmq-proof-frontier-v17/frontier.test.mjs
+          node --test experiments/deterministic-scheduler-v7/kernel.test.mjs
+      - name: Install pinned AMQP client without lifecycle hooks
+        run: npm install --no-save --ignore-scripts amqplib@0.10.9
+      - name: Run one-worker scoped RabbitMQ branch experiment and independent proof
+        working-directory: experiments/rabbitmq-proof-frontier-v17
+        env:
+          AMQP_URL: ${{ secrets.AMQP }}
+        run: node live.mjs
+      - name: Preserve exact proof, redelivery and acknowledgment evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-rabbitmq-proof-frontier-v17-evidence
+          path: experiments/rabbitmq-proof-frontier-v17/broker-frontier-v17-evidence.json
+          if-no-files-found: warn

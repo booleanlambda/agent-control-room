@@ -552,3 +552,30 @@ Existing repo integration verified: `.github/workflows/rabbitmq-smoke.yml` and `
 **What is NOT established:** existence of a separately isolated AAU proof-search queue, queue declarations/permissions, durability/ack/nack/redelivery, throughput, idempotency, ordering, crash recovery, independence of production broker namespaces, or any speedup in V13 search. A read-only connection does not prove access to create queues. GitHub Actions secret availability does not imply every Render worker has that exact secret available.
 
 **Next research gate (NOT STARTED):** implement a bounded broker-frontier experiment using `secrets.AMQP` from GitHub Actions, with an exclusive run-scoped namespace and no production queues. First prove queue create/publish/consume/ack with deduplication and a durable SQL search ledger holding authoritative [LB,UB] proof state, then measure one-worker equal-budget results versus V13 before attempting concurrency. Keep non-interfering keys/queues, single worker, no Silas wake or production deployment, and require deterministic verification of every branch/result.
+
+---
+
+## Experiment V17 — Actual RabbitMQ frontier + SQLite proof ledger, isolated redelivery and exact verification (2026-10-17)
+
+**Outcome: PASS.** Branch `experiment/rabbitmq-proof-frontier-v17`, [draft PR #64](https://github.com/booleanlambda/agent-control-room/pull/64). **DO NOT MERGE or deploy.** Production AAU/Silas and all existing RabbitMQ queues were untouched. Reused prevalidated Actions `secrets.AMQP` without displaying its value, hostname or URI. No provider/LLM calls or paid tokens.
+
+- Successful one-worker GitHub Actions run https://github.com/booleanlambda/agent-control-room/actions/runs/39074256954.
+- Downloadable JSON proof artifact: https://github.com/booleanlambda/agent-control-room/actions/runs/39074256954/artifacts/12116213178 (`aau-rabbitmq-proof-frontier-v17-evidence`).
+- Independently inspected ZIP JSON `broker-frontier-v17-evidence.json`; evidence root SHA256 **`512c09d09c622c29b2c8d0927e17e98caeb4a562b5a55b50e5410e6c64fe62f4`**.
+- Code: `experiments/rabbitmq-proof-frontier-v17/{ledger.py,partition.mjs,frontier.test.mjs,live.mjs}` and `.github/workflows/rabbitmq-proof-frontier-v17.yml`. Mandatory **6/6 new tests and 13/13 V7 kernel tests PASS** (19/19 total) before broker connection, including deterministic partition vs separate exact oracle on all three seven-job cases, ledger idempotency/conflict rejection, incomplete-frontier truth and independently verified schedules.
+
+### Actual broker + proof trace
+- Connected to existing RabbitMQ over **AMQPS TLS**, successfully declared one unique run-scoped **exclusive, non-durable, auto-delete** queue. This queue is unrelated to production/agent wake queues; it is explicitly deleted during cleanup and is not reusable.
+- Published **four confirmed messages**: one for each of three disjoint initial action partitions `J0@M0`, `J1@M0`, `J1@M1`, plus one deliberate same-ID duplicate.
+- Consumer made **five message deliveries**, including **one broker redelivery** following a deliberate channel shutdown after the authoritative SQLite ledger committed a valid root result but **before** its RabbitMQ message ACK. A new consumer channel fetched redelivered work and skipped its duplicate computation by consulting the ledger. The independently published duplicate was skipped too. **Two duplicate deliveries safely suppressed**, **four final acknowledgments**, **three distinct completed roots**, and no duplicate branch-result commit.
+- SQLite `FULL` synchronous transaction ledger stores root entry, pending/done, exact min cost, witness, hash, explored counts and claims. RabbitMQ transports only opaque partition IDs; **SQLite ledger determines whether a result counts**.
+- With only `J0@M0` complete and two roots unfinished, reported **certified interval [0,415]**, uncertainty gap **415**, `optimal=false`. Correctly refused to declare a proof early.
+- Exact partition results: `J0@M0`: **240 complete schedules, min cost 415**; `J1@M0`: **104 schedules, min 469**; `J1@M1`: **104 schedules, min 452**. All **448 possible complete assignments/orders** were traversed exactly once by disjoint topological initial choices. Final ledger [LB,UB] **[415,415]**, gap **0**, all three roots done, `optimal=true`. Independently rechecked root schedule witnesses using V6 feasibility evaluator and independently confirmed global optimum **415** with V6's separate exact oracle.
+- Broker evidence: `secretPresent=true,tls=true,connected=true,queueAsserted=true,confirmedPublishes=4,consumed=5,acknowledged=4,duplicateSkipped=2,redeliveries=1,simulatedUnackedDisconnect=true`. **0 model calls**.
+
+### Limits and production gate
+**Important:** This is an isolated transport/idempotency feasibility proof on a **single GitHub Actions runner**. Its SQLite file is local and disappears when the runner is destroyed. Its RabbitMQ queue is **non-durable exclusive auto-delete**. Thus this DOES NOT demonstrate entire-runner crash recovery, full broker restart durability, durable multi-host authoritative proof storage, distributed atomic queue+DB transaction, concurrency, exact global best-first prioritization, or 9–16-job speed improvement against V13.
+
+The experiment does confirm that an AMQP message queue can distribute branch IDs and safely recover unacknowledged **channel disconnects** while a separate ledger prevents duplicate proof commits and premature optimality claims.
+
+**Next gate NOT STARTED:** use a genuinely durable shared SQL proof ledger (e.g. isolated schema/tables with explicit unique `run_id` and RLS/lease/idempotency fencing) and a **run-scoped durable RabbitMQ queue** with queue lifecycle cleanup, then test crash/restart/redelivery across independent processes/runners, stale worker lease fencing, duplicate commits, poison-message policy and artifact-bound frontier reconciliation. Do not let a RabbitMQ queue replace the mathematical priority/index proof registry. Preserve one-worker baseline before concurrency. Do not touch existing production queues or agents.
