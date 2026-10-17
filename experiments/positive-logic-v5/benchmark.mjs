@@ -98,3 +98,5 @@ export function grade(p,answer){
 }
 
 export const TASKS=[{id:'maintenance_weighted_schedule_v5',name:'High-pressure scheduling with maintenance and switching',specification,publicInput:publicProblem,hiddenInputs:hiddenProblems,oracle:exactOracle,grade}];
+
+export const sha=digest;
