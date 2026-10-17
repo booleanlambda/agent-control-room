@@ -292,3 +292,33 @@ retrieved with a verified provider contract.
 No merge, deployment or Silas wake. Draft PR #45 remains isolated;
 the independent production `Systemic Runtime Tree CI` failure is
 unchanged.
+
+
+### Zero-cost direct traceback-to-repair preparation (no additional live Kimi call)
+
+[CI run 39036508935](https://github.com/booleanlambda/agent-control-room/actions/runs/39036508935) **PASSED**. This run repeated the original eight end-to-end
+synthetic-response scenarios **8/8** and added a ninth separate positive
+control to avoid the repeated first-stage diagnosis truncation.
+
+The new optional `AAU_REPAIR_START_WITH_V3=yes` entry:
+- Downloads the **genuine Kimi V3 crashing code** from immutable real
+  artifact in run 39025542225, verifies the exact Kimi-written code hash
+  `8ac998fcba84990297a65e6c34cdaf81c8e4d1943a19d25e047e32cd54d11b4d`;
+- Executes it with the public factory input in the network-disabled
+  Docker sandbox; **requires a reproduced Python traceback** before
+  admitting the run, and captures bounded stderr as factual feedback;
+- Starts at `repair` rather than a separate `diagnose`, using the
+  prior model-authored diagnosis and **actual interpreter failure**,
+  then (only if the new code passes public exact-optimum/witness
+  verification) proceeds to independent property tests;
+- Runs simulated code/test messages end to end with the same worker
+  and isolated Docker implementation. The synthetic repair passed
+  the public optimum plus six sealed variants, and the synthetic
+  property tester rejected both the old invalid witness and a
+  tampered cost. **Zero real model calls** were made.
+
+This does **not** establish any new cognitive capability for Kimi. It
+establishes that the next separately authorized live experiment can
+start with real traceback evidence and skip the repeated diagnosis
+output-bottleneck step. The live V4 attempt remains `manual_hold` and
+was not retried. No production or Silas changes.
