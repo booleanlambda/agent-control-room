@@ -1,0 +1,71 @@
+name: AAU Authorized Kimi Self-Remediation V3 One Shot
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/self-remediation-v3-one-shot.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  isolated-real-kimi-remediation:
+    if: github.head_ref == 'experiment/recursive-tree-nemotron-v0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 28
+    env:
+      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+      AAU_PYTHON_SANDBOX: 'yes'
+      AAU_REMEDIATION_V2_AUTHORIZED: 'yes'
+      AAU_REMEDIATION_V2_FIXTURE: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Fetch exact original Kimi failed-source artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: aau-kimi-unseen-python-cognition-audit
+          run-id: 38994095805
+          repository: booleanlambda/agent-control-room
+          github-token: ${{ github.token }}
+          path: experiments/recursion-tree-v0
+      - name: Validate original source and live-mode safeguards
+        run: |
+          set -euo pipefail
+          test -n "${MOONSHOT_API_KEY:-}" || { echo 'MOONSHOT_API_KEY_MISSING'; exit 3; }
+          test -z "${AAU_REMEDIATION_V2_FIXTURE:-}" || { echo 'SYNTHETIC_FIXTURE_NOT_ALLOWED'; exit 3; }
+          test -s experiments/recursion-tree-v0/unseen-python-kimi-report.json
+          node --check experiments/recursion-tree-v0/self-remediation-kimi-v2.mjs
+          node --test experiments/recursion-tree-v0/unseen-python-benchmarks.test.mjs
+          docker pull python:3.12-alpine
+      - name: Seed genuinely failed Kimi source, no model calls
+        working-directory: experiments/recursion-tree-v0
+        run: node self-remediation-kimi-v2.mjs seed
+      - name: Seven-step bounded diagnosis, repair and property-test loop
+        working-directory: experiments/recursion-tree-v0
+        shell: bash
+        run: |
+          set -euo pipefail
+          for step in $(seq 1 7); do
+            echo "KIMI_LIVE_REMEDIATION_STEP=$step"
+            node self-remediation-kimi-v2.mjs cycle
+            current="$(node -p "require('./self-remediation-v2-checkpoint.json').status")"
+            phase="$(node -p "require('./self-remediation-v2-checkpoint.json').phase")"
+            echo "KIMI_LIVE_STATUS=$current PHASE=$phase"
+            if [[ "$current" == 'passed' || "$current" == 'manual_hold' || "$current" == 'exhausted' || "$current" == 'stopped' ]]; then
+              break
+            fi
+            sleep 25
+          done
+      - name: Independently score all six hidden variants and model-generated tests
+        working-directory: experiments/recursion-tree-v0
+        run: node self-remediation-kimi-v2.mjs finish
+      - name: Save real-model checkpoint, reasoning trace, source and independently graded witnesses
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-kimi-self-remediation-v3-live-evidence
+          path: |
+            experiments/recursion-tree-v0/self-remediation-v2-checkpoint.json
+            experiments/recursion-tree-v0/self-remediation-v2-report.json
+          if-no-files-found: ignore
