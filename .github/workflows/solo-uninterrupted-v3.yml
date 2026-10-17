@@ -1,0 +1,45 @@
+name: AAU Single-Run Autonomous Recovery V3
+
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/solo-remediation-recovery-v2
+    paths:
+      - 'experiments/solo-uninterrupted-v3/**'
+      - '.github/workflows/solo-uninterrupted-v3.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  single-worker-uninterrupted:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      AAU_SOLO_REMEDIATION_REAL_KIMI: 'yes'
+      AAU_PYTHON_SANDBOX: 'yes'
+      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Preflight code syntax and exact hidden-capable benchmark
+        run: |
+          node --check experiments/solo-uninterrupted-v3/live.mjs
+          node --check experiments/solo-remediation-v2/benchmark.mjs
+          node --test experiments/solo-remediation-v2/benchmark.test.mjs
+      - name: One uninterrupted Kimi plan, solver, automatic recovery, verify, synthesize
+        working-directory: experiments/solo-uninterrupted-v3
+        run: node live.mjs
+      - name: Preserve original failed solver, all remediation attempts and verified root
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-single-run-recovery-v3-evidence
+          path: experiments/solo-uninterrupted-v3/single-run-v3-evidence.json
+          if-no-files-found: warn
