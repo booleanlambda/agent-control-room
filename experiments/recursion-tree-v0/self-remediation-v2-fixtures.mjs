@@ -75,6 +75,6 @@ export function simulateResponse(phase,scenario='success',attempt=1){
    {telemetry:{http:200,usage:2288,finish:'length',elapsedMs:20,received:false}});
  if(scenario==='transport_unknown')throw Object.assign(new Error('simulated_transport_ambiguous'),
    {telemetry:{http:null,usage:null,finish:null,elapsedMs:40,received:false}});
- return {answer:scriptedResponse(phase,scenario==='test_repair'&&phase==='tests'&&attempt===3?'weak_tests':'success'),usage:phase==='diagnose'?110:
+ return {answer:scriptedResponse(phase,scenario==='test_repair'?(phase==='tests'&&attempt===3?'weak_tests':'success'):scenario),usage:phase==='diagnose'?110:
   phase==='repair'?420:160,http:200,finish:'stop',elapsedMs:1};
 }
