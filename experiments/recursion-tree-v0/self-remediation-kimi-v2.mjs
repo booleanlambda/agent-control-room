@@ -14,6 +14,7 @@ const PRIOR='unseen-python-kimi-report.json';
 const KEY=String(process.env.MOONSHOT_API_KEY||'').trim();
 const FIXTURE=String(process.env.AAU_REMEDIATION_V2_FIXTURE||'');
 const mockRun=Boolean(FIXTURE);
+const testOnly=process.env.AAU_TESTS_ONLY_FROM_V5==='yes';
 const FIXTURES=['success','bad_witness','weak_tests','test_repair','truncated','transport_unknown'];
 const task=TASKS.find(x=>x.id==='assignment');
 const hash=x=>createHash('sha256').update(String(x||'')).digest('hex');
@@ -113,6 +114,42 @@ async function seed(){
    actualPublicCrashReproduced:true,
    stdoutWasAccepted:false};
  }
+ if(testOnly){
+  // NEW, explicitly authorized inference campaign. Never resume the
+  // uncertain V5 request; only use its immutable source and its test as
+  // research input. Source code may not be replaced during this experiment.
+  if(process.env.AAU_REPAIR_START_WITH_V3==='yes')
+   throw Error('TEST_ONLY_AND_REPAIR_SEED_CONFLICT');
+  const prior=JSON.parse(readFileSync('prior-v5/self-remediation-v2-checkpoint.json','utf8'));
+  const frozen='732f54bc7b428ef7d670c721c669060b2d0cf1741a339bdc0d33120862d5042b';
+  const broken='a66150b45b3d7a3ca7b1724b3abe2e31abb550e8de8e84b7e0aaf53af5db6470';
+  if(prior.status!=='manual_hold'||prior.sourceRun!==38994095805||
+    prior.callsAttempted!==5||hash(prior.latestCode)!==frozen||
+    hash(prior.latestTests)!==broken||
+    prior.phaseHistory?.filter(x=>x.phase==='repair').length!==2||
+    prior.phaseHistory?.filter(x=>x.phase==='tests').length!==1)
+   throw Error('IMMUTABLE_V5_LIVE_PROVENANCE_MISMATCH');
+  cp.latestCode=prior.latestCode;
+  cp.latestTests=prior.latestTests;
+  cp.phase='tests';cp.maxCalls=3;cp.maxTokens=16000;
+  cp.seedProvenance={mode:'TESTS_ONLY_FROZEN_VERIFIED_KIMI_SOLVER',
+   sourceRun:39038175797,sourceHash:frozen,faultyTestHash:broken,
+   originalSourceRun:38994095805,modelCallsInOriginalSource:5};
+  const validation=await assess(cp); // trusted, before any model call
+  if(!validation.public.pass||!validation.hiddenChecks.every(x=>x.pass)||
+     validation.tests.acceptsCorrect||!validation.tests.rejectsOld||
+     !validation.tests.rejectsCostTamper||cp.phase!=='tests')
+   throw Error('UNVERIFIED_SOLVER_OR_FALSE_NEGATIVE_NOT_REPRODUCED');
+  cp.feedback=JSON.stringify({reproducedLiveSelfTestFailure:true,
+    independentlyCertifiedSolver:true,
+    publicInput:task.public,
+    publicVerifiedOutput:validation.public.result,
+    rejectedByOwnTest:true,
+    oldBadWitness:cp.originalBadOutput,
+    originalModelTestSourceHash:broken,
+    issue:'Your previous test falsely rejects a verified feasible globally optimal public assignment and claims an unproven cheaper optimum of 88. Preserve the solver and rewrite only the verification tests. Never hardcode the public assignment as a rejection. The trusted runtime separately checks hidden cases, whose data and outputs remain withheld.'});
+  cp.status='ready';
+ }
  save(cp);
  console.log('REMEDIATION_V2_SEED='+JSON.stringify({verifiedHash:cp.originalHash,
   exactOriginalFailureReproduced:true,phase:cp.phase,oldUncertainCallResubmitted:false}));
@@ -121,7 +158,7 @@ function systemPrompt(phase){
  const common='You are Kimi K2.6 with thinking disabled. Autonomously repair YOUR OWN previously failed factory assignment Python algorithm. Solve generically for changed inputs, not just provided example. Python program reads JSON stdin and prints exactly one JSON object. No external libraries. No answers, patches, or optimum schedule are provided. This is a new explicitly authorized research attempt. Return ONE strict JSON object; concise, no markdown.';
  if(phase==='diagnose')return common+'\nAction: {"action":"diagnose","diagnosis":"specific defect","hypothesis":"testable correction"}. Analyze parent pointer, DP layer, assignment witness and objective consistency. Do not generate code in this stage. Keep <350 words.';
  if(phase==='repair')return common+'\nAction: {"action":"repair","python":"full Python 3 source","explanation":"brief"}. Include imports/input/output. Minimize cost exactly with activation costs, ordered switch penalties, capacity and allowed constraints. Reconstruct a feasible assignment, not only the correct optimum cost. Prefer concise complete code (<4500 output tokens). Do not write tests here. Avoid any answer hardcoding.';
- if(phase==='tests')return common+'\nAction: {"action":"tests","python":"full Python 3 verifier script","explanation":"brief"}. The test script reads {"input":factory_instance,"output":candidate_output} and outputs {"passed":true or false}. Independently verify every assignment index and eligibility, capacity loads, exact recomputed cost (job prices plus once-per-used-machine activation plus each switching fee) and proper list length. It MUST reject original cost-90 all-machine-2 invalid witness and accept any genuinely correct repaired feasible witness. Not a hardcoded expected assignment. Keep short.';
+ if(phase==='tests')return common+'\nAction: {"action":"tests","python":"full Python 3 verifier script","explanation":"brief"}. The test script reads {"input":factory_instance,"output":candidate_output} and outputs {"passed":true or false}. Independently verify every assignment index and eligibility, capacity loads, exact recomputed cost (job prices plus once-per-used-machine activation plus each switching fee) and proper list length. It MUST reject original cost-90 all-machine-2 invalid witness and accept any genuinely correct repaired feasible witness. Not a hardcoded expected assignment. Keep short.'+(testOnly?'\\nTHIS IS TEST-ONLY REMEDIATION: the exact independent verifier has already certified the frozen Kimi-authored solver on the public task and all six hidden variants. The PUBLIC optimum is 90 and [0,1,1,1,2,2,2] is a valid assignment; your prior test incorrectly claimed optimum 88. You MUST change ONLY the self-test source. Do not claim an unproven optimal lower cost. Your check should be generic and should validate consistency of the cost and constraints. Keep output concise.':'');
  throw Error('UNSUPPORTED_PHASE');
 }
 function userPrompt(cp){
@@ -134,7 +171,10 @@ function userPrompt(cp){
  if(cp.phase==='repair')return {...common,failedSource:cp.latestCode,
   reminder:'Author your own entire repaired source; full code not diff.'};
  return {...common,repairedSource:cp.latestCode,
-  publicObservation:cp.publicObservation,originalBadOutput:cp.originalBadOutput};
+  publicObservation:cp.publicObservation,originalBadOutput:cp.originalBadOutput,
+  ...(testOnly?{priorFaultySelfTestSource:cp.latestTests,
+    frozenSolverHash:cp.seedProvenance?.sourceHash,
+    modelMayChangeSolver:false}: {})};
 }
 async function callMoonshot(cp){
  if(!KEY)throw Error('MOONSHOT_SECRET_MISSING');
@@ -231,6 +271,9 @@ async function assess(cp){
 async function apply(cp){
  if(cp.status!=='answer_journaled'||!cp.pending)
   throw Error('NO_JOURNALED_RESPONSE');
+ if(testOnly&&(cp.phase!=='tests'||cp.seedProvenance?.mode!=='TESTS_ONLY_FROZEN_VERIFIED_KIMI_SOLVER'||
+    hash(cp.latestCode)!==cp.seedProvenance.sourceHash))
+  throw Error('FROZEN_SOLVER_INVARIANT_VIOLATION');
  const {phase,answer,meta}=cp.pending;
  const action=String(answer.action||'').toLowerCase();
  const entry={phase,action,usage:meta.usage,http:meta.http,
@@ -273,11 +316,21 @@ async function apply(cp){
   entry.codeHash=hash(cp.latestTests);
   const a=await assess(cp);
   entry.publicPassed=a.public.pass;
+  if(testOnly){
+    if(hash(cp.latestCode)!==cp.seedProvenance?.sourceHash)
+     throw Error('VERIFIED_KIMI_SOLVER_CHANGED');
+    if(!a.public.pass||!a.hiddenChecks.every(x=>x.pass))
+     throw Error('PREVIOUSLY_CERTIFIED_SOLVER_REGRESSED');
+    cp.phase=a.success?'done':'tests';
+    cp.status=a.success?'passed':'ready';
+  }
  }
  cp.phaseHistory.push(entry);
  cp.pending=null;
- if(cp.callsAttempted>=MAX_CALLS&&cp.status==='ready')cp.status='exhausted';
- if(cp.providerReportedTokens>=MAX_TOKENS&&cp.status==='ready')cp.status='exhausted';
+ if(cp.callsAttempted>=Math.min(MAX_CALLS,cp.maxCalls||MAX_CALLS)&&cp.status==='ready')
+  cp.status='exhausted';
+ if(cp.providerReportedTokens>=Math.min(MAX_TOKENS,cp.maxTokens||MAX_TOKENS)&&cp.status==='ready')
+  cp.status='exhausted';
  save(cp);
  console.log('REMEDIATION_V2_PHASE='+JSON.stringify({attempt:cp.callsAttempted,
   phase,action,status:cp.status,nextPhase:cp.phase,
@@ -288,11 +341,16 @@ async function apply(cp){
 async function oneCycle(){
  const cp=load();
  if(cp.status==='answer_journaled'){await apply(cp);return;}
+ if(testOnly&&(cp.phase!=='tests'||
+    hash(cp.latestCode)!==cp.seedProvenance?.sourceHash||
+    cp.seedProvenance.mode!=='TESTS_ONLY_FROZEN_VERIFIED_KIMI_SOLVER'))
+   throw Error('TEST_ONLY_SOLVER_IS_IMMUTABLE');
  if(['passed','manual_hold','exhausted','stopped'].includes(cp.status)){
   console.log('REMEDIATION_V2_NOOP='+cp.status);return;
  }
  if(cp.status!=='ready')throw Error('AMBIGUOUS_STAGE_NOT_RESUBMITTED');
- if(cp.callsAttempted>=MAX_CALLS||cp.providerReportedTokens>=MAX_TOKENS){
+ if(cp.callsAttempted>=Math.min(MAX_CALLS,cp.maxCalls||MAX_CALLS)||
+    cp.providerReportedTokens>=Math.min(MAX_TOKENS,cp.maxTokens||MAX_TOKENS)){
   cp.status='exhausted';save(cp);return;
  }
  cp.callsAttempted++;
@@ -343,6 +401,8 @@ function finish(){
   model:mockRun?'synthetic_fixture_no_model':'kimi-k2.6',
   thinking:mockRun?'not_applicable':'disabled',status:cp.status,success,
   baselineFailedSourceHash:cp.originalHash,originalBadOutput:cp.originalBadOutput,
+  seedProvenance:cp.seedProvenance||null,
+  frozenSolverIntegrity:!testOnly||hash(cp.latestCode)===cp.seedProvenance?.sourceHash,
   phaseHistory:cp.phaseHistory,latestCode:cp.latestCode,
   modelWrittenTests:cp.latestTests,assessments:cp.assessments,
   visiblePassed:cp.lastAssessment?.public?.pass||false,
