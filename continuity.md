@@ -470,3 +470,35 @@ No outside exact 12–16 job oracle was used. Optimality of **12 variant 1** fol
 **Demonstrated:** the lower-bound improvement is sound in all targeted oracle/invariant tests and tightens certification on most tested large cases with zero provider spend. No invalid schedule was accepted; all incomplete cases remain formally uncertain and are NOT called optimal. The parent-pointer structure compresses repeated paths but does not remove the exponential search frontier; 2,400-frontier cap still dominates 8/9 proofs.
 
 **Next research gate, NOT launched:** attack the frontier size itself with a provably safe memory-bounded search strategy (e.g., iterative deepening A* / branch-and-bound with complete iteration accounting), profile standalone memory and wall time on independent CI jobs, and test whether exact certificates can be completed for additional 14–16-job instances without raising current memory cap. Preserve existing independent exact/feasibility oracles, deterministic clocks, serial worker and all research/production isolation.
+
+---
+
+## Experiment V14 — Memory-bounded IDA* is sound but underperforms V13 (2026-10-17)
+
+**Outcome:** Implementation and independent correctness PASS, **performance hypothesis NOT SUPPORTED**. Isolated research draft PR [#61](https://github.com/booleanlambda/agent-control-room/pull/61), branch `experiment/ida-memory-v14`. Do not merge or deploy. **Zero provider/Kimi calls**, 0 tokens, no production AAU/Silas/Render/Supabase/broker changes.
+
+- Successful GitHub Actions single-worker run https://github.com/booleanlambda/agent-control-room/actions/runs/39070931629. Evidence artifact https://github.com/booleanlambda/agent-control-room/actions/runs/39070931629/artifacts/12114814768 (`aau-ida-memory-v14-evidence`).
+- Root proof/journal SHA256 `9e23158b4dbfcdf4405f6f8b07b3024e04d3362825850767f78a737366b643d1`.
+- New module `experiments/ida-memory-v14/ida.mjs` uses memory-bounded depth-first iterative-deepening A* with V13's admissible forced-rank relaxation, exact partial weighted tardiness and activation costs, a current feasible incumbent, and **no materialized global frontier**. Each threshold pass collects the minimum cutoff from branches above the current threshold. **Only COMPLETED threshold passes raise the certified lower bound**. Interrupted passes leave the last proven lower bound unchanged. Independent V6 schedule evaluator checks every returned feasible incumbent. Work is capped by node, iteration, sampled wall and heap budgets.
+- `ida.test.mjs`: 8/8 tests passed; V13 `certifier.test.mjs` 9/9 reran; **17/17 total passing**. Includes independent exact oracles for small jobs, interrupted iterations, repeatability, zero-node/time/heap budgets, all nine 12–16-job stress problems and invalid source rejection.
+- The comparison used the **same nine V12/V13 fixtures and same trusted beam incumbents**, **2,200 node expansion budget**, V13 allowed 2,400 frontier states, and V14 had no globally stored frontier. These methods have different search semantics; node counts do NOT measure equal search diversity or total work across repetitions.
+
+### Comparative result — negative, preserve V13 as leading proof method
+
+| Case | V13 certified interval [LB,UB] | V14 IDA* certified interval [LB,UB] | V14 node expansions |
+|---|---|---|---:|
+| 12 variant 0 | [565,1146] | [436,1146] | 2200 |
+| 12 variant 1 | **[1685,1685] optimal** | [1271,1750] | 2200 |
+| 12 variant 2 | [264,934] | [194,934] | 2200 |
+| 14 variant 0 | [787,1189] | [658,1189] | 2200 |
+| 14 variant 1 | [945,2080] | [788,2080] | 2200 |
+| 14 variant 2 | [820,1337] | [622,1337] | 2200 |
+| 16 variant 0 | [599,1464] | [572,1464] | 2200 |
+| 16 variant 1 | [440,1346] | [355,1346] | 2200 |
+| 16 variant 2 | [599,1054] | [396,1054] | 2200 |
+
+- V13 aggregate remaining certified gap **5,531**, V14 **7,008**, **1,477 larger (~26.7% worse)**. **V13 1/9 complete optimality proofs, V14 0/9**. V14 had a strictly worse gap in **all nine** equal-budget comparisons. It can retain a safe [LB,UB] interval but recomputes many partial subtrees across approximately 40 completed threshold rounds per case, spending CPU capacity without advancing proof as fast as best-first.
+- Separately allowed **15,000 expansions** to V14 on **14 variant 0,1,2**: [721,1189], [891,2080], [741,1337], all still nonzero gaps, none proven optimal. These are additional research runs **not part of equal-budget comparison**. Four independent small exact-oracle checks completed.
+- This DOES NOT establish real memory savings over V13: V14 has no global queue by design, but no controlled separate-process memory or RSS benchmark was done. The bounded V13 parent-pointer heap is still the better certifier for these fixtures at existing budgets. Do not replace V13 with V14 or silently call V14 an optimization success.
+
+**Next gate, NOT STARTED:** investigate proof-preserving alternatives with memory/expansion efficiency better than naive iterative deepening, e.g. memory-bounded best-first with disk-spill checkpointing or recursive best-first with backed-up f-bounds and complete iteration accounting. Measure separate-process peak RSS, disk I/O, time, expansions, proof gap, and independent validity on the same nine fixtures. Retain V13 baseline, preserve the hard frontier cap and no false optimum labels. No automatic production merge.
