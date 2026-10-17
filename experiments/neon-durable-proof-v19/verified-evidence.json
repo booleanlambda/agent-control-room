@@ -1,0 +1,133 @@
+{
+  "experiment": "AAU_V19_NEON_DURABLE_PROOF_LEDGERS",
+  "status": "verified_partial_integration",
+  "project_id": "lucky-term-22683833",
+  "neon_branch_id": "br-cold-rice-b4m3l9qu",
+  "neon_branch_name": "aau-v19-proof-ledger-isolated",
+  "production_branch_not_mutated": "br-mute-rain-b4sgepsi",
+  "schema": "aau_research_v19",
+  "test_run_uuid": "bcf92471-83d3-4aad-95b0-af5912480c16",
+  "problem_sha256": "544ebed3a3624eb4ef422454e8c6d064b4171b20282ef242de8dd8933685884f",
+  "independent_source": {
+    "workflow": "https://github.com/booleanlambda/agent-control-room/actions/runs/39074256954",
+    "artifact": "https://github.com/booleanlambda/agent-control-room/actions/runs/39074256954/artifacts/12116213178",
+    "oracle": "V6 exactOracle(publicProblem) = 415",
+    "baseline": "V7 kernel independently feasible cost = 512"
+  },
+  "schema_verification": {
+    "tables": [
+      "runs",
+      "branches",
+      "events"
+    ],
+    "rls_enabled_tables": 3,
+    "total_tables": 3,
+    "functions": [
+      "claim",
+      "complete",
+      "summary"
+    ],
+    "public_schema_grants": false
+  },
+  "trace": [
+    {
+      "step": "initialized",
+      "total": 3,
+      "done": 0,
+      "pending": 3,
+      "lower": 0,
+      "upper": 512,
+      "optimal": false
+    },
+    {
+      "step": "first_claim",
+      "id": "J0@M0",
+      "claimed": true,
+      "epoch": 1
+    },
+    {
+      "step": "second_claim_before_expiry",
+      "id": "J0@M0",
+      "claimed": false
+    },
+    {
+      "step": "expired_lease_reclaimed",
+      "id": "J0@M0",
+      "claimed": true,
+      "new_worker": "worker-beta",
+      "epoch": 2
+    },
+    {
+      "step": "stale_worker_completion",
+      "id": "J0@M0",
+      "old_epoch": 1,
+      "result": "STALE"
+    },
+    {
+      "step": "first_commit",
+      "id": "J0@M0",
+      "result": "COMMITTED",
+      "cost": 415,
+      "exhaustively_searched": 240
+    },
+    {
+      "step": "identical_redelivery_receipt",
+      "id": "J0@M0",
+      "result": "DUPLICATE"
+    },
+    {
+      "step": "conflicting_redelivery_receipt",
+      "id": "J0@M0",
+      "result": "CONFLICT"
+    },
+    {
+      "step": "partial_proof",
+      "done": 1,
+      "pending": 2,
+      "lower": 0,
+      "upper": 415,
+      "optimal": false
+    },
+    {
+      "step": "second_root_commit",
+      "id": "J1@M0",
+      "result": "COMMITTED",
+      "cost": 469,
+      "exhaustively_searched": 104
+    },
+    {
+      "step": "third_root_commit",
+      "id": "J1@M1",
+      "result": "COMMITTED",
+      "cost": 452,
+      "exhaustively_searched": 104
+    },
+    {
+      "step": "final_proof",
+      "done": 3,
+      "pending": 0,
+      "lower": 415,
+      "upper": 415,
+      "optimal": true,
+      "exhaustively_searched": 448
+    }
+  ],
+  "database_event_counts": {
+    "claim": 4,
+    "complete": 3
+  },
+  "github_ci": {
+    "url": "https://github.com/booleanlambda/agent-control-room/actions/runs/39077168309",
+    "status": "passed",
+    "new_receipt_tests": 2,
+    "v17_root_tests": 6,
+    "v7_kernel_tests": 13,
+    "total_passed": 21
+  },
+  "limits": [
+    "No real joint RabbitMQ+Neon worker: a branch-specific database credential has not been installed in the isolated GitHub Actions environment.",
+    "Neon lease expiry was simulated by modifying a lease timestamp on the isolated branch; this is not a real worker process crash.",
+    "Actual proof receipts were replayed from independently verified V17 evidence; the SQL owner functions rely on an external deterministic verifier and do not validate arbitrary worker-submitted cost claims themselves.",
+    "The research branch may have service costs and should be retired when no longer needed; no automatic production deployment or merge."
+  ]
+}

@@ -1,0 +1,31 @@
+name: AAU Neon Research Proof Ledger V19
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - experiment/broker-cross-runner-v18
+    paths:
+      - 'experiments/neon-durable-proof-v19/**'
+      - '.github/workflows/neon-proof-v19.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-neon-v19-independent-oracle
+  cancel-in-progress: false
+
+jobs:
+  independent-kernel-and-migration-guards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Verify exact receipt provenance and migration guards without database secrets
+        run: |
+          node --test experiments/neon-durable-proof-v19/receipt.test.mjs
+          node --test experiments/rabbitmq-proof-frontier-v17/frontier.test.mjs
+          node --test experiments/deterministic-scheduler-v7/kernel.test.mjs

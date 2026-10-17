@@ -620,3 +620,34 @@ The existing **V17** live same-run AMQP channel-redelivery demonstration remains
 **Explicit barriers:** The earlier attempted live multi-job workflow with repeated AMQP secret injection was blocked and was NOT committed/executed. A separate Neon branch creation was blocked. Supabase's **supported** development branch path is available only after its financial confirmation process. `get_cost(type="branch")` for the project's organization returned **$0.01344/hour**, and `confirm_cost` MUST NOT be called before the user explicitly agrees to that specific hourly charge. No cost has been accepted and no Supabase development branch has been created.
 
 **Decision / next gate:** Artifact snapshot persistence across fresh runner jobs is now **real and verified**. This validates serial handoff and proof correctness, not continuous shared ledger access, concurrency, crash recovery after lost artifact, broker restart, or RabbitMQ redelivery across distinct GitHub runners. V17 remains the last live RabbitMQ delivery/redelivery proof. Before V18 live combined test, secure user approval of branch cost and proper authorized workflow secret setup; don't bypass either control. Preserve separate run-scoped queue, one worker, and no production queue or Silas changes.
+
+---
+
+## Experiment V19 — Neon isolated durable proof ledger with lease fencing and exact receipts (2026-10-17)
+
+**Status: Neon persistent proof storage VERIFIED; combined RabbitMQ+Neon worker NOT YET TESTED.** New branch `experiment/neon-durable-proof-v19`, draft PR #66: https://github.com/booleanlambda/agent-control-room/pull/66. **DO NOT MERGE/DEPLOY.** No changes to production AAU/Silas, existing RabbitMQ production queues, Supabase production data, or Neon production branch. No LLM calls.
+
+### Isolated Neon infrastructure created and checked
+- Project `lucky-term-22683833` (Aau-saau). New independent Neon branch `br-cold-rice-b4m3l9qu` (`aau-v19-proof-ledger-isolated`), with small 0.25 CU configured compute and suspend timeout 0. The original `br-mute-rain-b4sgepsi` production branch is untouched. Branch may incur resource costs until retired; never delete it without explicit user authorization.
+- Installed PostgreSQL schema `aau_research_v19` on that *specific development branch* with tables `runs`, `branches` and `events`. **RLS enabled on all 3/3 tables**, public schema/table/function grants revoked; confirmed actual schema ACL `{neondb_owner=UC/neondb_owner}`.
+- Implemented owner-executed `claim(run,branch,worker,seconds)` with exclusive time-bound lease and monotonically increasing **fencing epoch**, `complete(...epoch,cost,leaves,receipt)` with row-level transactional lock and idempotent result handling, and `summary(run)` which never declares optimum while even one root remains incomplete and returns certified [LB,UB] interval. All operations used the explicit research branch ID via Neon connector.
+- Migration source `experiments/neon-durable-proof-v19/schema.sql`. First attempts failed safely/rolled back because Neon SQL API rejects multi-statements in one prepared query and native Neon Postgres lacks Supabase's `anon` role. Fixed and applied **13-statement transactional migration** successfully.
+
+### Verified live Neon transaction trace (same three exact scheduling roots from V17)
+Neon test UUID `bcf92471-83d3-4aad-95b0-af5912480c16`; trusted V6/V7 public problem digest `544ebed3a3624eb4ef422454e8c6d064b4171b20282ef242de8dd8933685884f`. V17's source exact receipts and independently validated scheduling witnesses taken from https://github.com/booleanlambda/agent-control-room/actions/runs/39074256954/artifacts/12116213178 and reverified in GitHub CI.
+- Initial state 3 pending roots, [LB,UB] **[0,512]**, NOT optimal.
+- Worker alpha claims `J0@M0` epoch 1. Second worker's claim while lease live returns `ok=false`.
+- Simulated expiration was explicitly set on the **isolated research branch**. Worker beta reclaims the same root with epoch **2**. Old worker alpha's epoch 1 completion returns **`STALE`**; it did not mutate the completed result.
+- Worker beta valid exact root receipt **COMMITTED** 415/240 leaves. Replaying identical completion returned **DUPLICATE**, conflicting cost 416 returned **CONFLICT**. Mid-run Neon summary 1/3 roots, [LB,UB] **[0,415]**, NOT optimal.
+- Remaining two verified root receipts committed: `J1@M0` cost 469/104 leaves; `J1@M1` cost 452/104 leaves. Final real Neon readback **3/3 complete; global certified [415,415], zero gap, optimal=true**. Total **448** complete schedules covered exactly once across three disjoint exhaustive V17 partitions. Database event audit: 4 claim events (including a reclaim), 3 completion events (not double counted).
+- Data persisted across multiple independent Neon connector invocations—not runner-local SQLite. This is a successful **persistent shared proof ledger**, without a combined broker worker.
+
+### Independent CI and evidence
+- GitHub Actions SUCCESS: https://github.com/booleanlambda/agent-control-room/actions/runs/39077168309. **21/21 tests passed**: two new receipt/migration tests, 6 V17 partition-ledger tests and 13 V7 kernel tests. Recomputed all three V17 witness receipts, 448 leaves and independent V6 oracle optimum **415**.
+- Checked-in nonsecret trace: `experiments/neon-durable-proof-v19/verified-evidence.json`; migration `schema.sql`, test `receipt.test.mjs` and workflow `.github/workflows/neon-proof-v19.yml`.
+- No database connection string or role password written to GitHub repository, Actions logs or model artifacts.
+
+### Honest limits / next gate
+- **Neon persistence/transaction correctness proven. RabbitMQ+Neon combined crash recovery not yet proven.** The Actions workflow has the pre-existing `secrets.AMQP` but no confirmed **branch-scoped least-privilege Neon Postgres credential**, and connector-owned privileged connection strings must never be committed to repo or displayed in logs.
+- Stale-worker test was controlled expiry + reclaim, not an actual runner crash. SQL functions trust a caller-controlled exact-cost receipt; a future **independent deterministic verifier service with tightly restricted database role** must authorize completion. RLS and revoked public access alone are not a complete multi-tenant authorization model.
+- Next gate: give isolated GitHub Actions worker a branch-specific Neon credential through a supported secrets-management action, execute real broker delivery → deterministic witness verification → Neon fenced claim/complete → broker ACK, then terminate worker between commit and ACK and prove recovery in a second process. Start with one worker and run-specific queue; do not add concurrency or connect production agent wake paths until that gate passes.
