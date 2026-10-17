@@ -88,3 +88,39 @@ Any later correction must be credited to that later run, not this one.
 Implementation `self-remediation-kimi.mjs` remains isolated and
 unmerged in experimental draft PR #45. The separate production
 `Systemic Runtime Tree CI` failure is still unresolved.
+
+
+## Authorized staged retest V2 — 17 October 2026
+
+**Evidence:** [GitHub Actions run 39024126193](https://github.com/booleanlambda/agent-control-room/actions/runs/39024126193), artifact `aau-kimi-remediation-v2-authorized-evidence` (ID `12097842257`).
+
+**Result: incomplete, not a cognitive verdict.** The user's explicit authorization
+created a NEW billable attempt; it did not retry the ambiguous request from
+run 39023455258. The authentic original Kimi-generated failed code was
+recovered by SHA and reproduced in a separate network-disabled Docker
+process. A fresh `diagnose` phase was sent to Kimi K2.6 thinking disabled.
+
+The model endpoint returned **HTTP 200 after 18.105s**,
+`finish_reason=length`; its output exceeded the diagnosis-stage
+`max_tokens=850` and the runtime correctly refused to treat this as a
+completed diagnosis. The provider reported **2,288 total tokens**,
+despite no usable response. No repaired Python or self-tests were executed,
+and no hidden variant was assessed. The checkpoint moved to
+`manual_hold` after exactly one new call. There were **zero automatic
+duplicate submissions**.
+
+**Attribution:** This time the failure was a **model-output cap / test
+configuration** limitation, *not* a network timeout and not evidence that
+Kimi can or cannot repair its traceback bug.
+
+**Subsequent research-code correction (not live retested):** The isolated
+`self-remediation-kimi-v2.mjs` diagnosis cap was increased from 850 to
+2,200; the accounting now records provider-reported usage on truncated
+responses, while still refusing to accept incomplete cognitive output.
+The immutable V2 Actions checkpoint recorded zero accepted-response tokens,
+but the live log provides the true reported usage **2,288**. This
+distinction is important for research cost accounting.
+
+No more paid attempts were made. The feature branch and PR #45 remain
+draft and unmerged, Silas untouched. The separate production
+Systemic Runtime Tree CI remains failing.
