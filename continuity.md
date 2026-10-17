@@ -717,3 +717,43 @@ Once configured, V20 must demonstrate **actual** broker delivery, verified Neon 
 **Proved:** Real message queue persistence and delivery across two distinct CI jobs/runners; Neon durable authoritative ledger across job boundaries; actual process `SIGKILL` precisely after verified SQL COMMIT and before queue ACK; requeue/recovery in separate environment; duplicate suppression, idempotency, final broker ACKs, exact deterministic global proof and isolated queue cleanup. **Not proved:** broker SERVER restart durability, real simultaneous worker concurrency, or improvement against the original nine 12/14/16-job V13 best-first search fixtures. The bounded exact scheduling experiment is a transport/proof correctness test, not a general AI cognition benchmark.
 
 **Decision:** The broker + Neon pattern is now validated for serial cross-runner recovery; retain as isolated research, do not merge into production. **Next gate (NOT STARTED):** benchmark one versus two concurrently running workers with transactional Neon leases on the same V13 nine 12–16-job workload under normalized node/compute budgets, and stress stale leases/poison messages. Use only separate run-scoped queues; preserve deterministic external proof verification and treat every unfinished branch as unresolved. Cleanup the Neon research branch only upon explicit authorization.
+
+---
+
+## Experiment V22 — One versus two concurrent RabbitMQ workers, nine V13 proof workloads (2026-10-17)
+
+**Status: PASS — one observed 1.33× improvement in job wall time with two workers; evidence insufficient for a stable general speedup conclusion.** Isolated draft PR [#69](https://github.com/booleanlambda/agent-control-room/pull/69), branch `experiment/rabbitmq-parallel-v22`. **DO NOT MERGE/DEPLOY.** Existing production AAU/Silas, existing broker wake queues, Supabase and Neon production branch untouched; 0 LLM/provider calls or tokens.
+
+### Actual implementation and isolation
+- Established additional research-only Neon schema `aau_research_v22` on **existing isolated research Neon branch** `br-cold-rice-b4m3l9qu`, with three private tables `runs/cases/events`, RLS and revoked public access. Censored per-case [LB,UB] certificates are stored honestly, **not** labeled exact just because a worker finished computing. Fenced `claim`, atomic idempotent `complete`, conflicting replay rejection and `summary` functions are specific to V22 cases. PostgreSQL check rejects non-finite duration using `p_ms >= 'Infinity'::double precision`; naive `isfinite(double precision)` had been rejected by Neon and was repaired before the live run.
+- Code `experiments/rabbitmq-parallel-v22/{schema.sql,store.mjs,worker.mjs,live.mjs,parallel.test.mjs}` and `.github/workflows/rabbitmq-parallel-v22.yml`; one draft PR. Both modes enforce the verified V19 private Neon branch marker, unique expiring research durable AMQPS queue with persistent messages and confirmed publishing, and **ACK only after** an independently verified V13 certificate is committed to Neon. All test queues were deleted.
+- Benchmarks original **nine V12/V13 12/14/16-job stress instances (three seeds/variants for each size)**, **one case per RabbitMQ message**, with one worker serial vs **two simultaneously spawned OS worker processes**. Each case receives the *same* V13 forced-rank best-first search, warm beam of 400 evaluations, expansion cap 2,200, frontier cap 2,400, V7 deterministic scheduling and independent V6 feasibility/cost verification. Case hashes, proof LB/UB, expansions, certificate and witness SHA256 values were independently replayed and matched **case-by-case** between modes. The two workers divide *independent cases*, NOT branches within any one search tree.
+- GitHub Actions full run https://github.com/booleanlambda/agent-control-room/actions/runs/39080274754 **SUCCESS**; **4/4 new V22 tests and 9/9 V13 certifier tests, total 13/13 preflight**; 18/18 independently validated live case executions and both Neon fenced ledger runs completed.
+- Artifact https://github.com/booleanlambda/agent-control-room/actions/runs/39080274754/artifacts/12118871233, downloaded `aau-rabbitmq-parallel-v22-evidence.zip` containing `parallel-v22-evidence.json`. ZIP SHA256 `e87891c92727ea90d0aeb541d3588c0e4ea88172925d61147d4bc9f989fabff1`. JSON SHA256 `f2ad45a29e304e7a9021e150acd523ab0979228ae57e87606f02a00bb62094bb`. V22 aggregate proofDigest `16222e2b0af88d206d421d4b5dfa250ac172f32585bc8298a5fcdf561c642e04`.
+
+### Actual per-run resource and correctness measurements
+
+| Measure | One worker | Two concurrent workers |
+|---|---:|---:|
+| Cases completed | **9/9** | **9/9** |
+| Certified optimal cases | 1/9 | 1/9 |
+| Sum of certified gaps `Σ(UB-LB)` | **5,531** | **5,531** |
+| Total V13 node expansions | **3,508** | **3,508** |
+| Full workflow-mode wall time (dispatch through workers completed) | **6,870.105 ms** | **5,172.099 ms** |
+| Throughput (cases/sec, including transport and worker startup) | **1.3100** | **1.7401** |
+| Summed per-task warmup+solver wall times (not true CPU usage) | 531.585 ms | 976.386 ms |
+| Peak worker-process RSS (Linux, KiB) | one process: 116,592 | two processes: 113,252 + 113,528 |
+| Broker ACKs | 9/9 | 9/9 |
+| Unreconciled/duplicated Neon case claims | 0 | 0 |
+| Research queue cleanup | true | true |
+
+**Observed wall-time speedup** `6870.105 / 5172.099 = 1.3283×`, equivalent to **24.7% less elapsed wall time** and **32.8% more throughput** in this single CI benchmark. Mean workload / output exactly equal: every case has identical V13 bound, feasible witness hash and certificate hash. The only case certified optimal in both modes was `n12_variant1` at cost **1685**. All other eight have nonzero certified gaps; no false global optimum claimed.
+
+The two processes occupied about **1.94× the sum of per-process peak RSS** (113,252+113,528 KiB vs 116,592 KiB) and incurred higher summed per-case wall times, likely due to scheduling contention and cold/warm variances. These are peak RSS samples **per process**, not synchronized aggregate peak memory or billed CPU measurements. The ~5–7 second end-to-end latency is dominated by process setup, AMQP/Neon roundtrips, queue polling and idle poll delay relative to ~0.5–1.0 seconds of summed local solver work. Thus do not extrapolate to expensive reasoning tasks.
+
+**Independent post-run Neon connector readback** of latest serial/two-worker V22 research runs: both `total=9, complete=9, pending=0, expanded=3508, gap=5531, proved=1, nonunique_claims=0`; each source row in the downloaded evidence verified `state=passed`. We have one observed **serial-first** run on shared GitHub Actions hardware. Order bias, host/cold start differences, DB/network variability and overlapping CPU costs are not controlled by one observation.
+
+### Decision and next research gate
+**Correctness and real concurrent multi-worker case dispatch PASS. Performance improvement is provisional**: only one serial-first run, modest observed 1.33× wall-time speedup, materially higher worker process memory. Retain V13 deterministic certifier. No production replacement authorized.
+
+**Next recommended experiment NOT STARTED:** crossover/repeated trials (1→2 and 2→1; multiple seeds or repetitions) and real **within-one-problem tree splitting** using Neon as a global authoritative proof-bound registry. With split search, no open node may be dropped and a leaf work item may only mark a subtree fully completed when its entire frontier was deterministically exhausted. Test poison/redelivery/stale-lease paths under concurrency and compare *equal total expansion, CPU and memory budgets* with V13. Do not confuse parallelism over nine independent tasks with parallel proof of a single task.
