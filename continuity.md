@@ -428,3 +428,45 @@ No outside exact 12–16 job oracle was used. Optimality of **12 variant 1** fol
 1. V11's claim that its frontier cap was a hard maximum was overbroad; **V12 fixes this**. The revised implementation must be used for any further research and previous V11 numerical certificates should be regression-replayed if considered for later use. V11 is not retroactively edited in its prior branch.
 2. The solver can give correct gap bounds when budgets are exhausted, but proof quality degrades at larger sizes under tight frontiers. This is the correct fail-closed result, not a failure to return a feasible schedule.
 3. The next gate should compare smarter bounded search, tighter admissible relaxations, and wall-clock/memory ceilings on multiple unseen instances, keeping the 100-state pressure tests. Do NOT widen budgets or merge into production by default. Keep model input restricted to strategic assignment, never clocks or certifier code.
+
+---
+
+## Experiment V13 — Forced-machine rank relaxation, compressed frontier state and capped proof stress (2026-10-17)
+
+**Status: PASSED on isolated research branch** `experiment/tighter-bounds-v13`, draft PR [#60](https://github.com/booleanlambda/agent-control-room/pull/60). **DO NOT MERGE/DEPLOY.** No Moonshot/Kimi provider calls (0 tokens); no changes to production AAU, Silas, Render, Supabase or broker.
+
+**Verified GitHub Actions:** https://github.com/booleanlambda/agent-control-room/actions/runs/39070162429 — job concluded SUCCESS. Full ZIP evidence https://github.com/booleanlambda/agent-control-room/actions/runs/39070162429/artifacts/12114582383 (`aau-tighter-bounds-v13-evidence`). Verified evidence root SHA256 **`98fca6fd552aacc159c887d444301dbfd53283e06b5899f0c082349a5e389351`**.
+
+### Implemented change
+1. New independent research copy `experiments/tighter-bounds-v13/certifier.mjs` of V12's already fixed certified frontier engine; prior V12 branch not changed.
+2. Stronger provably **admissible** remaining-job tardiness lower bound: for jobs eligible on exactly one machine, the k-th mandatory job cannot finish before that machine's current clock plus the sum of the k shortest mandatory processing times. A bounded subset-assignment DP (max 9 forced jobs per machine; otherwise safe fallback) assigns forced jobs to optimistic completion ranks, respecting the independently relaxed release and parent-finish earliest lower limits. Combine the forced group and flexible-job optimistic penalties, then take the maximum with the original V12 independent relaxation, adding unavoidable extra machine activation fee. This **cannot overstate** the cost of a valid full completion.
+3. Store each search node's `parent` pointer and latest `step` instead of repeatedly copying the whole proposal prefix. Reconstruct the full proposal only at a complete candidate. This reduces repeated path duplication by design; however direct overall **memory savings were not measured against a separate V12 process**, so do not claim verified byte-level improvement.
+4. Preserve V12's **atomic hard frontier limit**. Add finite wall-time (`maxWallMs`) and sampled heap use (`maxHeapBytes`) guards checked between expansions; when exhausted, stop and return a surviving-frontier admissible [LB,UB] interval. The heap byte check is a **sampled guard, not a guarantee against momentary GC/allocation peaks**.
+5. New `certifier.test.mjs`, `live.mjs` and `.github/workflows/tighter-bounds-v13.yml`.
+
+### Direct CI results
+- **9/9 new V13 tests and 8/8 existing V12 stress regressions passed**: total **17/17**. V13 tests compare against independent exact reference optima for 4–8 jobs, verify V13 bound never weaker than V12 at the root, independently verify reconstructed witnesses, compare V12-bound-mode results, check reproducible proofs, and deliberately censor both wall and heap search before any node expansion.
+- **Same nine independently seeded V12 12-, 14-, 16-job fixtures, same verified beam incumbents and the SAME standard budget of up to 2,200 node expansions and 2,400 frontier states.**
+- V12 aggregate certified gap `sum(UB-LB)` **5947**; V13 aggregate gap **5531**, improvement **416 (~6.99%)**. Eight of nine cases had a strictly smaller residual certified gap, one (12 variant 1 already optimal) unchanged, none worse.
+- V12 fully certified **1/9** and V13 **1/9** at the standard limit. Already-optimal 12 variant 1: V12 **948 expansions** vs V13 **563 expansions**, approximately **40.6% fewer**; independently feasible optimum **1685** retained.
+- V13 had fewer expansions in **2/9** cases; some unsolved cases expanded more before encountering the same 2,400-state frontier cap. No general runtime superiority is established.
+
+| Case | V12 certified LB | V13 certified LB | Verified incumbent UB | V13 expansion count | V13 proof status |
+|---|---:|---:|---:|---:|---|
+| 12 variant 0 | 553 | **565** | 1146 | 261 | frontier exhausted |
+| 12 variant 1 | 1685 | **1685** | 1685 | 563 | **certified optimal** |
+| 12 variant 2 | 261 | **264** | 934 | 355 | frontier exhausted |
+| 14 variant 0 | 730 | **787** | 1189 | 357 | frontier exhausted |
+| 14 variant 1 | 936 | **945** | 2080 | 512 | frontier exhausted |
+| 14 variant 2 | 801 | **820** | 1337 | 595 | frontier exhausted |
+| 16 variant 0 | 495 | **599** | 1464 | 193 | frontier exhausted |
+| 16 variant 1 | 297 | **440** | 1346 | 245 | frontier exhausted |
+| 16 variant 2 | 530 | **599** | 1054 | 427 | frontier exhausted |
+
+- Nine out of nine **tight 100-state frontier** experiments exited `frontier_budget` with valid admissible intervals; no silent state loss. Both deliberately `maxWallMs=0` and `maxHeapBytes=1` tests returned an independent-feasible upper bound and retained root lower bound with **zero expansions**, `wall_budget` and `heap_budget` respectively.
+- Maximum measured `heapUsed` in V13 standard nine runs was **32,256,752 bytes** (~30.8 MiB). This is NOT a full-process high-water RSS measure and not comparable to historical V12 independently. Timings are one-off observations.
+
+### Interpretation and next gate
+**Demonstrated:** the lower-bound improvement is sound in all targeted oracle/invariant tests and tightens certification on most tested large cases with zero provider spend. No invalid schedule was accepted; all incomplete cases remain formally uncertain and are NOT called optimal. The parent-pointer structure compresses repeated paths but does not remove the exponential search frontier; 2,400-frontier cap still dominates 8/9 proofs.
+
+**Next research gate, NOT launched:** attack the frontier size itself with a provably safe memory-bounded search strategy (e.g., iterative deepening A* / branch-and-bound with complete iteration accounting), profile standalone memory and wall time on independent CI jobs, and test whether exact certificates can be completed for additional 14–16-job instances without raising current memory cap. Preserve existing independent exact/feasibility oracles, deterministic clocks, serial worker and all research/production isolation.

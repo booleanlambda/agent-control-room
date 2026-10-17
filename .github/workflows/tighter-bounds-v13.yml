@@ -1,0 +1,44 @@
+name: AAU Tighter Certificate Bounds V13
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - experiment/certificate-stress-v12
+    paths:
+      - 'experiments/tighter-bounds-v13/**'
+      - '.github/workflows/tighter-bounds-v13.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  single-worker-certified-comparison:
+    runs-on: ubuntu-latest
+    timeout-minutes: 24
+    env:
+      AAU_V13_ISOLATED: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Verify forced-rank bound against independent exact oracle
+        run: |
+          node --check experiments/tighter-bounds-v13/certifier.mjs
+          node --check experiments/tighter-bounds-v13/live.mjs
+          node --test experiments/tighter-bounds-v13/certifier.test.mjs
+          node --test experiments/certificate-stress-v12/stress.test.mjs
+      - name: Compare V12 and V13 on identical stress fixtures and budgets
+        working-directory: experiments/tighter-bounds-v13
+        run: node live.mjs
+      - name: Preserve completed proof intervals or failure diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-tighter-bounds-v13-evidence
+          path: experiments/tighter-bounds-v13/v13-comparison-evidence.json
+          if-no-files-found: warn
