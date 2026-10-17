@@ -1,7 +1,8 @@
 // Authorized new inference campaign. Never resumes or resubmits the ambiguous
 // request from old run 39023455258. Each NEW phase is a unique one-shot POST.
 // Checkpoint before network; on ambiguity, no retries. Production isolated.
-import {readFileSync,writeFileSync,existsSync} from 'node:fs';
+import {readFileSync,writeFileSync,existsSync,openSync,fsyncSync,closeSync,renameSync,unlinkSync} from 'node:fs';
+import {simulateResponse} from './self-remediation-v2-fixtures.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {TASKS,check,grade,oracle} from './unseen-python-benchmarks.mjs';
 import {runIsolatedPython} from './unseen-python-sandbox.mjs';
@@ -11,14 +12,39 @@ const CHECKPOINT='self-remediation-v2-checkpoint.json';
 const REPORT='self-remediation-v2-report.json';
 const PRIOR='unseen-python-kimi-report.json';
 const KEY=String(process.env.MOONSHOT_API_KEY||'').trim();
+const FIXTURE=String(process.env.AAU_REMEDIATION_V2_FIXTURE||'');
+const mockRun=Boolean(FIXTURE);
+const FIXTURES=['success','bad_witness','weak_tests','truncated','transport_unknown'];
 const task=TASKS.find(x=>x.id==='assignment');
 const hash=x=>createHash('sha256').update(String(x||'')).digest('hex');
-const save=x=>writeFileSync(CHECKPOINT,JSON.stringify(x,null,2)+'\n');
+const save=x=>{
+ // Atomic checkpoint + fsync: a crashed worker cannot create a half-JSON
+ // reply journal that would otherwise trick a new worker into re-sending.
+ const tmp=CHECKPOINT+'.'+randomUUID()+'.tmp';
+ let fd;
+ try{
+  fd=openSync(tmp,'wx',0o600);
+  writeFileSync(fd,JSON.stringify(x,null,2)+'\n');
+  fsyncSync(fd);closeSync(fd);fd=undefined;
+  renameSync(tmp,CHECKPOINT);
+  const dirfd=openSync('.','r');
+  try{fsyncSync(dirfd)}finally{closeSync(dirfd)}
+ }finally{
+  if(fd!==undefined)closeSync(fd);
+  try{unlinkSync(tmp)}catch{}
+ }
+};
 const load=()=>JSON.parse(readFileSync(CHECKPOINT,'utf8'));
 const summarize=e=>String(e?.message||e||'unknown').slice(0,155);
 const MAX_CALLS=7,MAX_TOKENS=39000;
-if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_PYTHON_SANDBOX!=='yes'||
- process.env.AAU_REMEDIATION_V2_AUTHORIZED!=='yes')throw Error('NOT_AUTHORIZED');
+if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_PYTHON_SANDBOX!=='yes')
+ throw Error('DISPOSABLE_CI_REQUIRED');
+if(mockRun){
+ if(!FIXTURES.includes(FIXTURE)||KEY||process.env.AAU_REMEDIATION_V2_AUTHORIZED==='yes'||
+    process.env.AAU_NO_PROVIDER_NETWORK!=='yes')
+  throw Error('SIMULATOR_MUST_HAVE_NO_CREDENTIALS_OR_LIVE_AUTH');
+}else if(process.env.AAU_REMEDIATION_V2_AUTHORIZED!=='yes')
+ throw Error('PAID_INFERENCE_NOT_AUTHORIZED');
 const variations=()=>{
  const original=task.public;
  const edit=(name,fn)=>{const p=structuredClone(original);fn(p);return {name,input:p}};
@@ -56,6 +82,7 @@ async function seed(){
   feedback:'Original Kimi-generated DP returned optimal numeric cost 90, but an invalid [2,2,2,2,2,2,2] assignment violating machine capacity. Earlier attempted source repair did not preserve parent traceback. Investigate before a fresh code revision.',
   diagnosis:null,publicObservation:null,lastAssessment:null,
   liveInferencesFromOldRunRetried:0,
+  simulation:mockRun,scenario:mockRun?FIXTURE:null,
  };
  save(cp);
  console.log('REMEDIATION_V2_SEED='+JSON.stringify({verifiedHash:cp.originalHash,
@@ -220,7 +247,7 @@ async function oneCycle(){
  cp.status='request_in_flight';cp.requestNonce=randomUUID();
  save(cp); // durable intent BEFORE paid API request
  let response;
- try{response=await callMoonshot(cp);}
+ try{response=mockRun?simulateResponse(cp.phase,FIXTURE):await callMoonshot(cp);}
  catch(e){
   const telemetry=e.telemetry||null;
   // A successful HTTP response with finish_reason=length is NOT usable
@@ -240,14 +267,23 @@ async function oneCycle(){
  cp.pending={phase:cp.phase,answer:response.answer,
   meta:{usage:response.usage,http:response.http,elapsedMs:response.elapsedMs}};
  cp.status='answer_journaled';save(cp);
+ if(mockRun&&process.env.AAU_FIXTURE_STOP_AFTER_JOURNAL==='yes'){
+  console.log('REMEDIATION_FIXTURE_CRASH_BOUNDARY='+cp.phase);
+  return;
+ }
  await apply(cp);
 }
 function finish(){
  const cp=load(),success=cp.status==='passed';
  const report={experiment:cp.experiment,sourceRun:cp.sourceRun,
   oldAmbiguousRequestRetried:false,oldProviderBillingUnknown:true,
-  newBillableAttempts:cp.callsAttempted,providerReportedTokens:cp.providerReportedTokens,
-  model:'kimi-k2.6',thinking:'disabled',status:cp.status,success,
+  simulation:mockRun,scenario:mockRun?FIXTURE:null,
+  newBillableAttempts:mockRun?0:cp.callsAttempted,
+  syntheticResponseCount:mockRun?cp.callsAttempted:0,
+  providerReportedTokens:mockRun?0:cp.providerReportedTokens,
+  simulatedTokenUnits:mockRun?cp.providerReportedTokens:0,
+  model:mockRun?'synthetic_fixture_no_model':'kimi-k2.6',
+  thinking:mockRun?'not_applicable':'disabled',status:cp.status,success,
   baselineFailedSourceHash:cp.originalHash,originalBadOutput:cp.originalBadOutput,
   phaseHistory:cp.phaseHistory,latestCode:cp.latestCode,
   modelWrittenTests:cp.latestTests,assessments:cp.assessments,
@@ -259,7 +295,8 @@ function finish(){
  writeFileSync(REPORT,JSON.stringify(report,null,2)+'\n');
  console.log('REMEDIATION_V2_FINAL='+JSON.stringify({
   status:cp.status,success,attempts:cp.callsAttempted,
-  tokens:cp.providerReportedTokens,phases:cp.phaseHistory.map(x=>x.phase),
+  tokens:cp.providerReportedTokens,simulated:mockRun,
+  phases:cp.phaseHistory.map(x=>x.phase),
   publicPassed:report.visiblePassed,allSixHiddenPassed:report.allSixHiddenPassed,
   selfTests:report.ownTests}));
  if(!success)process.exitCode=2;
