@@ -14,7 +14,7 @@ const PRIOR='unseen-python-kimi-report.json';
 const KEY=String(process.env.MOONSHOT_API_KEY||'').trim();
 const FIXTURE=String(process.env.AAU_REMEDIATION_V2_FIXTURE||'');
 const mockRun=Boolean(FIXTURE);
-const FIXTURES=['success','bad_witness','weak_tests','truncated','transport_unknown'];
+const FIXTURES=['success','bad_witness','weak_tests','test_repair','truncated','transport_unknown'];
 const task=TASKS.find(x=>x.id==='assignment');
 const hash=x=>createHash('sha256').update(String(x||'')).digest('hex');
 const save=x=>{
@@ -299,7 +299,7 @@ async function oneCycle(){
  cp.status='request_in_flight';cp.requestNonce=randomUUID();
  save(cp); // durable intent BEFORE paid API request
  let response;
- try{response=mockRun?simulateResponse(cp.phase,FIXTURE):await callMoonshot(cp);}
+ try{response=mockRun?simulateResponse(cp.phase,FIXTURE,cp.callsAttempted):await callMoonshot(cp);}
  catch(e){
   const telemetry=e.telemetry||null;
   // A successful HTTP response with finish_reason=length is NOT usable
