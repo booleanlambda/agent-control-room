@@ -61,5 +61,5 @@ export function optimizeProposal(problem,seed,{maxEvaluations=1000,maxRounds=16,
   proposal:best,execution:current,trace,evaluations,rounds,
   evidence:{initialProposalHash:sha(seed),finalProposalHash:sha(best),
    finalLedgerHash:current.evidence.ledgerDigest,traceHash:sha(trace)},
-  truncated:evaluations>=maxEvaluations};
+  truncated:maxEvaluations>0&&maxRounds>0&&evaluations>=maxEvaluations};
 }
