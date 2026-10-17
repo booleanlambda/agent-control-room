@@ -1,0 +1,46 @@
+name: AAU Bounded Beam and Exact Optimization V9
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - experiment/scheduler-optimization-v8
+    paths:
+      - 'experiments/scheduler-beam-v9/**'
+      - '.github/workflows/scheduler-beam-v9.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  single-worker-beam-and-exact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 23
+    env:
+      AAU_V9_ISOLATED_LIVE: 'yes'
+      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Independent deterministic and randomized preflight gate
+        run: |
+          node --check experiments/scheduler-beam-v9/beam.mjs
+          node --check experiments/scheduler-beam-v9/live.mjs
+          node --test experiments/scheduler-beam-v9/beam.test.mjs
+          node --test experiments/scheduler-optimization-v8/optimizer.test.mjs
+          node --test experiments/deterministic-scheduler-v7/kernel.test.mjs
+      - name: Live two-call Kimi and fully attributed optimization comparison
+        working-directory: experiments/scheduler-beam-v9
+        run: node live.mjs
+      - name: Upload complete cost, provenance, model and search evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-beam-and-exact-v9-evidence
+          path: experiments/scheduler-beam-v9/beam-v9-evidence.json
+          if-no-files-found: warn
