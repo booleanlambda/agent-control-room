@@ -15,7 +15,7 @@ const KEY=String(process.env.MOONSHOT_API_KEY||'').trim();
 const FIXTURE=String(process.env.AAU_REMEDIATION_V2_FIXTURE||'');
 const mockRun=Boolean(FIXTURE);
 const testOnly=process.env.AAU_TESTS_ONLY_FROM_V5==='yes';
-const FIXTURES=['success','bad_witness','weak_tests','test_repair','truncated','transport_unknown'];
+const FIXTURES=['success','bad_witness','weak_tests','test_repair','test_only_repair','truncated','transport_unknown'];
 const task=TASKS.find(x=>x.id==='assignment');
 const hash=x=>createHash('sha256').update(String(x||'')).digest('hex');
 const save=x=>{
