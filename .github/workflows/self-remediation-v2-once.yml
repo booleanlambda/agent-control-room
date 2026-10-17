@@ -1,0 +1,71 @@
+name: AAU Authorized Kimi Phased Self-Remediation V2 Once
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/self-remediation-v2-once.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  autonomous-repair:
+    if: github.head_ref == 'experiment/recursive-tree-nemotron-v0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 28
+    env:
+      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+      AAU_PYTHON_SANDBOX: 'yes'
+      AAU_REMEDIATION_V2_AUTHORIZED: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Fetch the immutable original model-authored failed code
+        uses: actions/download-artifact@v4
+        with:
+          name: aau-kimi-unseen-python-cognition-audit
+          run-id: 38994095805
+          repository: booleanlambda/agent-control-room
+          github-token: ${{ github.token }}
+          path: experiments/recursion-tree-v0
+      - name: Preflight and contract checks
+        run: |
+          set -euo pipefail
+          node --check experiments/recursion-tree-v0/self-remediation-kimi-v2.mjs
+          node --test experiments/recursion-tree-v0/unseen-python-benchmarks.test.mjs
+          test -s experiments/recursion-tree-v0/unseen-python-kimi-report.json
+          test -n "${MOONSHOT_API_KEY:-}" || exit 3
+          docker pull python:3.12-alpine
+      - name: Reproduce exact old failure without making a model call
+        working-directory: experiments/recursion-tree-v0
+        run: node self-remediation-kimi-v2.mjs seed
+      - name: New authorized bounded independent diagnosis code and tests processes
+        working-directory: experiments/recursion-tree-v0
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 7); do
+            echo "NEW_AUTHORIZED_REMEDIATION_STEP=$i"
+            node self-remediation-kimi-v2.mjs cycle
+            state="$(node -p "require('./self-remediation-v2-checkpoint.json').status")"
+            echo "REMEDIATION_V2_STATUS=$state"
+            if [[ "$state" == "passed" || "$state" == "manual_hold" || "$state" == "stopped" || "$state" == "exhausted" ]]; then
+              break
+            fi
+            sleep 25
+          done
+      - name: Independently finalize objective traceback and model-written property tests
+        working-directory: experiments/recursion-tree-v0
+        run: node self-remediation-kimi-v2.mjs finish
+      - name: Preserve durable artifacts regardless of success
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-kimi-remediation-v2-authorized-evidence
+          path: |
+            experiments/recursion-tree-v0/self-remediation-v2-checkpoint.json
+            experiments/recursion-tree-v0/self-remediation-v2-report.json
+          if-no-files-found: ignore
