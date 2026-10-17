@@ -150,3 +150,95 @@ Other research-only hardening: checkpoints are atomically replaced after file `f
 Files: `self-remediation-v2-fixtures.mjs` (labeled synthetic responses), `self-remediation-v2-fixture-integration.mjs` (eight independent-process scenarios), `self-remediation-kimi-v2.mjs` (shared execution state machine), and `.github/workflows/experimental-self-remediation-fixture.yml` (permanent, secret-free CI).
 
 All changes remain research-only in draft PR #45; **no merge or deployment and no Silas wake**. The independent production `Systemic Runtime Tree CI` failure remains a separate blocker.
+
+
+## User-authorized LIVE Kimi K2.6 self-remediation — 17 October 2026
+
+**Live GitHub Actions:** [run 39025542225](https://github.com/booleanlambda/agent-control-room/actions/runs/39025542225).  
+**Immutable live audit artifact:** `aau-kimi-self-remediation-v3-live-evidence` (ID **12098172297**).
+
+**VERDICT: self-remediation FAILED under the experiment's bounded conditions.**
+This time it was a genuine cognition/code-generation exercise, not the
+prior 95-second timeout or 850-output-token truncation. A newly authorized
+campaign loaded the unchanged model-authored failed factory assignment code,
+verified its SHA and reproduced the invalid all-machine-2 witness. Every
+actual Moonshot request completed (HTTP 200, `finish_reason=stop`,
+thinking disabled). The one-shot workflow trigger was deleted immediately
+after dispatch; this campaign was not auto-retried.
+
+| Measured condition | Real result |
+|---|---|
+| Model | `kimi-k2.6`, thinking disabled |
+| Genuine model calls | **7** |
+| Provider-reported tokens | **19,112** |
+| Stage sequence | `diagnose, repair, tests, diagnose, repair, tests, diagnose` |
+| Submitted repaired Python programs | **2** |
+| New model-written property-test scripts | **2** |
+| Repaired Python execution | **Both exited `python_exit_1`** |
+| Passed original 7-job public witness | **No** |
+| Passed six sealed alternate instances | **No** |
+| Self-tests reject original invalid witness | Yes |
+| Self-tests accept validated repair | No repaired output to accept |
+| Remediation state | **`exhausted`**, strict failure, no retry |
+
+Kimi's first diagnosis blamed omission of explicit machine-2 capacity from
+the DP state; its first changed code expanded the state to track all three
+machine loads, but retained incorrectly scoped traceback/predecessor data,
+and Python exited before returning any result. A second diagnosis identified
+the traceback failure; the next version added job-indexed state but
+incorrectly saved/recovered predecessor information and still exited.
+On its seventh call, Kimi proposed another predecessor-pointer fix, but
+the maximum call count had already been reached; no third code revision
+was submitted or certified.
+
+**Precise failure attribution:**
+- **Cognitive/code failure:** the model did not deliver an executable,
+  globally optimal assignment with a valid witness within two revisions
+  and seven calls. This is a negative result for its bounded self-repair
+  ability on this particular persistent traceback defect.
+- **Harness feedback flaw exposed:** the experiment returned only generic
+  `python_exit_1` and not the bounded public Python stderr traceback.
+  Kimi had to hypothesize the specific crash instead of seeing the actual
+  interpreter error.
+- **Harness scheduling flaw exposed:** it spent a `tests` model call
+  after each repaired program had already failed public execution.
+  This reduced the useful repair budget and stranded the final diagnosis
+  without a remaining code-call slot.
+- Model-written property tests rejected the original wrong witness but
+  could not accept repaired outputs because both Python programs crashed.
+  Their `rejectsCostTamper=false` evidence is not proof the check is
+  intrinsically unsound: the harness had **no valid model output** to
+  mutate and pass to the test.
+- The exact optimum from the earlier public run (90) was not reproduced
+  by the new code because neither repaired program returned a result.
+
+### Post-mortem experimental harness improvements (NO new model calls)
+
+After auditing the immutable live artifact, the isolated research
+implementation `self-remediation-kimi-v2.mjs` was revised to:
+1. Return a bounded **public-only Python stderr traceback** on execution
+   failure; sealed hidden-case output and internal oracle data remain
+   unavailable to the model.
+2. Require a publicly **executable, feasible AND exact-optimal witness**
+   immediately after a repair. If it crashes, is infeasible or is
+   suboptimal, go directly to the next `diagnose` phase instead of
+   generating tests for already broken code.
+3. Continue keeping request state journaled before network submission,
+   using atomic `fsync` checkpoints, bounded attempts, and `manual_hold`
+   on ambiguous external provider outcomes.
+
+The changed workflow was tested with the **same fixture-driven V2 process**
+in disposable containers, including the negative original-code case:
+[CI run 39025947393](https://github.com/booleanlambda/agent-control-room/actions/runs/39025947393)
+**passed all eight expected cases**. The bad-witness fixture now traverses
+`diagnose → repair → diagnose` with **no wasted tests phase**,
+while complete synthetic positive fixtures and negative controls retain
+their expected outcomes. All fixture calls are simulated, not a new
+Kimi cognition demonstration.
+
+**Remaining work:** A later live model test could determine whether exact
+stderr feedback and phase triage improve real self-repair. It must be
+separately authorized as a new possibly billable experiment. Nothing
+in this report warrants deploying Kimi remediation into production:
+PR #45 remains draft/unmerged, Silas untouched, and the separate
+`Systemic Runtime Tree CI` failure remains open.
