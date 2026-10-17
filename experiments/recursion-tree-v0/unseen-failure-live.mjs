@@ -50,14 +50,19 @@ async function inference(messages,caseId,stage){
    method:'POST',signal:timer.signal,redirect:'manual',
    headers:{authorization:'Bearer '+key,'content-type':'application/json'},
    body:JSON.stringify({model:'kimi-k2.6',thinking:{type:'disabled'},
-    stream:false,temperature:0.55,response_format:{type:'json_object'},
+    stream:false,temperature:0.6,response_format:{type:'json_object'},
     max_tokens:stage==='tests'?3700:stage==='diagnose'?2400:5200,messages})});
   latest.http=response.status;
   const p=await response.json().catch(()=>({}));
   usage=Number.isSafeInteger(p.usage?.total_tokens)?p.usage.total_tokens:null;
   if(usage!==null)state.providerReportedTokens+=usage;
   latest.usage=usage;latest.finish=p.choices?.[0]?.finish_reason||null;
-  if(!response.ok)throw Error('provider_http_'+response.status);
+  if(!response.ok){
+    latest.providerErrorType=String(p?.error?.type||'').slice(0,90);
+    latest.providerErrorCode=String(p?.error?.code||'').slice(0,90);
+    latest.providerErrorMessage=String(p?.error?.message||'').slice(0,180);
+    throw Error('provider_http_'+response.status);
+  }
   if(latest.finish!=='stop')throw Error('incomplete_'+latest.finish);
   if(p.choices?.[0]?.message?.reasoning_content)throw Error('thinking_off_not_honored');
   const content=p.choices?.[0]?.message?.content;
