@@ -210,12 +210,21 @@ async function assess(cp){
   success:Boolean(p.passed&&other.every(x=>x.pass)&&Object.values(checks).every(Boolean))};
  cp.assessments.push(record);
  cp.lastAssessment=record;
+ const solverAccepted=record.public.pass&&other.every(x=>x.pass);
+ // Distinguish successful algorithm repair from a defective self-written
+ // property test. Do not waste an additional diagnosis/solver revision when
+ // only the submitted test script rejects a verified-correct witness.
+ const nextPhase=record.success?'done':solverAccepted?'tests':'diagnose';
  cp.feedback=JSON.stringify({visibleOutput:record.public.result,
   publicPass:record.public.pass,publicFailure:record.public.failureReason,
+  publicVerifiedGloballyOptimal:record.public.pass,
   modelTests:checks,hiddenResults:'withheld',
-  next:'Repair the root cause, not just the objective number.'}).slice(0,1600);
+  fixScope:solverAccepted?'self_written_tests_only':'repaired_solver',
+  next:solverAccepted?
+   'Your current Python solver passed independent public correctness and sealed variants. Keep it unchanged. Your self-written test script is defective: it must accept THIS verified optimal public assignment, reject the original all-machine-2 invalid witness, and reject a falsified cost. Write a NEW generic property test; do not hardcode an invented smaller optimum.':
+   'Repair the root cause of the solver failure, not merely its claimed objective.'}).slice(0,2200);
  cp.publicObservation=record.public.result;
- cp.phase=record.success?'done':'diagnose';
+ cp.phase=nextPhase;
  cp.status=record.success?'passed':'ready';
  return record;
 }
