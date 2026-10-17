@@ -43,7 +43,7 @@ async function ask(label,payload,cap){
   const tokens=packet?.usage?.total_tokens;
   if(Number.isSafeInteger(tokens)&&tokens>=0){report.modelTokens+=tokens;entry.reportedTokens=tokens;}
   const choice=packet?.choices?.[0];entry.finish=choice?.finish_reason??null;
-  if(!response.ok){entry.status='provider_rejected';entry.reason=response.status===429?'rate_limit_or_concurrency':'http_'+response.status;report.state='manual_hold';save();return null;}
+  if(!response.ok){entry.status='provider_rejected';entry.reason=response.status===429?'rate_limit_or_concurrency':'http_'+response.status;entry.providerError={type:String(packet?.error?.type??'').slice(0,80),code:String(packet?.error?.code??'').slice(0,80),message:String(packet?.error?.message??'').slice(0,500)};report.state='manual_hold';save();return null;}
   if(entry.finish!=='stop'||choice?.message?.reasoning_content){entry.status='incomplete';report.state='manual_hold';save();return null;}
   let result;try{result=JSON.parse(choice?.message?.content??'')}catch{entry.status='invalid_json';report.state='manual_hold';save();return null;}
   if(!result||result.action!=='propose'||!Array.isArray(result.jobs)){entry.status='bad_contract';report.state='manual_hold';save();return null;}
