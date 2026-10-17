@@ -173,7 +173,9 @@ async function assess(cp){
   rejectsCostTamper:Boolean(mutant?.ok&&mutant.result?.passed===false),
  };
  const record={public:{executed:pub.ok,result:pub.ok?pub.result:null,
-    error:pub.error||null,feasible:Boolean(p.observed?.ok),
+    error:pub.error||null,
+    pythonStderr:pub.ok?null:String(pub.stderr||'').slice(0,1400),
+    feasible:Boolean(p.observed?.ok),
     correctObjective:pub.ok?pub.result?.cost===oracle(task.id,task.public).cost:false,
     pass:Boolean(p.passed),failureReason:p.observed?.reason||null},
   hiddenChecks:other,tests:checks,
@@ -210,13 +212,25 @@ async function apply(cp){
   cp.latestCode=code;
   // Public validation is not the final acceptance gate; hidden remains sealed.
   const e=await runIsolatedPython(code,task.public);
-  const g=e.ok?check(task.id,task.public,e.result):
-   {ok:false,reason:e.error};
+  // Do not waste a model-authored test phase on Python that has already
+  // crashed, or on an infeasible/suboptimal public witness. Return only
+  // PUBLIC execution evidence, including bounded stderr traceback.
+  const verified=e.ok?grade(task.id,task.public,e.result):
+   {passed:false,observed:{ok:false,reason:e.error}};
+  const publicPass=Boolean(verified.passed);
   cp.publicObservation=e.ok?e.result:null;
-  entry.publicPassed=Boolean(g.ok);
-  cp.feedback=JSON.stringify({publicExecution:e.ok,publicOutput:e.result||null,
-    feasible:g.ok,diagnostic:g.reason||null,hiddenNotDisclosed:true}).slice(0,1250);
-  cp.phase='tests';cp.status='ready';
+  entry.publicPassed=publicPass;
+  cp.feedback=JSON.stringify({publicExecution:e.ok,
+    publicOutput:e.ok?e.result:null,
+    publicFeasible:verified.observed?.ok===true,
+    publicExactOptimal:publicPass,
+    publicError:e.error||null,
+    pythonStderr:e.ok?null:String(e.stderr||'').slice(0,1400),
+    diagnostic:verified.observed?.reason||null,
+    hiddenNotDisclosed:true,
+    next:publicPass?'Write independent property tests.':
+      'Diagnose the observed public failure; do not write tests for broken code.'}).slice(0,2500);
+  cp.phase=publicPass?'tests':'diagnose';cp.status='ready';
  }else if(phase==='tests'){
   cp.latestTests=String(answer.python||'');
   entry.codeHash=hash(cp.latestTests);
