@@ -305,3 +305,43 @@ This demonstrates agent-guided candidate refinement and deterministic, independe
 **Not established:** robustness on unseen task families, scaling beyond eight jobs, model-led optimization gain over a baseline, reliable runtime/cost comparisons, transfer of static optimized order to changed timing conditions, or production readiness.
 
 **Recommended next research gate (NOT launched):** apply the same trusted kernel and bounded beam separately to each **new problem instance** (not one reused public plan), benchmark 9-12 job scaling with strictly enforced compute ceilings, and measure heuristic gap versus independent exact/lower bounds when available. Further model studies should test whether Kimi contributes useful high-level decomposition or diversification rather than scheduling arithmetic. Keep one worker, finite budgets, hash receipts and no production changes.
+
+---
+
+## Experiment V10 — Independently re-optimize every instance; bounded 9–12 job scaling (2026-10-17)
+
+**Status: isolated research experiment PASS.** New branch `experiment/per-instance-scaling-v10`, draft PR [#57](https://github.com/booleanlambda/agent-control-room/pull/57) — NO MERGE or production/Silas/Render/Supabase/queue changes.
+
+- Verified successful one-worker GitHub Actions run: https://github.com/booleanlambda/agent-control-room/actions/runs/39063906570.
+- Permanent Actions evidence: https://github.com/booleanlambda/agent-control-room/actions/runs/39063906570/artifacts/12112760726 (`aau-per-instance-scaling-v10-evidence`).
+- New files: `experiments/per-instance-scaling-v10/bench.mjs` (deterministic generation + independent admissible bound + fresh topological seed heuristics + beam for each problem), `bench.test.mjs` (11 new tests), `live.mjs` (live benchmark and Kimi 10-job seed), and `.github/workflows/per-instance-scaling-v10.yml`.
+- **43/43 deterministic tests passed**: new V10 11/11, V9 9/9, V8 10/10, V7 kernel 13/13. Includes randomized small exact cross-checks, independent feasibility checks and fixed search budgets.
+- All six cases used **a separately generated set of topologically valid, machine-eligible seeds**, and an independent **V9 beam search capped at 1,400 evaluations per instance**, width 12, depth at most 9. It does NOT reuse the public-optimized order for other timing variants.
+
+### Verified costs (lower is better)
+| Scenario | Jobs | Fresh initial seed cost | Independent per-instance beam cost | Independently proven exact optimum | Provable lower bound | Upper bound on true optimality gap |
+|---|---:|---:|---:|---:|---:|---:|
+| Seven-job original public | 7 | 533 | **415** | **415** | 10 | **0 by exact proof** |
+| Seven-job hidden variant 1 | 7 | 546 | **387** | **387** | 36 | **0 by exact proof** |
+| Seven-job hidden variant 2 | 7 | 630 | **582** | **582** | 70 | **0 by exact proof** |
+| New nine-job case | 9 | 645 | **499** | not established | 200 | **<=299** |
+| New ten-job case | 10 | 488 | **420** | not established | 157 | **<=263** |
+| New twelve-job case | 12 | 848 | **706** | not established | 73 | **<=633** |
+
+All six results were verified independently feasible and obeyed machine setup, predecessor completion, maintenance, machine eligibility, and cost calculations. **All six beam runs used the entire 1,400-evaluation allowance.** The bound for >8 jobs is admissible: optimistic earliest release/parent finish ignoring setup, congestion and downtime, plus minimum unavoidable machine activation using type coverage. The bounds are conservative/loose: they do NOT establish that 499/420/706 are optimal. For seven-job cases external exact oracle certifies optimality, overriding much weaker relaxation-bound gaps.
+
+### Genuine one-worker Kimi integration
+- Kimi K2.6 thinking OFF, one actual serial provider call, **666 provider-reported tokens**, HTTP 200 `finish_reason=stop`. No retries/concurrency.
+- It saw ONLY the new ten-job problem and supplied a complete, machine-eligible, topological assignment without timestamps/code. Its legal assignment cost **516**, worse than the best deterministic initial seed **488**.
+- Adding Kimi's assignment as a V9 beam seed reached **420** at the same 1,400-evaluation budget. Beam *without* Kimi also reached **420**. **Incremental model-attributable gain: 0**. The difference from the Kimi seed 516 to 420 (96) belongs to the deterministic engine.
+- The 9- and 12-job problems were not shown to Kimi. Their plans were independently optimized by the deterministic system. Do not misreport these as model solving hidden tasks.
+- Verified root digest from full Actions artifact: `f864a9d407072b581fbb46a89bec303fda17f91049124a84ba6937776a8b2934`.
+
+### Research conclusion and next decision
+- The prior V9 hidden generalization weakness **was partly an evaluation protocol error**: applying the public plan unchanged to altered instances caused large avoidable gaps. Re-optimizing each input independently yields exact optima for ALL THREE seven-job cases.
+- The deterministic kernel and beam produce verified-feasible improvements on 9, 10 and 12 jobs without any model-derived clock arithmetic. This is a bounded scaling feasibility demonstration, NOT evidence of statistically reliable optimality or real-world performance.
+- The admissible lower bounds for large instances are weak; a tighter independent bound or bounded exact solver is needed for meaningful optimality certification at >=9 jobs. 1,400 evaluations were exhausted for each.
+- Kimi's single 10-job trial supplied a valid but worse-than-baseline plan and did not boost beam search. Its best role may be choosing strategy/diversity/which exact tools to invoke, not generating schedules.
+- Timings recorded in artifact are one CI realization and should not be presented as stable performance comparisons.
+
+**Next experimental gate NOT started:** strengthen lower bounds through disjoint chains/machine workload relaxations or constraint programming, profile search with explicit time/evaluation ceilings on several seeded 9–12 job instances, and evaluate proof-backed anytime optimality gap vs computed feasible incumbents. Preserve hidden separation, serial model calls and production isolation.
