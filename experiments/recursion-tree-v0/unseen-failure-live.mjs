@@ -27,11 +27,16 @@ const state={experiment:'AAU_KIMI_UNFAMILIAR_FAILURE_SELF_REPAIR_V1',
  noRetryOnUnknownRequest:true,
  tasks:[],providerTrace:[],campaignStatus:'started'};
 function persist(){writeFileSync(filename,JSON.stringify(state,null,2)+'\n')}
+let nextProviderAt=Date.now();
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 persist();
 function short(e){return String(e?.message||e||'unknown').slice(0,160)}
 async function inference(messages,caseId,stage){
  if(state.genuineProviderCalls>=MAX_TOTAL_CALLS)throw Error('global_call_ceiling');
  if(state.providerReportedTokens>=MAX_TOKENS)throw Error('global_token_ceiling');
+ const pause=Math.max(0,nextProviderAt-Date.now());
+ if(pause)await sleep(pause);
+ nextProviderAt=Date.now()+24000; // Moonshot account 3 RPM pacing
  const requestId=randomUUID();
  state.providerTrace.push({requestId,caseId,stage,status:'request_in_flight',
   startedAt:new Date().toISOString()});
