@@ -486,3 +486,15 @@ Do not credit no-cost synthetic test outputs as cognition.
 **Release gate:** PR #45 stays **draft and unmerged**. No production wake,
 Silas remediation, deployment or data writes occurred. The separate
 production `Systemic Runtime Tree CI` remains failing.
+
+
+## Unfamiliar-failure generalization: preflight passed, live request blocked (October 17, 2026)
+
+Independent source-integrity + no-network Docker preflight:
+[run 39040940114](https://github.com/booleanlambda/agent-control-room/actions/runs/39040940114), **PASSED**. Three original Kimi-authored Python solvers (factory assignment, constrained routing, and integer number theory) passed public and held-out reference checks; three *explicitly injected* mutations each caused a visible public failure. The injected patch locations and oracle solutions are not included in model prompts.
+
+The first newly authorized live comparison [run 39041003283](https://github.com/booleanlambda/agent-control-room/actions/runs/39041003283) returned provider HTTP **400** before any model-generated code due to the new non-thinking runner's sampling configuration (`temperature=0.4`). The runner was adjusted to `temperature=0.6`, consistent with the previous successful Kimi non-thinking calls.
+
+The second authorized live comparison [run 39041196301](https://github.com/booleanlambda/agent-control-room/actions/runs/39041196301) was rejected with HTTP **429** before model inference; immutable artifact `aau-kimi-unfamiliar-faults-fixed-live-evidence` (ID `12104485050`) records provider error code `rate_limit_reached_error` and message **`request reached max organization concurrency: 1`**. The request was rejected in ~453ms. The artifact records **one attempted API call, no accepted model response, no repaired program, no provider-reported token usage**, and state `manual_hold`. No automatic retry occurred; neither assignment nor routing nor number theory was cognitively scored. Do not characterize this result as an unsuccessful repair by Kimi.
+
+Next evaluation is blocked by provider concurrency/admission, not math quality. Do not launch another potentially billed test merely to bypass a transient 429 without a new user request. Keep draft PR #45 unmerged, Silas unchanged, and production Systemic Runtime Tree CI separately blocked.
