@@ -2,7 +2,7 @@ name: AAU Serial Scheduler Optimization V8
 
 on:
   pull_request:
-    types: [opened]
+    types: [opened, synchronize]
     branches:
       - experiment/deterministic-scheduler-v7
     paths:
