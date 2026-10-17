@@ -57,7 +57,7 @@ export function scheduleCandidate(problem,proposal){
  let cost=0;
  for(let index=0;index<proposal.jobs.length;index++){
   const e=proposal.jobs[index];
-  if(!e||typeof e.id!=='string'||typeof e.machine!=='string')return fail('invalid_proposal_shape',{index});
+  if(!e||typeof e.id!=='string'||typeof e.machine!=='string'||Object.keys(e).some(k=>k!=='id'&&k!=='machine'))return fail('invalid_proposal_shape',{index});
   const job=jobs.get(e.id),machine=machines.get(e.machine);
   if(!job)return fail('unknown_job',{index,id:e.id});
   if(!machine)return fail('unknown_machine',{index,id:e.id,machine:e.machine});
