@@ -1,0 +1,51 @@
+name: AAU V22 RabbitMQ Parallel Proof Benchmark
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - experiment/broker-neon-cross-runner-v21
+    paths:
+      - 'experiments/rabbitmq-parallel-v22/**'
+      - '.github/workflows/rabbitmq-parallel-v22.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  isolated-one-vs-two-workers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      AAU_V22_RESEARCH: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Exact oracle, independent V13 feasibility and Neon fenced-ledger preflight
+        run: |
+          node --check experiments/rabbitmq-parallel-v22/store.mjs
+          node --check experiments/rabbitmq-parallel-v22/worker.mjs
+          node --check experiments/rabbitmq-parallel-v22/live.mjs
+          node --test experiments/rabbitmq-parallel-v22/parallel.test.mjs
+          node --test experiments/tighter-bounds-v13/certifier.test.mjs
+      - name: Install pinned RabbitMQ and PostgreSQL clients without lifecycle scripts
+        run: npm install --no-save --ignore-scripts amqplib@0.10.9 pg@8.16.3
+      - name: Benchmark one worker then two concurrent workers on identical nine V13 cases
+        working-directory: experiments/rabbitmq-parallel-v22
+        env:
+          AMQP_URL: ${{ secrets.AMQP }}
+          NEON_V19_DATABASE_URL: ${{ secrets.NEON_V19_DATABASE_URL }}
+        run: node live.mjs
+      - name: Preserve evidence on all outcomes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-rabbitmq-parallel-v22-evidence
+          path: experiments/rabbitmq-parallel-v22/parallel-v22-evidence.json
+          if-no-files-found: warn
