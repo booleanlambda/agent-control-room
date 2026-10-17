@@ -1,0 +1,3 @@
+AAU_SINGLE_THREAD_LOGISTICS_V1
+One isolated worker; up to four strictly sequential Moonshot model requests.
+No production services, queues, or Silas wakes. No automatic provider retries.
