@@ -85,6 +85,34 @@ async function seed(){
   liveInferencesFromOldRunRetried:0,
   simulation:mockRun,scenario:mockRun?FIXTURE:null,
  };
+ if(process.env.AAU_REPAIR_START_WITH_V3==='yes'){
+  // Opt-in alternative for the NEXT separately authorized trial:
+  // start from the LAST genuine Kimi-generated crashing program, not from
+  // the original cost-only bug. No human-written source is substituted.
+  const prior=JSON.parse(readFileSync('prior-v3/self-remediation-v2-checkpoint.json','utf8'));
+  const knownHash='8ac998fcba84990297a65e6c34cdaf81c8e4d1943a19d25e047e32cd54d11b4d';
+  if(prior.status!=='exhausted'||prior.sourceRun!==38994095805||
+   hash(prior.latestCode)!==knownHash||
+   prior.phaseHistory?.filter(x=>x.phase==='repair').length!==2)
+   throw Error('PREVIOUS_LIVE_FAILURE_PROVENANCE_INVALID');
+  const crashed=await runIsolatedPython(prior.latestCode,task.public);
+  if(crashed.ok||crashed.error!=='python_exit_1'||
+     !String(crashed.stderr||'').includes('Traceback'))
+   throw Error('PREVIOUS_LIVE_FAILURE_DID_NOT_REPRODUCE');
+  cp.latestCode=prior.latestCode;
+  cp.phase='repair';
+  cp.diagnosis={diagnosis:String(prior.phaseHistory.at(-1).summary||'').slice(0,900),
+   hypothesis:'Use actual public interpreter error and verify each predecessor chain in a complete executable repair.'};
+  cp.feedback=JSON.stringify({source:'genuine_prior_kimi_generated_code',
+   sourceRun:39025542225,failedSourceHash:knownHash,
+   publicError:crashed.error,
+   pythonStderr:String(crashed.stderr).slice(0,1600),
+   note:'The code crashes on the known public input. Repair the entire Python program. Do not make claims about withheld cases.'}).slice(0,2500);
+  cp.seedProvenance={mode:'direct_repair_with_real_stderr',
+   sourceRun:39025542225,sourceHash:knownHash,
+   actualPublicCrashReproduced:true,
+   stdoutWasAccepted:false};
+ }
  save(cp);
  console.log('REMEDIATION_V2_SEED='+JSON.stringify({verifiedHash:cp.originalHash,
   exactOriginalFailureReproduced:true,phase:cp.phase,oldUncertainCallResubmitted:false}));
@@ -229,7 +257,7 @@ async function apply(cp){
     diagnostic:verified.observed?.reason||null,
     hiddenNotDisclosed:true,
     next:publicPass?'Write independent property tests.':
-      'Diagnose the observed public failure; do not write tests for broken code.'}).slice(0,2500);
+      'Use the Python stderr to diagnose the execution error, then repair the full source.'}).slice(0,2500);
   cp.phase=publicPass?'tests':'diagnose';cp.status='ready';
  }else if(phase==='tests'){
   cp.latestTests=String(answer.python||'');
