@@ -1,0 +1,47 @@
+name: AAU Per-Instance Scaling V10
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - experiment/scheduler-beam-v9
+    paths:
+      - 'experiments/per-instance-scaling-v10/**'
+      - '.github/workflows/per-instance-scaling-v10.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  one-worker-independent-scaling:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      AAU_V10_RESEARCH: 'yes'
+      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Zero-cost preflight lower bounds exact oracles and scaling invariants
+        run: |
+          node --check experiments/per-instance-scaling-v10/bench.mjs
+          node --check experiments/per-instance-scaling-v10/live.mjs
+          node --test experiments/per-instance-scaling-v10/bench.test.mjs
+          node --test experiments/scheduler-beam-v9/beam.test.mjs
+          node --test experiments/scheduler-optimization-v8/optimizer.test.mjs
+          node --test experiments/deterministic-scheduler-v7/kernel.test.mjs
+      - name: Benchmark six independently reoptimized cases and one single-thread Kimi ten-job proposal
+        working-directory: experiments/per-instance-scaling-v10
+        run: node live.mjs
+      - name: Preserve benchmark scaling gap and model attribution on every outcome
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-per-instance-scaling-v10-evidence
+          path: experiments/per-instance-scaling-v10/per-instance-v10-evidence.json
+          if-no-files-found: warn
