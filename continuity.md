@@ -173,3 +173,23 @@ Model had to find the least-cost path through a cyclic directed graph respecting
 - The earlier Experiment 5 initial run ended in `manual_hold` after 2 calls and 10,983 tokens because `finish_reason=length` on an 8,000-max-output coding request, with no solver returned. Its results are in the preceding continuity section. Across v5 plus v5b, two distinct isolated live runs used 7 calls and 30,295 provider-reported tokens; do NOT present this as one uninterrupted single run.
 - **Next action NOT started:** enhance deterministic public failure feedback to include the precise invalid job, required predecessor finish, actual work start, setup reservation and machine completion. Do not expose hidden oracle feedback. Add bounded unit tests proving the public diagnostic counterexample. Then run a separately authorized, single-thread experiment with a finite diagnosis/repair budget. Do not increase worker count or merge these drafts.
 
+
+---
+
+## Experiment 6 — Precise diagnostic recovery of real model-authored logic error (2026-10-17)
+
+**Result: FAILED to complete remediation, but diagnostics independently verified.** Single-worker isolated draft PR [#53](https://github.com/booleanlambda/agent-control-room/pull/53); branch `experiment/precise-diagnostics-v6`. **Do not merge or deploy.**
+
+- GitHub Actions run: https://github.com/booleanlambda/agent-control-room/actions/runs/39060149714
+- Preserved evidence: https://github.com/booleanlambda/agent-control-room/actions/runs/39060149714/artifacts/12110094862 (`aau-precise-diagnostics-v6-evidence`).
+- Reference source: Kimi's ACTUAL last executable-but-invalid Python from Experiment v5b run `39059227910`. Downloaded as immutable Actions artifact and checked source SHA256 plus identical public/hidden input SHA256 before model calls. No synthetic defect injected. This is a **new manually initiated recovery test**, not the original uninterrupted v5b execution.
+- New verifier files: `experiments/precise-diagnostics-v6/{benchmark.mjs,benchmark.test.mjs,recover.mjs}`; workflow `.github/workflows/precise-diagnostics-v6.yml`.
+- **13/13 deterministic regression tests passed**, including exact parent finish, wrong start, machine setup overlap, release, maintenance and valid held-out oracle witnesses. Public diagnostic outputs first invalid job + `requiredPredecessorFinish`, `predecessors` IDs and finish times, `previousMachineFinish`, `actualSetupStart`, `setupDuration`, `minimumWorkStart`, and violated constraint types. Hidden oracle data/answers were never shown to model.
+- **Original logical error reproduced:** model's prior schedule was executable, but `J2` on `M1` started at **1** when its predecessor `J1` on `M0` did not finish until **15**. Exact verifier rejected `before_predecessor_finish`.
+- Kimi K2.6 thinking disabled made **3 sequential real calls**: one diagnosis and two model-authored whole-code repair attempts; **13,576 provider-reported tokens**. Model correctly diagnosed missing parent-finish tracking across different machines.
+- **Repair 1:** Python executed, returned schedule, but violated machine/setup timing: `J1` assigned `M1`, work start **0**, initial machine type `c` vs job type `b`, required setup **3** and prior machine clock **0**, so setup would start **-3**; minimum legal work start **3**. Public grade rejected.
+- **Repair 2:** Same public failure remained: `J1` on `M1` at start **0** with setup duration **3** and setup beginning **-3**. Inspection of both versions shows their setup-search input `earliestWorkStart - setupDuration` could become negative. The initial recurrence allowed time before zero; a proper fix would bound setup start by machine availability/clock (>=0) before searching maintenance windows.
+- State: `repair_failed_within_two_attempts`. **0/2 hidden cases graded**, **no root proof**, no acceptance of invalid output. The verifier passed its invariants and successfully rejected Kimi's model-authored invalid results.
+- Distinguish model diagnosis correctness from model repair success. Three calls completed without provider uncertainty. Combined preceding v5 and v5b should NOT be merged into one lifecycle; keep run identifiers separate.
+
+**Next gate (NOT started):** independently test the verifier's `machine_or_setup_overlap` counterexample and verify start-of-horizon bound against a locally controlled wrong schedule. If further model trials are authorized, ensure public feedback includes the precise *current* failing job after each repair, without exposing hidden reference answers. Do not silently raise the two-repair cap or retry uncertain paid calls. Keep one worker; no deployment or Silas wake.
