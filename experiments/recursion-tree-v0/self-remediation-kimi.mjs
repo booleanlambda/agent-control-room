@@ -188,6 +188,7 @@ Do not fabricate tests or correctness.`},
 }
 async function cycle(){
  const cp=load();
+ if(cp.status==='answer_journaled'){await applyAnswer(cp);return;}
  if(cp.status==='passed'||cp.status==='stopped'||cp.status==='manual_hold'||
     cp.status==='exhausted'){
    console.log('SELF_REMEDIATION_NOOP='+cp.status);return;
@@ -214,13 +215,20 @@ async function cycle(){
   http:reply.status,finish:reply.finish,modelLatencyMs:reply.elapsedMs,
   codeHash:null,code:null,selfTestsSource:null,assessment:null};
  // Journal the returned answer BEFORE running Python. If execution crashes,
- // the next separate process sees the accepted answer and may reconcile.
+ // the next separate process safely replays it WITHOUT another model call.
  cp.pendingAnswer={...entry,code:String(answer.python||''),
    selfTestsSource:String(answer.self_tests||'')};
  cp.status='answer_journaled';save(cp);
+ await applyAnswer(cp);
+}
+async function applyAnswer(cp){
+ if(cp.status!=='answer_journaled'||!cp.pendingAnswer)
+  throw Error('NO_DURABLE_ANSWER_TO_REPLAY');
+ const pending=cp.pendingAnswer,number=pending.cycle,action=pending.action;
+ const entry={...pending,assessment:null};
  if(action==='repair'){
-  const code=cp.pendingAnswer.code,tests=cp.pendingAnswer.selfTestsSource;
-  entry.codeHash=sha(code);entry.code=code;entry.selfTestsSource=tests;
+  const code=entry.code,tests=entry.selfTestsSource;
+  entry.codeHash=sha(code);
   const assessment=await runCandidate(code,tests,cp.originalBadOutput);
   entry.assessment=assessment;
   cp.lastCode=code;cp.lastTests=tests;
@@ -232,14 +240,13 @@ async function cycle(){
       note:'Hidden tests were independently run but their details are sealed.'}).slice(0,1600):
     'Python execution failed: '+assessment.public.error+
       '. Fix source or executor assumptions; hidden details remain sealed.';
-  if(assessment.passed)cp.status='passed';
-  else cp.status='remediating';
+  cp.status=assessment.passed?'passed':'remediating';
  }else if(action==='diagnose'){
   cp.currentFailureFeedback='Diagnostic hypothesis recorded: '+entry.hypothesis+
    '. Supply executable repaired Python and property checks next.';
   cp.status='remediating';
  }else if(action==='stop'){
-  cp.status='stopped';cp.stopReason=String(answer.reason||'model_declined').slice(0,600);
+  cp.status='stopped';cp.stopReason=String(pending.reason||'model_declined').slice(0,600);
  }else{
   cp.currentFailureFeedback='Invalid action; must diagnose, repair, or stop.';
   cp.status='remediating';
@@ -255,6 +262,7 @@ async function cycle(){
   hiddenPass:entry.assessment?.heldOut?.passedAll||false,
   selfTests:entry.assessment?.selfTests}));
 }
+
 function finalize(){
  const cp=load(),last=cp.cycles.at(-1),passed=cp.status==='passed';
  const summary={experiment:cp.experiment,fromRun:cp.sourceActionsRun,
