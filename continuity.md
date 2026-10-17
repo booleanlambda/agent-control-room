@@ -244,3 +244,35 @@ Model had to find the least-cost path through a cyclic directed graph respecting
 ### Interpretation / next gate
 **Verified isolated resolution of recurring scheduling timing errors:** runtime owns all arithmetic/time constraints and independent verifier confirms feasibility. No amount of agent reasoning can submit an illegal start timestamp for acceptance under this interface.
 **Not yet production-ready**: tested only one benchmark family with small (7-job) problems, and model optimization remained suboptimal (public +97, hidden2 +108). Larger cases need bounded optimizer/search with measurable quality/gap, adversarial testing and additional guardrails. Next stage, if authorized: add an explicit independent optimization service for bounded small problems or heuristic exploration for larger ones; preserve agent autonomy in choice of strategies, but never delegate clock correctness to LLM. Test more problem families and failure modes before considering 2-worker concurrency or merging into AAU.
+
+---
+
+## Experiment V8 — Kimi proposal refinement vs deterministic optimizer (2026-10-17)
+
+**Research branch:** `experiment/scheduler-optimization-v8`; draft PR https://github.com/booleanlambda/agent-control-room/pull/55. NO MERGE, NO AAU/Silas/production changes.
+**Verified final GitHub Actions run:** https://github.com/booleanlambda/agent-control-room/actions/runs/39061989692 (one worker, conclusion success).
+**Full evidence artifact:** https://github.com/booleanlambda/agent-control-room/actions/runs/39061989692/artifacts/12112315096, `aau-serial-scheduler-optimization-v8-evidence`.
+**Implementation:** `experiments/scheduler-optimization-v8/optimizer.mjs`, `optimizer.test.mjs`, `live.mjs` and `.github/workflows/scheduler-optimization-v8.yml`. Existing v7 scheduling kernel and independent v6 exhaustive oracle unchanged.
+
+### Measured execution
+- Mandatory preflight: **10/10 optimizer tests** and **13/13 trusted scheduling-kernel tests** passed, including 16 randomized small-graph optimizer tests plus original v7 randomized validation. Independent exact oracle baseline: public **415**, hidden 1 **387**, hidden 2 **582**.
+- One live Kimi K2.6 thinking-off worker; **2 sequential actual model calls, 1,433 provider-reported tokens**. Both returned complete structured 7-job candidate order/machine assignments with no model-authored timestamps or executable code.
+- Model's own first proposal: **public cost 630**, independently feasible.
+- Model's own revised proposal using public feedback: **public cost 533**, independently feasible. Kimi improved its own suggestion by **97 units**, but did **NOT** beat v7 historical baseline **512** (21 units worse).
+- The experimental runtime explicitly refused to attribute deterministic gain to Kimi; chose **historical 512-cost baseline** as trusted optimizer seed.
+- Deterministic bounded relocation/reassignment search inspected **78 proposals**, found **one strictly improving round**, and produced public cost **459**. **53-unit / ~10.35%** gain attributable solely to deterministic optimizer, **44-unit gap** above exact 415 optimum.
+- Same optimized machine assignments/order re-evaluated on withheld inputs (NOT seen by Kimi): **hidden1 cost 437 vs optimum 387**, **hidden2 cost 705 vs optimum 582**, both independent verifier **feasible/valid**, neither optimal.
+- Neither model proposal nor deterministic improver produced an illegal timestamp, negative setup start or missed precedence/maintenance check; verified deterministic root digest: `2d8e975fc723d3e7507b4d7f5f0dba20a3fb603add284f610c457c9e46c6d4ac`.
+- Model-attributable improvement from historical baseline was **-21**, deterministic optimization gain **+53**. Do not collapse these or call Kimi globally optimal.
+
+### Failure and run history
+1. First V8 workflow run `39061864986`: preflight **9/10**. Zero-evaluation optimization budget correctly left schedule unchanged but incorrectly set `truncated=true`; no Kimi run. Corrected bounded-search bookkeeping.
+2. Re-run `39061905077`: optimizer tests **10/10** plus kernel tests **13/13** passed. One Kimi call reached HTTP 200 but `finish_reason=length` under 2,200 output token limit; logged `manual_hold`, **2,757 provider-reported tokens**, no proposal used. No automatic retry.
+3. Fresh authorized V8 rerun `39061989692`: instruction explicitly restricted JSON to 7 jobs and short strategy, raised bounded output ceiling, kept Kimi K2.6 required temperature **0.6**, and passed as above. Previous runs remain separate paid/event records.
+
+### Conclusion and next gate
+This demonstrates agent-guided candidate refinement and deterministic, independently validated feasible optimization in one isolated research workflow. Runtime correctness remains strongly separated from strategic selection quality.
+
+**Remaining problem:** steepest-descent search stopped at a local minimum (459 vs 415); Kimi's second proposal did not beat original baseline. The trusted kernel already has `searchBestCandidate` for exact small-instance optimization, but V8 did NOT substitute its exact result for the bounded neighborhood improver, to preserve attribution.
+
+**Recommended next step (not launched):** add beam search or bounded multi-start exploration, or invoke exact branch-and-bound only for small instances, comparing compute cost against optimality gap. For larger schedules report a feasible incumbent and a defensible bound, not an unsupported 'optimal' badge. Preserve one worker and independent oracle; do not bring Silas into experiment until robustness and budget gating improve.
