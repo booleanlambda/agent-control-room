@@ -1,0 +1,45 @@
+name: AAU Certificate Stress V12
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - experiment/certified-anytime-v11
+    paths:
+      - 'experiments/certificate-stress-v12/**'
+      - '.github/workflows/certificate-stress-v12.yml'
+      - 'experiments/certified-anytime-v11/certifier.mjs'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  no-provider-independent-stress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    env:
+      AAU_V12_RESEARCH: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Gate on stress, bound and independent exact-oracle regressions
+        run: |
+          node --check experiments/certificate-stress-v12/stress.mjs
+          node --check experiments/certificate-stress-v12/live.mjs
+          node --test experiments/certificate-stress-v12/stress.test.mjs
+          node --test experiments/certified-anytime-v11/certifier.test.mjs
+      - name: One-worker stress with zero, node and tight frontier budgets
+        working-directory: experiments/certificate-stress-v12
+        run: node live.mjs
+      - name: Preserve all bounded proof failures and independently checked witnesses
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-certificate-stress-v12-evidence
+          path: experiments/certificate-stress-v12/stress-v12-evidence.json
+          if-no-files-found: warn
