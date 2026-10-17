@@ -1,0 +1,85 @@
+name: AAU Kimi Tests Only Remediation One Shot
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/kimi-tests-only-once.yml'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: aau-kimi-tests-only-once
+  cancel-in-progress: false
+jobs:
+  verify-live-self-test:
+    if: github.head_ref == 'experiment/recursive-tree-nemotron-v0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 17
+    env:
+      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+      AAU_PYTHON_SANDBOX: 'yes'
+      AAU_REMEDIATION_V2_AUTHORIZED: 'yes'
+      AAU_TESTS_ONLY_FROM_V5: 'yes'
+      AAU_REMEDIATION_V2_FIXTURE: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Fetch original failed Kimi source, unchanged
+        uses: actions/download-artifact@v4
+        with:
+          name: aau-kimi-unseen-python-cognition-audit
+          run-id: 38994095805
+          repository: booleanlambda/agent-control-room
+          github-token: ${{ github.token }}
+          path: experiments/recursion-tree-v0
+      - name: Fetch actual Kimi repaired solver and faulty regression test
+        uses: actions/download-artifact@v4
+        with:
+          name: aau-kimi-direct-traceback-real-repair-evidence
+          run-id: 39038175797
+          repository: booleanlambda/agent-control-room
+          github-token: ${{ github.token }}
+          path: experiments/recursion-tree-v0/prior-v5
+      - name: Verify mode, provenance, syntax and independent graders before inference
+        run: |
+          set -euo pipefail
+          test -n "${MOONSHOT_API_KEY:-}" || { echo 'MOONSHOT_KEY_ABSENT'; exit 3; }
+          test -z "${AAU_REMEDIATION_V2_FIXTURE:-}"
+          test "${AAU_TESTS_ONLY_FROM_V5:-}" = yes
+          test -s experiments/recursion-tree-v0/unseen-python-kimi-report.json
+          test -s experiments/recursion-tree-v0/prior-v5/self-remediation-v2-checkpoint.json
+          node --check experiments/recursion-tree-v0/self-remediation-kimi-v2.mjs
+          node --test experiments/recursion-tree-v0/unseen-python-benchmarks.test.mjs
+          docker pull python:3.12-alpine
+      - name: Independently certify original Kimi solver and reproduce faulty self-test
+        working-directory: experiments/recursion-tree-v0
+        run: node self-remediation-kimi-v2.mjs seed
+      - name: Up to 3 new Kimi responses, tests only, solver immutable
+        working-directory: experiments/recursion-tree-v0
+        shell: bash
+        run: |
+          set -euo pipefail
+          for cycle in $(seq 1 3); do
+            echo "LIVE_KIMI_TEST_REPAIR_CYCLE=$cycle"
+            node self-remediation-kimi-v2.mjs cycle
+            status="$(node -p "require('./self-remediation-v2-checkpoint.json').status")"
+            phase="$(node -p "require('./self-remediation-v2-checkpoint.json').phase")"
+            echo "LIVE_KIMI_TEST_REPAIR_STATUS=$status PHASE=$phase"
+            if [[ "$status" == "passed" || "$status" == "manual_hold" || "$status" == "exhausted" || "$status" == "stopped" ]]; then
+              break
+            fi
+            sleep 25
+          done
+      - name: Independent accept-correct reject-old reject-tamper and 6 sealed cases gate
+        working-directory: experiments/recursion-tree-v0
+        run: node self-remediation-kimi-v2.mjs finish
+      - name: Preserve all actual model-written tests, source hash and grader evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-kimi-tests-only-live-remediation-evidence
+          path: |
+            experiments/recursion-tree-v0/self-remediation-v2-checkpoint.json
+            experiments/recursion-tree-v0/self-remediation-v2-report.json
+          if-no-files-found: ignore
