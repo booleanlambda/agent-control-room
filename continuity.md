@@ -599,3 +599,24 @@ The experiment does confirm that an AMQP message queue can distribute branch IDs
 The serialized SQLite checkpoint logic is verified offline across distinct local processes and restored filesystem snapshots. **Not yet established:** genuine fresh GitHub Actions runner-to-runner handoff, broker durable queue permissions, persistent AMQP message redelivery, clean queue expiry, whole-runner crash recovery, online shared SQL row locking/fencing or multiworker concurrency.
 
 The existing **V17** live same-run AMQP channel-redelivery demonstration remains the latest fully proven broker integration. To proceed with V18 live, obtain an approved way to provision a separate persistent research database and inject AMQP credentials into the isolated workflow without bypassing repository safety controls. First do serial fresh-runner recovery with authoritative durable ledger; then add durable lease/idempotency fencing; only then compare against V13 and allow concurrency.
+
+---
+
+## V18B — Real separate-runner SQLite artifact handoff PASS; live broker+shared DB remains gated (2026-10-17)
+
+**Status:** Verified independent GitHub Actions runner artifact handoff, NOT verified live cross-runner RabbitMQ. Single isolated research branch `experiment/broker-cross-runner-v18`, draft [PR #65](https://github.com/booleanlambda/agent-control-room/pull/65). **DO NOT MERGE OR DEPLOY.** Zero model calls, zero RabbitMQ calls, no production database writes.
+
+**Actual workflow:** https://github.com/booleanlambda/agent-control-room/actions/runs/39076158735 — **all five independent GitHub Actions jobs succeeded**: `init` (runner 1) → `root1` (runner 2) → `root2` (runner 3) → `root3` (runner 4) → `verify` (runner 5). Each restored the **immutable snapshot artifact** from the prior job and uploaded a fresh SQLite file plus digest-chained JSON manifest. The final verified artifact is https://github.com/booleanlambda/agent-control-room/actions/runs/39076158735/artifacts/12117485059 (`v18b-verified-proof`). Also confirmed successful earlier V18 offline preflight run https://github.com/booleanlambda/agent-control-room/actions/runs/39075082440 (8/8 tests).
+
+**New changes:** `experiments/broker-cross-runner-v18/artifact-handoff.mjs` (run-ID fenced digest-checked SQLite checkpoint import and exact partition solver) and `.github/workflows/broker-artifact-cross-runner-v18b.yml` (five serial GitHub jobs, no AMQP secret). Each stage rejects out-of-order/stale run IDs, mismatched database file hashes, duplicate root execution, and conflicting duplicate completion. The durable SQLite data is transferred via GitHub Actions artifacts between separate runners and is independent of any shared online service.
+
+**Downloaded and inspected final ZIP** `aau-v18b-cross-runner-verified-proof.zip`, containing `manifest.json` and `proof.sqlite`; `complete=true`, `noBrokerCalls=true`, `modelCalls=0`, final proof SHA256 `8cf534287226585ff534ca90d64d4640c36ce9b6b2766b044276b95d6567fb24`.
+- Initial state: 3 pending branches, certified interval **[0,512]**, not optimal.
+- After `root1`: 2 pending, interval **[0,415]**, not optimal.
+- After `root2`: 1 pending, interval **[0,415]**, not optimal.
+- After `root3`: 0 pending, interval **[415,415]**, exact optimality certified.
+- Final independent verifier: optimum **415**, exhaustive **448** complete schedules across three disjoint root partitions (240/104/104); branch minima 415/469/452; **0 proof gap**, all three root witnesses independently checked by V6 exact oracle/evaluator. The proof was still sound and correctly censored before the final branch.
+
+**Explicit barriers:** The earlier attempted live multi-job workflow with repeated AMQP secret injection was blocked and was NOT committed/executed. A separate Neon branch creation was blocked. Supabase's **supported** development branch path is available only after its financial confirmation process. `get_cost(type="branch")` for the project's organization returned **$0.01344/hour**, and `confirm_cost` MUST NOT be called before the user explicitly agrees to that specific hourly charge. No cost has been accepted and no Supabase development branch has been created.
+
+**Decision / next gate:** Artifact snapshot persistence across fresh runner jobs is now **real and verified**. This validates serial handoff and proof correctness, not continuous shared ledger access, concurrency, crash recovery after lost artifact, broker restart, or RabbitMQ redelivery across distinct GitHub runners. V17 remains the last live RabbitMQ delivery/redelivery proof. Before V18 live combined test, secure user approval of branch cost and proper authorized workflow secret setup; don't bypass either control. Preserve separate run-scoped queue, one worker, and no production queue or Silas changes.
