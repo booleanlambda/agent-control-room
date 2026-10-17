@@ -52,9 +52,13 @@ async function query(messages,record){
   finish=packet?.choices?.[0]?.finish_reason??null;
   if(!response.ok){
    const errorInfo=packet?.error||{};
-   const safeType=String(errorInfo.type||errorInfo.code||'unknown').slice(0,60);
-   const safeMessage=String(errorInfo.message||'').slice(0,150);
-   throw Error('provider_http_'+http+'_'+safeType+':'+safeMessage);
+   // Provider error messages may include organization IDs and other
+   // account identifiers. Never persist raw message text in research logs.
+   const safeType=String(errorInfo.type||errorInfo.code||'unknown')
+    .toLowerCase().replace(/[^a-z0-9_-]/g,'').slice(0,45);
+   const reason=http===429?'provider_capacity_or_rate_limited':
+    http===400?'invalid_request':http===403?'access_denied':'provider_rejection';
+   throw Error('provider_http_'+http+'_'+safeType+'_'+reason);
   }
   if(finish!=='stop')throw Error('incomplete_'+String(finish));
   if(packet?.choices?.[0]?.message?.reasoning_content)
