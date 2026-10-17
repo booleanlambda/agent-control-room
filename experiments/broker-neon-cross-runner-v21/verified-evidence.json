@@ -1,0 +1,76 @@
+{
+  "experiment": "AAU_V21_RABBITMQ_NEON_CROSS_RUNNER",
+  "state": "passed",
+  "isolation": {
+    "neonProject": "lucky-term-22683833",
+    "neonBranch": "br-cold-rice-b4m3l9qu",
+    "productionBranchUntouched": true,
+    "productionQueuesUntouched": true,
+    "modelCalls": 0
+  },
+  "workflow": {
+    "runId": 39079576622,
+    "url": "https://github.com/booleanlambda/agent-control-room/actions/runs/39079576622",
+    "jobs": [
+      {
+        "name": "phase1_publisher_crash",
+        "id": 117533602545,
+        "status": "success"
+      },
+      {
+        "name": "phase2_independent_recovery",
+        "id": 117533678593,
+        "status": "success"
+      }
+    ],
+    "preflightPassed": 11
+  },
+  "artifacts": {
+    "phase1": 12118013859,
+    "final": 12118312887,
+    "proofDigest": "f86c74e073c850a8c35ad620105d933e554ddf1cbccec967b291bdd2cf5acf58",
+    "finalJsonSha256": "8f5f4eaeede34ea793a7d8703779dbfacd64487276f4f95ebb19b6da55cff482",
+    "finalZipSha256": "004c531d7b37893287d7ca79a4e64ff1995f34306a0032f3de1767cdc0be37b2"
+  },
+  "observations": {
+    "phase1": {
+      "workerSIGKILL": true,
+      "neonFirstCommit": true,
+      "unacknowledgedMessagesReady": 4,
+      "partialNeonInterval": [
+        0,
+        415
+      ],
+      "pending": 2
+    },
+    "phase2": {
+      "brokerRedeliveries": 1,
+      "duplicateDeliveriesSkipped": 2,
+      "acknowledgedOriginalMessages": 4,
+      "completedRootCount": 3,
+      "researchQueueDeleted": true,
+      "independentExactOracle": 415,
+      "globalInterval": [
+        415,
+        415
+      ],
+      "exhaustiveSchedules": 448
+    }
+  },
+  "independentReadback": {
+    "tool": "Neon run_sql",
+    "runUuid": "b64bfc4b-cef5-4073-829c-e253b683c61c",
+    "completed": 3,
+    "pending": 0,
+    "leaves": 448,
+    "lower": 415,
+    "upper": 415,
+    "optimal": true
+  },
+  "limitations": [
+    "No RabbitMQ broker-process restart during the experiment",
+    "Two GitHub hosted job environments; worker execution remained serial rather than concurrent",
+    "The exact search benchmark was seven jobs with three partitions, not the V13 nine stress instances",
+    "Research Neon branch may incur compute cost and requires separate cleanup authorization"
+  ]
+}
