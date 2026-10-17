@@ -23,7 +23,7 @@ test('gen cost, startup, thermal peak, state of charge, ramp and emissions are a
  assert.equal(good.soc.length,9);
  assert.equal(good.hours.reduce((v,r)=>v+r.hourCost,0),good.totalCost);
  assert.equal(evaluate([5,4,4,3,4,4,3,4]).reason,'ramp');
- assert.equal(evaluate([0,4,4,3,4,4,3,4]).reason,'ramp');
+ assert.equal(evaluate([0,4,4,3,4,4,3,4]).reason,'battery_rate');
  assert.equal(evaluate([1,4,4,3,4,4,3,4]).reason,'invalid_output_levels_or_length');
 });
 test('model must propose full DP state and recurrence before exact solver is exposed',()=>{
