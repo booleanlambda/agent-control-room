@@ -79,3 +79,31 @@ Do not merge PR #46 or enable production wakes by implication. Do not convert CI
 The successful cognitive recovery occurred across **two workflow runs with an operator-initiated continuation** after the first failed. It does NOT yet prove automatic error detection, auto-branching recovery, and re-verification in *one unattended lifecycle*, nor generalization reliability over multiple unrelated failures. The fixed original source plus two hidden variants form one narrow benchmark family.
 **Next recommended isolated test:** incorporate bounded fail -> diagnose -> repair -> independently regrade -> synthesize in a single durable one-worker workflow with no human intervention and no parallel provider calls. Repeat across new unknown failures only after that. No deployment or Silas state changes were performed here. Production runtime CI must be evaluated separately.
 
+
+---
+
+## Experiment 3 — Uninterrupted single-worker recovery lifecycle: PASS (2026-10-17)
+
+- Branch: `experiment/solo-uninterrupted-v3`; one-time draft PR https://github.com/booleanlambda/agent-control-room/pull/49 (research only; do not merge).
+- Verified single-job Actions run: https://github.com/booleanlambda/agent-control-room/actions/runs/39056795340 — job `single-worker-uninterrupted` completed **success**.
+- Artifact: https://github.com/booleanlambda/agent-control-room/actions/runs/39056795340/artifacts/12110206030 (`aau-single-run-recovery-v3-evidence`).
+- Implementation: `experiments/solo-uninterrupted-v3/live.mjs`, workflow `.github/workflows/solo-uninterrupted-v3.yml`.
+- Same independently exhaustive precedence-aware benchmark as Experiment 2: public and two withheld logistics variants (NOT independent new task families). Six deterministic preflight checks passed.
+
+### One-workflow sequence and evidence
+1. Kimi K2.6, thinking disabled, independently produced a decomposition (`R`, `R.001`), derived constraints and exact algorithm (`R.002`), then authored Python solver (`R.003`). **Initial solver passed** exact public 113/113 and two hidden optimality checks 119/119, 140/140.
+2. As no organic initial solver error occurred, the **same workflow** injected a controlled input-handling defect into the model-authored Python: `fixedCost += 7` per vehicle. The independent oracle detected a public cost disagreement: model claimed **127**, oracle recomputed **113**. The branch type is `controlled_tamper_after_success`, not an organically occurring cognitive bug.
+3. In that same running job and with no human intervention, the model generated a diagnosis (`R.005`) that specifically found the fixed-cost inflation (+7 per vehicle, +14 total). It provided a repair plan, authored a corrected whole Python program (`R.006.1`), and passed public 113/113 plus both hidden cases 119/119 and 140/140, on **first repair attempt**.
+4. Kimi then authored final synthesis (`R.final`), and the deterministic ledger created a root digest.
+
+**Measured:** Six sequential actual Kimi calls (plan, derive, author, diagnose, repair, synthesize), 18,112 provider-reported total tokens, one worker, zero parallel calls within this workflow, zero automatic retries of uncertain provider requests, repair accepted, 2/2 hidden cases passed. All six API calls returned complete `finish_reason=stop`.
+
+**Root digest:** `50de5e5288880e98fe2628416bc1b0c4aa16e2317d84fd674774a38719f69b23`.
+
+### Interpretation and remaining limitations
+This **does** demonstrate automatic detect -> diagnose -> repair -> verify -> synthesize within one uninterrupted, isolated single-worker process, without an operator-initiated second run. It is a proof of concept, not production readiness.
+It does **not** demonstrate that the same uninterrupted runner reliably repairs an **organic** initial coding failure (that occurred in Experiment 2 and was recovered in a manually initiated second run). It also does not demonstrate new unseen task families, adaptive multi-level recursive decomposition, concurrent workers, long-horizon recovery, or broad reliability. The controlled defect is visible in source and relatively localized. Do not mistake this easy injection for a severe unknown fault.
+Production AAU/Silas were untouched. Original production `Systemic Runtime Tree CI` blockers remain independent of this research lane.
+
+**Recommended next gate, NOT launched:** one single-worker run where the model's own initial solver fails naturally, and a recovery node is automatically created without a workflow restart; repeat with multiple unfamiliar held-out problem families and explicit error budgets. Do not enable concurrency until serial recovery is robust across novel faults.
+
