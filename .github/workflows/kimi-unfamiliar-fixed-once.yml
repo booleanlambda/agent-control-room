@@ -1,0 +1,61 @@
+name: AAU Kimi Unfamiliar Failures Validated Request One Shot
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/kimi-unfamiliar-fixed-once.yml'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: aau-kimi-unfamiliar-fixed-one-shot
+  cancel-in-progress: false
+jobs:
+  blind-three-faults:
+    if: github.head_ref == 'experiment/recursive-tree-nemotron-v0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 28
+    env:
+      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+      AAU_PYTHON_SANDBOX: 'yes'
+      AAU_UNFAMILIAR_REAL_KIMI: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fetch historical Kimi-written coding examples
+        uses: actions/download-artifact@v4
+        with:
+          name: aau-kimi-unseen-python-cognition-audit
+          run-id: 38994095805
+          repository: booleanlambda/agent-control-room
+          github-token: ${{ github.token }}
+          path: experiments/recursion-tree-v0
+      - name: Fetch independently verified Kimi-authored factory solver
+        uses: actions/download-artifact@v4
+        with:
+          name: aau-kimi-direct-traceback-real-repair-evidence
+          run-id: 39038175797
+          repository: booleanlambda/agent-control-room
+          github-token: ${{ github.token }}
+          path: experiments/recursion-tree-v0/prior-v5
+      - name: Verify official Kimi 0.6 non-thinking temperature and all preflight oracles
+        run: |
+          set -euo pipefail
+          test -n "${MOONSHOT_API_KEY:-}"
+          grep -q 'temperature:0.6,max_tokens:7600' experiments/recursion-tree-v0/unfamiliar-fault-live.mjs
+          node --check experiments/recursion-tree-v0/unfamiliar-fault-cases.mjs
+          node --check experiments/recursion-tree-v0/unfamiliar-fault-live.mjs
+          node --test experiments/recursion-tree-v0/unseen-python-benchmarks.test.mjs
+          docker pull python:3.12-alpine
+      - name: Actual Kimi K2.6 independent root cause debugging and held-out evaluation on three fault classes
+        working-directory: experiments/recursion-tree-v0
+        run: node unfamiliar-fault-live.mjs live
+      - name: Archive real model-generated code diagnostics and hidden grading even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-kimi-unfamiliar-faults-fixed-live-evidence
+          path: experiments/recursion-tree-v0/unfamiliar-fault-live-results.json
+          if-no-files-found: ignore
