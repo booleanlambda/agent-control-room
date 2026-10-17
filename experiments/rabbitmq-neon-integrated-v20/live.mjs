@@ -28,8 +28,8 @@ const liveGuard=process.env.GITHUB_ACTIONS==='true'&&process.env.AAU_V20_RESEARC
 const rawNeon=String(process.env.NEON_V19_DATABASE_URL||'').trim();
 const rawAmqp=String(process.env.AMQP_URL||'').trim();
 if(!liveGuard){report.status='blocked_not_research_ci';persist();console.log('AAU_V20_STATUS=BLOCKED_NOT_CI');process.exitCode=2}
-else if(!rawNeon){report.status='blocked_missing_neon_v19_branch_secret';persist();console.log('AAU_V20_STATUS=BLOCKED_MISSING_NEON_V19_DATABASE_URL')}
-else if(!rawAmqp){report.status='blocked_missing_existing_amqp_secret';persist();console.log('AAU_V20_STATUS=BLOCKED_MISSING_AMQP')}
+else if(!rawNeon){report.status='blocked_missing_neon_v19_branch_secret';persist();console.log('AAU_V20_STATUS=BLOCKED_MISSING_NEON_V19_DATABASE_URL');process.exitCode=3}
+else if(!rawAmqp){report.status='blocked_missing_existing_amqp_secret';persist();console.log('AAU_V20_STATUS=BLOCKED_MISSING_AMQP');process.exitCode=3}
 else{
  let amqp,store,connection,channel,queue;
  try{
