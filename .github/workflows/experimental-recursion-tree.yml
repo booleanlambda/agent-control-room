@@ -60,6 +60,7 @@ jobs:
           node --check experiments/recursion-tree-v0/autonomous-engineering-benchmark.mjs
           node --check experiments/recursion-tree-v0/autonomous-engineering-live.mjs
           node --test experiments/recursion-tree-v0/autonomous-engineering-benchmark.test.mjs
+          python3 experiments/recursion-tree-v0/autonomous-engineering-reference.py
       - name: Simulated stage 1 tree
         working-directory: experiments/recursion-tree-v0
         run: node run.mjs --mode=mock --stage=1
