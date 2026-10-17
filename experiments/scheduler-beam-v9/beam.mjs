@@ -56,7 +56,7 @@ export function beamOptimize(problem,seeds,{maxEvaluations=1200,beamWidth=10,max
     validEvaluations++;
     const state={proposal:candidate,cost:schedule.cost,schedule,key,source:'beam'};
     next.push(state);
-    if(byCost(state,best)<0){
+    if(state.cost<best.cost){
      const old=best.cost;best=state;
      trace.push({depth:depth+1,move,oldCost:old,newCost:state.cost,
       proposalHash:key,ledgerHash:schedule.evidence.ledgerDigest});
