@@ -1,0 +1,54 @@
+name: AAU Precise Public Diagnostic Recovery V6
+
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/positive-logic-v5b
+    paths:
+      - 'experiments/precise-diagnostics-v6/**'
+      - '.github/workflows/precise-diagnostics-v6.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  single-worker-original-error-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 26
+    env:
+      AAU_V6_EXPLICIT_RUN: 'yes'
+      AAU_PYTHON_SANDBOX: 'yes'
+      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Run deterministic precision diagnostic and positive-cost oracle tests
+        run: |
+          node --check experiments/precise-diagnostics-v6/benchmark.mjs
+          node --check experiments/precise-diagnostics-v6/recover.mjs
+          node --test experiments/precise-diagnostics-v6/benchmark.test.mjs
+      - name: Import immutable v5b model-authored executable wrong program
+        uses: actions/download-artifact@v4
+        with:
+          run-id: 39059227910
+          name: aau-positive-logic-v5b-evidence
+          github-token: ${{ github.token }}
+          repository: booleanlambda/agent-control-room
+          path: experiments/precise-diagnostics-v6/previous-evidence
+      - name: Diagnose and repair exact public counterexample in one bounded worker
+        working-directory: experiments/precise-diagnostics-v6
+        run: node recover.mjs
+      - name: Preserve failure, repair and hidden proof artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-precise-diagnostics-v6-evidence
+          path: experiments/precise-diagnostics-v6/precise-recovery-v6-evidence.json
+          if-no-files-found: warn
