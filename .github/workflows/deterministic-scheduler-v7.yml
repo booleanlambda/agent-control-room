@@ -2,7 +2,7 @@ name: AAU Deterministic Scheduler Kernel V7
 
 on:
   pull_request:
-    types: [opened]
+    types: [opened, synchronize]
     branches:
       - experiment/precise-diagnostics-v6
     paths:
