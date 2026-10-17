@@ -388,3 +388,43 @@ Every case exited `proof_complete` with **certified lower = verified feasible up
 - Any future change must keep validation independent, never turn a positive residual gap into an `optimal` claim and preserve proof frontier or fail closed.
 
 **Next research gate (NOT started):** audit proof and performance using multiple independently seeded 12–16-job fixtures, profile max-frontier and expansion exhaustion, and deliberately trigger censored/budgeted runs to verify that `[LB,UB]` remains sound. Explore whether agent-led decomposition improves search ordering only when a deterministic baseline and independent verifier have been established; no production integration or concurrency yet.
+
+---
+
+## Experiment V12 — Multi-seed 12–16 job stress; discovered and repaired frontier-cap bug (2026-10-17)
+
+**Research scope**: draft PR [#59](https://github.com/booleanlambda/agent-control-room/pull/59), branch `experiment/certificate-stress-v12`. DO NOT MERGE or deploy; AAU production, Silas, services and secrets untouched. **Zero model/provider calls or tokens.**
+
+### Actual CI execution, failure and correction
+- First CI: https://github.com/booleanlambda/agent-control-room/actions/runs/39067524365 **FAIL** (6/8 new stress tests passed). Two tests found a real V11 implementation defect: after popping a frontier state, expanding all its children could make heap size **exceed the nominal `maxFrontier` cap**. It retained all states so was not silently discarding proofs, but its advertised memory limit was **not hard**. No inference was triggered.
+- Fixed in the V12 **research branch copy** of `experiments/certified-anytime-v11/certifier.mjs`, commit `9e9dfc6`: stage all candidate children in a temporary list; if accepting them would exceed the configured frontier capacity, reinsert the **whole unexpanded parent** with its admissible lower bound and exit `frontier_budget`. Otherwise atomically commit all children. Nothing is silently dropped. Counting expansions and the exit flag were corrected.
+- Verified **successful final CI**: https://github.com/booleanlambda/agent-control-room/actions/runs/39067594396 (job success).
+- Full evidence artifact: https://github.com/booleanlambda/agent-control-room/actions/runs/39067594396/artifacts/12114205557 (`aau-certificate-stress-v12-evidence`).
+- **17/17 deterministic regressions passed**: 8 new V12 stress tests and 9 old V11 anytime tests. Additional live independent exact-oracle checks on 4-, 5-, 6-, and 7-job instances all passed. No provider requests.
+- Verified root evidence digest: `71ac37274b99c14a45d567053901948164878a2ea6d12a69f09b071396aa593e`.
+
+### Workload and budgets
+- Nine distinct, reproducible seeded cases: three each with **12, 14, and 16 jobs**, varying precedence graphs, setup, releases, maintenance, activation and due dates; all two-machine synthetic tasks.
+- Every case got an independently checked legal incumbent after up to 400 deterministic beam evaluations. Four proof checkpoints per case: zero expansions, early 450 expansions, deeper 2,200 expansions, and intentionally tight 100-state frontier with 2,200 possible expansions; ordinary frontier cap 2,400. The solver correctly stopped early on frontier pressure.
+- **36/36 proof checkpoints** returned feasible independent-validated upper bounds, admissible lower bounds <= those uppers, correctly bounded node and frontier usage, and honest proof status. All nine early checkpoints were censored, eight of nine deep checkpoints censored, all nine tight-frontier cases exited `frontier_budget`.
+- Key result: the hard frontier restriction is now actually enforced, and the remaining frontier retains a mathematically sound lower bound on *all* incomplete branches. A censored result must be reported as **[LB, UB]**, not as optimal.
+
+### Results of deep search (lower is better)
+| New seeded instance | Independently valid upper bound UB | Certified lower bound LB | Uncertainty UB-LB | Expanded | Decision |
+|---|---:|---:|---:|---:|---|
+| 12 variant 0 | 1146 | 553 | 593 | 261 | frontier budget |
+| 12 variant 1 | **1685** | **1685** | **0** | 948 | **optimal certified** |
+| 12 variant 2 | 934 | 261 | 673 | 352 | frontier budget |
+| 14 variant 0 | 1189 | 730 | 459 | 333 | frontier budget |
+| 14 variant 1 | 2080 | 936 | 1144 | 489 | frontier budget |
+| 14 variant 2 | 1337 | 801 | 536 | 542 | frontier budget |
+| 16 variant 0 | 1464 | 495 | 969 | 198 | frontier budget |
+| 16 variant 1 | 1346 | 297 | 1049 | 221 | frontier budget |
+| 16 variant 2 | 1054 | 530 | 524 | 401 | frontier budget |
+
+No outside exact 12–16 job oracle was used. Optimality of **12 variant 1** follows from the bounded best-first tree's exhausted/pruned frontier and bound invariants; independent feasibility and randomized small-oracle checks were performed. For the remaining eight, **optimality NOT shown**. There are no speed, memory or scale guarantees from nine synthetic cases.
+
+### Implications
+1. V11's claim that its frontier cap was a hard maximum was overbroad; **V12 fixes this**. The revised implementation must be used for any further research and previous V11 numerical certificates should be regression-replayed if considered for later use. V11 is not retroactively edited in its prior branch.
+2. The solver can give correct gap bounds when budgets are exhausted, but proof quality degrades at larger sizes under tight frontiers. This is the correct fail-closed result, not a failure to return a feasible schedule.
+3. The next gate should compare smarter bounded search, tighter admissible relaxations, and wall-clock/memory ceilings on multiple unseen instances, keeping the 100-state pressure tests. Do NOT widen budgets or merge into production by default. Keep model input restricted to strategic assignment, never clocks or certifier code.

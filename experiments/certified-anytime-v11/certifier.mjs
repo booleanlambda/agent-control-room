@@ -94,7 +94,7 @@ export function certifyAnytime(p,incumbent,{maxExpansions=16000,maxFrontier=1000
  const rootBound=node.lb;
  const heap=new MinHeap();heap.push(node);
  let upper=initial.cost,best=structuredClone(incumbent),bestResult=initial;
- let expansions=0,generated=1,pruned=0,dominancePruned=0,serial=1,maxHeap=1;
+ let expansions=0,generated=1,pruned=0,dominancePruned=0,serial=1,maxHeap=1,frontierBudgetHalt=false;
  const memo=new Map(),start=process.hrtime.bigint();
  const fullMask=(1<<p.jobs.length)-1;
  while(heap.size&&expansions<maxExpansions&&heap.size<maxFrontier){
@@ -107,8 +107,8 @@ export function certifyAnytime(p,incumbent,{maxExpansions=16000,maxFrontier=1000
   const earlier=memo.get(signature);
   if(earlier!==undefined&&earlier<=current.cost){dominancePruned++;continue}
   memo.set(signature,current.cost);
-  expansions++;
   if(current.mask===fullMask){
+   expansions++;
    if(current.cost<upper){
     const witness={jobs:current.proposal};
     const checked=scheduleCandidate(p,witness);
@@ -117,6 +117,11 @@ export function certifyAnytime(p,incumbent,{maxExpansions=16000,maxFrontier=1000
    }
    continue;
   }
+  // Build a COMPLETE set of children before modifying the priority queue.
+  // If the frontier would exceed its cap, put the whole unexpanded parent
+  // back into the heap. Its lower bound remains a sound certificate for
+  // every unexamined branch: no partial expansion or discarded siblings.
+  const pending=[];let locallyPruned=0;
   for(let i=0;i<p.jobs.length;i++){
    if(current.mask&(1<<i))continue;
    const j=p.jobs[i],pi=j.parents.map(id=>indices.get(id));
@@ -128,17 +133,25 @@ export function certifyAnytime(p,incumbent,{maxExpansions=16000,maxFrontier=1000
     const timing=legalTransition(j,machine,current.machines[m],parentTime);
     const fee=current.machines[m].used?0:machine.activation;
     const cost=current.cost+fee+Math.max(0,timing.finish-j.due)*j.weight;
-    if(cost>=upper){pruned++;continue}
+    if(cost>=upper){locallyPruned++;continue}
     const child={mask:current.mask|(1<<i),ends:current.ends.slice(),
      machines:current.machines.map(x=>({...x})),cost,
      proposal:[...current.proposal,{id:j.id,machine:machine.id}],serial:serial++};
     child.ends[i]=timing.finish;
     child.machines[m]={clock:timing.finish,last:j.type,used:true};
     child.lb=relaxedBound(p,child,order);
-    if(child.lb>=upper){pruned++;continue}
-    heap.push(child);generated++;
+    if(child.lb>=upper){locallyPruned++;continue}
+    pending.push(child);
    }
   }
+  if(heap.size+pending.length>maxFrontier){
+   heap.push(current);
+   frontierBudgetHalt=true;
+   maxHeap=Math.max(maxHeap,heap.size);
+   break;
+  }
+  expansions++;pruned+=locallyPruned;
+  for(const child of pending){heap.push(child);generated++;}
   maxHeap=Math.max(maxHeap,heap.size);
  }
  // Any pruned state cannot improve upper. Only surviving frontier remains.
@@ -152,7 +165,7 @@ export function certifyAnytime(p,incumbent,{maxExpansions=16000,maxFrontier=1000
  return {upperBound:upper,lowerBound:lower,gapUpper:upper-lower,certifiedOptimal,
   rootBound,initialUpper:initial.cost,incumbent:best,execution:bestResult,
   expanded:expansions,generated,pruned,dominancePruned,maxHeap,remainingFrontier:heap.size,
-  exitReason:certifiedOptimal?'proof_complete':expansions>=maxExpansions?'expansion_budget':heap.size>=maxFrontier?'frontier_budget':'stopped',
+  exitReason:certifiedOptimal?'proof_complete':frontierBudgetHalt||heap.size>=maxFrontier?'frontier_budget':expansions>=maxExpansions?'expansion_budget':'stopped',
   elapsedNs,
   evidence:{problemHash:sha(p),initialHash:sha(incumbent),finalHash:sha(best),
    scheduleHash:bestResult.evidence.scheduleDigest,
