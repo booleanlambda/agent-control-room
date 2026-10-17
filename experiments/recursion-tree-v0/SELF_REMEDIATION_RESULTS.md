@@ -412,3 +412,77 @@ not be credited as live Kimi cognition.
 **Release boundary:** draft PR #45 remains unmerged. No Silas wake or
 production deploy. Independent production `Systemic Runtime Tree CI`
 continues to fail and blocks promotion.
+
+
+## LIVE Kimi K2.6 self-written verification repair — October 17, 2026
+
+**Live Actions:** [39039858401](https://github.com/booleanlambda/agent-control-room/actions/runs/39039858401) **SUCCESS**.  
+**Immutable evidence:** `aau-kimi-tests-only-live-remediation-evidence`,
+artifact ID **12103890920**, includes full Kimi-generated verification Python,
+checkpoint, model-reported usage, and external assessment.
+
+**VERDICT: a genuine model-authored self-verification REPAIR PASSED.** The
+user authorized a new (non-retry) live call. The isolated experiment
+retrieved the immutable original flawed test and already independently
+verified **Kimi-authored repaired solver** from prior live run 39038175797.
+The seed checked both original source and model-authored source hashes,
+reproduced the old false negative, and independently reran the solver
+against the public task plus six withheld variations. It froze the
+solver at SHA-256
+`732f54bc7b428ef7d670c721c669060b2d0cf1741a339bdc0d33120862d5042b`
+and exposed the error in Kimi's previous self-written tests
+(SHA-256 `a66150b45b3d7a3ca7b1724b3abe2e31abb550e8de8e84b7e0aaf53af5db6470`).
+The live model was allowed to submit only a **new verifier script**, not
+alter the successful assignment algorithm.
+
+**Real Kimi results:**
+- Model `kimi-k2.6`, thinking disabled, one authenticated complete response
+  (HTTP 200, `finish_reason=stop`), **1 live model call**, **3,071
+  provider-reported total tokens**; no timeout, truncation or retry.
+- Kimi authored new generic verifier Python with eligibility, machine
+  capacity, assignment/activation/switch-cost recomputation and a
+  **separately implemented DP optimality check**. It removed the
+  incorrect hardcoded `optimum=88` exception.
+- Its test accepted the verified public optimum `90` with assignment
+  `[0,1,1,1,2,2,2]`, rejected the original invalid all-machine-2
+  witness and rejected the falsified cost. The frozen solver remained
+  independently optimal and feasible on all six sealed variants.
+- Final checkpoint state: **`passed`**; `frozenSolverIntegrity=true`;
+  test hash
+  `b2d20d0f86c13a4b3b8aa6d109e25475bf3fd6708cb23de3bd79f6726ecf4e54`.
+  This is actual Kimi-generated code, not the earlier handcrafted
+  synthetic fixture.
+
+### Stronger no-cost adversarial verification
+
+**CI:** [39040065101](https://github.com/booleanlambda/agent-control-room/actions/runs/39040065101)
+**SUCCESS**, artifact `aau-remediation-no-provider-protocol-evidence` ID
+**12104000408**. A separate research-only verifier loaded the *exact
+immutable live Kimi test program* (verified by SHA) and the unchanged
+Kimi solver. It executed both in Docker with no network or model access.
+Across the public input and six variants (including held-out changes)
+it tested four witness classes per instance:
+1. Globally optimal/feasible solution — **7/7 accepted**.
+2. Tampered reported cost — **7/7 rejected**.
+3. Invalid all-machine-2 assignment — **7/7 rejected**.
+4. Feasible but mathematically suboptimal assignment, with internally
+   consistent recomputed cost — **7/7 rejected**.
+
+Thus **28/28 independent adversarial verdicts matched ground truth**
+with zero new provider calls in this follow-up. The same job also passed
+the pre-existing nine synthetic process/crash/protocol controls and the
+previous traceback-source replay.
+
+**Interpretation:** The research series now includes (a) genuinely
+Kimi-authored successful **algorithm repair** and (b) genuinely
+Kimi-authored successful **self-test repair** that preserved the solver,
+each independently validated. These occurred in **separate live,
+operator-authorized experiments**, not an uninterrupted autonomous
+production agent cycle. The finding is specific to one factory
+assignment family and seven inputs; it does **not** establish a reliable
+general-purpose self-healing rate nor warrant production deployment.
+Do not credit no-cost synthetic test outputs as cognition.
+
+**Release gate:** PR #45 stays **draft and unmerged**. No production wake,
+Silas remediation, deployment or data writes occurred. The separate
+production `Systemic Runtime Tree CI` remains failing.
