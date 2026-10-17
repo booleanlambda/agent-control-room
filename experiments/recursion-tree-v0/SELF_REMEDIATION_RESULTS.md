@@ -124,3 +124,29 @@ distinction is important for research cost accounting.
 No more paid attempts were made. The feature branch and PR #45 remain
 draft and unmerged, Silas untouched. The separate production
 Systemic Runtime Tree CI remains failing.
+
+
+## Synthetic full lifecycle test — 17 October 2026 (NO new provider calls)
+
+**Verified final CI:** [AAU Free Self-Remediation Protocol End-to-End, run 39025203270](https://github.com/booleanlambda/agent-control-room/actions/runs/39025203270), artifact `aau-remediation-no-provider-protocol-evidence` (ID `12098590440`). An earlier initial pass was [run 39025088219](https://github.com/booleanlambda/agent-control-room/actions/runs/39025088219). The final run additionally disables all `fetch` use in fixture mode and counts only journaled synthetic answers.
+
+**Result: 8/8 scenario expectations satisfied — 2 positive controls, 6 correctly rejected/stopped negative controls, zero genuine LLM calls and zero new billed inference.** All paths used the **same V2 remediation runner** (`self-remediation-kimi-v2.mjs`) as the live experiment, with a protected synthetic response adapter; they did not call the Moonshot API. The original Kimi assignment source was downloaded unchanged from the historical GitHub Actions artifact and its failure was reproduced. Python ran in actual short-lived Docker containers with networking disabled, no credentials, read-only filesystem and resource limits. Diagnosis, code, tests and recovery were separate OS process invocations backed by an on-disk journal.
+
+| Scenario | Test expectation and observed result |
+|---|---|
+| Full `diagnose → repair → tests` | **Accepted** fixture-authored generic enumeration algorithm; public exact optimum and all **six** sealed variant tests passed. Fixture-authored property test accepted valid witness, rejected the old all-machine-2 witness, rejected a changed-cost witness. |
+| Restart after response journaling | **Accepted** without another synthetic model response: saved `answer_journaled` was applied from the next OS process; downstream stages finished, count remained 3 completed fixture responses. |
+| Original Kimi's faulty witness, despite optimal numeric cost | **Rejected**: public optimum 90 but machine-capacity violation; independent witness check prevented certification. |
+| Solver optimal but verifier returns `passed: true` unconditionally | **Rejected**: public and six hidden solutions valid, but model-written self-test failed to reject the original invalid witness and a tampered cost. |
+| `finish_reason=length` | **Stopped** at `manual_hold` with zero completed answer and **2,288 simulated** reported token units correctly recorded. |
+| Unknown transport result | **Stopped** at `manual_hold`; no duplicate submission, no invented provider usage. |
+| Interrupted `request_in_flight` | **Rejected** resubmission from a new process; request count did not increase. |
+| Attempt ceiling reached | **Stopped** at `exhausted`; artificial pre-used attempts do not count as completed answers. |
+
+Other research-only hardening: checkpoints are atomically replaced after file `fsync`, followed by parent-directory `fsync` on the disposable Linux filesystem; fixture mode is only allowed in GitHub CI **without provider credentials and without live-inference authorization** and explicitly throws if any network `fetch` is attempted. The workflow reuses the exact original failing source from GitHub Actions run 38994095805, with SHA-256 seed verification. Artifacts label simulated actions and tokens separately from real provider calls and never credit the manually written fixture repair to Kimi.
+
+**Interpretation:** the response/journaling/repair/execution/hidden-grading workflow is now tested end to end, including failure containment and OS-process restart. **Kimi's own ability to produce the repair remains unproven**, because this run substituted explicitly synthetic responses instead of making a new Moonshot inference. The last real Kimi attempt still ended with `finish_reason=length` under the earlier 850 output-token limit; the research branch has since increased the diagnosis cap to 2,200 without testing it against a new live request. The next live inference would require its own explicit potentially billable authorization.
+
+Files: `self-remediation-v2-fixtures.mjs` (labeled synthetic responses), `self-remediation-v2-fixture-integration.mjs` (eight independent-process scenarios), `self-remediation-kimi-v2.mjs` (shared execution state machine), and `.github/workflows/experimental-self-remediation-fixture.yml` (permanent, secret-free CI).
+
+All changes remain research-only in draft PR #45; **no merge or deployment and no Silas wake**. The independent production `Systemic Runtime Tree CI` failure remains a separate blocker.
