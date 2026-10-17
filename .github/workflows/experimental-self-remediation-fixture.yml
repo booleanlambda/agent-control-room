@@ -42,6 +42,14 @@ jobs:
           repository: booleanlambda/agent-control-room
           github-token: ${{ github.token }}
           path: experiments/recursion-tree-v0
+      - name: Retrieve immutable Kimi V3 crashed-program evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: aau-kimi-self-remediation-v3-live-evidence
+          run-id: 39025542225
+          repository: booleanlambda/agent-control-room
+          github-token: ${{ github.token }}
+          path: experiments/recursion-tree-v0/prior-v3
       - name: Check all fixture paths and no provider credentials
         run: |
           set -euo pipefail
@@ -51,11 +59,15 @@ jobs:
           node --check experiments/recursion-tree-v0/self-remediation-v2-fixtures.mjs
           node --check experiments/recursion-tree-v0/self-remediation-kimi-v2.mjs
           node --check experiments/recursion-tree-v0/self-remediation-v2-fixture-integration.mjs
+          node --check experiments/recursion-tree-v0/self-remediation-direct-traceback-fixture.mjs
           node --test experiments/recursion-tree-v0/unseen-python-benchmarks.test.mjs
           docker pull python:3.12-alpine
       - name: Eight genuine Docker and independent-process remediation replay scenarios
         working-directory: experiments/recursion-tree-v0
         run: node self-remediation-v2-fixture-integration.mjs
+      - name: Verify DIRECT traceback-to-repair entry using real failed Kimi V3 source, synthetic response, and Docker
+        working-directory: experiments/recursion-tree-v0
+        run: node self-remediation-direct-traceback-fixture.mjs
       - name: Archive synthetic vs live provenance and recovery evidence
         if: always()
         uses: actions/upload-artifact@v4
