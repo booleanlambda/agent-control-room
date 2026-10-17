@@ -20,7 +20,7 @@ if(process.env.GITHUB_ACTIONS!=='true'||
 assert.ok(existsSync(original),'real prior Kimi failed artifact must be downloaded');
 const scenarios=[];
 const scratch=mkdtempSync(join(tmpdir(),'aau-remediation-fixture-'));
-const scenarioNames=['success','journal_replay','bad_witness',
+const scenarioNames=['success','journal_replay','test_repair','bad_witness',
  'weak_tests','truncated','transport_unknown','inflight_stop','budget_ceiling'];
 function cp(dir){
  return JSON.parse(readFileSync(join(dir,'self-remediation-v2-checkpoint.json'),'utf8'));
@@ -110,12 +110,31 @@ try{
       assert.equal(observed.diagnostic,'machine_capacity');
     }else assert.equal(cp(dir).phase,'tests');
     run(dir,'cycle',name);
-    const final=cp(dir);
+    let final=cp(dir);
     assert.equal(final.callsAttempted,3);
     assert.equal(final.phaseHistory.length,3);
     assert.deepEqual(final.phaseHistory.map(x=>x.phase),
       name==='bad_witness'?['diagnose','repair','diagnose']:
        ['diagnose','repair','tests']);
+    if(name==='test_repair'){
+      assert.equal(final.status,'ready');
+      assert.equal(final.phase,'tests',
+       'do not revise an independently verified optimal solver for a bad self-test');
+      assert.equal(final.lastAssessment.public.pass,true);
+      assert.ok(final.lastAssessment.hiddenChecks.every(x=>x.pass));
+      assert.equal(final.lastAssessment.tests.rejectsOld,false);
+      assert.equal(JSON.parse(final.feedback).fixScope,'self_written_tests_only');
+      const optimalHash=final.phaseHistory[1].codeHash;
+      run(dir,'cycle',name);
+      final=cp(dir);
+      assert.equal(final.callsAttempted,4);
+      assert.equal(final.status,'passed');
+      assert.deepEqual(final.phaseHistory.map(x=>x.phase),
+       ['diagnose','repair','tests','tests']);
+      assert.equal(final.phaseHistory[1].codeHash,optimalHash);
+      assert.ok(Object.values(final.lastAssessment.tests).every(Boolean));
+      assert.ok(final.lastAssessment.hiddenChecks.every(x=>x.pass));
+    }
     if(['success','journal_replay'].includes(name)){
       assert.equal(final.status,'passed');
       assert.equal(final.lastAssessment.public.pass,true);
@@ -134,6 +153,8 @@ try{
       assert.equal(observed.diagnostic,'machine_capacity');
     }else if(name==='weak_tests'){
       assert.equal(final.status,'ready');
+      assert.equal(final.phase,'tests');
+      assert.equal(JSON.parse(final.feedback).fixScope,'self_written_tests_only');
       assert.equal(final.lastAssessment.public.pass,true);
       assert.ok(final.lastAssessment.hiddenChecks.every(x=>x.pass));
       assert.equal(final.lastAssessment.tests.acceptsCorrect,true);
@@ -142,7 +163,7 @@ try{
       assert.equal(final.lastAssessment.success,false);
     }
   }
-  const expectedPass=['success','journal_replay'].includes(name);
+  const expectedPass=['success','journal_replay','test_repair'].includes(name);
   run(dir,'finish',name,{},expectedPass);
   const result=JSON.parse(readFileSync(join(dir,'self-remediation-v2-report.json')));
   assert.equal(result.simulation,true,'never count simulated responses as inference');
@@ -170,7 +191,7 @@ try{
   oldModelArtifactRecovered:true,realDockerSandboxExecutions:true,
   originalKimiBadSourceUsed:true,
   independentOSProcessesPerStage:true,scenariosCount:scenarios.length,
-  acceptedPositiveControls:2,rejectedNegativeControls:6,
+  acceptedPositiveControls:3,rejectedNegativeControls:6,
   actualKimiSelfRemediationProven:false,scenarios};
  writeFileSync(join(root,'self-remediation-v2-fixture-evidence.json'),
   JSON.stringify(report,null,2)+'\n');
