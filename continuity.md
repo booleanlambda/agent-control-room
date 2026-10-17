@@ -651,3 +651,51 @@ Neon test UUID `bcf92471-83d3-4aad-95b0-af5912480c16`; trusted V6/V7 public prob
 - **Neon persistence/transaction correctness proven. RabbitMQ+Neon combined crash recovery not yet proven.** The Actions workflow has the pre-existing `secrets.AMQP` but no confirmed **branch-scoped least-privilege Neon Postgres credential**, and connector-owned privileged connection strings must never be committed to repo or displayed in logs.
 - Stale-worker test was controlled expiry + reclaim, not an actual runner crash. SQL functions trust a caller-controlled exact-cost receipt; a future **independent deterministic verifier service with tightly restricted database role** must authorize completion. RLS and revoked public access alone are not a complete multi-tenant authorization model.
 - Next gate: give isolated GitHub Actions worker a branch-specific Neon credential through a supported secrets-management action, execute real broker delivery → deterministic witness verification → Neon fenced claim/complete → broker ACK, then terminate worker between commit and ACK and prove recovery in a second process. Start with one worker and run-specific queue; do not add concurrency or connect production agent wake paths until that gate passes.
+
+---
+
+## Experiment V20 — Combined RabbitMQ + Neon SIGKILL recovery ready, LIVE BLOCKED BY MISSING BRANCH SECRET (2026-10-17)
+
+**Outcome:** Isolated implementation and deterministic CI **26/26 tests PASS**; **live combined broker/Neon test NOT RUN**. New branch `experiment/rabbitmq-neon-integrated-v20`, [draft PR #67](https://github.com/booleanlambda/agent-control-room/pull/67). DO NOT MERGE/DEPLOY. Zero LLM/provider calls, no existing production agent queues touched, no Silas wakes or production Neon/Supabase changes.
+
+### Implemented
+- `experiments/rabbitmq-neon-integrated-v20/store.mjs` uses `pg` with TLS and a hard fail-closed **branch marker check** matching `br-cold-rice-b4m3l9qu` and `AAU_V20_ISOLATED_LIVE_WORKER` before any write. Calls V19's already-tested `aau_research_v19.claim`, `complete`, and `summary`, fenced by worker epoch, with all SQL parameters bound.
+- Research-only `marker.sql` added and **actually installed on V19 isolated Neon development branch**: `aau_research_v19.integration_scope`. RLS enabled; no public grants. This branch is `br-cold-rice-b4m3l9qu`, NOT the production branch `br-mute-rain-b4sgepsi`.
+- `worker.mjs`: one worker process verifies every root exhaustively with V7 scheduling and independent V6 evaluator, then COMMITs its exact result to Neon, and **SIGKILLs itself before ACK**. A separate replacement worker consumes redelivered/pending messages, skips already completed roots, commits outstanding legal results and ACKs deliveries. Each message carries only `run` UUID and root ID; unique `aau.research.v20.<uuid>` broker queue with 10-minute expiry, durable queue and persistent publishes. Worker always requires AMQPS. No production queue names.
+- `live.mjs`: orchestrates two OS worker processes in one CI runner, validates initial unfinished interval, checks SIGKILL, Neon persistence, broker requeue, duplicate suppression and final V6 exact optimum 415 over 448 exhaustive legal schedules. Explicit guarded outcomes on missing credentials. This is **one GitHub runner with two worker processes**, not cross-runner or broker restart durability.
+- `integration.test.mjs` (5 unit/regression tests), `.github/workflows/rabbitmq-neon-proof-v20.yml`; workflow references existing `secrets.AMQP` and intended **new** branch-limited `secrets.NEON_V19_DATABASE_URL`, and preserves every outcome as an artifact. **Never prints/stores either secret.**
+- The V19 Neon proof ledger already passed its own live lease fencing, stale worker/duplicate/conflict checks, and the V17 RabbitMQ test previously passed a broker redelivery simulation; however, their **combined** live use is not verified by V20 yet.
+
+### Verified current CI
+- GitHub Actions: https://github.com/booleanlambda/agent-control-room/actions/runs/39078310334. The workflow job SUCCESS: **5 V20 + 2 V19 + 6 V17 + 13 V7 tests = 26/26 passed**, no failures.
+- Artifact https://github.com/booleanlambda/agent-control-room/actions/runs/39078310334/artifacts/12117469142 (`aau-rabbitmq-neon-v20-evidence`). Downloaded JSON status **`blocked_missing_neon_v19_branch_secret`**; `amqpsConnected=false`, `neonMarkerVerified=false`, no proof receipt. Thus workflow success means only *preflight success*, NOT end-to-end recovery success.
+- The combined integration was deliberately not launched because GitHub Actions **has no configured `NEON_V19_DATABASE_URL` secret**. The GitHub connector available here does not expose a repository-secrets write method. Do not paste the Neon connection string into code, PR, chat, artifacts or logs.
+
+### Precise next user action and future gate
+In the repository GitHub UI, Settings -> Secrets and variables -> Actions -> New repository secret, name **`NEON_V19_DATABASE_URL`**; value: a valid PostgreSQL TLS connection URL for the **Neon development branch `aau-v19-proof-ledger-isolated`**, obtainable in Neon's console after selecting that branch (NOT production). Keep the URL private. Then rerun this exact V20 GitHub Actions workflow on the research PR. A least-privilege branch-specific role is preferable over production-wide privileged credentials.
+
+Once configured, V20 must demonstrate **actual** broker delivery, verified Neon commit, SIGKILL-before-ACK, redelivery in a distinct process, idempotent completion, final Neon [415,415] proof and independent V6 oracle. Do not claim any of those happened just because the preflight passed. Retire the separately billed research branch only with explicit user authorization when finished.
+
+---
+
+## Experiment V20 — Live RabbitMQ + Neon SIGKILL-before-ACK recovery PASS (2026-10-17)
+
+**Status:** LIVE INTEGRATION VERIFIED, no production merge or deployment. Isolated GitHub research draft [PR #67](https://github.com/booleanlambda/agent-control-room/pull/67), branch `experiment/rabbitmq-neon-integrated-v20`. The existing AMQPS GitHub secret and the now-installed private `NEON_V19_DATABASE_URL` were successfully used by isolated GitHub Actions; neither credential was printed. Production AAU/Silas, production RabbitMQ queue namespaces, Supabase production and Neon production branch untouched. **0 LLM/provider calls.**
+
+### Successful execution
+- GitHub Actions run https://github.com/booleanlambda/agent-control-room/actions/runs/39079131720 completed **SUCCESS** after the user configured the branch-only Neon GitHub Actions secret.
+- Tests: V20 5 + V19 2 + V17 6 + V7 13 = **26/26 passed**.
+- Artifact https://github.com/booleanlambda/agent-control-room/actions/runs/39079131720/artifacts/12118001973, downloaded and inspected: `integrated-v20-evidence.json` within `aau-rabbitmq-neon-v20-verified-evidence.zip`. Evidence root `proofDigest=91f8416f8d7f0c6d6a7cf8d049ba4a8cb9cfa64697884a24e3b09a62fa43f1da`. ZIP SHA256 `6fdb47b0b991be0e9522d29887bd55c370d475ad560e83a3981667a4c82c6f79`.
+- Implemented and executed a unique **run-scoped durable RabbitMQ queue** with 10-minute expiry and persistent message publication (4 confirmed messages: 3 distinct root IDs plus an intentional duplicate). A single active worker process verified the first root with trusted V7 scheduling and independent V6 evaluator, COMMITTED its exact witness receipt to the private Neon V19 research branch, and was then actually terminated by **`SIGKILL` without RabbitMQ ACK**.
+- A second OS worker process connected and received **1 RabbitMQ redelivery**, skipped **2 duplicate deliveries** based on Neon durable completion ledger, completed the other **2 unfinished roots**, and ACKed all **4** originally published messages. Only one worker process was active at a time.
+- The isolated Neon branch marker `br-cold-rice-b4m3l9qu` + `AAU_V20_ISOLATED_LIVE_WORKER` was checked before any V20 write; `neonMarkerVerified=true`, `amqpsConnected=true`, `simulatedKill=true`. No production queue name reused.
+- V20 produced 3/3 completed exact root minima **415, 469, 452**, representing **240 + 104 + 104 = 448** exhaustive seven-job complete schedules; final global certified interval **[415,415]**, gap zero, matches separate V6 exact oracle **415**. Final proof hash `91f8416f8d7f0c6d6a7cf8d049ba4a8cb9cfa64697884a24e3b09a62fa43f1da`.
+- **Independent subsequent Neon connector readback**, NOT just a worker assertion: Neon project `lucky-term-22683833`, development branch `br-cold-rice-b4m3l9qu`, actual new `run_id=b70f5987-9de5-4850-86ea-db5b5c59a1fe`, persisted **3/3 complete, 448 leaves**. Separate SQL `aau_research_v19.summary(run_id)` returned `total=3, completed=3, pending=0, lower_bound=415, upper_bound=415, gap=0, optimal=true`.
+- An essential correctness repair before rerunning: no missing credential may silently leave GitHub Actions green; `live.mjs` now sets a nonzero exit status when AMQP or the research Neon secret is missing.
+
+### Proven vs unproven
+**Proven:** scoped durable AMQP delivery, Neon database transaction after exact deterministic evaluation, real process death between COMMIT and ACK, redelivery to a different process, idempotent duplicate suppression, acknowledgment of all original messages, and persisted global exact certificate on the separate Neon research branch.
+
+**NOT proven:** RabbitMQ broker restart persistence, recovery across **two different GitHub runners/machines** (both worker processes ran in one job), concurrent worker scaling, crash recovery from corrupt or irretrievably lost Neon credentials, or improvement in 12–16-job certification throughput against V13. A durable queue plus a separate SQL ledger is now viable infrastructure, but these scheduling tests are controlled seven-job workloads and do not demonstrate general cognitive gain for Silas.
+
+**Next proposed gate, NOT STARTED:** test durable broker delivery and real Neon persistence **across distinct GitHub Actions runners**, then one-versus-two-worker throughput and proof quality using the same V13 12–16-job controlled instances. Keep isolated queues/branch, per-worker lease fencing and external independent proof verification; do not production-merge or assume concurrency improves performance.
