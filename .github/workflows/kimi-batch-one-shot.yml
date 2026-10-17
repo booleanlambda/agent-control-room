@@ -1,0 +1,45 @@
+name: AAU Kimi K2.6 Durable Batch One Shot
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/kimi-batch-one-shot.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  batch-recovery:
+    if: github.head_ref == 'experiment/recursive-tree-nemotron-v0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+      AAU_EXPERIMENT_BATCH: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Validate single-submission guard and syntax
+        working-directory: experiments/recursion-tree-v0
+        run: |
+          set -euo pipefail
+          test -n "${MOONSHOT_API_KEY:-}" || { echo 'MOONSHOT_KEY_MISSING'; exit 3; }
+          node --check moonshot-batch-durable.mjs
+          test ! -f kimi-batch-recovery-checkpoint.json
+      - name: Create exactly one 4-leaf batch and durable ID; process terminates
+        working-directory: experiments/recursion-tree-v0
+        run: node moonshot-batch-durable.mjs submit
+      - name: Separate clean Node client reattaches via saved batch ID and GETs only
+        working-directory: experiments/recursion-tree-v0
+        run: node moonshot-batch-durable.mjs resume
+      - name: Archive resumable batch ID checkpoint and verified output/cost
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-kimi-k26-batch-durable-recovery
+          path: |
+            experiments/recursion-tree-v0/kimi-batch-recovery-checkpoint.json
+            experiments/recursion-tree-v0/kimi-batch-recovery-report.json
+          if-no-files-found: ignore
