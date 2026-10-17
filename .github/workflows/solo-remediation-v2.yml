@@ -1,0 +1,46 @@
+name: AAU Serial Self-Remediation V2
+
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/solo-logistics-v1
+    paths:
+      - 'experiments/solo-remediation-v2/**'
+      - '.github/workflows/solo-remediation-v2.yml'
+
+permissions:
+  contents: read
+
+# Intentionally shares the v1 serial model lane; never runs a matrix.
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  single-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      AAU_SOLO_REMEDIATION_REAL_KIMI: 'yes'
+      AAU_PYTHON_SANDBOX: 'yes'
+      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Source syntax and independent deterministic benchmark
+        run: |
+          node --check experiments/solo-remediation-v2/benchmark.mjs
+          node --check experiments/solo-remediation-v2/live.mjs
+          node --test experiments/solo-remediation-v2/benchmark.test.mjs
+      - name: Single-thread Kimi solve, fault, diagnose, repair and verify
+        working-directory: experiments/solo-remediation-v2
+        run: node live.mjs
+      - name: Preserve all model results and failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-serial-self-remediation-v2-evidence
+          path: experiments/solo-remediation-v2/remediation-v2-evidence.json
+          if-no-files-found: warn
