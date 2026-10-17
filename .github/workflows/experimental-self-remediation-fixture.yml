@@ -58,6 +58,14 @@ jobs:
           repository: booleanlambda/agent-control-room
           github-token: ${{ github.token }}
           path: experiments/recursion-tree-v0/prior-v5
+      - name: Retrieve immutable V6 Kimi-written corrected verification script
+        uses: actions/download-artifact@v4
+        with:
+          name: aau-kimi-tests-only-live-remediation-evidence
+          run-id: 39039858401
+          repository: booleanlambda/agent-control-room
+          github-token: ${{ github.token }}
+          path: experiments/recursion-tree-v0/prior-v6
       - name: Check all fixture paths and no provider credentials
         run: |
           set -euo pipefail
@@ -69,6 +77,7 @@ jobs:
           node --check experiments/recursion-tree-v0/self-remediation-v2-fixture-integration.mjs
           node --check experiments/recursion-tree-v0/self-remediation-direct-traceback-fixture.mjs
           node --check experiments/recursion-tree-v0/self-remediation-tests-only-fixture.mjs
+          node --check experiments/recursion-tree-v0/self-remediation-tests-only-adversarial.mjs
           node --test experiments/recursion-tree-v0/unseen-python-benchmarks.test.mjs
           docker pull python:3.12-alpine
       - name: Eight genuine Docker and independent-process remediation replay scenarios
@@ -80,10 +89,15 @@ jobs:
       - name: Verify model-written solver remains frozen while replacing only Kimi's false-negative self-test
         working-directory: experiments/recursion-tree-v0
         run: node self-remediation-tests-only-fixture.mjs
+      - name: Adversarially audit genuine Kimi-authored self-tests on 7 problems and 21 mutant witnesses
+        working-directory: experiments/recursion-tree-v0
+        run: node self-remediation-tests-only-adversarial.mjs
       - name: Archive synthetic vs live provenance and recovery evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: aau-remediation-no-provider-protocol-evidence
-          path: experiments/recursion-tree-v0/self-remediation-v2-fixture-evidence.json
+          path: |
+            experiments/recursion-tree-v0/self-remediation-v2-fixture-evidence.json
+            experiments/recursion-tree-v0/test-only-kimi-adversarial-audit.json
           if-no-files-found: ignore
