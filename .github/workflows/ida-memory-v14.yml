@@ -1,0 +1,44 @@
+name: AAU Memory Bounded Iterative Deepening V14
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - experiment/tighter-bounds-v13
+    paths:
+      - 'experiments/ida-memory-v14/**'
+      - '.github/workflows/ida-memory-v14.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  deterministic-ida-proof-single-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 24
+    env:
+      AAU_V14_RESEARCH: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Test interrupted proof intervals, randomized oracles and memory bounds
+        run: |
+          node --check experiments/ida-memory-v14/ida.mjs
+          node --check experiments/ida-memory-v14/live.mjs
+          node --test experiments/ida-memory-v14/ida.test.mjs
+          node --test experiments/tighter-bounds-v13/certifier.test.mjs
+      - name: Compare old frontier and iterative deepening on nine stress fixtures
+        working-directory: experiments/ida-memory-v14
+        run: node live.mjs
+      - name: Preserve all proof intervals including on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-ida-memory-v14-evidence
+          path: experiments/ida-memory-v14/ida-v14-evidence.json
+          if-no-files-found: warn
