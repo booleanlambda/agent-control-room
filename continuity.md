@@ -210,3 +210,37 @@ Model had to find the least-cost path through a cyclic directed graph respecting
 6. **Failure policy:** stop on verifier mismatch, failed invariant, ambiguous provider result, budget exhaustion. No automatic retries of uncertain billable calls and no Kimi-authored changes to verifier/kernel during live tests. Keep Silas paused/untouched and avoid merging research PRs.
 
 **Next implementable work item:** create `experiments/deterministic-scheduler-v7/kernel.mjs` and `kernel.test.mjs` on a new research branch, establish green independent cross-checks before one new paid Kimi run. Do not call the architecture fix complete until these tests and a live end-to-end trial pass.
+
+---
+
+## Experiment V7 — Deterministic scheduling kernel, implementation and successful live single-worker test (2026-10-17)
+
+**Research draft PR:** https://github.com/booleanlambda/agent-control-room/pull/54
+**Branch:** `experiment/deterministic-scheduler-v7` — DO NOT MERGE OR DEPLOY to AAU production; Silas, Render, Supabase and queues are untouched.
+
+### Architectural change implemented
+- New trusted pure JS scheduling transitions: `experiments/deterministic-scheduler-v7/kernel.mjs`.
+- Kimi NEVER authors or passes timing/arithmetic source: it submits only `{jobs:[{id,machine},...]}`. Kernel rejects extra keys, missing/repeated jobs, illegal machines, unresolved predecessors. It owns release, machine clock, previous type, non-preemptible setup, earliest parent FINISH, maintenance windows, activation exactly once, weighted tardiness, schedule, evidence ledger and SHA256 hashes.
+- Kernel derives earliest legal start: `max(job.release,max(parentFinish),machine.finish+setup)`; adjusts for every maintenance intersection on the **entire [setupStart,workFinish)** interval; setupStart is always >= machine.finish >= 0.
+- For small cases the kernel includes `searchBestCandidate` exhaustively searching feasible topological orders and machine assignments. **Independent** `experiments/precise-diagnostics-v6/benchmark.mjs` oracle evaluates/grades its results; no shared solver implementation.
+- 13 tests in `kernel.test.mjs`: positive-cost public and both hidden optima, randomized 24 small exact cross-check problems, time-zero setup, cross-machine parent finish, maintenance, unsorted overlaps, sequential changes, release, no setup for same type, one-time activation, tamper/duplicates and deterministic hashes.
+
+### GitHub Actions actual run results and fixes
+1. Initial CI run `39061112011`: failed preflight 8/13 because one-machine regression fixtures incorrectly invoked the old exact oracle which intentionally only supports 2 machines. Model stage SKIPPED, no paid inference. Regression test helper fixed to use independent feasibility `evaluate` for 1-machine cases, and full independent `grade` only for 2 machines.
+2. Run `39061169990`: 13/13 regressions PASS, 3/3 oracle optimal cross-check PASS; provider call rejected with **HTTP 400** (0 reported tokens); model stage set `manual_hold`. No automatic retry.
+3. Run `39061242564`: independent preflight still PASS; response journal revealed precise HTTP 400 `invalid temperature: only 0.6 is allowed for this model`. No model tokens returned.
+4. Corrected request temperature 0.45 -> **0.6**. Verified successful final research run: **https://github.com/booleanlambda/agent-control-room/actions/runs/39061295205**; one worker, one serial Kimi K2.6 thinking-off model call, **877 provider-reported tokens**. Full evidence artifact: **https://github.com/booleanlambda/agent-control-room/actions/runs/39061295205/artifacts/12111636580** (`aau-deterministic-scheduler-v7-evidence`). Job conclusion **success**; 13/13 deterministic tests passed.
+
+### Exact measured outcomes for final successful run
+- Independent public and hidden kernel-oracle optimality baseline costs: **415**, **387**, **582**. Kernel's exhaustive search matched reference oracle on each EXACTLY.
+- Kimi's first candidate topological assignment was accepted without requiring revision:
+  `[J0@M0,J1@M1,J3@M0,J2@M1,J4@M0,J6@M0,J5@M1]`.
+- Kernel-generated candidate PUBLIC cost **512** vs independent proven optimum **415** (gap 97); **feasible but NOT optimal**.
+- Same Kimi ordering/assignment re-evaluated on two hidden datasets: both **valid feasible schedules**; hidden 1 **387 vs 387 optimum** (optimal), hidden 2 **690 vs 582 optimum** (108 gap). This checks deterministic kernel robustness on changed timing inputs, NOT new hidden cognitive problem-solving by Kimi.
+- Kernel never accepted negative setup start, unmet predecessor, or maintenance conflict; external exact verifier accepted all model proposal outputs as feasible and computed actual cost. Model did not supply timestamps, costs or executable Python.
+- Three proof nodes (model assignment, trusted scheduling kernel result, independent verifier) accepted. Verified root SHA256 `75688b1130ba366c6a56aa01f3977f05908324ca2170f1287e6f9521458acfe7`.
+- Model call and token figures apply to successful final run only. Prior HTTP400 requests are separately recorded and had zero reported tokens; do not combine distinct GitHub runs into one uninterrupted Kimi execution.
+
+### Interpretation / next gate
+**Verified isolated resolution of recurring scheduling timing errors:** runtime owns all arithmetic/time constraints and independent verifier confirms feasibility. No amount of agent reasoning can submit an illegal start timestamp for acceptance under this interface.
+**Not yet production-ready**: tested only one benchmark family with small (7-job) problems, and model optimization remained suboptimal (public +97, hidden2 +108). Larger cases need bounded optimizer/search with measurable quality/gap, adversarial testing and additional guardrails. Next stage, if authorized: add an explicit independent optimization service for bounded small problems or heuristic exploration for larger ones; preserve agent autonomy in choice of strategies, but never delegate clock correctness to LLM. Test more problem families and failure modes before considering 2-worker concurrency or merging into AAU.
