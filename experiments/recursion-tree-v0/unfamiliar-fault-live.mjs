@@ -42,7 +42,7 @@ async function query(messages,record){
    headers:{authorization:'Bearer '+key,'content-type':'application/json',
     accept:'application/json'},
    body:JSON.stringify({model:'kimi-k2.6',thinking:{type:'disabled'},
-    temperature:0.4,max_tokens:7600,response_format:{type:'json_object'},
+    temperature:0.6,max_tokens:7600,response_format:{type:'json_object'},
     stream:false,messages})});
   http=response.status;
   const packet=await response.json().catch(()=>({}));
@@ -50,7 +50,12 @@ async function query(messages,record){
   if(Number.isSafeInteger(Number(usage))&&usage!==null&&Number(usage)>=0)
    report.providerReportedTokens+=Number(usage);
   finish=packet?.choices?.[0]?.finish_reason??null;
-  if(!response.ok)throw Error('provider_http_'+http);
+  if(!response.ok){
+   const errorInfo=packet?.error||{};
+   const safeType=String(errorInfo.type||errorInfo.code||'unknown').slice(0,60);
+   const safeMessage=String(errorInfo.message||'').slice(0,150);
+   throw Error('provider_http_'+http+'_'+safeType+':'+safeMessage);
+  }
   if(finish!=='stop')throw Error('incomplete_'+String(finish));
   if(packet?.choices?.[0]?.message?.reasoning_content)
    throw Error('unexpected_thinking_output');
