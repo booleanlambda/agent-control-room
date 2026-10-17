@@ -84,7 +84,7 @@ async function callMoonshot(cp){
  if(!KEY)throw Error('MOONSHOT_SECRET_MISSING');
  const ctl=new AbortController(),clock=setTimeout(()=>ctl.abort(),175000);
  const phase=cp.phase,started=Date.now(),outputLimit=
-  phase==='diagnose'?850:phase==='repair'?5200:3200;
+  phase==='diagnose'?2200:phase==='repair'?5200:3200;
  let http=null,usage=null,finish=null,received=false;
  try{
   const r=await fetch('https://api.moonshot.ai/v1/chat/completions',{
@@ -222,10 +222,18 @@ async function oneCycle(){
  let response;
  try{response=await callMoonshot(cp);}
  catch(e){
+  const telemetry=e.telemetry||null;
+  // A successful HTTP response with finish_reason=length is NOT usable
+  // cognitive output, but its provider-reported tokens are still consumed.
+  // Preserve known usage without double-counting an unreceived result.
+  const knownUsage=Number(telemetry?.usage);
+  if(Number.isSafeInteger(knownUsage)&&knownUsage>0)
+   cp.providerReportedTokens+=knownUsage;
   cp.status='manual_hold';cp.uncertainFailure=summarize(e);
-  cp.transportTelemetry=e.telemetry||null;save(cp);
+  cp.transportTelemetry=telemetry;save(cp);
   console.log('REMEDIATION_V2_MANUAL_HOLD='+JSON.stringify({phase:cp.phase,
-   attempt:cp.callsAttempted,failure:cp.uncertainFailure,telemetry:cp.transportTelemetry}));
+   attempt:cp.callsAttempted,failure:cp.uncertainFailure,
+   accountedProviderTokens:cp.providerReportedTokens,telemetry:cp.transportTelemetry}));
   return;
  }
  cp.providerReportedTokens+=response.usage;
