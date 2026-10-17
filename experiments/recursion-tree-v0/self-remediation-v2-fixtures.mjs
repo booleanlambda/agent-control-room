@@ -1,7 +1,7 @@
 // Synthetic responses, NOT Kimi model output. No provider/network access.
 // These deliberately test the unchanged live response -> checkpoint -> Python
 // execution -> independent hidden-grading path.
-export const EXACT_SOLVER = String.raw\`import json,sys
+export const EXACT_SOLVER = String.raw`import json,sys
 d=json.load(sys.stdin)
 n=len(d["sizes"])
 best=None
@@ -33,8 +33,8 @@ visit(0,[],[0,0,0],set(),0)
 if best is None:
     print(json.dumps({"cost":None,"assignment":[]}))
 else:
-    print(json.dumps({"cost":best,"assignment":best_route}))\`;
-export const PROPERTY_TESTS = String.raw\`import json,sys
+    print(json.dumps({"cost":best,"assignment":best_route}))`;
+export const PROPERTY_TESTS = String.raw`import json,sys
 v=json.load(sys.stdin)
 d=v["input"]; out=v["output"]
 good=isinstance(out,dict)
@@ -56,8 +56,8 @@ if good:
     cost+=sum(d["activation"][m] for m in used)
     if not isinstance(out.get("cost"),int) or isinstance(out.get("cost"),bool) or out["cost"]!=cost:
         good=False
-print(json.dumps({"passed":bool(good)}))\`;
-export const BAD_TESTS = 'import json,sys\nv=json.load(sys.stdin)\nprint(json.dumps({"passed": True}))\n';
+print(json.dumps({"passed":bool(good)}))`;
+export const BAD_TESTS = 'import json,sys\n# Deliberately broken regression suite: it accepts any candidate without checking capacity or cost\nv=json.load(sys.stdin)\nprint(json.dumps({"passed": True}))\n';
 export function scriptedResponse(phase,scenario='success'){
  if(phase==='diagnose')return {action:'diagnose',
   diagnosis:'The source overwrites or loses DP parent pointers between job layers, so the numeric minimum is correct but traceback yields an impossible machine assignment.',
