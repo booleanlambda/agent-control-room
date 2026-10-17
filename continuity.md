@@ -502,3 +502,39 @@ No outside exact 12–16 job oracle was used. Optimality of **12 variant 1** fol
 - This DOES NOT establish real memory savings over V13: V14 has no global queue by design, but no controlled separate-process memory or RSS benchmark was done. The bounded V13 parent-pointer heap is still the better certifier for these fixtures at existing budgets. Do not replace V13 with V14 or silently call V14 an optimization success.
 
 **Next gate, NOT STARTED:** investigate proof-preserving alternatives with memory/expansion efficiency better than naive iterative deepening, e.g. memory-bounded best-first with disk-spill checkpointing or recursive best-first with backed-up f-bounds and complete iteration accounting. Measure separate-process peak RSS, disk I/O, time, expansions, proof gap, and independent validity on the same nine fixtures. Retain V13 baseline, preserve the hard frontier cap and no false optimum labels. No automatic production merge.
+
+---
+
+## Experiment V15 — Durable SQLite frontier spill vs V13 best-first, negative performance trade-off (2026-10-17)
+
+**Scope/status:** Isolated research draft PR [#62](https://github.com/booleanlambda/agent-control-room/pull/62), `experiment/disk-frontier-v15`; CI PASS and exact correctness checks PASS, **overall replacement NOT recommended** due large runtime penalty and lost exact proof. **DO NOT MERGE/DEPLOY.** Zero Moonshot/Kimi/provider calls, zero provider tokens and no production AAU/Silas/Render/Supabase/broker writes.
+
+### Verified execution and implementation
+- Successful GitHub Actions run https://github.com/booleanlambda/agent-control-room/actions/runs/39071580533.
+- Evidence artifact https://github.com/booleanlambda/agent-control-room/actions/runs/39071580533/artifacts/12114768554 (`aau-disk-frontier-v15-evidence`).
+- Root evidence ledger SHA256 **`7eccea8c6d359321c006c78e4e001e283a8bea2308683e074585044877275b96`**, checked against downloaded ZIP.
+- Implemented `experiments/disk-frontier-v15/spill.py` with Python stdlib `sqlite3` durable on-disk best-first queue ordered by admissible forced-machine-rank lower bound. Each node removal and all its child inserts are an **atomic SQLite transaction**; if a hard queue-state cap would be exceeded, do not remove parent or drop children, report `disk_queue_budget` and certify interval using complete surviving queue. Soft on-disk byte cap checked between transactions, not byte-perfect. `PRAGMA synchronous=FULL` + rollback journal chosen for durability.
+- `disk.mjs` runs Python as an isolated subprocess, independently recomputes selected proposal via trusted V7 scheduling kernel and separate V6 feasibility validator, reports source/hash/certificate. `v13-worker.mjs` runs V13 in its own separate Node process for RSS comparisons. `live.mjs` tests exactly the original V12/V13 nine independently seeded 12,14,16-job instances and same beam incumbents.
+- **8/8 V15 tests plus 9/9 V13 tests passed (17/17)**. V15 tested *10 independent 4–8 job exact oracle fixtures*, four additional 4–7 job exact oracle trials in the final evidence, atomic queue-budget censoring, soft database-budget censoring, zero-node budget, independent feasible witness and deterministic replay. No falsely certified optimality or dropped queue state was observed.
+
+### Same-case fixed expansion-budget comparison
+Each configuration allowed at most 2,200 node expansions and used V13's forced-rank admissible relaxation; V13 was capped at 2,400 **in-RAM frontier states**, disk-tight at 2,400 **on-disk queue states**, disk-spill at **16,000 on-disk queue states**. These are **not equal memory/storage budgets**. Separate-process peak RSS is not interpreter-normalized.
+
+| Measure | V13 in-memory Node | SQLite tight (2,400 disk states) | SQLite spill (16,000 disk states) |
+|---|---:|---:|---:|
+| Cases fully proved optimal | **1/9** | 0/9 | 0/9 |
+| Aggregate certified uncertainty `sum(UB-LB)` | 5,531 | 6,120 | **5,255** |
+| Cases with smaller gap than V13 | baseline | — | **7/9** |
+| Total node expansions across nine cases | 3,508 | 4,933 | 18,219 |
+| Total measured solver time across nine cases | **0.562 seconds** | 14.10 seconds | **73.99 seconds** |
+| Largest peak child-process RSS | ~66.6 MiB (Node) | ~14.3 MiB (Python) | ~15.4 MiB (Python) |
+| Largest SQLite database/journal bytes recorded | n/a | ~1.19 MB | **6,840,320 bytes (~6.5 MiB)** |
+
+The disk spill's aggregate certified gap improved **276 (about 5%)** vs V13 only because it could retain more frontier states, and it tightened seven of nine gaps. It **lost** the V13 exact proof: for 12 variant 1, V13 certified optimum **1685**, while disk spill under the same 2,200-node expansion limit stopped at **[1642,1750]** without any proof. Two of nine spill intervals were worse than V13. No new 14/16 job case became certified exact.
+
+Measured solver time **73.99 seconds vs 0.562 seconds** (roughly 132× in this one CI run) includes far more disk search expansions and durable SQLite fsync per expansion; do not interpret as a pure algorithmic speed factor or stable hardware benchmark. Same-state-cap disk-tight also took **14.10 seconds**, exceeding V13's **0.562 seconds** by roughly 25×. Node/Python RSS figures are not apples-to-apples because interpreter overhead differs, and the database occupies separate disk space.
+
+### Decision
+**Do NOT substitute V15 disk-backed search for V13.** It demonstrates correct proof-preserving spill/censoring with low measured Python RSS and moderate disk allocation, but under the existing expansion budget yields no additional exact proofs and large wall-time penalties. Preserve V13 as the preferred in-memory certifier. Disk spill should remain an experimental fallback for genuinely memory-limited environments only if durability/I/O overhead can be controlled and per-process benchmarks prove a practical advantage. No production integration, concurrency, or expanded paid model experiments authorized by this result.
+
+**Next research gate, NOT STARTED:** profile database transaction/fsync costs separately, test batched or WAL-backed disk priority queues with proof-preserving atomicity, or a proof-preserving bounded hybrid RAM+disk queue, and compare equal search work and equal memory budgets. Make any successor independently pass small exact oracle and hard interrupted-frontier invariants before considering migration. Continue writing exact run/evidence hashes to continuity.
