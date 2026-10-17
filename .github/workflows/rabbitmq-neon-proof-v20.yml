@@ -1,0 +1,53 @@
+name: AAU Isolated RabbitMQ Neon Proof V20
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - experiment/neon-durable-proof-v19
+    paths:
+      - 'experiments/rabbitmq-neon-integrated-v20/**'
+      - '.github/workflows/rabbitmq-neon-proof-v20.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  isolated-one-worker-two-process-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      AAU_V20_RESEARCH: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate independent V6-V7 exact oracles and V20 safety invariants first
+        run: |
+          node --check experiments/rabbitmq-neon-integrated-v20/store.mjs
+          node --check experiments/rabbitmq-neon-integrated-v20/worker.mjs
+          node --check experiments/rabbitmq-neon-integrated-v20/live.mjs
+          node --test experiments/rabbitmq-neon-integrated-v20/integration.test.mjs
+          node --test experiments/neon-durable-proof-v19/receipt.test.mjs
+          node --test experiments/rabbitmq-proof-frontier-v17/frontier.test.mjs
+          node --test experiments/deterministic-scheduler-v7/kernel.test.mjs
+      - name: Install pinned PostgreSQL and AMQP clients without lifecycle scripts
+        run: npm install --no-save --ignore-scripts pg@8.16.3 amqplib@0.10.9
+      - name: Run isolated Neon branch and RabbitMQ crash-redelivery integration when branch secret is present
+        working-directory: experiments/rabbitmq-neon-integrated-v20
+        env:
+          AMQP_URL: ${{ secrets.AMQP }}
+          NEON_V19_DATABASE_URL: ${{ secrets.NEON_V19_DATABASE_URL }}
+        run: node live.mjs
+      - name: Preserve explicit passed, blocked or failed live status as evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-rabbitmq-neon-v20-evidence
+          path: experiments/rabbitmq-neon-integrated-v20/integrated-v20-evidence.json
+          if-no-files-found: warn
