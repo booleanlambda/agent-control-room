@@ -1,0 +1,45 @@
+name: AAU Disk Frontier Research V15
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - experiment/ida-memory-v14
+    paths:
+      - 'experiments/disk-frontier-v15/**'
+      - '.github/workflows/disk-frontier-v15.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  sqlite-spill-vs-v13:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      AAU_V15_RESEARCH: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Verify SQLite atomic frontier and independent oracle regression suite
+        run: |
+          python3 -m py_compile experiments/disk-frontier-v15/spill.py
+          node --check experiments/disk-frontier-v15/disk.mjs
+          node --check experiments/disk-frontier-v15/live.mjs
+          node --test experiments/disk-frontier-v15/disk.test.mjs
+          node --test experiments/tighter-bounds-v13/certifier.test.mjs
+      - name: Separate-process V13 and SQLite proof comparison on same nine cases
+        working-directory: experiments/disk-frontier-v15
+        run: node live.mjs
+      - name: Preserve bound comparisons, disk and RSS evidence on all outcomes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-disk-frontier-v15-evidence
+          path: experiments/disk-frontier-v15/disk-v15-evidence.json
+          if-no-files-found: warn
