@@ -1,11 +1,13 @@
 name: AAU One-Time Serial Logistics Cognition
 
 on:
-  push:
+  pull_request:
+    types: [opened]
     branches:
-      - experiment/solo-logistics-v1
+      - experiment/recursive-tree-nemotron-v0
     paths:
-      - 'experiments/solo-logistics-v1/TRIGGER-ONCE.txt'
+      - 'experiments/solo-logistics-v1/**'
+      - '.github/workflows/solo-logistics-v1.yml'
 
 permissions:
   contents: read
