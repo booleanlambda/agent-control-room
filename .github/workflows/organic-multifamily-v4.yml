@@ -1,0 +1,46 @@
+name: AAU Serial Novel Organic Recovery V4
+
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/solo-uninterrupted-v3
+    paths:
+      - 'experiments/organic-multifamily-v4/**'
+      - '.github/workflows/organic-multifamily-v4.yml'
+
+permissions:
+  contents: read
+
+# Shared serial research lane (v1/v2/v3/v4); no matrix or parallel model requests.
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  single-worker-two-new-families:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      AAU_ORGANIC_V4_AUTHORIZED: 'yes'
+      AAU_PYTHON_SANDBOX: 'yes'
+      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Verify reference oracles and runner syntax without model cost
+        run: |
+          node --check experiments/organic-multifamily-v4/benchmark.mjs
+          node --check experiments/organic-multifamily-v4/live.mjs
+          node --test experiments/organic-multifamily-v4/benchmark.test.mjs
+      - name: One worker runs two novel tasks with automatic organic repair
+        working-directory: experiments/organic-multifamily-v4
+        run: node live.mjs
+      - name: Preserve evidence and failed model outputs regardless of conclusion
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-serial-organic-v4-evidence
+          path: experiments/organic-multifamily-v4/organic-v4-evidence.json
+          if-no-files-found: warn
