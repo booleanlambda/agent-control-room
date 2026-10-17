@@ -1,0 +1,65 @@
+name: AAU Free Self-Remediation Protocol End-to-End
+
+on:
+  push:
+    branches: [experiment/recursive-tree-nemotron-v0]
+    paths:
+      - 'experiments/recursion-tree-v0/self-remediation-v2-*.mjs'
+      - 'experiments/recursion-tree-v0/self-remediation-kimi-v2.mjs'
+      - '.github/workflows/experimental-self-remediation-fixture.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'experiments/recursion-tree-v0/self-remediation-v2-*.mjs'
+      - 'experiments/recursion-tree-v0/self-remediation-kimi-v2.mjs'
+      - '.github/workflows/experimental-self-remediation-fixture.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  disposable-multiprocess-replay:
+    if: github.head_ref == 'experiment/recursive-tree-nemotron-v0' || github.ref_name == 'experiment/recursive-tree-nemotron-v0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 13
+    env:
+      GITHUB_ACTIONS: 'true'
+      AAU_PYTHON_SANDBOX: 'yes'
+      AAU_NO_PROVIDER_NETWORK: 'yes'
+      AAU_REMEDIATION_V2_AUTHORIZED: ''
+      MOONSHOT_API_KEY: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fetch exact historical failed Kimi code, never a repaired stand-in
+        uses: actions/download-artifact@v4
+        with:
+          name: aau-kimi-unseen-python-cognition-audit
+          run-id: 38994095805
+          repository: booleanlambda/agent-control-room
+          github-token: ${{ github.token }}
+          path: experiments/recursion-tree-v0
+      - name: Check all fixture paths and no provider credentials
+        run: |
+          set -euo pipefail
+          test -z "${MOONSHOT_API_KEY:-}"
+          test -z "${AAU_REMEDIATION_V2_AUTHORIZED:-}"
+          test -s experiments/recursion-tree-v0/unseen-python-kimi-report.json
+          node --check experiments/recursion-tree-v0/self-remediation-v2-fixtures.mjs
+          node --check experiments/recursion-tree-v0/self-remediation-kimi-v2.mjs
+          node --check experiments/recursion-tree-v0/self-remediation-v2-fixture-integration.mjs
+          node --test experiments/recursion-tree-v0/unseen-python-benchmarks.test.mjs
+          docker pull python:3.12-alpine
+      - name: Eight genuine Docker and independent-process remediation replay scenarios
+        working-directory: experiments/recursion-tree-v0
+        run: node self-remediation-v2-fixture-integration.mjs
+      - name: Archive synthetic vs live provenance and recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-remediation-no-provider-protocol-evidence
+          path: experiments/recursion-tree-v0/self-remediation-v2-fixture-evidence.json
+          if-no-files-found: ignore
