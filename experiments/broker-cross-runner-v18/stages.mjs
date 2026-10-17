@@ -2,7 +2,6 @@
 // Each GitHub Actions job is a fresh process with a fresh runner filesystem.
 // SQLite is checkpointed to immutable Actions artifact BEFORE a message ack.
 // Never reuse this artifact handoff as a concurrent mutable SQL database.
-import amqp from 'amqplib';
 import {spawnSync} from 'node:child_process';
 import {createHash,randomUUID} from 'node:crypto';
 import {mkdirSync,readFileSync,writeFileSync,existsSync} from 'node:fs';
@@ -15,6 +14,7 @@ import {rootPartitions,solvePartition,digest} from '../rabbitmq-proof-frontier-v
 if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_V18_RESEARCH!=='yes')throw Error('RESEARCH_CI_ONLY');
 const stage=process.argv[2];
 if(!['publish','handoff1','handoff2','handoff3','finalize'].includes(stage))throw Error('INVALID_STAGE');
+const {default:amqp}=await import('amqplib');
 const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const dir=resolve('./state'),db=join(dir,'ledger.sqlite'),manifest=join(dir,'evidence.json');
 const ledgerCode=fileURLToPath(new URL('../rabbitmq-proof-frontier-v17/ledger.py',import.meta.url));
