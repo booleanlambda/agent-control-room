@@ -170,6 +170,10 @@ async function one(c){
    continue;
   }
   if(action==='repair'){
+   if(repaired){
+    msgs.push({role:'user',content:'The solver is already independently verified on the PUBLIC case and is frozen. Submit only a repaired general verifier using action tests.'});
+    continue;
+   }
    const source=String(answer.python||'');
    t.codeAttempts++;note.sourceHash=sha(source);note.source=source;
    if(source.length<30||source.length>12000){
