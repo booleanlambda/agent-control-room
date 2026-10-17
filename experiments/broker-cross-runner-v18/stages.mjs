@@ -126,7 +126,9 @@ try{
    }
    if(!computedRoot)throw Error('NO_UNFINISHED_ROOT_FOUND');
    const s=ledger({action:'summary',verifiedIncumbentCost:data.baseline});
-   if(s.completed!==Number(stage.slice(-1))||s.optimal||s.gap<=0)
+   const shouldBeExact=stage==='handoff3';
+   if(s.completed!==Number(stage.slice(-1))||s.optimal!==shouldBeExact||
+      (shouldBeExact?s.gap!==0:s.gap<=0))
     throw Error('CENSOR_PROOF_MISCLASSIFIED');
    data.broker.unackedHandoffs++;
    data.stages.push({stage,root:computedRoot,consumedInStage,ackedInStage,
