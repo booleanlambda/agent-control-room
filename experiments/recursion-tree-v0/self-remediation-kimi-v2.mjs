@@ -43,6 +43,7 @@ if(mockRun){
  if(!FIXTURES.includes(FIXTURE)||KEY||process.env.AAU_REMEDIATION_V2_AUTHORIZED==='yes'||
     process.env.AAU_NO_PROVIDER_NETWORK!=='yes')
   throw Error('SIMULATOR_MUST_HAVE_NO_CREDENTIALS_OR_LIVE_AUTH');
+ globalThis.fetch=async()=>{throw Error('FIXTURE_MODE_NETWORK_FORBIDDEN')};
 }else if(process.env.AAU_REMEDIATION_V2_AUTHORIZED!=='yes')
  throw Error('PAID_INFERENCE_NOT_AUTHORIZED');
 const variations=()=>{
@@ -283,7 +284,9 @@ function finish(){
   oldAmbiguousRequestRetried:false,oldProviderBillingUnknown:true,
   simulation:mockRun,scenario:mockRun?FIXTURE:null,
   newBillableAttempts:mockRun?0:cp.callsAttempted,
-  syntheticResponseCount:mockRun?cp.callsAttempted:0,
+  // Only journaled synthetic answers count as completed; artificial
+  // budget claims and incomplete provider responses do not.
+  syntheticResponseCount:mockRun?cp.phaseHistory.length:0,
   providerReportedTokens:mockRun?0:cp.providerReportedTokens,
   simulatedTokenUnits:mockRun?cp.providerReportedTokens:0,
   model:mockRun?'synthetic_fixture_no_model':'kimi-k2.6',
