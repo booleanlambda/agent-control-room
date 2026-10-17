@@ -689,3 +689,71 @@ Actions, with credentials held only in Actions secrets:
 It is not applied to Silas's production workers, has not been merged or
 deployed, and is not a statement of production provider contract terms.
 No real account billing guarantees were asserted.
+
+
+## Kimi K2.6 Batch API: attempted live 4-leaf job, account admission denied (October 16–17, 2026 UTC)
+
+**Source:** Moonshot's [official Batch API guide](https://platform.kimi.ai/docs/guide/use-batch-api) supports `kimi-k2.6` and `kimi-k2.7-code`,
+requires a JSONL input file uploaded with `purpose=batch`, then
+`POST /v1/batches`, a persistent `batch_id` for `GET /v1/batches/{id}`,
+and results in an `output_file_id` retrieved via Files API. The guide
+advertises **40% less token price** than real-time calls, but jobs are
+asynchronous with a user-selected completion window (our test selected 24h).
+Temperature and similar sampling parameters must not be supplied.
+The test input was four isolated Silas-like diagnostic leaves `E01..E04`,
+each an independent `kimi-k2.6` non-thinking request with a capped
+80-token response. A distinct one-call synchronous control was planned
+only **after successful batch creation** to measure matched-case latency.
+
+**Observed LIVE account result:** [GitHub Actions run 38984785161](https://github.com/booleanlambda/agent-control-room/actions/runs/38984785161),
+artifact `aau-kimi-k26-batch-durable-recovery` (12082064955).
+The single JSONL `POST /v1/files` upload attempt returned **HTTP 403**
+before it produced an `input_file_id`. The runner failed explicitly
+at `stage=upload_rejected`; **no batch was created, no batch ID exists,
+no batch leaf model inference occurred, and no synchronous control call
+was sent**. The checkpoint retains `uploadHttp=403` and 0 creation attempts.
+
+The separate authenticated **read-only** access probe
+[GitHub Actions run 38984893727](https://github.com/booleanlambda/agent-control-room/actions/runs/38984893727)
+confirmed `GET /v1/models`=**200** (four available models),
+`GET /v1/files`=**200** (zero items), but
+`GET /v1/batches`=**403**, with the provider message
+`权限错误` (permission error). This strongly indicates the configured key
+or account **cannot currently access batch operations**; the issue is
+not reasoning quality, context, or a Kimi K2.6 model failure. Do not
+retry the same upload or create batch until account permissions change.
+No evidence exists of a charge or successful inference from the rejected
+batch submission.
+
+**Outcome comparison with synchronous Kimi:**
+
+| Metric | Synchronous Kimi K2.6 | Kimi K2.6 Batch |
+|---|---|---|
+| Live API authorization | Yes, previously verified | Denied at upload/list |
+| Real completed inference sample | Earlier 31-call ten-level run | None in this test |
+| Recovery mechanism | Completed sync response ID not retrievable via tested routes | Documented `GET batch` and output-file retrieval, if authorized and a batch ID is durably stored |
+| Actual four-leaf throughput and latency | Not measured on these four leaves | Not measured; batch could not start |
+| Cost | Standard provider token rates | Documentation advertises 40% reduction; **not an observed charge or saving** |
+| What can still go wrong | Provider completed but client failed to journal | Client lost `POST /batches` response before storing batch ID; do not blindly create again |
+
+**Enforcement added to experimental CI**:
+- `moonshot-batch-durable.mjs`: strict one-upload/one-create limit, saves
+  `input_file_id` and `batch_id` immediately on return to an on-disk
+  checkpoint, exits the first process, and uses a separate read-only
+  recovery process to retrieve the batch and check exact custom-ID coverage,
+  known-label oracle, `finish_reason=stop` and no thinking traces.
+  The run intentionally aborted before these later stages because of 403.
+- `batch-admission-recovery.mjs` plus 13 tests: reject unauthorized
+  access, treat lost create response without a persisted `batch_id` as
+  billing-uncertain, reattach by durable ID when possible, reject missing or
+  duplicate result rows, truncated replies, wrong class labels, and
+  unexpected reasoning. **None of these tests equate simulation with a
+  real accepted Moonshot batch.**
+- One-use workflows were deleted after dispatch to prevent automatic
+  chargeable reruns. Only non-paid deterministic regression tests remain.
+
+**Next real-world prerequisite:** Enable Batch API access for the existing
+Moonshot account/API key (or obtain clarification from Moonshot support
+about `403 权限错误` on `GET /v1/batches` and batch file upload).
+Recheck permission with read-only requests **before** attempting another
+upload. No production Silas or service changes.
