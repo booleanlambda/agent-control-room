@@ -264,6 +264,10 @@ async function oneCycle(){
   return;
  }
  cp.providerReportedTokens+=response.usage;
+ // Negative fixture replays the exact original broken Kimi source. It
+ // must fail witness certification even though its objective is optimal.
+ if(mockRun&&FIXTURE==='bad_witness'&&cp.phase==='repair')
+  response.answer.python=cp.originalCode;
  cp.pending={phase:cp.phase,answer:response.answer,
   meta:{usage:response.usage,http:response.http,elapsedMs:response.elapsedMs}};
  cp.status='answer_journaled';save(cp);
