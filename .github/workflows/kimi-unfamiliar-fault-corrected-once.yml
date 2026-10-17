@@ -1,0 +1,42 @@
+name: AAU Kimi Unfamiliar Failure Repair Corrected One Shot
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/kimi-unfamiliar-fault-corrected-once.yml'
+permissions:
+  contents: read
+concurrency:
+  group: aau-kimi-unfamiliar-fault-corrected-once
+  cancel-in-progress: false
+jobs:
+  live-blind-fault-repair:
+    if: github.head_ref == 'experiment/recursive-tree-nemotron-v0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 26
+    env:
+      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+      AAU_PYTHON_SANDBOX: 'yes'
+      AAU_UNFAMILIAR_FAILURE_LIVE: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Check corrected instant-mode request and independent grader
+        run: |
+          set -euo pipefail
+          test -n "${MOONSHOT_API_KEY:-}" || { echo 'MISSING_MOONSHOT_KEY'; exit 3; }
+          node --check experiments/recursion-tree-v0/unseen-failure-live.mjs
+          node --check experiments/recursion-tree-v0/unseen-failure-fixtures.mjs
+          node --test experiments/recursion-tree-v0/unseen-python-benchmarks.test.mjs
+          docker pull python:3.12-alpine
+      - name: Kimi K2.6 chooses diagnosis and repairs of routing and arithmetic defects
+        working-directory: experiments/recursion-tree-v0
+        run: node unseen-failure-live.mjs live
+      - name: Preserve actual model code, messages, public and sealed grading, and provider usage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-kimi-unfamiliar-failure-corrected-real-evidence
+          path: experiments/recursion-tree-v0/unseen-failure-kimi-report.json
+          if-no-files-found: ignore
