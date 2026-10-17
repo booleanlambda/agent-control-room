@@ -15,8 +15,8 @@ const baseline={jobs:[{id:'J0',machine:'M0'},{id:'J1',machine:'M1'},{id:'J3',mac
 const report={experiment:'AAU_SERIAL_AGENT_GUIDED_SCHEDULE_OPTIMIZATION_V8',model:'kimi-k2.6',
  thinking:'disabled',workerCount:1,modelWritesTimingCode:false,
  publicHash:digest(publicProblem),hiddenHashes:hiddenProblems.map(digest),
- modelCalls:0,modelTokens:0,maxModelCalls:2,maxReportedTokens:14000,
- reserved:0,maxReservationUnits:30000,noAmbiguousProviderRetries:true,api:[],
+ modelCalls:0,modelTokens:0,maxModelCalls:2,maxReportedTokens:21000,
+ reserved:0,maxReservationUnits:42000,noAmbiguousProviderRetries:true,api:[],
  state:'running',baseline:null,modelTrials:[],independentOracles:[],
  optimizer:null,hiddenVerification:null,rootProof:null,
  limitations:['Two calls and one schedule family do not establish robust model optimization',
@@ -24,10 +24,10 @@ const report={experiment:'AAU_SERIAL_AGENT_GUIDED_SCHEDULE_OPTIMIZATION_V8',mode
  'Hidden oracle data never appears in model prompts']};
 const file='optimization-v8-evidence.json',persist=()=>writeFileSync(file,JSON.stringify(report,null,2)+'\n');
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));let lastTime=0;
-const SYS='You are choosing topological job order and machine assignment only. All times, penalties and legal setup windows are calculated by a trusted deterministic scheduler. Your task is to improve the verified scheduling cost. Submit only JSON {"action":"propose","strategy":"...","jobs":[{"id":"J0","machine":"M0"},...]}. Every job exactly once; all parents must occur earlier than children; machines must be eligible. No timestamps, costs or extra fields in jobs. No code. Never claim that you ran an experiment.';
+const SYS='You are choosing topological job order and machine assignment only. All times, penalties and legal setup windows are calculated by a trusted deterministic scheduler. Your task is to improve the verified scheduling cost. Submit only JSON {"action":"propose","strategy":"...","jobs":[{"id":"J0","machine":"M0"},...]}. Every job exactly once; all parents must occur earlier than children; machines must be eligible. No timestamps, costs or extra fields in jobs. No code. Output at most 450 characters: seven jobs and strategy of at most six words. Do not narrate thinking or justify the schedule. Never claim that you ran an experiment.';
 async function kimi(stage,prompt){
  if(report.modelCalls>=report.maxModelCalls||report.modelTokens>=report.maxReportedTokens){report.state='budget_exhausted';persist();return null;}
- const messages=[{role:'system',content:SYS},{role:'user',content:JSON.stringify(prompt)}],cap=2200;
+ const messages=[{role:'system',content:SYS},{role:'user',content:JSON.stringify(prompt)}],cap=5500;
  const reserve=Math.ceil(JSON.stringify(messages).length/2)+cap;
  if(report.reserved+reserve>report.maxReservationUnits){report.state='reservation_exhausted';persist();return null;}
  await sleep(Math.max(0,lastTime+23000-Date.now()));lastTime=Date.now();
