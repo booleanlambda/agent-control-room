@@ -242,3 +242,53 @@ separately authorized as a new possibly billable experiment. Nothing
 in this report warrants deploying Kimi remediation into production:
 PR #45 remains draft/unmerged, Silas untouched, and the separate
 `Systemic Runtime Tree CI` failure remains open.
+
+
+## Live Kimi traceback-feedback retest V4 — 17 October 2026
+
+**Authenticated run:** [GitHub Actions 39036081642](https://github.com/booleanlambda/agent-control-room/actions/runs/39036081642).  
+**Immutable artifact:** `aau-kimi-v4-traceback-remediation-live`, ID `12102276741`.
+
+The user authorized a **new bounded test** using the earlier repaired
+harness: send public Python stderr if Kimi-authored code crashes,
+skip property-test generation for failing public programs, and preserve
+all six sealed hidden cases. The new run was not a retry of any previous
+ambiguous HTTP request; the temporary paid-inference workflow trigger
+was removed immediately after dispatch.
+
+**Observed LIVE outcome: `manual_hold`, no completed remediation actions.**
+The seed stage verified the genuine original model-written failed code
+(`320681db4e573366aa28df9bfe9924f89bdcf1e7f64d2753bdbbe7258b58ac7b`)
+and reproduced the invalid assignment. On the first NEW
+`diagnose` API request, Moonshot responded **HTTP 200** after
+**31.886 seconds**, `finish_reason=length`. The model consumed
+the configured **2,200 output-token allowance** without finishing
+the required JSON response, despite prompt instructions to keep the
+diagnosis under 350 words. The provider reported **3,638 total tokens**.
+The updated accounting preserved all known provider-reported tokens,
+and the checkpoint went to `manual_hold`. No response text was
+accepted, no Python repair was produced, no property tests ran, and no
+hidden variant was executed; **no automatic repeated request** occurred.
+The final GitHub job failed its deliberately strict completion gate.
+
+**Cause:** This is an **output-budget/response-completeness failure
+of the first diagnosis step**, not the previous 95-second transport
+timeout and not another demonstrated self-remediation cognitive
+failure. The newer traceback-feedback mechanism was therefore
+**not exercised in a live model repair**, even though the synthetic
+end-to-end 8/8 regression tests had passed.
+
+**Next-stage recommendation (no automatic paid request):**
+remove the mandatory standalone diagnosis step from the next controlled
+trial. Provide the known original failed code plus the actual public
+execution error as context and request a combined *diagnosis + complete
+Python repair* in a single bounded `repair` response; use the
+verified public execution+feasible-optimum gate before asking for
+property tests. Preserve the external `manual_hold` and token-budget
+policy. Any subsequent live request must be newly authorized; the
+exact Moonshot response from this run cannot be safely replayed or
+retrieved with a verified provider contract.
+
+No merge, deployment or Silas wake. Draft PR #45 remains isolated;
+the independent production `Systemic Runtime Tree CI` failure is
+unchanged.
