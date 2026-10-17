@@ -1,0 +1,54 @@
+name: AAU Serial Organic Self-Repair Recovery
+
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/solo-remediation-v2
+    paths:
+      - 'experiments/solo-remediation-v2/resume.mjs'
+      - '.github/workflows/solo-remediation-recovery-v2.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+# Same research provider slot as serial v1 and v2, no matrix.
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  single-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 24
+    env:
+      AAU_RESUME_REAL_KIMI: 'yes'
+      AAU_PYTHON_SANDBOX: 'yes'
+      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Check syntax and exact independent benchmark
+        run: |
+          node --check experiments/solo-remediation-v2/resume.mjs
+          node --test experiments/solo-remediation-v2/benchmark.test.mjs
+      - name: Import previously failed solver, verified source hashes and evidence
+        uses: actions/download-artifact@v4
+        with:
+          run-id: 39056004458
+          name: aau-serial-self-remediation-v2-evidence
+          github-token: ${{ github.token }}
+          repository: booleanlambda/agent-control-room
+          path: experiments/solo-remediation-v2/previous-evidence
+      - name: Live Kimi diagnose and repair its own original failed solver
+        working-directory: experiments/solo-remediation-v2
+        run: node resume.mjs
+      - name: Upload independent remediation and parent-proof evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-organic-self-repair-v2-evidence
+          path: experiments/solo-remediation-v2/recovery-v2-evidence.json
+          if-no-files-found: warn
