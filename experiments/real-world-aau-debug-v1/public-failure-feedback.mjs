@@ -40,7 +40,10 @@ export function makePublicFeedback(receipt){
    case:row.name,passed:safePassed,
    failureCodes:Array.from(new Set(problemCodes)).slice(0,15),
    exceptionKind:['ReferenceError','TypeError','SyntaxError','RangeError','Error','OTHER'].includes(row.exceptionKind)?row.exceptionKind:null,
-   reportedStatus:safeStatus(row.status)
+   reportedStatus:safeStatus(row.status),
+   // Public assertion only, provided by the independent verifier.
+   // Never infer labels from model output and never accept arbitrary strings.
+   expectedStatus:safeStatus(row.expectedStatus)
   }));
  }
  const complete=PUBLIC_CASE_NAMES.every(n=>map.has(n))&&
