@@ -10,7 +10,7 @@ import {LEVELS,publicCasesFor,hiddenCases,stageHash,assess,sha} from './benchmar
 import {createLedger} from './ledger.mjs';
 import {reconcileSelectedCost} from './cost-companion.mjs';
 import {behaviorProbesAt} from './behavioral-probes.mjs';
-import {kimiStageRequest,kimiResponseAcceptable} from './thinking-router.mjs';
+import {kimiStageRequest} from './thinking-router.mjs';
 import {planExhaustion,remainingPatchSlots,parseDecomposition,recoveryAfterFailedVerification} from './budget-recovery.mjs';
 import {inspectV28ProviderResponse,classifyV28ThrownError} from './provider-response-diagnostics.mjs';
 if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_V24_RESEARCH!=='yes'||
