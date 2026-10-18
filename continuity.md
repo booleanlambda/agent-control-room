@@ -837,3 +837,28 @@ The 5-call failed run is [Actions 39085292461](https://github.com/booleanlambda/
 
 ### Recommended next isolated gate (NOT STARTED)
 Before another billable trial, add to the *public-only* remediation feedback a **specific, minimal counterexample with the expected lexicographically ordered answer** and executable pass/fail witness, then prove the feedback is sound using independent deterministic tests. Keep final hidden oracle and hidden test inputs isolated from the model. Target the archived nine-level failure directly to prove an actual local patch repairs the omitted acceptance check. Measure remediation efficiency and fresh unseen behavior separately, and do not infer that more model attempts by themselves ensure convergence.
+
+
+---
+
+## V26 — Asked Kimi why it missed lexicographic tie-breaking (2026-10-18)
+
+User requested **directly ask Kimi** about its own failed V25 depth-one tie-break. Isolated draft [PR #74](https://github.com/booleanlambda/agent-control-room/pull/74), workflow [39088609308](https://github.com/booleanlambda/agent-control-room/actions/runs/39088609308), job `117560322827`. Only one intended thinking-OFF `kimi-k2.6` provider call, no repair, no mutation; record scoped to V25 Neon `485862c5-8525-4b74-92ed-d242e6fbc277`. The script passed original-run integrity checks and journaled an attempted call, but provider returned `PROVIDER_RESPONSE_INCOMPLETE`, with **no usable new answer, no reported token usage, and an uncertain billable outcome**. Follow-up status `manual_hold`; no automatic retry. Evidence artifact [12121672882](https://github.com/booleanlambda/agent-control-room/actions/runs/39088609308/artifacts/12121672882), ZIP `aau-kimi-self-diagnosis-v26-evidence.zip`. This is **NOT** a new successful Kimi self-diagnosis.
+
+**Actual prior Kimi responses from V25, preserved in Neon (these were spoken by Kimi during earlier repair attempts, not the follow-up call):**
+- Repair 1 correctly recognized that candidate selection using `cost < best_cost` failed to resolve equal-cost lexicographic ties and suggested an equal-cost comparison. Model-authored patch remained incorrect.
+- Repair 2 offered an inconsistent account: said `itertools.combinations` visits tuples in lexicographic order so retaining first tie could work, but separately observed that `cost >= best_cost` was pruning candidate combinations prematurely. Kimi's own diagnosis changed and still did not satisfy the verifier.
+- Final model-authored failed source persists with:
+```python
+cost += c['cost']
+if cost >= best_cost:
+    valid = False
+    break
+...
+if required <= covered and cost < best_cost:
+    best_cost=cost
+    best=combo
+```
+The premature **`>=`** pruning discards equal-cost candidate lists before lexicographic comparison; the final `<` acceptance condition never selects the lexicographically smaller equal-cost list. Thus a missed invariant remained in executable behavior. The final program was recovered; the *initial pre-repair source was not persisted*. Do not claim first source inspection or access to hidden model deliberation.
+
+**Interpretation:** Contemporaneous Kimi diagnosed the main error at least once but failed to implement a correct and stable local repair in two attempts. This is an implementation/repair-convergence problem, not evidence that Kimi was unaware of the stated tie-break rule. The V26 fresh provider query has not explained internal reasoning; another paid attempt requires explicit manual authorization/verification because the previous response may be billable despite no reported usage. Future architecture recommendations should distinguish a missing invariant in model-authored code from the verified model's competence and avoid feeding oracle gold answers by default. PR-open-only avoids automatic billable CI retries; DO NOT MERGE OR DEPLOY.

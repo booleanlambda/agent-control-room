@@ -1,0 +1,49 @@
+name: AAU V26 Kimi Thinking-OFF Own-Failure Diagnosis
+
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/kimi-recursion-invariant-v25
+    paths:
+      - 'experiments/kimi-self-diagnosis-v26/**'
+      - '.github/workflows/kimi-self-diagnosis-v26.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  isolated-one-model-postmortem:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      AAU_V26_ONE_SHOT: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Check single-call non-mutating postmortem harness
+        run: |
+          node --check experiments/kimi-self-diagnosis-v26/ask.mjs
+          test "$(grep -c "const body={model:'kimi-k2.6'" experiments/kimi-self-diagnosis-v26/ask.mjs)" = "1"
+          grep -F "thinking:{type:'disabled'}" experiments/kimi-self-diagnosis-v26/ask.mjs
+      - name: Install pinned read-only Neon database driver
+        run: npm install --no-save --ignore-scripts pg@8.16.3
+      - name: Ask Kimi why it missed while preserving original V25 evidence
+        working-directory: experiments/kimi-self-diagnosis-v26
+        env:
+          NEON_V19_DATABASE_URL: ${{ secrets.NEON_V19_DATABASE_URL }}
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: node ask.mjs
+      - name: Preserve model's actual answer and provider receipt even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-kimi-own-failure-postmortem-v26-evidence
+          path: experiments/kimi-self-diagnosis-v26/v26-kimi-self-diagnosis.json
+          retention-days: 7
+          if-no-files-found: warn
