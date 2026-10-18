@@ -39,6 +39,7 @@ export function makePublicFeedback(receipt){
   map.set(row.name,Object.freeze({
    case:row.name,passed:safePassed,
    failureCodes:Array.from(new Set(problemCodes)).slice(0,15),
+   exceptionKind:['ReferenceError','TypeError','SyntaxError','RangeError','Error','OTHER'].includes(row.exceptionKind)?row.exceptionKind:null,
    reportedStatus:safeStatus(row.status)
   }));
  }
