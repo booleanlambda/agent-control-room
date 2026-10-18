@@ -58,3 +58,15 @@ test('model-owned code patch can coexist with top-level forensic explanation',as
  assert.equal(validateModelDecision(a).ok,true);
  assert.equal(normalizeModelOwnedPatches(a).length,1);
 });
+
+test('smoke is explicit research-only two-stage evaluation with independent public verifier',()=>{
+ assert.match(runner,/process\.env\.AAU_FORENSICS_SMOKE==='yes'/);
+ assert.match(runner,/kind:'INITIAL_PATCH_VERIFIED'/);
+ assert.match(runner,/resolveModelDecision\(report\.forensics,initialDecisionId/);
+ assert.match(runner,/kind:'FORENSICS_SMOKE_STOP'/);
+ assert.match(runner,/report\.success=false/);
+ assert.ok(runner.indexOf('let check=runPublicVerification(candidate.code')<
+           runner.indexOf('FORENSICS_SMOKE_STOP'));
+ assert.ok(runner.indexOf("FORENSICS_SMOKE_STOP")<
+           runner.indexOf("'decompose_public_failure_tree'"));
+});
