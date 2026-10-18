@@ -27,6 +27,8 @@ jobs:
         run: |
           node --check experiments/kimi-thinking-on-shape-probe/live.mjs
           node --test experiments/kimi-thinking-on-shape-probe/shape-helpers.test.mjs
+          node --check experiments/kimi-thinking-on-shape-probe/diagnostic-acceptance.mjs
+          node --test experiments/kimi-thinking-on-shape-probe/diagnostic-acceptance.test.mjs
           node --test experiments/kimi-recursion-v24/provider-response-diagnostics.test.mjs
           node --test experiments/kimi-recursion-v24/thinking-router.test.mjs
           node --test experiments/kimi-recursion-v24/budget-recovery.test.mjs
