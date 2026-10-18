@@ -40,6 +40,8 @@ jobs:
           node --test experiments/real-world-aau-debug-v1/remediation-exhaustion-route.test.mjs
           node --check experiments/real-world-aau-debug-v1/fallback-continuation.mjs
           node --test experiments/real-world-aau-debug-v1/fallback-continuation.test.mjs
+          node --check experiments/real-world-aau-debug-v1/early-focused-progress.mjs
+          node --test experiments/real-world-aau-debug-v1/early-focused-progress.test.mjs
           node --test experiments/aau-provider-transport/headers-timeout.test.mjs
           node --test experiments/aau-provider-transport/transport-policy.test.mjs
           node --test experiments/aau-provider-transport/scoped-benchmark.test.mjs
