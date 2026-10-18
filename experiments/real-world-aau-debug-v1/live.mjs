@@ -317,6 +317,12 @@ try{
     const verdict=focusedPatchDecision(initialPublic.receipt,trialCheck.receipt);
     patchRejection=verdict.reason;
     patchAccepted=verdict.accept;
+    resolveModelDecision(report.forensics,patchDecisionId,{
+     outcome:verdict.accept?'PROGRESS':verdict.reason==='PUBLIC_REGRESSION'?'REGRESSION':'NO_PROGRESS',
+     verified:true});
+    audit({kind:verdict.accept?'NODE_PATCH_ACCEPTED':'NODE_PATCH_REJECTED',
+     stage:'repair_tree_node_'+node.id,decisionId:patchDecisionId,nodeId:node.id,
+     candidateSha256:digest(trial.code),reasonCode:verdict.reason});
     report.focusedNodeResults.push({
      node:node.id,depth:node.depth,accepted:verdict.accept,reason:verdict.reason,
      previousCandidateSha256:digest(candidate.code),
