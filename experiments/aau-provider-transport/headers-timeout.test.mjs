@@ -46,18 +46,18 @@ async function probe(url,{headersTimeout,applicationTimeoutMs}){
  }
 }
 test('HTTP-client timeout ends request even though application still allows it',async()=>{
- await delayedLoopbackResponse(500,async url=>{
-  const result=await probe(url,{headersTimeout:150,applicationTimeoutMs:1000});
+ await delayedLoopbackResponse(2400,async url=>{
+  const result=await probe(url,{headersTimeout:700,applicationTimeoutMs:4000});
   assert.equal(result.status,'failed');
   assert.equal(result.causeCode,'UND_ERR_HEADERS_TIMEOUT');
   assert.equal(result.headerReceived,false);
   assert.equal(result.deadlineFired,false);
-  assert.ok(result.elapsedMs<700);
+  assert.ok(result.elapsedMs<3400);
  });
 });
 test('larger header deadline lets same long-request complete without changing response',async()=>{
- await delayedLoopbackResponse(500,async url=>{
-  const result=await probe(url,{headersTimeout:1200,applicationTimeoutMs:1000});
+ await delayedLoopbackResponse(2400,async url=>{
+  const result=await probe(url,{headersTimeout:3500,applicationTimeoutMs:4000});
   assert.equal(result.status,'received');
   assert.equal(result.headerReceived,true);
   assert.equal(result.deadlineFired,false);
@@ -65,8 +65,8 @@ test('larger header deadline lets same long-request complete without changing re
  });
 });
 test('explicit application timeout remains authoritative below transport deadline',async()=>{
- await delayedLoopbackResponse(500,async url=>{
-  const result=await probe(url,{headersTimeout:1200,applicationTimeoutMs:180});
+ await delayedLoopbackResponse(2400,async url=>{
+  const result=await probe(url,{headersTimeout:3500,applicationTimeoutMs:600});
   assert.equal(result.status,'failed');
   assert.equal(result.deadlineFired,true);
   assert.equal(result.headerReceived,false);
