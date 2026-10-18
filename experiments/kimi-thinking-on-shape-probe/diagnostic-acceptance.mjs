@@ -58,8 +58,13 @@ export function assessDiagnosticStrategy(answer){
    limitations:['Heuristic coverage only; no executable repair verification']};
  }
  const {fragments}=corpus(answer);
+ // A scenario listed only under a testing section does not prove its
+ // handling was diagnosed or remediated. Count tests only for the test rubric.
+ const testOnlyRoot=/^\s*(testableRequirements|tests|testCases|testScenarios|verification|acceptanceCriteria|expectedResults)\b/i;
  const criterionResults=REQUIREMENTS.map(req=>({
-  id:req.id,met:fragments.some(fragment=>req.match.every(rx=>rx.test(fragment)))
+  id:req.id,met:fragments.some(fragment=>
+   (req.id==='testable_verification'||!testOnlyRoot.test(fragment))&&
+   req.match.every(rx=>rx.test(fragment)))
  }));
  const metCount=criterionResults.filter(x=>x.met).length;
  return {rubric:RUBRIC_VERSION,
