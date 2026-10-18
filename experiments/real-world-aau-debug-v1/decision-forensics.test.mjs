@@ -51,6 +51,7 @@ test('model choice is preserved as a claim, runtime outcome is independent and l
  assert.deepEqual(add,{ok:true,id:'decision_1'});
  assert.equal(ledger.schema,FORENSICS_SCHEMA);
  assert.equal(ledger.modelDecisions[0].independentlyVerified,false);
+ assert.match(ledger.modelDecisions[0].modelClaimSha256,/^[a-f0-9]{64}$/);
  auditEvent(ledger,{kind:'PROVIDER_RESPONSE_ACCEPTED',stage:'repair_tree_node_3',
   decisionId:add.id,nodeId:3,parentId:1,budget:4512});
  auditEvent(ledger,{kind:'PUBLIC_VERIFIER_REJECTED_PATCH',stage:'repair_tree_node_3',
@@ -59,6 +60,8 @@ test('model choice is preserved as a claim, runtime outcome is independent and l
  assert.equal(resolveModelDecision(ledger,add.id,{outcome:'NO_PROGRESS',verified:true}),true);
  assert.equal(ledger.modelDecisions[0].outcome,'NO_PROGRESS');
  assert.equal(ledger.modelDecisions[0].independentlyVerified,true);
+ assert.equal(ledger.events[0].modelClaimSha256,ledger.modelDecisions[0].modelClaimSha256);
+ assert.equal(ledger.events[1].modelClaimSha256,ledger.modelDecisions[0].modelClaimSha256);
  assert.equal(ledger.events.length,2);
  assert.equal(ledger.events[1].seq,2);
 });
