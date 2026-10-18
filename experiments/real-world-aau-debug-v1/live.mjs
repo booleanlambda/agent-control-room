@@ -12,6 +12,7 @@ import {inspectV28TransportFailure} from '../kimi-recursion-v24/provider-respons
 import {fetch as scopedFetch,Agent} from 'undici';
 import {transportTimeoutPolicy,makeScopedUndiciAgent} from '../aau-provider-transport/transport-policy.mjs';
 import {makePublicFeedback} from './public-failure-feedback.mjs';
+import {classifyThinkingExhaustion,proposedExhaustionRoute} from './remediation-exhaustion-route.mjs';
 if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_REAL_WORLD_DEBUG!=='yes')throw Error('RESEARCH_ONLY');
 const digest=x=>createHash('sha256').update(String(x)).digest('hex');
 const run=randomUUID(),base=readFileSync(new URL('./legacy-model-source.txt',import.meta.url),'utf8');
@@ -22,7 +23,8 @@ const report={experiment:'REAL_AAU_V28_ORIGINAL_PROVIDER_DIAGNOSTIC_INCIDENT',
  problemType:'actual AAU provider/manual-hold provenance loss',
  planGeneratedByModel:false,noGoldPatchProvided:true,noSyntheticFaultInjection:true,
  proofModelIndependent:true,maxCalls:3,modelCalls:[],decisions:[],tests:[],
- success:false,candidateSha256:null,nonReplayableCalls:true};
+ success:false,candidateSha256:null,nonReplayableCalls:true,
+ thinkingExhaustion:null,proposedDecomposition:null};
 const save=()=>writeFileSync('real-world-debug-evidence.json',JSON.stringify(report,null,2)+'\n');
 const system='You are Kimi K2.6, acting as a software engineer. Your job is to independently diagnose and fix a REAL historical code defect, not a synthetic exercise. Produce exactly one JSON object, no markdown. Analyze constraints yourself, choose your own decomposition; avoid inventing observed outcomes. Do not request or expose hidden tests. Do not change thinking-mode policy or auto-retry ambiguous paid provider calls.';
 const MAX_CALLS=3;
@@ -72,7 +74,23 @@ async function callModel(label,payload,thinking=false){
   receipt.reasoningTokens=Number.isSafeInteger(j?.usage?.completion_tokens_details?.reasoning_tokens)?
    j.usage.completion_tokens_details.reasoning_tokens:null;
   if(!res.ok){receipt.status='provider_http_error';throw Error('MODEL_REQUEST_MANUAL_HOLD')}
-  if(receipt.finishReason!=='stop'){receipt.status='incomplete_response';throw Error('MODEL_REQUEST_MANUAL_HOLD')}
+  const exhaustionClass=classifyThinkingExhaustion({
+   thinking,httpOk:res.ok,finishReason:receipt.finishReason,
+   completionTokens:receipt.completionTokens,completionCeiling:max_tokens});
+  if(exhaustionClass==='THINKING_BUDGET_EXHAUSTED'){
+   receipt.status='thinking_budget_exhausted';
+   report.thinkingExhaustion={stage:label,finishReason:receipt.finishReason,
+    usage:receipt.usage,completionTokens:receipt.completionTokens,
+    reasoningTokens:receipt.reasoningTokens,completionCeiling:max_tokens};
+   report.proposedDecomposition=proposedExhaustionRoute({
+    usedCalls:report.modelCalls.length,maxCalls:MAX_CALLS,confirmed:true});
+   throw Error('THINKING_BUDGET_EXHAUSTED');
+  }
+  if(receipt.finishReason!=='stop'){
+   receipt.status=exhaustionClass==='OUTPUT_TRUNCATED_UNCONFIRMED'?
+    'output_truncated_unconfirmed':'incomplete_response';
+   throw Error('MODEL_REQUEST_MANUAL_HOLD');
+  }
   const text=choice?.message?.content;
   if(typeof text!=='string'||!text.trim()){receipt.status='empty_response';throw Error('MODEL_REQUEST_MANUAL_HOLD')}
   // Thinking ON can return valid JSON wrapped in a complete Markdown JSON fence.
@@ -106,7 +124,9 @@ async function callModel(label,payload,thinking=false){
     'transport_timeout_or_abort':'transport_or_client_error';
    receipt.transportDiagnostic=transport;
   }
-  save();throw Error('MODEL_REQUEST_MANUAL_HOLD');
+  save();
+  if(e?.message==='THINKING_BUDGET_EXHAUSTED')throw e;
+  throw Error('MODEL_REQUEST_MANUAL_HOLD');
  }finally{
   clearTimeout(timer);
   // Terminate any open connections in this single-use scoped dispatcher.
@@ -202,7 +222,8 @@ try{
  }
  report.candidateSha256=digest(candidate.code);
 }catch(e){
- report.status='blocked';
+ report.status=e?.message==='THINKING_BUDGET_EXHAUSTED'?
+  'thinking_budget_exhausted_decomposition_pending':'blocked';
  report.errorCategory=/^[A-Z0-9_]+$/.test(String(e.message))?e.message:'REDACTED_FAILURE';
 }finally{
  report.providerTokens=totalTokens;
