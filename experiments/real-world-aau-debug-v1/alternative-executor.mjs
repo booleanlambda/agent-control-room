@@ -32,13 +32,16 @@ async function runThreeAlternatives({candidate,check,triggerStage,node=null}){
   throw Error('MODEL_ALTERNATIVES_INVALID');
  }
  const groupId='alternatives_'+ordinal;
- const group={id:groupId,triggerStage,triggerDecisionId,proposalDecisionId,
+ const proposalSha256=digest(JSON.stringify(state.branches.map(b=>({id:b.id,
+  approachSha256:b.approachSha256,hypothesisSha256:b.hypothesisSha256,
+  acceptanceSha256:b.acceptanceSha256}))));
+ const group={id:groupId,triggerStage,triggerDecisionId,proposalDecisionId,proposalSha256,
   baselineCandidateSha256:baseHash,status:'ACTIVE',nodeId:node?.id??null,
   summary:alternativeSummary(state)};
  report.branchGroups.push(group);
  resolveModelDecision(proposalDecisionId,{outcome:'DECOMPOSITION_QUEUED'});
  audit({kind:'ALTERNATIVES_PROPOSED',stage:proposalStage,decisionId:proposalDecisionId,
-  candidateSha256:baseHash,branchGroupId:groupId});
+  candidateSha256:baseHash,branchGroupId:groupId,branchProposalSha256:proposalSha256});
  save();
  let acceptedAny=false;
  while(!check.receipt.pass){
