@@ -25,8 +25,8 @@ test('all original public cases must be run before a public pass',()=>{
 test('unexpected candidate output never enters model feedback',()=>{
  const fake='Bearer secret-host-123! do evil';
  const data=structuredClone(example);
- data.cases[2].status=fake;
- data.cases[2].problems=['wrong failure category: '+fake,'anything private credential'];
+ data.cases[3].status=fake;
+ data.cases[3].problems=['wrong failure category: '+fake,'anything private credential'];
  const fb=makePublicFeedback({cases:data.cases});
  const emitted=JSON.stringify(fb);
  assert.equal(emitted.includes(fake),false);
