@@ -10,16 +10,23 @@ if(!sourcePath)throw Error('CANDIDATE_PATH_REQUIRED');
 const code=readFileSync(sourcePath,'utf8');
 if(!code.includes('async function model(')||code.length<1500||code.length>13000)
  throw Error('CANDIDATE_SHAPE_INVALID');
-const valid=(tokens=123,content='{"patch":"ok"}',finish='stop')=>({
- ok:true,status:200,json:async()=>({
+// Real Fetch Response supports BOTH text() and json(); each consumes the
+// response body exactly once. Earlier verifier only mocked json(), which
+// unfairly rejected legitimate code using res.text() then JSON.parse().
+function response(status,body){
+ const raw=JSON.stringify(body);
+ let consumed=false;
+ async function read(){if(consumed)throw Error('BODY_ALREADY_USED');consumed=true;return raw}
+ return {ok:status>=200&&status<300,status,text:read,json:async()=>JSON.parse(await read())};
+}
+const valid=(tokens=123,content='{"patch":"ok"}',finish='stop')=>response(200,{
  choices:[{finish_reason:finish,message:{content}}],
  usage:{total_tokens:tokens,prompt_tokens:42,completion_tokens:tokens-42}
- })
 });
 const cases={
  received:{phase:'level_1',reply:valid(),expectStatus:'received',expectTokens:123,expectFinish:'stop',mode:'return'},
  malformed:{phase:'repair_2',reply:valid(123,'{"broken":','stop'),expectStatus:'malformed_model_json',expectTokens:123,expectFinish:'stop',mode:'hold'},
- http_error:{phase:'repair_2',reply:{ok:false,status:503,json:async()=>({error:{message:'PRIVATE_CANARY'}})},expectStatus:'provider_http_error',expectTokens:null,expectFinish:null,mode:'hold'},
+ http_error:{phase:'repair_2',reply:response(503,{error:{message:'PRIVATE_CANARY'}}),expectStatus:'provider_http_error',expectTokens:null,expectFinish:null,mode:'hold'},
  timeout:{phase:'repair_2',throwError:Object.assign(new Error('PRIVATE_CANARY'),{name:'TimeoutError'}),expectStatus:'transport_timeout_or_abort',expectTokens:null,expectFinish:null,mode:'hold'},
  off_length:{phase:'level_2',reply:valid(234,'{','length'),expectStatus:'output_truncated_unconfirmed_fallback',expectTokens:234,expectFinish:'length',mode:'hold'},
  on_length:{phase:'repair_2',reply:valid(234,'{','length'),expectStatus:'budget_exhausted',expectTokens:234,expectFinish:'length',mode:'exhaustion'},
