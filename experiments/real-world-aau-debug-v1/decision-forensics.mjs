@@ -122,7 +122,8 @@ export function attachModelDecision(ledger,answer,{stage,nodeId=null,parentId=nu
 }
 const allowedCodes=/^[A-Z][A-Z0-9_]{2,75}$/;
 export function auditEvent(ledger,{kind,stage,decisionId=null,nodeId=null,parentId=null,
- candidateSha256=null,verification=null,budget=null,caseId=null,reasonCode=null}){
+ candidateSha256=null,verification=null,budget=null,caseId=null,reasonCode=null,
+ branchGroupId=null,alternativeId=null}){
  entryLimit(ledger);
  const k=allowedCodes.test(kind??'')?kind:null,st=safeId(stage);
  if(!k||!st)throw Error('INVALID_FORENSIC_EVENT');
@@ -137,6 +138,8 @@ export function auditEvent(ledger,{kind,stage,decisionId=null,nodeId=null,parent
   reasonCode:allowedCodes.test(reasonCode??'')?reasonCode:null,
   decisionId:typeof decisionId==='string'&&/^decision_[0-9]{1,5}$/.test(decisionId)?decisionId:null,
   nodeId:safeNode(nodeId),parentId:safeNode(parentId),
+  branchGroupId:typeof branchGroupId==='string'&&/^alternatives_[1-9][0-9]{0,3}$/.test(branchGroupId)?branchGroupId:null,
+  alternativeId:Number.isInteger(alternativeId)&&alternativeId>=1&&alternativeId<=3?alternativeId:null,
   modelClaimSha256:ledger.modelDecisions.find(x=>x.id===decisionId)?.modelClaimSha256??null,
   candidateSha256:safeHash(candidateSha256),
   verification:verification&&permittedVerdicts.has(verification.verdict)?{
