@@ -16,6 +16,7 @@ import {classifyThinkingExhaustion,proposedExhaustionRoute} from './remediation-
 import {focusedPatchDecision} from './early-focused-progress.mjs';
 import {budgetReservation,createRepairTree,takeRepairNode,addChildRepairNodes,treeSummary,GLOBAL_PROVIDER_TOKEN_BUDGET,RECURSION_DEPTH_LIMIT} from './progress-budget-tree.mjs';
 import {selectValidModelOwnedNodes} from './model-node-validation.mjs';
+import {makeForensicLedger,auditEvent,attachModelDecision,resolveModelDecision,MODEL_FORENSICS_INSTRUCTIONS} from './decision-forensics.mjs';
 if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_REAL_WORLD_DEBUG!=='yes')throw Error('RESEARCH_ONLY');
 const digest=x=>createHash('sha256').update(String(x)).digest('hex');
 const run=randomUUID(),base=readFileSync(new URL('./legacy-model-source.txt',import.meta.url),'utf8');
@@ -26,7 +27,7 @@ const report={experiment:'REAL_AAU_V28_ORIGINAL_PROVIDER_DIAGNOSTIC_INCIDENT',
  problemType:'actual AAU provider/manual-hold provenance loss',
  planGeneratedByModel:false,noGoldPatchProvided:true,noSyntheticFaultInjection:true,
  proofModelIndependent:true,maxCalls:null,computeBudgetTokens:GLOBAL_PROVIDER_TOKEN_BUDGET,
- modelCalls:[],decisions:[],tests:[],
+ modelCalls:[],decisions:[],tests:[],forensics:makeForensicLedger(),
  architecture:'progress-driven recursive OFF nodes, independent public verifier, budget-governed ON',
  modelOwnedEarlyTasks:[],focusedNodeResults:[],earlyOffNodesRun:0,
  repairTree:{pending:0,visited:0,depthOfNextNode:null,uniqueTasks:0},
@@ -35,7 +36,10 @@ const report={experiment:'REAL_AAU_V28_ORIGINAL_PROVIDER_DIAGNOSTIC_INCIDENT',
  success:false,candidateSha256:null,nonReplayableCalls:true,
  thinkingExhaustion:null,proposedDecomposition:null};
 const save=()=>writeFileSync('real-world-debug-evidence.json',JSON.stringify(report,null,2)+'\n');
-const system='You are Kimi K2.6, acting as a software engineer. Your job is to independently diagnose and fix a REAL historical code defect, not a synthetic exercise. Produce exactly one JSON object, no markdown. Analyze constraints yourself, choose your own decomposition; avoid inventing observed outcomes. Do not request or expose hidden tests. Do not change thinking-mode policy or auto-retry ambiguous paid provider calls.';
+const audit=fields=>{const entry=auditEvent(report.forensics,fields);save();return entry};
+const summarizePlan=tasks=>tasks.map(t=>({id:t.id,issueSha256:digest(t.issue),acceptanceSha256:digest(t.acceptance)}));
+const currentDecision=()=>report.modelCalls.at(-1)?.forensicDecisionId??null;
+const system='You are Kimi K2.6, acting as a software engineer. Your job is to independently diagnose and fix a REAL historical code defect, not a synthetic exercise. Produce exactly one JSON object, no markdown. Analyze constraints yourself, choose your own decomposition; avoid inventing observed outcomes. Do not request or expose hidden tests. Do not change thinking-mode policy or auto-retry ambiguous paid provider calls. '+MODEL_FORENSICS_INSTRUCTIONS;
 // Deliberately no hard numeric maximum on model calls; global compute is finite.
 let totalTokens=0;
 async function callModel(label,payload,thinking=false){
@@ -46,7 +50,8 @@ async function callModel(label,payload,thinking=false){
  const reservation=budgetReservation({requestBody:JSON.stringify(body),thinking,
   reportedTokens:report.modelCalls.map(x=>x.usage)});
  if(!reservation.permitted){
-  report.stopReason=reservation.reason;save();
+  report.stopReason=reservation.reason;
+  audit({kind:'BUDGET_BLOCKED',stage:label,reasonCode:'GLOBAL_COMPUTE_BUDGET_EXHAUSTED',budget:reservation.remainingBefore});
   throw Error('GLOBAL_COMPUTE_BUDGET_EXHAUSTED');
  }
  const receipt={stage:label,thinking:thinking?'enabled':'disabled',
@@ -58,7 +63,10 @@ async function callModel(label,payload,thinking=false){
   rawReasoningStored:false,finalJsonDiagnostic:null,
   clientTimeoutPolicy:thinking?transportTimeoutPolicy(true):null,
   scopedUndiciUsed:thinking};
- report.modelCalls.push(receipt);save();
+ report.modelCalls.push(receipt);
+ audit({kind:'PROVIDER_CALL_PREPARED',stage:label,
+  budget:reservation.remainingBefore,
+  nodeId:Number((label.match(/(?:repair_tree_node_|split_failed_tree_node_)([0-9]+)$/)||[])[1])||null});
  // Use an explicit per-call Undici dispatcher ONLY for thinking-ON.
  // Its headers/body deadlines are beyond the existing 720s application abort;
  // thinking-OFF preserves its original global-fetch path and 175s deadline.
@@ -133,7 +141,20 @@ async function callModel(label,payload,thinking=false){
   if(!answer||Array.isArray(answer)||typeof answer!=='object'){
    receipt.status='invalid_shape';throw Error('MODEL_REQUEST_MANUAL_HOLD')
   }
-  receipt.status='accepted';receipt.contentSha256=digest(text);
+  receipt.contentSha256=digest(text);
+  const reason=attachModelDecision(report.forensics,answer,{
+   stage:label,nodeId:Number((label.match(/(?:repair_tree_node_|split_failed_tree_node_)([0-9]+)$/)||[])[1])||null,
+   parentId:payload?.parentNode?.id??payload?.node?.parentId??null,
+   requestHash:receipt.requestSha256,responseHash:receipt.contentSha256});
+  if(!reason.ok){
+   receipt.status='model_decision_forensics_invalid';
+   receipt.forensicsFailureCode=reason.reason;
+   audit({kind:'MODEL_FORENSICS_REJECTED',stage:label,reasonCode:reason.reason});
+   throw Error('MODEL_DECISION_FORENSICS_MISSING');
+  }
+  receipt.forensicDecisionId=reason.id;
+  receipt.status='accepted';
+  audit({kind:'MODEL_DECISION_RECORDED',stage:label,decisionId:reason.id});
   // Retain safe SHAPE METADATA to diagnose contract drift; no raw content.
   receipt.responseStructure=safeStructureSummary(answer);
   save();return answer;
@@ -148,7 +169,8 @@ async function callModel(label,payload,thinking=false){
    receipt.transportDiagnostic=transport;
   }
   save();
-  if(e?.message==='THINKING_BUDGET_EXHAUSTED')throw e;
+  if(e?.message==='THINKING_BUDGET_EXHAUSTED'||
+     e?.message==='MODEL_DECISION_FORENSICS_MISSING')throw e;
   throw Error('MODEL_REQUEST_MANUAL_HOLD');
  }finally{
   clearTimeout(timer);
@@ -157,7 +179,8 @@ async function callModel(label,payload,thinking=false){
   receipt.elapsedMs=Date.now()-requestStartedAt;
   receipt.httpHeadersReceived=headersReceived;
   receipt.requestDeadlineFired=requestDeadlineFired;
-  save();
+  audit({kind:'PROVIDER_CALL_SETTLED',stage:label,decisionId:receipt.forensicDecisionId,
+   reasonCode:receipt.status.toUpperCase(),budget:Number.isInteger(receipt.usage)?receipt.usage:null});
  }
 }
 function applyModelPatch(src,answer){
@@ -204,7 +227,18 @@ function runPublicVerification(candidate,suite='public'){
    expectedStatus:suite==='public'?x.expectedStatus??null:null,
    exceptionKind:x.exceptionKind??null})),
   candidateSha256:digest(candidate),runnerErrored:!!p.error,stderrPresent:!!p.stderr};
- report.tests.push(receipt);save();
+ report.tests.push(receipt);
+ const stageName=suite==='public'?'verify_public':'verify_hidden';
+ for(const outcome of receipt.cases){
+  audit({kind:outcome.passed?'CASE_TEST_PASSED':'CASE_TEST_FAILED',
+   stage:stageName,caseId:suite==='public'?outcome.name:null,
+   decisionId:currentDecision(),candidateSha256:receipt.candidateSha256,
+   reasonCode:outcome.passed?'VERIFIED_PASS':'INDEPENDENT_TEST_FAILED'});
+ }
+ audit({kind:'VERIFICATION_SUITE_COMPLETED',stage:stageName,
+  decisionId:currentDecision(),candidateSha256:receipt.candidateSha256,
+  verification:{verdict:receipt.pass?'PASS':'FAIL',suite,
+   casesExecuted:receipt.cases.length,casesPassed:receipt.cases.filter(x=>x.passed).length}});
  return {receipt,publicFeedback};
 }
 try{
@@ -214,7 +248,10 @@ try{
   task:'Inspect code. Identify at least 2 distinct causal subproblems and independent acceptance criteria. Choose the decomposition yourself (2 to 5 tasks). Return {tasks:[{issue,acceptance},...]}. Do not propose code in this stage.',
   originalSource:base
  }));
- report.planGeneratedByModel=true;report.decisions.push({phase:'plan',tasks:plan});save();
+ report.planGeneratedByModel=true;
+ report.decisions.push({phase:'plan',tasks:summarizePlan(plan),decisionId:currentDecision()});
+ resolveModelDecision(report.forensics,currentDecision(),{outcome:'DECOMPOSITION_QUEUED'});
+ audit({kind:'INITIAL_PLAN_ACCEPTED',stage:'discover_and_decompose',decisionId:currentDecision()});
  const proposal=await callModel('implement_model_generated_plan',{
   incident:'Fix the real documented provider receipt loss without changing model thinking policy, provider retry policy, stage sequencing or business logic. Only modify the supplied frozen function.',
   originalSource:base,modelGeneratedPlan:plan,
@@ -222,7 +259,9 @@ try{
   publicAcceptance:['One presend journal, no automatic paid retry','accepted responses still return normal JSON','true ON length is still special','rejected provider response retains finish/tokens/category','manual hold for non-length failures','no duplicate ledger writes on storage failures']
  });
  let candidate=applyModelPatch(base,proposal);
- report.decisions.push({phase:'implementation',spans:candidate.spans,diagnosis:typeof proposal.diagnosis==='string'?proposal.diagnosis.slice(0,650):null});
+ report.decisions.push({phase:'implementation',spans:candidate.spans,decisionId:currentDecision()});
+ audit({kind:'MODEL_PATCH_BUILT',stage:'implement_model_generated_plan',
+  decisionId:currentDecision(),candidateSha256:digest(candidate.code)});
  let check=runPublicVerification(candidate.code,'public');
  if(!check.receipt.pass){
   // Kimi chooses root subproblems; no deterministic patch or hidden tests.
@@ -240,14 +279,21 @@ try{
   if(rootSelection.tasks.length<2)throw Error('INSUFFICIENT_VALID_MODEL_NODES');
   const rootTasks=rootSelection.tasks;
   const tree=createRepairTree(rootTasks);
-  report.modelOwnedEarlyTasks=rootTasks;
-  report.decisions.push({phase:'public_failure_tree',tasks:rootTasks});
+  report.modelOwnedEarlyTasks=summarizePlan(rootTasks);
+  report.decisions.push({phase:'public_failure_tree',tasks:summarizePlan(rootTasks),
+   decisionId:currentDecision()});
+  resolveModelDecision(report.forensics,currentDecision(),{outcome:'DECOMPOSITION_QUEUED'});
+  audit({kind:'ROOT_REPAIR_TREE_CREATED',stage:'decompose_public_failure_tree',
+   decisionId:currentDecision()});
   report.repairTree=treeSummary(tree);save();
   // Iterate the model-defined tree until the actual public oracle accepts,
   // no nodes remain, or the finite compute budget prevents another call.
   // There is no two-node truncation and no hard model-call-count threshold.
   while(tree.queue.length>0&&!check.receipt.pass){
    const node=takeRepairNode(tree);
+   audit({kind:'REPAIR_NODE_SELECTED',stage:'repair_tree_node_'+node.id,
+    nodeId:node.id,parentId:Number.isInteger(node.parent)?node.parent:null,
+    candidateSha256:digest(candidate.code)});
    report.repairTree=treeSummary(tree);save();
    const initialPublic=check;
    let patchAccepted=false,patchRejection='NOT_ATTEMPTED';
@@ -255,11 +301,15 @@ try{
     const answer=await callModel('repair_tree_node_'+node.id,{
      incident:'One narrow child node in the original V28 provider-diagnostic software repair. Fix this node only, based on independent public proof.',
      currentCandidate:candidate.code,currentCandidateSha256:digest(candidate.code),
-     node:{id:node.id,depth:node.depth,issue:node.issue,acceptance:node.acceptance},
+     node:{id:node.id,parentId:Number.isInteger(node.parent)?node.parent:null,
+      depth:node.depth,issue:node.issue,acceptance:node.acceptance},
      publicFailures:check.publicFeedback,
      instruction:'Return JSON {replacements:[{old:EXACT UNIQUE SOURCE SPAN in currentCandidate,replacement:NEW SOURCE},...],diagnosis:string}. Only model-authored edits, at most 3 spans. Preserve all earlier passing cases. Do not edit tests, expose private errors, or replay paid requests.'
     },false);
     report.earlyOffNodesRun+=1;
+    const patchDecisionId=currentDecision();
+    audit({kind:'MODEL_NODE_PATCH_RECEIVED',stage:'repair_tree_node_'+node.id,
+     decisionId:patchDecisionId,nodeId:node.id});
     const edits=normalizeModelOwnedPatches(answer);
     if(edits.length>3)throw Error('FOCUSED_PATCH_TOO_MANY_EDITS');
     const trial=applyModelPatch(candidate.code,answer);
@@ -267,6 +317,12 @@ try{
     const verdict=focusedPatchDecision(initialPublic.receipt,trialCheck.receipt);
     patchRejection=verdict.reason;
     patchAccepted=verdict.accept;
+    resolveModelDecision(report.forensics,patchDecisionId,{
+     outcome:verdict.accept?'PROGRESS':verdict.reason==='PUBLIC_REGRESSION'?'REGRESSION':'NO_PROGRESS',
+     verified:true});
+    audit({kind:verdict.accept?'NODE_PATCH_ACCEPTED':'NODE_PATCH_REJECTED',
+     stage:'repair_tree_node_'+node.id,decisionId:patchDecisionId,nodeId:node.id,
+     candidateSha256:digest(trial.code),reasonCode:verdict.reason});
     report.focusedNodeResults.push({
      node:node.id,depth:node.depth,accepted:verdict.accept,reason:verdict.reason,
      previousCandidateSha256:digest(candidate.code),
@@ -285,6 +341,9 @@ try{
          'MODEL_PATCH_COUNT_INVALID','FOCUSED_PATCH_TOO_MANY_EDITS',
          'MODEL_OUTPUT_AMBIGUOUS_CONTAINERS'].includes(safe))throw error;
     patchRejection='MODEL_AUTHORED_PATCH_INVALID';
+    resolveModelDecision(report.forensics,currentDecision(),{outcome:'REJECTED',verified:false});
+    audit({kind:'MODEL_PATCH_VALIDATION_REJECTED',stage:'repair_tree_node_'+node.id,
+     nodeId:node.id,decisionId:currentDecision(),reasonCode:patchRejection});
    }
    report.decisions.push({phase:'repair_tree_node',node:node.id,depth:node.depth,
     accepted:patchAccepted,reason:patchRejection});
@@ -300,6 +359,11 @@ try{
     },false);
     const childSelection=selectValidModelOwnedNodes(childResponse,{maxTasks:3});
     const added=addChildRepairNodes(tree,node,childSelection.tasks);
+    resolveModelDecision(report.forensics,currentDecision(),{
+     outcome:added.added>0?'DECOMPOSITION_QUEUED':'REJECTED',verified:false});
+    audit({kind:added.added>0?'CHILD_NODES_QUEUED':'CHILD_DECOMPOSITION_REJECTED',
+     stage:'split_failed_tree_node_'+node.id,nodeId:node.id,
+     decisionId:currentDecision(),reasonCode:added.reason});
     report.decisions.push({phase:'validate_model_child_decomposition',node:node.id,
      sourceCount:childSelection.sourceCount,rejectedCount:childSelection.rejectedCount,
      rejectionCounts:childSelection.rejectionCounts??{},reason:childSelection.reason});
@@ -326,8 +390,14 @@ try{
    const repaired=applyModelPatch(candidate.code,fix);
    const verified=runPublicVerification(repaired.code,'public');
    const verdict=focusedPatchDecision(check.receipt,verified.receipt);
+   resolveModelDecision(report.forensics,currentDecision(),{
+    outcome:verdict.accept?'PROGRESS':verdict.reason==='PUBLIC_REGRESSION'?'REGRESSION':'NO_PROGRESS',verified:true});
+   audit({kind:verdict.accept?'THINKING_ON_PATCH_ACCEPTED':'THINKING_ON_PATCH_REJECTED',
+    stage:'on_residual_after_off_tree',decisionId:currentDecision(),
+    reasonCode:verdict.reason,candidateSha256:digest(repaired.code)});
    report.decisions.push({phase:'thinking_on_after_tree',
-    accepted:verdict.accept,reason:verdict.reason,spans:repaired.spans});
+    accepted:verdict.accept,reason:verdict.reason,spans:repaired.spans,
+    decisionId:currentDecision()});
    if(verdict.accept){candidate=repaired;check=verified;}
   }
  }
@@ -340,11 +410,15 @@ try{
  }
  report.candidateSha256=digest(candidate.code);
 }catch(e){
+ const failure=/^[A-Z0-9_]+$/.test(String(e?.message))?e.message:'REDACTED_FAILURE';
+ audit({kind:'EXECUTION_BLOCKED',stage:'execution_final',reasonCode:failure});
  report.status=e?.message==='THINKING_BUDGET_EXHAUSTED'?
   'thinking_budget_exhausted_decomposition_pending':'blocked';
  report.errorCategory=/^[A-Z0-9_]+$/.test(String(e.message))?e.message:'REDACTED_FAILURE';
 }finally{
  report.providerTokens=totalTokens;
+ audit({kind:'EXECUTION_FINISHED',stage:'execution_final',
+  reasonCode:report.success?'VERIFIED_SUCCESS':'UNVERIFIED_OR_BLOCKED',budget:totalTokens});
  save();
  console.log('AAU_REAL_WORLD_FINAL='+JSON.stringify({
   status:report.status,success:report.success,modelCalls:report.modelCalls.length,
