@@ -9,8 +9,8 @@ test('exact phase routing: repairs think ON and all routine Kimi phases remain O
   assert.equal(repair.model,'kimi-k2.6');
   assert.deepEqual(repair.thinking,{type:'enabled'});
   assert.equal(repair.temperature,1.0);
-  assert.equal(repair.max_tokens,9000);
-  assert.equal(repair.timeoutMs,280000);
+  assert.equal(repair.max_tokens,16000);
+  assert.equal(repair.timeoutMs,330000);
   const ordinary=kimiStageRequest('level_'+i,3100);
   assert.deepEqual(ordinary.thinking,{type:'disabled'});
   assert.equal(ordinary.temperature,0.6);
