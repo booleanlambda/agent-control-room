@@ -32,3 +32,29 @@ test('do not serialize original model-authored task prose into legacy decision l
  assert.match(runner,/report\.modelOwnedEarlyTasks=summarizePlan\(rootTasks\)/);
  assert.doesNotMatch(runner,/report\.decisions\.push\(\{phase:'plan',tasks:plan\}/);
 });
+
+test('Kimi patch stages must receive explicit same-level forensic output contract',()=>{
+ assert.match(runner,/const mandatoryDecisionOutput=/);
+ assert.match(runner,/requiredKey:'decisionForensics'/);
+ assert.match(runner,/allDecisionsMustBeExplained:true/);
+ assert.match(runner,/content:JSON\.stringify\(\{\s*\.\.\.payload,mandatoryDecisionOutput\s*\}\)/);
+ assert.ok(runner.indexOf('mandatoryDecisionOutput')<runner.indexOf('const reservation=budgetReservation'));
+});
+test('model-owned code patch can coexist with top-level forensic explanation',async()=>{
+ const {validateModelDecision}=await import('./decision-forensics.mjs');
+ const {normalizeModelOwnedPatches}=await import('./output-normalizer.mjs');
+ const a={replacements:[{old:'const before=undefined;','replacement':'const before=null;'}],
+  diagnosis:'Preserve original source while fixing one local bug.',
+  decisionForensics:{
+   choice:'Fix the known malformed response classification.',
+   rationale:'The public test reports an incorrect status while the normal response passes.',
+   evidence:[{sourceId:'public_verifier',caseId:'malformed',
+    observation:'The malformed public test reports the wrong diagnostic category.'}],
+   alternatives:[{option:'Change the public test expected category.',
+    rejection:'That would defeat the existing independent acceptance contract.'}],
+   expectedOutcome:'The repaired candidate should pass the malformed JSON public case.',
+   uncertainty:'HTTP provider rejection and timeout still require independent verification.'
+  }};
+ assert.equal(validateModelDecision(a).ok,true);
+ assert.equal(normalizeModelOwnedPatches(a).length,1);
+});
