@@ -9,6 +9,8 @@ import {spawnSync} from 'node:child_process';
 import {parseModelOwnedPlan,normalizeModelOwnedPatches,safeStructureSummary} from './output-normalizer.mjs';
 import {inspectThinkingOnFinalJson} from '../kimi-recursion-v24/thinking-on-json-syntax.mjs';
 import {inspectV28TransportFailure} from '../kimi-recursion-v24/provider-response-diagnostics.mjs';
+import {fetch as scopedFetch,Agent} from 'undici';
+import {transportTimeoutPolicy,makeScopedUndiciAgent} from '../aau-provider-transport/transport-policy.mjs';
 if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_REAL_WORLD_DEBUG!=='yes')throw Error('RESEARCH_ONLY');
 const digest=x=>createHash('sha256').update(String(x)).digest('hex');
 const run=randomUUID(),base=readFileSync(new URL('./legacy-model-source.txt',import.meta.url),'utf8');
@@ -35,8 +37,14 @@ async function callModel(label,payload,thinking=false){
   status:'sent_or_uncertain',usage:null,finishReason:null,
   completionTokens:null,reasoningTokens:null,rawFinalContentStored:false,
   elapsedMs:null,httpHeadersReceived:false,requestDeadlineFired:false,
-  rawReasoningStored:false,finalJsonDiagnostic:null};
+  rawReasoningStored:false,finalJsonDiagnostic:null,
+  clientTimeoutPolicy:thinking?transportTimeoutPolicy(true):null,
+  scopedUndiciUsed:thinking};
  report.modelCalls.push(receipt);save();
+ // Use an explicit per-call Undici dispatcher ONLY for thinking-ON.
+ // Its headers/body deadlines are beyond the existing 720s application abort;
+ // thinking-OFF preserves its original global-fetch path and 175s deadline.
+ const scopedAgent=thinking?makeScopedUndiciAgent(Agent,true):null;
  const controller=new AbortController();
  const requestStartedAt=Date.now();
  let headersReceived=false,requestDeadlineFired=false;
@@ -46,10 +54,11 @@ async function callModel(label,payload,thinking=false){
  try{
   const key=String(process.env.MOONSHOT_API_KEY||'').trim();
   if(!key)throw Error('RESEARCH_API_KEY_MISSING');
-  const res=await fetch('https://api.moonshot.ai/v1/chat/completions',{
+  const providerFetch=thinking?scopedFetch:fetch;
+  const res=await providerFetch('https://api.moonshot.ai/v1/chat/completions',{
    method:'POST',redirect:'manual',signal:controller.signal,
    headers:{authorization:'Bearer '+key,'content-type':'application/json',accept:'application/json'},
-   body:JSON.stringify(body)});
+   body:JSON.stringify(body),...(scopedAgent?{dispatcher:scopedAgent}:{})});
   headersReceived=true;
   const j=await res.json().catch(()=>null);
   receipt.httpHeadersReceived=headersReceived;
@@ -99,6 +108,8 @@ async function callModel(label,payload,thinking=false){
   save();throw Error('MODEL_REQUEST_MANUAL_HOLD');
  }finally{
   clearTimeout(timer);
+  // Terminate any open connections in this single-use scoped dispatcher.
+  if(scopedAgent)await scopedAgent.destroy();
   receipt.elapsedMs=Date.now()-requestStartedAt;
   receipt.httpHeadersReceived=headersReceived;
   receipt.requestDeadlineFired=requestDeadlineFired;
