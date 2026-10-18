@@ -15,11 +15,11 @@ test('existing application deadlines unchanged and observed',()=>{
  assert.match(code,/receipt\.httpHeadersReceived=headersReceived/);
  assert.match(code,/receipt\.requestDeadlineFired=requestDeadlineFired/);
 });
-test('paid model call budget not widened and no catch-based resend',()=>{
- assert.match(code,/const MAX_CALLS=3/);
+test('bounded five distinct stage calls and no catch-based resend',()=>{
+ assert.match(code,/const MAX_CALLS=MAX_RESEARCH_CALLS/);
  assert.match(code,/thinking\?32768:4096/);
  assert.match(code,/stream:false/);
  assert.match(code,/status:'sent_or_uncertain'/);
  assert.equal((code.match(/await providerFetch\(/g)||[]).length,1);
- assert.equal((code.match(/await callModel\(/g)||[]).length,3);
+ assert.equal((code.match(/await callModel\(/g)||[]).length,5);
 });
