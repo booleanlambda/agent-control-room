@@ -341,6 +341,9 @@ try{
          'MODEL_PATCH_COUNT_INVALID','FOCUSED_PATCH_TOO_MANY_EDITS',
          'MODEL_OUTPUT_AMBIGUOUS_CONTAINERS'].includes(safe))throw error;
     patchRejection='MODEL_AUTHORED_PATCH_INVALID';
+    resolveModelDecision(report.forensics,currentDecision(),{outcome:'REJECTED',verified:false});
+    audit({kind:'MODEL_PATCH_VALIDATION_REJECTED',stage:'repair_tree_node_'+node.id,
+     nodeId:node.id,decisionId:currentDecision(),reasonCode:patchRejection});
    }
    report.decisions.push({phase:'repair_tree_node',node:node.id,depth:node.depth,
     accepted:patchAccepted,reason:patchRejection});
