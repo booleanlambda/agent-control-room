@@ -61,3 +61,26 @@ test('unexpected model exception keeps safe exception kind, no raw detail',()=>{
  assert.equal(unsafe.failedCases[0].exceptionKind,null);
  assert.equal(JSON.stringify(unsafe).includes('token=private'),false);
 });
+
+test('canonical public expected categories now accompany actual categories, never patch code',()=>{
+ const data=structuredClone(example);
+ const expected={received:'received',malformed:'malformed_model_json',
+  http_error:'provider_http_error',timeout:'transport_timeout_or_abort'};
+ for(const row of data.cases)row.expectedStatus=expected[row.name];
+ const feedback=makePublicFeedback(data);
+ assert.equal(feedback.complete,true);
+ assert.deepEqual(feedback.failedCases.map(r=>[r.case,r.reportedStatus,r.expectedStatus]),[
+  ['malformed','bad_model_json','malformed_model_json'],
+  ['http_error','provider_http_error','provider_http_error'],
+  ['timeout','transport_or_secret','transport_timeout_or_abort']
+ ]);
+ assert.equal(JSON.stringify(feedback).includes('oldHash'),false);
+ assert.equal(feedback.containsHiddenFeedback,false);
+});
+test('unsafe expectation string is redacted',()=>{
+ const data=structuredClone(example);
+ data.cases[3].expectedStatus='PRIVATE_CANARY Unauthorized URL';
+ const fb=makePublicFeedback(data);
+ assert.equal(fb.failedCases[2].expectedStatus,null);
+ assert.equal(JSON.stringify(fb).includes('PRIVATE_CANARY'),false);
+});
