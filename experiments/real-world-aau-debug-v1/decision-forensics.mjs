@@ -106,7 +106,8 @@ export function attachModelDecision(ledger,answer,{stage,nodeId=null,parentId=nu
  requestHash,responseHash}){
  entryLimit(ledger);
  const parsed=validateModelDecision(answer);
- if(!parsed.ok)return {ok:false,reason:parsed.reason};
+ if(!parsed.ok)return {ok:false,reason:parsed.reason,
+  ...(parsed.fieldDiagnostic?{fieldDiagnostic:parsed.fieldDiagnostic}:{})};
  const stageId=safeId(stage);
  if(!stageId)return {ok:false,reason:'INVALID_MODEL_FORENSIC_STAGE'};
  const id='decision_'+(ledger.modelDecisions.length+1);
