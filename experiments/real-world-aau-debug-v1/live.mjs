@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
+import {parseModelOwnedPlan} from './plan-parser.mjs';
 if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_REAL_WORLD_DEBUG!=='yes')throw Error('RESEARCH_ONLY');
 const digest=x=>createHash('sha256').update(String(x)).digest('hex');
 const run=randomUUID(),base=readFileSync(new URL('./legacy-model-source.txt',import.meta.url),'utf8');
@@ -54,24 +55,19 @@ async function callModel(label,payload,thinking=false){
   if(!answer||Array.isArray(answer)||typeof answer!=='object'){
    receipt.status='invalid_shape';throw Error('MODEL_REQUEST_MANUAL_HOLD')
   }
-  receipt.status='accepted';receipt.contentSha256=digest(text);save();return answer;
+  receipt.status='accepted';receipt.contentSha256=digest(text);
+  // Retain safe SHAPE METADATA to diagnose contract drift; no raw content.
+  receipt.responseKeys=Object.keys(answer).filter(k=>/^[a-zA-Z_]{1,36}$/.test(k)).slice(0,12);
+  const maybeTasks=answer.tasks||answer.subtasks||answer.steps||answer.plan?.steps||
+   answer.plan?.tasks||answer.decomposition?.steps||answer.workstreams;
+  receipt.modelTaskItemKeys=Array.isArray(maybeTasks)&&maybeTasks[0]&&typeof maybeTasks[0]==='object'
+   ?Object.keys(maybeTasks[0]).filter(k=>/^[a-zA-Z_]{1,36}$/.test(k)).slice(0,12):[];
+  save();return answer;
  }catch(e){
   if(receipt.status==='sent_or_uncertain')receipt.status=e?.name==='AbortError'?
    'timeout_or_abort':'transport_or_client_error';
   save();throw Error('MODEL_REQUEST_MANUAL_HOLD');
  }finally{clearTimeout(timer)}
-}
-function parsePlan(obj){
- const tasks=obj?.tasks;
- if(!Array.isArray(tasks)||tasks.length<2||tasks.length>5)throw Error('MODEL_PLAN_INVALID_COUNT');
- const approved=tasks.map((task,i)=>{
-  if(typeof task?.issue!=='string'||task.issue.length<12||task.issue.length>280||
-   typeof task?.acceptance!=='string'||task.acceptance.length<12||task.acceptance.length>280)
-    throw Error('MODEL_PLAN_INVALID_NODE');
-  return {id:i+1,issue:task.issue,acceptance:task.acceptance};
- });
- if(new Set(approved.map(x=>x.issue)).size!==approved.length)throw Error('DUPLICATE_PLAN_NODE');
- return approved;
 }
 function applyModelPatch(src,answer){
  const replacements=answer?.replacements;
@@ -111,7 +107,7 @@ function runPublicVerification(candidate,suite='public'){
  return {receipt,firstFailure:failures[0]??null};
 }
 try{
- const plan=parsePlan(await callModel('discover_and_decompose',{
+ const plan=parseModelOwnedPlan(await callModel('discover_and_decompose',{
   incident:'Real V28 provider-response diagnostic was lost when a broad catch overwrote per-call provider token receipt, finish reason and exact rejection category before MODEL_REQUEST_MANUAL_HOLD.',
   provenance:'Historical source in frozen file; no gold patch available',
   task:'Inspect code. Identify at least 2 distinct causal subproblems and independent acceptance criteria. Choose the decomposition yourself (2 to 5 tasks). Return {tasks:[{issue,acceptance},...]}. Do not propose code in this stage.',
