@@ -4,6 +4,7 @@ on:
     branches:
       - experiment/kimi-thinking-on-shape-live-20261018
       - experiment/kimi-json-retry-20261018
+      - experiment/kimi-thinking-on-semantic-gate-v1-20261018
     paths:
       - 'experiments/kimi-thinking-on-shape-probe/**'
       - '.github/workflows/kimi-thinking-on-shape-probe-static.yml'
@@ -23,6 +24,8 @@ jobs:
           node --check experiments/kimi-thinking-on-shape-probe/live.mjs
           node --check experiments/kimi-thinking-on-shape-probe/shape-helpers.mjs
           node --test experiments/kimi-thinking-on-shape-probe/shape-helpers.test.mjs
+          node --check experiments/kimi-thinking-on-shape-probe/diagnostic-acceptance.mjs
+          node --test experiments/kimi-thinking-on-shape-probe/diagnostic-acceptance.test.mjs
           node --test experiments/kimi-recursion-v24/provider-response-diagnostics.test.mjs
           node --test experiments/kimi-recursion-v24/thinking-on-json-syntax.test.mjs
           node --test experiments/kimi-recursion-v24/thinking-router.test.mjs
