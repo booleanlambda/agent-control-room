@@ -111,7 +111,7 @@ async function runThreeAlternatives({candidate,check,triggerStage,node=null}){
   branchGroupId:groupId,candidateSha256:digest(candidate.code),
   reasonCode:check.receipt.pass?'PUBLIC_SUITE_PASSED':
    acceptedAny?'PARTIAL_PROGRESS':'ALL_ALTERNATIVES_FAILED'});
- save();return {candidate,check,acceptedAny};
+ save();return {candidate,check,acceptedAny,group};
 }
 
 return runThreeAlternatives;
