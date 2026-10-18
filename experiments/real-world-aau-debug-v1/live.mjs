@@ -15,6 +15,7 @@ import {makePublicFeedback} from './public-failure-feedback.mjs';
 import {classifyThinkingExhaustion,proposedExhaustionRoute} from './remediation-exhaustion-route.mjs';
 import {focusedPatchDecision} from './early-focused-progress.mjs';
 import {budgetReservation,createRepairTree,takeRepairNode,addChildRepairNodes,treeSummary,GLOBAL_PROVIDER_TOKEN_BUDGET,RECURSION_DEPTH_LIMIT} from './progress-budget-tree.mjs';
+import {selectValidModelOwnedNodes} from './model-node-validation.mjs';
 if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_REAL_WORLD_DEBUG!=='yes')throw Error('RESEARCH_ONLY');
 const digest=x=>createHash('sha256').update(String(x)).digest('hex');
 const run=randomUUID(),base=readFileSync(new URL('./legacy-model-source.txt',import.meta.url),'utf8');
@@ -225,13 +226,19 @@ try{
  let check=runPublicVerification(candidate.code,'public');
  if(!check.receipt.pass){
   // Kimi chooses root subproblems; no deterministic patch or hidden tests.
-  const rootTasks=parseModelOwnedPlan(await callModel('decompose_public_failure_tree',{
+  const rootResponse=await callModel('decompose_public_failure_tree',{
    incident:'The original V28 AAU provider-diagnostics code still fails the public executable tests. Decompose every independent unsolved failure into testable repair nodes before patching. Only the model chooses the decomposition.',
    originalSource:base,currentCandidate:candidate.code,
    currentCandidateSha256:digest(candidate.code),
    previousPlan:plan,publicFailures:check.publicFeedback,
    requirement:'Return 2 to 6 distinct tasks as JSON {tasks:[{issue,acceptance},...]}. Ground tasks in the actual failed public assertions, including expected and observed status categories, sanitized diagnostic report requirements, no data leakage, and ledger invariants. Do not claim the public suite is incomplete when complete. No code or hidden test cases.'
-  },false));
+  },false);
+  const rootSelection=selectValidModelOwnedNodes(rootResponse);
+  report.rootNodeValidation={sourceCount:rootSelection.sourceCount,
+   rejectedCount:rootSelection.rejectedCount,
+   rejectionCounts:rootSelection.rejectionCounts??{},reason:rootSelection.reason};
+  if(rootSelection.tasks.length<2)throw Error('INSUFFICIENT_VALID_MODEL_NODES');
+  const rootTasks=rootSelection.tasks;
   const tree=createRepairTree(rootTasks);
   report.modelOwnedEarlyTasks=rootTasks;
   report.decisions.push({phase:'public_failure_tree',tasks:rootTasks});
@@ -283,15 +290,19 @@ try{
     accepted:patchAccepted,reason:patchRejection});
    report.repairTree=treeSummary(tree);save();
    if(!patchAccepted&&!check.receipt.pass&&node.depth<RECURSION_DEPTH_LIMIT){
-    const children=parseModelOwnedPlan(await callModel('split_failed_tree_node_'+node.id,{
+    const childResponse=await callModel('split_failed_tree_node_'+node.id,{
      incident:'Model-authored focused node did not produce measurable independent public-test progress. Decompose the precise unresolved node into 2 to 3 smaller independently verifiable subtasks, with thinking OFF.',
      parentNode:{id:node.id,depth:node.depth,issue:node.issue,acceptance:node.acceptance},
      publicFailures:check.publicFeedback,
      currentCandidate:candidate.code,
      rejectionCategory:patchRejection,
      instruction:'Return JSON tasks:[{issue,acceptance},...] with 2 to 3 different smaller tasks, each grounded in current public failures. Do not repeat the parent/sibling task, do not invent test results and do not write code.'
-    },false));
-    const added=addChildRepairNodes(tree,node,children);
+    },false);
+    const childSelection=selectValidModelOwnedNodes(childResponse,{maxTasks:3});
+    const added=addChildRepairNodes(tree,node,childSelection.tasks);
+    report.decisions.push({phase:'validate_model_child_decomposition',node:node.id,
+     sourceCount:childSelection.sourceCount,rejectedCount:childSelection.rejectedCount,
+     rejectionCounts:childSelection.rejectionCounts??{},reason:childSelection.reason});
     report.decisions.push({phase:'subdivide_failed_node',node:node.id,
      depth:node.depth,added:added.added,reason:added.reason});
     report.repairTree=treeSummary(tree);save();
