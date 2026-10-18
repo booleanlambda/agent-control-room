@@ -20,7 +20,7 @@ export function createLedger(connectionString){
    try{
     await c.query('BEGIN');
     await c.query("insert into aau_research_v23.runs(run_id,benchmark_hash,next_phase,state) values($1,$2,'level_0',$3::jsonb)",
-      [run,problemHash,JSON.stringify({nodes:[],levelIndex:0,maxDepthReached:0,verifiedDepth:0,repairs:[],providerCalls:0,providerTokens:0,results:{},source:null,acceptedSource:null,levelHistory:[]})]);
+      [run,problemHash,JSON.stringify({nodes:[],levelIndex:0,maxDepthReached:0,verifiedDepth:0,repairs:[],providerCalls:0,providerTokens:0,results:{},source:null,acceptedSource:null,levelHistory:[],levelLogs:[],repairCounts:{}})]);
     await c.query('insert into aau_research_v23.outbox(run_id,seq) values($1,0)',[run]);
     await c.query('COMMIT');
    }catch(e){await c.query('ROLLBACK');throw e}finally{c.release()}
