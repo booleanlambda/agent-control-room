@@ -18,6 +18,7 @@ jobs:
     timeout-minutes: 45
     env:
       AAU_REAL_WORLD_DEBUG: 'yes'
+      AAU_FORENSICS_SMOKE: 'yes'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
