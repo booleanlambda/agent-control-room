@@ -91,7 +91,10 @@ async function exercise(key){
  if(!scenario.ledgerFail&&scenario.mode==='hold'&&report.providerCallDiagnostics?.length<1)
   problems.push('missing sanitized diagnostic report on hold');
  if(scenario.ledgerFail&&events.finish.length!==1)problems.push('ledger commit ambiguity led to second write');
- return {case:key,passed:problems.length===0,problems,reportedStatus:statusSafe};
+ // Expected status is a PUBLIC assertion, not a hidden reference patch.
+ // Do not emit expected statuses for hidden execution, even to artifacts.
+ return {case:key,passed:problems.length===0,problems,reportedStatus:statusSafe,
+  ...(stage==='public'?{expectedStatus:scenario.expectStatus}:{})};
 }
 let failures=0;
 for(const key of selected){
