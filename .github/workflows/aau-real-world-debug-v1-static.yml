@@ -43,6 +43,8 @@ jobs:
           node --test experiments/real-world-aau-debug-v1/early-focused-progress.test.mjs
           node --check experiments/real-world-aau-debug-v1/progress-budget-tree.mjs
           node --test experiments/real-world-aau-debug-v1/progress-budget-tree.test.mjs
+          node --check experiments/real-world-aau-debug-v1/model-node-validation.mjs
+          node --test experiments/real-world-aau-debug-v1/model-node-validation.test.mjs
           node --test experiments/real-world-aau-debug-v1/historical-exhaustion-replay.test.mjs
           node --check experiments/kimi-recursion-v24/thinking-on-json-syntax.mjs
           node --test experiments/kimi-recursion-v24/thinking-on-json-syntax.test.mjs
