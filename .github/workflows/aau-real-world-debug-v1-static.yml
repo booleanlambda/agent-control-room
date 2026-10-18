@@ -36,6 +36,7 @@ jobs:
           node --test experiments/kimi-recursion-v24/budget-recovery.test.mjs
           node --test experiments/aau-provider-transport/headers-timeout.test.mjs
           node --test experiments/aau-provider-transport/transport-policy.test.mjs
+          node --test experiments/aau-provider-transport/scoped-benchmark.test.mjs
           node --check experiments/real-world-aau-debug-v1/verify-candidate.mjs
       - name: Confirm real original defect is caught before model edits
         working-directory: experiments/real-world-aau-debug-v1
