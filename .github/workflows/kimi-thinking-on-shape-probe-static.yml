@@ -1,0 +1,27 @@
+name: Kimi thinking-ON shape probe offline gates
+on:
+  push:
+    branches:
+      - experiment/kimi-thinking-on-shape-live-20261018
+    paths:
+      - 'experiments/kimi-thinking-on-shape-probe/**'
+      - '.github/workflows/kimi-thinking-on-shape-probe-static.yml'
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax and redaction guards without provider keys
+        run: |
+          node --check experiments/kimi-thinking-on-shape-probe/live.mjs
+          node --check experiments/kimi-thinking-on-shape-probe/shape-helpers.mjs
+          node --test experiments/kimi-thinking-on-shape-probe/shape-helpers.test.mjs
+          node --test experiments/kimi-recursion-v24/provider-response-diagnostics.test.mjs
+          node --test experiments/kimi-recursion-v24/thinking-router.test.mjs
+          node --test experiments/kimi-recursion-v24/budget-recovery.test.mjs
