@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {createAlternativeBranches,selectNextAlternative,settleAlternative,alternativeSummary}
+import {createAlternativeBranches,selectNextAlternative,settleAlternative,alternativeSummary,verifyAlternativeDescriptions}
  from './alternative-branches.mjs';
 const sha=s=>createHash('sha256').update(s).digest('hex');
 const h=n=>sha('candidate-snapshot-'+n);
@@ -74,4 +74,13 @@ test('refuse out-of-order outcomes and bad candidate proofs',()=>{
  assert.throws(()=>settleAlternative(state,{id:2,verdict:'NO_PROGRESS',sourceSha256:h(0),trialSha256:h(2)}),/ALTERNATIVE_ORDER_INVALID/);
  assert.throws(()=>settleAlternative(state,{id:1,verdict:'PASS',sourceSha256:'wrong',trialSha256:h(2)}),/ALTERNATIVE_CANDIDATE_HASH_INVALID/);
  assert.equal(state.records.length,0);
+});
+
+test('forensic narrative fields are bounded, human-readable and cryptographically bound',()=>{
+ const state=createAlternativeBranches(plan(),h(0));
+ const receipt=alternativeSummary(state);
+ assert.equal(verifyAlternativeDescriptions(receipt),true);
+ assert.ok(receipt.branches[0].approach.includes('malformed'));
+ receipt.branches[0].hypothesis='A fabricated new hypothesis not signed by its hash.';
+ assert.equal(verifyAlternativeDescriptions(receipt),false);
 });
