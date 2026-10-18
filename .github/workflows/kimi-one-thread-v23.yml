@@ -1,0 +1,55 @@
+name: AAU V23 Single Thread Cheap Kimi Cognitive Architecture
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - experiment/rabbitmq-parallel-v22
+    paths:
+      - 'experiments/kimi-one-thread-v23/**'
+      - '.github/workflows/kimi-one-thread-v23.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  one-thread-one-kimi-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 19
+    env:
+      AAU_V23_RESEARCH: 'yes'
+      AAU_PYTHON_SANDBOX: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate hidden benchmark, deterministic oracle, scoped cognitive state machine before model inference
+        run: |
+          node --check experiments/kimi-one-thread-v23/benchmark.mjs
+          node --check experiments/kimi-one-thread-v23/ledger.mjs
+          node --check experiments/kimi-one-thread-v23/live.mjs
+          node --test experiments/kimi-one-thread-v23/cognition.test.mjs
+      - name: Install pinned AMQP and Neon clients without lifecycle scripts
+        run: npm install --no-save --ignore-scripts amqplib@0.10.9 pg@8.16.3
+      - name: Verify Docker sandbox is available before sending billable calls
+        run: docker info --format '{{.ServerVersion}}'
+      - name: Run single RabbitMQ-driven cognitive thread with Kimi thinking OFF
+        working-directory: experiments/kimi-one-thread-v23
+        env:
+          AMQP_URL: ${{ secrets.AMQP }}
+          NEON_V19_DATABASE_URL: ${{ secrets.NEON_V19_DATABASE_URL }}
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: node live.mjs
+      - name: Preserve exact real model calls, verifier outcomes and remediation evidence on success or failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-kimi-cognitive-thread-v23-evidence
+          path: experiments/kimi-one-thread-v23/single-thread-v23-evidence.json
+          if-no-files-found: warn
+          retention-days: 7
