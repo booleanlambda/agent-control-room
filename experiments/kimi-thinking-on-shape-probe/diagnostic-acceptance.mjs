@@ -43,6 +43,36 @@ function corpus(answer){
  }
  return {fragments,whole:whole.join(' ').slice(0,120000)};
 }
+// A concrete scenario/given/then table is a test specification even when
+// the model calls it "testableOutcomes" rather than literal "tests".
+function hasStructuredTestPlan(answer){
+ const sectionNames=['testableOutcomes','testableRequirements','testCases',
+  'tests','verification','acceptanceCriteria','expectedOutcomes','testScenarios'];
+ const queue=[answer],seen=new Set();
+ const text=x=>typeof x==='string'&&x.trim().length>=8;
+ while(queue.length){
+  const root=queue.shift();
+  if(!isObject(root)||seen.has(root))continue;
+  seen.add(root);
+  for(const name of sectionNames){
+   const cases=root[name];
+   if(!Array.isArray(cases)||cases.length<2)continue;
+   const strong=cases.filter(item=>{
+    if(!isObject(item))return false;
+    const scenario=[item.scenario,item.case,item.test,item.description,
+     item.name].some(text);
+    const expectation=[item.then,item.expected,item.expectedResult,
+     item.expectedOutcome,item.assertion,item.expectedBehavior].some(text);
+    return scenario&&expectation;
+   });
+   if(strong.length>=2)return true;
+  }
+  for(const item of Object.values(root)){
+   if(isObject(item))queue.push(item);
+  }
+ }
+ return false;
+}
 function hasStructure(answer){
  if(!isObject(answer))return false;
  const s=Object.keys(answer);
@@ -62,9 +92,10 @@ export function assessDiagnosticStrategy(answer){
  // handling was diagnosed or remediated. Count tests only for the test rubric.
  const testOnlyRoot=/^\s*(testableRequirements|tests|testCases|testScenarios|verification|acceptanceCriteria|expectedResults)\b/i;
  const criterionResults=REQUIREMENTS.map(req=>({
-  id:req.id,met:fragments.some(fragment=>
-   (req.id==='testable_verification'||!testOnlyRoot.test(fragment))&&
-   req.match.every(rx=>rx.test(fragment)))
+  id:req.id,met:(req.id==='testable_verification'&&hasStructuredTestPlan(answer))||
+   fragments.some(fragment=>
+    (req.id==='testable_verification'||!testOnlyRoot.test(fragment))&&
+    req.match.every(rx=>rx.test(fragment)))
  }));
  const metCount=criterionResults.filter(x=>x.met).length;
  return {rubric:RUBRIC_VERSION,
