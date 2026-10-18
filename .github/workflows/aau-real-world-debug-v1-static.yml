@@ -37,6 +37,7 @@ jobs:
           node --test experiments/real-world-aau-debug-v1/remediation-exhaustion-route.test.mjs
           node --check experiments/real-world-aau-debug-v1/fallback-continuation.mjs
           node --test experiments/real-world-aau-debug-v1/fallback-continuation.test.mjs
+          node --test experiments/real-world-aau-debug-v1/historical-exhaustion-replay.test.mjs
           node --check experiments/kimi-recursion-v24/thinking-on-json-syntax.mjs
           node --test experiments/kimi-recursion-v24/thinking-on-json-syntax.test.mjs
           node --test experiments/kimi-recursion-v24/provider-response-diagnostics.test.mjs
