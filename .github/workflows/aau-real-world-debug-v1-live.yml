@@ -18,7 +18,8 @@ jobs:
     timeout-minutes: 45
     env:
       AAU_REAL_WORLD_DEBUG: 'yes'
-      AAU_FORENSICS_SMOKE: 'yes'
+      AAU_FORENSICS_SMOKE: 'no'
+      AAU_ALTERNATIVES_SMOKE: 'yes'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -50,6 +51,10 @@ jobs:
           node --check experiments/real-world-aau-debug-v1/decision-forensics.mjs
           node --test experiments/real-world-aau-debug-v1/decision-forensics.test.mjs
           node --test experiments/real-world-aau-debug-v1/decision-forensics-integration.test.mjs
+          node --check experiments/real-world-aau-debug-v1/alternative-branches.mjs
+          node --test experiments/real-world-aau-debug-v1/alternative-branches.test.mjs
+          node --check experiments/real-world-aau-debug-v1/alternative-executor.mjs
+          node --test experiments/real-world-aau-debug-v1/alternative-executor.test.mjs
           node --check experiments/real-world-aau-debug-v1/forensics-trace-check.mjs
           node --test experiments/real-world-aau-debug-v1/forensics-trace-check.test.mjs
           node --check experiments/real-world-aau-debug-v1/forensics-verdict.mjs
