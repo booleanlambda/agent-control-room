@@ -24,7 +24,9 @@ const evidence={probe:'KIMI_THINKING_ON_FINAL_JSON_SHAPE',
  callLimit:1,automaticRetries:false,
  status:'preparing',httpHeadersReceived:false,requestDeadlineFired:false,
  providerReceipt:null,finalSchema:[],messageFields:[],transport:null,
- rawContentStored:false,privateReasoningStored:false};
+ rawContentStored:false,privateReasoningStored:false,
+ tempFinalFileCreated:false,tempFinalFileDeleted:false,
+ finalContentSha256:null,inRunnerParseCheck:null};
 const save=()=>writeFileSync('thinking-on-shape-evidence.json',JSON.stringify(evidence,null,2)+'\n');
 const body={model:cfg.model,thinking:cfg.thinking,temperature:cfg.temperature,
  response_format:{type:'json_object'},max_tokens:cfg.max_tokens,stream:false,
@@ -40,6 +42,7 @@ evidence.requestSha256=hash(JSON.stringify(body));
 const key=String(process.env.MOONSHOT_API_KEY||'').trim();
 if(!key)throw Error('PROVIDER_KEY_UNAVAILABLE');
 let started=Date.now(),settled=false,deadlineFired=false,headersReceived=false;
+let temporaryDirectory=null;
 const ctrl=new AbortController();
 const timer=setTimeout(()=>{
  if(!settled){deadlineFired=true;ctrl.abort()}
