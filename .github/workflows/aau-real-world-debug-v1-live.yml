@@ -49,6 +49,9 @@ jobs:
           node --check experiments/real-world-aau-debug-v1/decision-forensics.mjs
           node --test experiments/real-world-aau-debug-v1/decision-forensics.test.mjs
           node --test experiments/real-world-aau-debug-v1/decision-forensics-integration.test.mjs
+          node --check experiments/real-world-aau-debug-v1/forensics-trace-check.mjs
+          node --test experiments/real-world-aau-debug-v1/forensics-trace-check.test.mjs
+          node --check experiments/real-world-aau-debug-v1/forensics-verdict.mjs
           node --test experiments/aau-provider-transport/headers-timeout.test.mjs
           node --test experiments/aau-provider-transport/transport-policy.test.mjs
           node --test experiments/aau-provider-transport/scoped-benchmark.test.mjs
@@ -64,11 +67,17 @@ jobs:
         env:
           MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
         run: node live.mjs
+      - name: Independently audit live model decisions against provider and executable-test trail
+        if: always()
+        working-directory: experiments/real-world-aau-debug-v1
+        run: node forensics-verdict.mjs
       - name: Retain model route, independent scores and sanitized call evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: aau-real-world-historical-provider-debug-proof
-          path: experiments/real-world-aau-debug-v1/real-world-debug-evidence.json
+          path: |
+            experiments/real-world-aau-debug-v1/real-world-debug-evidence.json
+            experiments/real-world-aau-debug-v1/forensic-audit-summary.json
           if-no-files-found: warn
           retention-days: 7
