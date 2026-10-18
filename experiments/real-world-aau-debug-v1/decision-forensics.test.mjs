@@ -103,3 +103,19 @@ test('forensic source text must not quote hidden oracle cases',()=>{
  hidden.decisionForensics.evidence[0].caseId='off_length';
  assert.equal(validateModelDecision(hidden).ok,false);
 });
+
+test('summary rejection explains which field failed without exposing any field text',async()=>{
+ const {summarizeForensicFields}=await import('./decision-forensics.mjs');
+ const x=structuredClone(good);
+ x.decisionForensics.uncertainty='None';
+ const result=validateModelDecision(x);
+ assert.equal(result.reason,'INVALID_MODEL_FORENSIC_SUMMARY');
+ assert.equal(result.fieldDiagnostic.fields.uncertainty.status,'TOO_SHORT');
+ assert.equal(result.fieldDiagnostic.fields.choice.status,'VALID');
+ assert.equal(JSON.stringify(result.fieldDiagnostic).includes('None'),false);
+ const y=structuredClone(good);
+ y.decisionForensics.rationale='Bearer sensitive-value-is-private';
+ const another=summarizeForensicFields(y);
+ assert.equal(another.fields.rationale.status,'UNSAFE_TEXT');
+ assert.equal(JSON.stringify(another).includes('sensitive-value-is-private'),false);
+});
