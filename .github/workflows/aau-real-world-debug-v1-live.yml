@@ -30,6 +30,8 @@ jobs:
           node --test experiments/real-world-aau-debug-v1/plan-parser.test.mjs
           node --check experiments/real-world-aau-debug-v1/output-normalizer.mjs
           node --test experiments/real-world-aau-debug-v1/output-normalizer.test.mjs
+          node --check experiments/real-world-aau-debug-v1/output-normalizer.mjs
+          node --test experiments/real-world-aau-debug-v1/output-normalizer.test.mjs
           node --check experiments/real-world-aau-debug-v1/verify-candidate.mjs
           test -s experiments/real-world-aau-debug-v1/legacy-model-source.txt
       - name: Verify Docker secure offline evaluation
