@@ -71,3 +71,31 @@ test('not mistaken for executable proof even when requirements are covered',()=>
  assert.equal(Object.hasOwn(x,'softwareFixVerified'),false);
  assert.deepEqual(x.criterionResults.map(y=>y.id),REQUIREMENTS.map(y=>y.id));
 });
+
+test('structured testableOutcomes scenario/given/then satisfy verification without literal test word',()=>{
+ const x=structuredClone(sufficient);
+ delete x.testableRequirements;
+ x.testableOutcomes=[
+  {scenario:'Provider returns malformed JSON response',
+   given:'Parser receives invalid final content',
+   then:'The manual-hold category is preserved'},
+  {scenario:'Provider request times out before headers',
+   given:'Transport reports deadline cancellation',
+   then:'No paid provider call is resent'},
+  {scenario:'Database journal write remains ambiguous',
+   given:'Database reports an unknown commit result',
+   then:'No duplicate persistent ledger write is made'}
+ ];
+ const result=assessDiagnosticStrategy(x);
+ assert.equal(result.criterionResults.find(z=>z.id==='testable_verification').met,true);
+ assert.equal(result.verdict,'REQUIREMENTS_COVERED');
+});
+test('testableOutcomes header alone does not count without case and expected outcome',()=>{
+ const x=structuredClone(sufficient);
+ delete x.testableRequirements;
+ x.testableOutcomes=[{scenario:'Only a listed failure scenario'},
+  {scenario:'Another missing expected outcome'}];
+ const result=assessDiagnosticStrategy(x);
+ assert.equal(result.criterionResults.find(z=>z.id==='testable_verification').met,false);
+ assert.equal(result.verdict,'REQUIREMENTS_NOT_COVERED');
+});
