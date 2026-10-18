@@ -149,6 +149,8 @@ async function callModel(label,payload,thinking=false){
   if(!reason.ok){
    receipt.status='model_decision_forensics_invalid';
    receipt.forensicsFailureCode=reason.reason;
+   if(reason.fieldDiagnostic)receipt.forensicFieldDiagnostic=reason.fieldDiagnostic;
+   receipt.responseStructure=safeStructureSummary(answer);
    audit({kind:'MODEL_FORENSICS_REJECTED',stage:label,reasonCode:reason.reason});
    throw Error('MODEL_DECISION_FORENSICS_MISSING');
   }
