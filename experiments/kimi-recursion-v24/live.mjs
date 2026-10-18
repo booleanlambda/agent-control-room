@@ -8,6 +8,7 @@ import {writeFileSync} from 'node:fs';
 import {runIsolatedPython} from '../recursion-tree-v0/unseen-python-sandbox.mjs';
 import {LEVELS,publicCasesFor,hiddenCases,stageHash,assess,sha} from './benchmark.mjs';
 import {createLedger} from './ledger.mjs';
+import {reconcileSelectedCost} from './cost-companion.mjs';
 if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_V24_RESEARCH!=='yes'||
    process.env.AAU_PYTHON_SANDBOX!=='yes')throw Error('RESEARCH_ONLY');
 const digest=x=>createHash('sha256').update(typeof x==='string'?x:JSON.stringify(x)).digest('hex');
@@ -86,17 +87,7 @@ async function evalCode(source,problem){
  // selected IDs and the search strategy. The runtime only recomputes their
  // unambiguous sum; it never adds/removes controls, computes a proposal,
  // generates source, or weakens the independent optimum/invariant checker.
- let result=exec.result,normalized=false,verifiedSum=null;
- if(Array.isArray(result?.selected)&&
-    !(result.selected.length===0&&result.cost===null)){
-  const ids=new Map(problem.controls.map(c=>[c.id,c.cost]));
-  if(result.selected.every(id=>typeof id==='string'&&ids.has(id))&&
-     new Set(result.selected).size===result.selected.length){
-   verifiedSum=result.selected.reduce((n,id)=>n+ids.get(id),0);
-   normalized=verifiedSum!==result.cost;
-   result={...result,cost:verifiedSum};
-  }
- }
+ const {answer:result,adjusted:normalized,verifiedCost:verifiedSum}=reconcileSelectedCost(problem,exec.result);
  const verified=assess(problem,result);
  return {passed:verified.passed,feedback:verified.passed?
    {reason:verified.reason,cost:verified.cost??null,normalizedCost:normalized,
