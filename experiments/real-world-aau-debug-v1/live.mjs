@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
-import {parseModelOwnedPlan} from './plan-parser.mjs';
+import {parseModelOwnedPlan,normalizeModelOwnedPatches,safeStructureSummary} from './output-normalizer.mjs';
 if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_REAL_WORLD_DEBUG!=='yes')throw Error('RESEARCH_ONLY');
 const digest=x=>createHash('sha256').update(String(x)).digest('hex');
 const run=randomUUID(),base=readFileSync(new URL('./legacy-model-source.txt',import.meta.url),'utf8');
@@ -57,11 +57,7 @@ async function callModel(label,payload,thinking=false){
   }
   receipt.status='accepted';receipt.contentSha256=digest(text);
   // Retain safe SHAPE METADATA to diagnose contract drift; no raw content.
-  receipt.responseKeys=Object.keys(answer).filter(k=>/^[a-zA-Z_]{1,36}$/.test(k)).slice(0,12);
-  const maybeTasks=answer.tasks||answer.subtasks||answer.steps||answer.plan?.steps||
-   answer.plan?.tasks||answer.decomposition?.steps||answer.workstreams;
-  receipt.modelTaskItemKeys=Array.isArray(maybeTasks)&&maybeTasks[0]&&typeof maybeTasks[0]==='object'
-   ?Object.keys(maybeTasks[0]).filter(k=>/^[a-zA-Z_]{1,36}$/.test(k)).slice(0,12):[];
+  receipt.responseStructure=safeStructureSummary(answer);
   save();return answer;
  }catch(e){
   if(receipt.status==='sent_or_uncertain')receipt.status=e?.name==='AbortError'?
@@ -70,9 +66,9 @@ async function callModel(label,payload,thinking=false){
  }finally{clearTimeout(timer)}
 }
 function applyModelPatch(src,answer){
- const replacements=answer?.replacements;
- if(!Array.isArray(replacements)||!replacements.length||replacements.length>7)
-  throw Error('MODEL_PATCH_COUNT_INVALID');
+ // Kimi thinking-OFF output is validated semantically after normalization.
+ // Only field names/containers are adapted; exact source spans remain model-authored.
+ const replacements=normalizeModelOwnedPatches(answer);
  let candidate=src,spans=[];
  for(const [i,r] of replacements.entries()){
   if(typeof r?.old!=='string'||r.old.length<12||typeof r?.replacement!=='string'||
