@@ -82,3 +82,21 @@ test('invalid/missing decision does not enter forensic ledger',()=>{
  assert.equal(r.ok,false);
  assert.equal(ledger.modelDecisions.length,0);
 });
+
+test('event hash links are independently recomputable; tampering with a prior event breaks chain',async()=>{
+ const {createHash}=await import('node:crypto');
+ const ledger=makeForensicLedger();
+ const a=auditEvent(ledger,{kind:'REPAIR_NODE_SELECTED',stage:'repair_tree_node_7',nodeId:7});
+ const b=auditEvent(ledger,{kind:'NODE_PATCH_REJECTED',stage:'repair_tree_node_7',nodeId:7});
+ assert.equal(a.prevHash,'GENESIS');
+ assert.equal(b.prevHash,a.hash);
+ const verify=ev=>createHash('sha256').update(JSON.stringify(
+  Object.fromEntries(Object.entries(ev).filter(([k])=>k!=='hash')))).digest('hex')===ev.hash;
+ assert.equal(verify(a),true);assert.equal(verify(b),true);
+ a.nodeId=8;assert.equal(verify(a),false);
+});
+test('forensic source text must not quote hidden oracle cases',()=>{
+ const hidden=structuredClone(good);
+ hidden.decisionForensics.evidence[0].caseId='off_length';
+ assert.equal(validateModelDecision(hidden).ok,false);
+});
