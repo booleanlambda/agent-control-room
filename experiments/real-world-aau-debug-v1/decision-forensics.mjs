@@ -84,7 +84,7 @@ export function attachModelDecision(ledger,answer,{stage,nodeId=null,parentId=nu
 }
 const allowedCodes=/^[A-Z][A-Z0-9_]{2,75}$/;
 export function auditEvent(ledger,{kind,stage,decisionId=null,nodeId=null,parentId=null,
- candidateSha256=null,verification=null,budget=null}){
+ candidateSha256=null,verification=null,budget=null,caseId=null,reasonCode=null}){
  entryLimit(ledger);
  const k=allowedCodes.test(kind??'')?kind:null,st=safeId(stage);
  if(!k||!st)throw Error('INVALID_FORENSIC_EVENT');
@@ -95,6 +95,8 @@ export function auditEvent(ledger,{kind,stage,decisionId=null,nodeId=null,parent
  const data={
   seq:ledger.events.length+1,recordedAt:new Date().toISOString(),
   kind:k,stage:st,
+  caseId:allowedCases.has(caseId)?caseId:null,
+  reasonCode:allowedCodes.test(reasonCode??'')?reasonCode:null,
   decisionId:typeof decisionId==='string'&&/^decision_[0-9]{1,5}$/.test(decisionId)?decisionId:null,
   nodeId:safeNode(nodeId),parentId:safeNode(parentId),
   candidateSha256:safeHash(candidateSha256),
