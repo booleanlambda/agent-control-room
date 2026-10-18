@@ -9,15 +9,21 @@ test('exact phase routing: repairs think ON and all routine Kimi phases remain O
   assert.equal(repair.model,'kimi-k2.6');
   assert.deepEqual(repair.thinking,{type:'enabled'});
   assert.equal(repair.temperature,1.0);
-  assert.equal(repair.max_tokens,16000);
-  assert.equal(repair.timeoutMs,330000);
+  assert.equal(repair.max_tokens,32768);
+  assert.equal(repair.timeoutMs,720000);
   const ordinary=kimiStageRequest('level_'+i,3100);
   assert.deepEqual(ordinary.thinking,{type:'disabled'});
   assert.equal(ordinary.temperature,0.6);
-  assert.equal(ordinary.max_tokens,3100);
+  assert.equal(ordinary.max_tokens,4096);
   assert.equal(ordinary.timeoutMs,175000);
+  for(const phase of ['decompose_'+i,'repair_piece_'+i]){
+   const child=kimiStageRequest(phase,1024);
+   assert.equal(child.thinking.type,'disabled');
+   assert.equal(child.max_tokens,4096);
+  }
  }
  assert.equal(kimiStageMode('synthesize'),'disabled');
+ assert.equal(kimiStageRequest('synthesize',1450).max_tokens,4096);
  assert.throws(()=>kimiStageMode('verify_1'),/UNRECOGNIZED_MODEL_STAGE/);
  assert.throws(()=>kimiStageMode('diagnose_1'),/UNRECOGNIZED_MODEL_STAGE/);
  assert.throws(()=>kimiStageMode('repair_10'),/UNRECOGNIZED_MODEL_STAGE/);
