@@ -13,6 +13,7 @@ import {fetch as scopedFetch,Agent} from 'undici';
 import {transportTimeoutPolicy,makeScopedUndiciAgent} from '../aau-provider-transport/transport-policy.mjs';
 import {makePublicFeedback} from './public-failure-feedback.mjs';
 import {classifyThinkingExhaustion,proposedExhaustionRoute} from './remediation-exhaustion-route.mjs';
+import {authorizeExhaustionContinuation,MAX_RESEARCH_CALLS} from './fallback-continuation.mjs';
 if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_REAL_WORLD_DEBUG!=='yes')throw Error('RESEARCH_ONLY');
 const digest=x=>createHash('sha256').update(String(x)).digest('hex');
 const run=randomUUID(),base=readFileSync(new URL('./legacy-model-source.txt',import.meta.url),'utf8');
@@ -22,12 +23,13 @@ const report={experiment:'REAL_AAU_V28_ORIGINAL_PROVIDER_DIAGNOSTIC_INCIDENT',
  originalCodeSha256:digest(base),status:'running',model:'kimi-k2.6',
  problemType:'actual AAU provider/manual-hold provenance loss',
  planGeneratedByModel:false,noGoldPatchProvided:true,noSyntheticFaultInjection:true,
- proofModelIndependent:true,maxCalls:3,modelCalls:[],decisions:[],tests:[],
+ proofModelIndependent:true,maxCalls:MAX_RESEARCH_CALLS,modelCalls:[],decisions:[],tests:[],
+ continuedAfterConfirmedExhaustion:false,continuationCalls:0,
  success:false,candidateSha256:null,nonReplayableCalls:true,
  thinkingExhaustion:null,proposedDecomposition:null};
 const save=()=>writeFileSync('real-world-debug-evidence.json',JSON.stringify(report,null,2)+'\n');
 const system='You are Kimi K2.6, acting as a software engineer. Your job is to independently diagnose and fix a REAL historical code defect, not a synthetic exercise. Produce exactly one JSON object, no markdown. Analyze constraints yourself, choose your own decomposition; avoid inventing observed outcomes. Do not request or expose hidden tests. Do not change thinking-mode policy or auto-retry ambiguous paid provider calls.';
-const MAX_CALLS=3;
+const MAX_CALLS=MAX_RESEARCH_CALLS;
 let totalTokens=0;
 async function callModel(label,payload,thinking=false){
  if(report.modelCalls.length>=MAX_CALLS||totalTokens>=75000)throw Error('RESEARCH_MODEL_CAP_REACHED');
@@ -79,7 +81,8 @@ async function callModel(label,payload,thinking=false){
    completionTokens:receipt.completionTokens,completionCeiling:max_tokens});
   if(exhaustionClass==='THINKING_BUDGET_EXHAUSTED'){
    receipt.status='thinking_budget_exhausted';
-   report.thinkingExhaustion={stage:label,finishReason:receipt.finishReason,
+   report.thinkingExhaustion={stage:label,thinking:'enabled',providerHttpStatus:res.status,
+    finishReason:receipt.finishReason,
     usage:receipt.usage,completionTokens:receipt.completionTokens,
     reasoningTokens:receipt.reasoningTokens,completionCeiling:max_tokens};
    report.proposedDecomposition=proposedExhaustionRoute({
@@ -199,7 +202,7 @@ try{
  report.decisions.push({phase:'implementation',spans:candidate.spans,diagnosis:typeof proposal.diagnosis==='string'?proposal.diagnosis.slice(0,650):null});
  let check=runPublicVerification(candidate.code,'public');
  if(!check.receipt.pass){
-  const fix=await callModel('remediate_failed_public_test',{
+  const remediationRequest={
    incident:'Real V28 diagnostic code bug; previous implementation failed an independent PUBLIC verifier. Repair your own candidate, preserving all earlier contracts. No gold answer or hidden tests are available.',
    originalSource:base,currentCandidate:candidate.code,
    currentCandidateSha256:digest(candidate.code),
@@ -207,11 +210,55 @@ try{
    publicFailures:check.publicFeedback??{suite:'public',complete:false,failedCases:[]},
    publicFeedbackPolicy:'All public failures are independently observed. Fix every failing case without changing the tests. The public checker withholds hidden cases. Status names must use stable canonical diagnostic categories, and never log raw provider messages, exception text or credentials.',
    instruction:'Return JSON {replacements:[{old:EXACT UNIQUE STRING from currentCandidate,replacement:NEW SOURCE},...],diagnosis:string}, only scoped patches. Never auto retry provider requests.'
-  },true);
-  candidate=applyModelPatch(candidate.code,fix);
-  report.decisions.push({phase:'remediation',spans:candidate.spans,
-   diagnosis:typeof fix.diagnosis==='string'?fix.diagnosis.slice(0,650):null});
-  check=runPublicVerification(candidate.code,'public');
+  };
+  try{
+   const fix=await callModel('remediate_failed_public_test',remediationRequest,true);
+   candidate=applyModelPatch(candidate.code,fix);
+   report.decisions.push({phase:'remediation',spans:candidate.spans,
+    diagnosis:typeof fix.diagnosis==='string'?fix.diagnosis.slice(0,650):null});
+   check=runPublicVerification(candidate.code,'public');
+  }catch(e){
+   // Continue only after a completed HTTP-200 length response that consumed
+   // all 32768 completion tokens. No transport-error, uncertain or malformed
+   // provider call may be retried through this path.
+   if(e?.message!=='THINKING_BUDGET_EXHAUSTED')throw e;
+   const route=authorizeExhaustionContinuation({
+    modelCalls:report.modelCalls,thinkingReceipt:report.thinkingExhaustion
+   });
+   report.fallbackAuthorization=route;
+   save();
+   if(!route.authorized||route.continuationCallsRemaining<2)
+    throw Error('EXHAUSTION_FALLBACK_NOT_AUTHORIZED');
+   report.continuedAfterConfirmedExhaustion=true;
+   const focusedPlan=parseModelOwnedPlan(await callModel(
+    'decompose_remaining_public_failures',{
+     incident:'Completed thinking-ON remediation exhausted its 32768-token completion budget with finish_reason=length. Its incomplete response was rejected. Build a small NEW scoped decomposition with thinking OFF (4096 completion tokens).',
+     objective:'Plan 2 or 3 focused independent subproblems needed to repair the same real AAU V28 diagnostic bug. Do not make code edits in this step. Every goal must have a testable acceptance criterion. Do not widen the original problem or alter thinking policy.',
+     currentCandidate:candidate.code,
+     currentCandidateSha256:digest(candidate.code),
+     modelGeneratedPlan:plan,
+     publicFailures:check.publicFeedback,
+     interface:'Return one JSON object with tasks:[{issue:string,acceptance:string},...] containing 2 or 3 narrowly scoped tasks. Do not disclose hidden tests or invent observed outcomes.',
+     safeguards:['No raw exception strings/secrets','No duplicate ledger writes or paid model retries','Preserve accepted response behavior and token/finish receipts']
+    },false));
+   report.continuationCalls+=1;
+   report.decisions.push({phase:'thinking_off_fallback_decomposition',tasks:focusedPlan});
+   save();
+   const patch=await callModel('implement_decomposed_public_remediation',{
+    incident:'Implement the focused 4K thinking-OFF fallback decomposition after a completed thinking-ON budget exhaustion; repair the remaining public behavioral failures.',
+    currentCandidate:candidate.code,
+    currentCandidateSha256:digest(candidate.code),
+    focusedPlan,
+    publicFailures:check.publicFeedback,
+    patchContract:'Return exactly one JSON object with replacements:[{old:EXACT UNIQUE SOURCE SPAN from currentCandidate,replacement:NEW SOURCE TEXT},...] and optional diagnosis. Up to 7 scoped edits. Do not include unmodified code or raw provider error bodies.',
+    invariants:['Only one initial provider send and one durable finishCall per attempt','Never retry paid calls after ambiguity','Preserve token and finish reason when available','Use canonical diagnostic categories','One sanitized report entry on each hold','Never leak exception text or credentials','Do not alter model thinking mode or hidden tests']
+   },false);
+   report.continuationCalls+=1;
+   candidate=applyModelPatch(candidate.code,patch);
+   report.decisions.push({phase:'thinking_off_fallback_implementation',spans:candidate.spans,
+    diagnosis:typeof patch.diagnosis==='string'?patch.diagnosis.slice(0,650):null});
+   check=runPublicVerification(candidate.code,'public');
+  }
  }
  if(!check.receipt.pass){
   report.status='failed_public_verification';
