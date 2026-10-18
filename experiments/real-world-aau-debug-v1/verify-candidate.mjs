@@ -72,7 +72,9 @@ async function exercise(key){
  if(scenario.mode==='return'&&(hold||value?.patch!=='ok'))problems.push('valid response must return normal answer');
  if(scenario.mode==='exhaustion'&&(hold||value!==context.THINKING_EXHAUSTED))
   problems.push('confirmed ON length must use authorized exhaustion sentinel');
- if(last&&scenario.expectStatus!==null&&last[3]!==scenario.expectStatus)problems.push('wrong failure category: '+String(last[3]));
+ const statusSafe=typeof last?.[3]==='string'&&/^[a-z][a-z0-9_]{0,63}$/.test(last[3])?last[3]:null;
+ if(last&&scenario.expectStatus!==null&&last[3]!==scenario.expectStatus)
+  problems.push('wrong failure category: '+(statusSafe??'redacted_invalid_status'));
  if(last&&scenario.expectStatus!==null&&last[4]!==scenario.expectTokens)problems.push('token receipt lost');
  if(last&&scenario.expectStatus!==null&&last[5]!==scenario.expectFinish)problems.push('finish reason lost');
  if(report.providerCallDiagnostics?.some(x=>JSON.stringify(x).includes('PRIVATE_CANARY')||JSON.stringify(x).includes('SECRET_URL')))
@@ -80,11 +82,15 @@ async function exercise(key){
  if(!scenario.ledgerFail&&scenario.mode==='hold'&&report.providerCallDiagnostics?.length<1)
   problems.push('missing sanitized diagnostic report on hold');
  if(scenario.ledgerFail&&events.finish.length!==1)problems.push('ledger commit ambiguity led to second write');
- return {case:key,passed:problems.length===0,problems,reportedStatus:last?.[3]??null};
+ return {case:key,passed:problems.length===0,problems,reportedStatus:statusSafe};
 }
 let failures=0;
 for(const key of selected){
- const x=await exercise(key);
+ // A model-generated exception may fail one case, but must not suppress
+ // the other public cases or raw-stack-leak into feedback.
+ let x;
+ try{x=await exercise(key)}
+ catch{x={case:key,passed:false,problems:['candidate exception during verification'],reportedStatus:null}}
  console.log(JSON.stringify(x));
  if(!x.passed)failures++;
 }
