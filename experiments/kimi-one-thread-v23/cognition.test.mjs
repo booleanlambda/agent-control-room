@@ -21,7 +21,7 @@ test('reference grader blocks missing dependencies, constraints, exclusions, non
  const r=grade(publicProblem,{selected:['A'],cost:8});
  assert.equal(r.kind,'dependency_missing');
  assert.equal(grade(publicProblem,{selected:['B','F'],cost:14}).kind,'exclusion_violated');
- assert.equal(grade(publicProblem,{selected:['D','A'],cost:10}).kind,'group_unsatisfied');
+ assert.equal(grade(publicProblem,{selected:['A','D'],cost:10}).kind,'group_unsatisfied');
  const opt=exactOracle(publicProblem);
  assert.equal(grade(publicProblem,{selected:opt.selected,cost:opt.cost+1}).kind,'cost_mismatch');
 });
