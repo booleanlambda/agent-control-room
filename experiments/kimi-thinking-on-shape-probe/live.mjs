@@ -56,6 +56,16 @@ try{
  headersReceived=true;
  const parsed=await res.json().then(x=>({ok:true,value:x})).catch(()=>({ok:false,value:null}));
  settled=true;clearTimeout(timer);
+ const finalText=parsed.value?.choices?.[0]?.message?.content;
+ if(typeof finalText==='string'&&finalText.length<=262144){
+  temporaryDirectory=mkdtempSync(path.join(tmpdir(),'aau-final-'));
+  const tempFile=path.join(temporaryDirectory,'answer.txt');
+  writeFileSync(tempFile,finalText,{encoding:'utf8',mode:0o600,flag:'wx'});
+  evidence.tempFinalFileCreated=true;
+  evidence.finalContentSha256=hash(finalText);
+  const localCheck=inspectThinkingOnFinalJson(readFileSync(tempFile,'utf8'));
+  evidence.inRunnerParseCheck=localCheck.meta;
+ }
  const outcome=inspectV28ProviderResponse(stage,res.status,parsed.value,parsed.ok);
  evidence.providerReceipt={...outcome.receipt,elapsedMs:Date.now()-started};
  evidence.status=outcome.category;
