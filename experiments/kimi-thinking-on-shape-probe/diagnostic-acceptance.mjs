@@ -92,10 +92,11 @@ export function assessDiagnosticStrategy(answer){
  // handling was diagnosed or remediated. Count tests only for the test rubric.
  const testOnlyRoot=/^\s*(testableRequirements|tests|testCases|testScenarios|verification|acceptanceCriteria|expectedResults)\b/i;
  const criterionResults=REQUIREMENTS.map(req=>({
-  id:req.id,met:(req.id==='testable_verification'&&hasStructuredTestPlan(answer))||
+  id:req.id,met:req.id==='testable_verification'?
+   (hasStructuredTestPlan(answer)||fragments.some(fragment=>
+    testOnlyRoot.test(fragment)&&req.match.every(rx=>rx.test(fragment)))):
    fragments.some(fragment=>
-    (req.id==='testable_verification'||!testOnlyRoot.test(fragment))&&
-    req.match.every(rx=>rx.test(fragment)))
+    !testOnlyRoot.test(fragment)&&req.match.every(rx=>rx.test(fragment)))
  }));
  const metCount=criterionResults.filter(x=>x.met).length;
  return {rubric:RUBRIC_VERSION,
