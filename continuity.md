@@ -936,3 +936,20 @@ Before another billable trial, add to the *public-only* remediation feedback a *
 **Evidence:** [GitHub artifact 12138370737](https://github.com/booleanlambda/agent-control-room/actions/runs/39130556926/artifacts/12138370737), downloaded ZIP `aau-kimi-v28-live-diagnostic.zip`, SHA-256 `255dee4b096adce77d4292f9892304c151258a25b813ce1e93abb88a30baed71`; embedded `kimi-recursion-v24-evidence.json` SHA-256 `8aad03a5d4e2574e9f29fc2636d01c19b6138d5bc257167ba42cc7e7b2a1c33f`. Production Silas untouched. The repair-level ledger status can be independently joined to the exact run UUID.
 
 **Next bounded improvement before any repeat paid trial:** capture sanitized exception name, allowlisted top-level and nested `cause.code` (e.g. HTTP client header/body timeout vs connection reset), elapsed milliseconds and whether HTTP headers were received; keep raw error messages, request headers, tokens and private reasoning out of diagnostics. Preserve current non-retry/manual-hold policy and run deterministic transport-fault injection first. The current live run already validates that error category and ledger persistence no longer disappear, not the root source of the client/transport exception.
+
+---
+
+## V28 diagnostic provenance refinement — offline verified (2026-10-18)
+
+**Scope:** isolated experiment branch `experiment/kimi-v28-diagnostics-live-20261018`, draft PR #79, **no new paid Moonshot call**. This follows the live trial [39130556926](https://github.com/booleanlambda/agent-control-room/actions/runs/39130556926), which preserved `transport_or_client_error` but not the exact underlying transport cause. The earlier failed response cannot be reclassified retroactively.
+
+### Changes
+- `provider-response-diagnostics.mjs` now extracts only an allowlisted exception name plus allowlisted top-level `error.code` and one-level `error.cause.code`. Examples: `UND_ERR_HEADERS_TIMEOUT`, `UND_ERR_CONNECT_TIMEOUT`, `ECONNRESET`, `EAI_AGAIN`. Unknown values map to `OTHER_ERROR` or `null`. It never persists raw `error.message`, stack, cause object, credential-bearing URLs, or private reasoning.
+- Provider call instrumentation captures bounded `elapsedMs`, `httpHeadersReceived` (only after `fetch` returns), and `requestDeadlineFired` (only if the configured timer fires while the provider response is still unsettled). A completed body clears the timer before ledger work so a slow database commit cannot masquerade as a provider timeout.
+- When `MODEL_REQUEST_MANUAL_HOLD` is raised, the sanitized diagnostic is attached to the failure and written into the existing `aau_research_v23.events.details.providerDiagnostic` through the terminal state transition, in addition to the existing evidence JSON and per-call status/finish/token fields in `aau_research_v23.calls`. No schema changes needed.
+- Ambiguous paid calls remain **non-retryable**. A failed ledger finalization is not automatically replayed. The `repair_N` thinking-ON 32768-token and routine thinking-OFF 4096-token ceilings, one-time confirmed `finish_reason='length'` decomposition trigger, RabbitMQ ACK sequencing and independent public/hidden verifier are unchanged.
+
+### Tests and limits
+- Added credential-free fault-injection cases for nested Undici timeout, socket reset, DNS error, local deadline, HTTP header observation, unknown/malicious code redaction and durable event plumbing, alongside the existing budget/routing/depth regressions.
+- [GitHub Actions **39131784314**](https://github.com/booleanlambda/agent-control-room/actions/runs/39131784314): **SUCCESS**, syntax check and all configured offline tests. The earlier diagnostic test run [39131692594](https://github.com/booleanlambda/agent-control-room/actions/runs/39131692594) also passed before the post-response deadline refinement.
+- This validates **instrumentation and static/offline fault classification**, not a new live provider failure or the 32K exhaustion → 4K decomposition transition. Further paid work requires separate authorization; production AAU and Silas remain unchanged. An unrelated pre-existing `repair-expertise-verifier-runtime` push workflow still reports failures and was not modified.
