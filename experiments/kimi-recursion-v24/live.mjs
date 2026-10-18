@@ -9,16 +9,17 @@ import {runIsolatedPython} from '../recursion-tree-v0/unseen-python-sandbox.mjs'
 import {LEVELS,publicCasesFor,hiddenCases,stageHash,assess,sha} from './benchmark.mjs';
 import {createLedger} from './ledger.mjs';
 import {reconcileSelectedCost} from './cost-companion.mjs';
+import {behaviorProbesAt} from './behavioral-probes.mjs';
 if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_V24_RESEARCH!=='yes'||
    process.env.AAU_PYTHON_SANDBOX!=='yes')throw Error('RESEARCH_ONLY');
 const digest=x=>createHash('sha256').update(typeof x==='string'?x:JSON.stringify(x)).digest('hex');
 const run=randomUUID(),queue='aau.research.v24.'+run.replaceAll('-','');
-const report={experiment:'V24B_KIMI_DEEP_RECURSION_DETERMINISTIC_COST_SUPPORT',
+const report={experiment:'V25_BEHAVIORAL_INVARIANT_COMPLETENESS',
  run,model:'kimi-k2.6',thinking:'disabled',workers:1,maxConcurrentModelCalls:1,
  status:'running',requestedDepth:10,verifiedDepth:0,deepestReached:0,
  exactHiddenPass:false,callCount:0,providerTokens:0,repairCount:0,
  repairs:[],nodes:[],phaseEvents:[],brokerACKs:0,brokerPublished:0,
- noInjectedDefects:true,architecture:'one durable RabbitMQ thread + isolated Neon checkpoint and transactional outbox + general Python sandbox + independent stage/hidden oracle',
+ noInjectedDefects:true,behavioralInvariantGate:true,architecture:'one durable RabbitMQ thread + isolated Neon checkpoint and transactional outbox + general Python sandbox + independent stage/hidden oracle',
  modelMakesAlgorithms:true,oracleNotModelAccessible:true,
  caveats:['Only a single spine of ten semantically dependent proof nodes, not a 1024-leaf binary recursion tree',
  'The levels and per-level constraints are revealed sequentially but were selected by the experiment designer',
@@ -106,6 +107,20 @@ async function allAncestors(source,depth){
    if(!v.passed)return {passed:false,inspected,
     failure:{level:j,caseIndex:k,input,reason:v.feedback.reason,details:v.feedback}};
   }
+  // Behavioral invariant-completeness counterexamples are PUBLIC and
+  // disjoint from withheld cases. Any model-generated algorithm must change
+  // its result when a constraint is active and independently discriminating.
+  for(const probe of behaviorProbesAt(j)){
+   const v=await evalCode(source,probe.input);
+   inspected++;
+   if(v.feedback?.normalizedCost)normalizations.push({
+    level:j,probeId:probe.id,rawCost:v.feedback.rawCost??null,
+    verifiedCost:v.feedback.verifiedCost});
+   if(!v.passed)return {passed:false,inspected,
+    failure:{level:j,kind:'PUBLIC_BEHAVIORAL_INVARIANT_COUNTEREXAMPLE',
+     probeId:probe.id,caseIndex:null,input:probe.input,
+     reason:v.feedback.reason,details:v.feedback}};
+  }
  }
  return {passed:true,inspected,normalizations};
 }
@@ -117,7 +132,7 @@ function makeNode(state,depth,summary){
   priorHash:parent?.proof??digest('ROOT_V24'),
   invariant:LEVELS[depth].id,ruleDigest:digest(LEVELS[depth].rule),
   sourceHash:digest(state.source),independentChecks:summary.inspected,
-  verificationHash:digest({depth,source:digest(state.source),cases:publicCasesFor(depth).map(sha)}),
+  verificationHash:digest({depth,source:digest(state.source),cases:publicCasesFor(depth).map(sha),behavioralProbes:behaviorProbesAt(depth).map(p=>({id:p.id,hash:sha(p.input)}))}),
   proof:digest({parentHash:parent?.proof??digest('ROOT_V24'),depth,sourceHash:digest(state.source),rule:LEVELS[depth].id,
     checks:summary.inspected})};
  state.nodes.push(n);state.verifiedDepth=depth+1;state.maxDepthReached=depth+1;
