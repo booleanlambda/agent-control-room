@@ -1,10 +1,10 @@
 // Three model-authored, distinct alternative approaches to a failed public repair.
 // This state machine owns scheduling, not patch contents or hidden acceptance truth.
 // Failed/regressed approaches are never admitted to the accepted source snapshot.
-// Only hashes, ordinal IDs and independently observed verdicts are persisted.
+// Store only validated brief strategy descriptions, hashes, ordinal IDs and independently observed verdicts; never patches, private reasoning or hidden-case information.
 import {createHash} from 'node:crypto';
 const sha=x=>createHash('sha256').update(String(x)).digest('hex');
-const forbidden=/PRIVATE_CANARY|SECRET_URL|bearer\s+|(?:api[_-]?key|password|secret|token)\s*[:=]|https?:\/\/|BEGIN\s+(?:RSA|OPENSSH|PRIVATE)\s+KEY/i;
+const forbidden=/PRIVATE_CANARY|SECRET_URL|bearer\s+|(?:api[_-]?key|password|secret|token)\s*[:=]|https?:\/\/|(?:[a-z0-9-]+\.)+(?:com|net|org|ai)(?:[\/:?#]|$)|BEGIN\s+(?:RSA|OPENSSH|PRIVATE)\s+KEY|(?:sk|pk)_[A-Za-z0-9_-]{15,}/i;
 function field(value){
  if(typeof value!=='string')return null;
  const s=value.trim();
@@ -66,7 +66,9 @@ export function alternativeSummary(state){
   baselineSha256:state.baselineSha,selectedCount:state.cursor,
   settledCount:state.records.length,remaining:state.exhausted?0:ALTERNATIVE_COUNT-state.cursor,
   exhausted:state.exhausted,activeId:state.active,
-  branches:state.branches.map(x=>({id:x.id,approachSha256:x.approachSha256,
-   hypothesisSha256:x.hypothesisSha256,acceptanceSha256:x.acceptanceSha256})),
+  branches:state.branches.map(x=>({id:x.id,approach:x.approach,
+   hypothesis:x.hypothesis,acceptance:x.acceptance,
+   approachSha256:x.approachSha256,hypothesisSha256:x.hypothesisSha256,
+   acceptanceSha256:x.acceptanceSha256})),
   attempts:state.records.map(x=>({...x}))};
 }
