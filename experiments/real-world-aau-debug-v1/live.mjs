@@ -11,6 +11,7 @@ import {inspectThinkingOnFinalJson} from '../kimi-recursion-v24/thinking-on-json
 import {inspectV28TransportFailure} from '../kimi-recursion-v24/provider-response-diagnostics.mjs';
 import {fetch as scopedFetch,Agent} from 'undici';
 import {transportTimeoutPolicy,makeScopedUndiciAgent} from '../aau-provider-transport/transport-policy.mjs';
+import {makePublicFeedback} from './public-failure-feedback.mjs';
 if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_REAL_WORLD_DEBUG!=='yes')throw Error('RESEARCH_ONLY');
 const digest=x=>createHash('sha256').update(String(x)).digest('hex');
 const run=randomUUID(),base=readFileSync(new URL('./legacy-model-source.txt',import.meta.url),'utf8');
@@ -147,11 +148,18 @@ function runPublicVerification(candidate,suite='public'){
  const rows=(p.stdout||'').split('\n').filter(Boolean).flatMap(line=>{try{return [JSON.parse(line)]}catch{return []}});
  const failures=rows.filter(x=>x.case&&!x.passed);
  const summary=rows.find(x=>x.AAU_REAL_BUG_TEST_SUMMARY);
- const receipt={suite,pass:p.status===0,exitCode:p.status??null,
+ const publicFeedback=suite==='public'?makePublicFeedback({cases:rows.filter(x=>x.case)}):null;
+ const requiredCases=suite==='public'?4:4;
+ const observedCases=rows.filter(x=>x.case);
+ const allCasesExecuted=observedCases.length===requiredCases&&
+  new Set(observedCases.map(x=>x.case)).size===requiredCases;
+ const receipt={suite,pass:p.status===0&&allCasesExecuted&&
+  observedCases.every(x=>x.passed===true),exitCode:p.status??null,
+  allCasesExecuted,
   cases:rows.filter(x=>x.case).map(x=>({name:x.case,passed:x.passed,problems:x.problems,status:x.reportedStatus})),
   candidateSha256:digest(candidate),runnerErrored:!!p.error,stderrPresent:!!p.stderr};
  report.tests.push(receipt);save();
- return {receipt,firstFailure:failures[0]??null};
+ return {receipt,publicFeedback};
 }
 try{
  const plan=parseModelOwnedPlan(await callModel('discover_and_decompose',{
@@ -175,7 +183,9 @@ try{
    incident:'Real V28 diagnostic code bug; previous implementation failed an independent PUBLIC verifier. Repair your own candidate, preserving all earlier contracts. No gold answer or hidden tests are available.',
    originalSource:base,currentCandidate:candidate.code,
    currentCandidateSha256:digest(candidate.code),
-   modelGeneratedPlan:plan,publicFailure:check.firstFailure??{category:'VERIFIER_OR_PATCH_ERROR'},
+   modelGeneratedPlan:plan,
+   publicFailures:check.publicFeedback??{suite:'public',complete:false,failedCases:[]},
+   publicFeedbackPolicy:'All public failures are independently observed. Fix every failing case without changing the tests. The public checker withholds hidden cases. Status names must use stable canonical diagnostic categories, and never log raw provider messages, exception text or credentials.',
    instruction:'Return JSON {replacements:[{old:EXACT UNIQUE STRING from currentCandidate,replacement:NEW SOURCE},...],diagnosis:string}, only scoped patches. Never auto retry provider requests.'
   },true);
   candidate=applyModelPatch(candidate.code,fix);
