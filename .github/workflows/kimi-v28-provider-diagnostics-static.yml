@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - experiment/kimi-v28-provider-test
+      - experiment/kimi-v28-diagnostics-live-20261018
     paths:
       - '.github/workflows/kimi-v28-provider-diagnostics-static.yml'
       - 'experiments/kimi-recursion-v24/live.mjs'
