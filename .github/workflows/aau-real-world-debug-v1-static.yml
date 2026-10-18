@@ -12,6 +12,7 @@ on:
       - experiment/aau-progress-budget-tree-20261018
       - experiment/aau-mandatory-decision-forensics-20261018
       - experiment/aau-decision-forensics-live-20261018
+      - experiment/aau-decision-forensics-live-v2-20261018
     paths:
       - 'experiments/real-world-aau-debug-v1/**'
       - 'experiments/aau-provider-transport/**'
