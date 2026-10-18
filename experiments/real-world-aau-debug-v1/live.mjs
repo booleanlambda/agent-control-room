@@ -359,6 +359,11 @@ try{
     },false);
     const childSelection=selectValidModelOwnedNodes(childResponse,{maxTasks:3});
     const added=addChildRepairNodes(tree,node,childSelection.tasks);
+    resolveModelDecision(report.forensics,currentDecision(),{
+     outcome:added.added>0?'DECOMPOSITION_QUEUED':'REJECTED',verified:false});
+    audit({kind:added.added>0?'CHILD_NODES_QUEUED':'CHILD_DECOMPOSITION_REJECTED',
+     stage:'split_failed_tree_node_'+node.id,nodeId:node.id,
+     decisionId:currentDecision(),reasonCode:added.reason});
     report.decisions.push({phase:'validate_model_child_decomposition',node:node.id,
      sourceCount:childSelection.sourceCount,rejectedCount:childSelection.rejectedCount,
      rejectionCounts:childSelection.rejectionCounts??{},reason:childSelection.reason});
