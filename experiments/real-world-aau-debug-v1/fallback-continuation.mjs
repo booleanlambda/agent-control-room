@@ -11,7 +11,10 @@ const isValidStage=x=>typeof x==='string'&&/^[a-z0-9_]{2,80}$/.test(x);
 export function authorizeExhaustionContinuation({modelCalls,thinkingReceipt}={}){
  const stages=Array.isArray(modelCalls)?modelCalls.map(x=>x?.stage):[];
  const priorComplete=REQUIRED_PRIOR_STAGES.every((stage,i)=>stages[i]===stage);
- const ready=priorComplete&&stages.length===3&&thinkingReceipt?.stage==='remediate_failed_public_test'&&
+ const ready=priorComplete&&stages.length===3&&
+   modelCalls[0]?.status==='accepted'&&modelCalls[1]?.status==='accepted'&&
+   modelCalls[2]?.status==='thinking_budget_exhausted'&&
+   thinkingReceipt?.stage==='remediate_failed_public_test'&&
    thinkingReceipt?.completionCeiling===32768&&
    thinkingReceipt?.completionTokens===32768&&
    thinkingReceipt?.finishReason==='length'&&
