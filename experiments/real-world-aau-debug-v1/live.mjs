@@ -16,6 +16,7 @@ import {classifyThinkingExhaustion,proposedExhaustionRoute} from './remediation-
 import {focusedPatchDecision} from './early-focused-progress.mjs';
 import {budgetReservation,createRepairTree,takeRepairNode,addChildRepairNodes,treeSummary,GLOBAL_PROVIDER_TOKEN_BUDGET,RECURSION_DEPTH_LIMIT} from './progress-budget-tree.mjs';
 import {selectValidModelOwnedNodes} from './model-node-validation.mjs';
+import {createAlternativeExecutor} from './alternative-executor.mjs';
 import {makeForensicLedger,auditEvent,attachModelDecision,resolveModelDecision,MODEL_FORENSICS_INSTRUCTIONS} from './decision-forensics.mjs';
 if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_REAL_WORLD_DEBUG!=='yes')throw Error('RESEARCH_ONLY');
 const digest=x=>createHash('sha256').update(String(x)).digest('hex');
@@ -27,7 +28,7 @@ const report={experiment:'REAL_AAU_V28_ORIGINAL_PROVIDER_DIAGNOSTIC_INCIDENT',
  problemType:'actual AAU provider/manual-hold provenance loss',
  planGeneratedByModel:false,noGoldPatchProvided:true,noSyntheticFaultInjection:true,
  proofModelIndependent:true,maxCalls:null,computeBudgetTokens:GLOBAL_PROVIDER_TOKEN_BUDGET,
- modelCalls:[],decisions:[],tests:[],forensics:makeForensicLedger(),
+ modelCalls:[],decisions:[],tests:[],branchGroups:[],forensics:makeForensicLedger(),
  architecture:'progress-driven recursive OFF nodes, independent public verifier, budget-governed ON',
  modelOwnedEarlyTasks:[],focusedNodeResults:[],earlyOffNodesRun:0,
  repairTree:{pending:0,visited:0,depthOfNextNode:null,uniqueTasks:0},
@@ -254,6 +255,10 @@ function runPublicVerification(candidate,suite='public'){
    casesExecuted:receipt.cases.length,casesPassed:receipt.cases.filter(x=>x.passed).length}});
  return {receipt,publicFeedback};
 }
+const runThreeAlternatives=createAlternativeExecutor({report,callModel,currentDecision,digest,
+ resolveModelDecision:(id,outcome)=>resolveModelDecision(report.forensics,id,outcome),audit,save,
+ normalizeModelOwnedPatches,applyModelPatch,runPublicVerification,focusedPatchDecision});
+
 try{
  const plan=parseModelOwnedPlan(await callModel('discover_and_decompose',{
   incident:'Real V28 provider-response diagnostic was lost when a broad catch overwrote per-call provider token receipt, finish reason and exact rejection category before MODEL_REQUEST_MANUAL_HOLD.',
@@ -268,7 +273,7 @@ try{
  const proposal=await callModel('implement_model_generated_plan',{
   incident:'Fix the real documented provider receipt loss without changing model thinking policy, provider retry policy, stage sequencing or business logic. Only modify the supplied frozen function.',
   originalSource:base,modelGeneratedPlan:plan,
-  interface:'Return JSON {replacements:[{old:EXACT UNIQUE ORIGINAL SOURCE SPAN, replacement:NEW SOURCE TEXT},...],diagnosis:string}. Apply changes to originalSource in order. No changes to tests. Target up to 7 local replacements. Existing db.finishCall(run,stage,attempt,status,tokens,finish,responseHash) writes one receipt; report may accept providerCallDiagnostics array. Preserve provider usage on rejection and never use a second finishCall after a failed ledger write. Distinguish malformed JSON, HTTP failure, incomplete stop/length response, transport/timeout. One valid repair_ stage + length still returns THINKING_EXHAUSTED. No raw provider error messages or secrets in reports.',
+  interface:'Return JSON {replacements:[{old:EXACT UNIQUE ORIGINAL SOURCE SPAN, replacement:NEW SOURCE TEXT},...],diagnosis:string,decisionForensics:{choice,rationale,evidence,alternatives,expectedOutcome,uncertainty}}. Apply changes to originalSource in order. No changes to tests. Target up to 7 local replacements. Existing db.finishCall(run,stage,attempt,status,tokens,finish,responseHash) writes one receipt; report may accept providerCallDiagnostics array. Preserve provider usage on rejection and never use a second finishCall after a failed ledger write. Distinguish malformed JSON, HTTP failure, incomplete stop/length response, transport/timeout. One valid repair_ stage + length still returns THINKING_EXHAUSTED. No raw provider error messages or secrets in reports.',
   publicAcceptance:['One presend journal, no automatic paid retry','accepted responses still return normal JSON','true ON length is still special','rejected provider response retains finish/tokens/category','manual hold for non-length failures','no duplicate ledger writes on storage failures']
  });
  let candidate=applyModelPatch(base,proposal);
@@ -290,6 +295,12 @@ try{
   report.candidateSha256=digest(candidate.code);
   audit({kind:'FORENSICS_SMOKE_STOP',stage:'execution_final',reasonCode:'SMOKE_STOP_AFTER_PUBLIC_TEST'});
  }else if(!check.receipt.pass){
+  const altResult=await runThreeAlternatives({candidate,check,triggerStage:'implement_model_generated_plan'});
+  candidate=altResult.candidate;check=altResult.check;
+  if(process.env.AAU_ALTERNATIVES_SMOKE==='yes'){
+   report.status='alternatives_smoke_completed';report.smokeOnly=true;
+   audit({kind:'ALTERNATIVES_SMOKE_STOP',stage:'execution_final',reasonCode:'SMOKE_AFTER_ALTERNATIVES'});
+  }else if(!check.receipt.pass){
   // Kimi chooses root subproblems; no deterministic patch or hidden tests.
   const rootResponse=await callModel('decompose_public_failure_tree',{
    incident:'The original V28 AAU provider-diagnostics code still fails the public executable tests. Decompose every independent unsolved failure into testable repair nodes before patching. Only the model chooses the decomposition.',
@@ -330,7 +341,7 @@ try{
      node:{id:node.id,parentId:Number.isInteger(node.parent)?node.parent:null,
       depth:node.depth,issue:node.issue,acceptance:node.acceptance},
      publicFailures:check.publicFeedback,
-     instruction:'Return JSON {replacements:[{old:EXACT UNIQUE SOURCE SPAN in currentCandidate,replacement:NEW SOURCE},...],diagnosis:string}. Only model-authored edits, at most 3 spans. Preserve all earlier passing cases. Do not edit tests, expose private errors, or replay paid requests.'
+     instruction:'Return JSON {replacements:[{old:EXACT UNIQUE SOURCE SPAN in currentCandidate,replacement:NEW SOURCE},...],diagnosis:string,decisionForensics:{choice,rationale,evidence,alternatives,expectedOutcome,uncertainty}}. Only model-authored edits, at most 3 spans. Preserve all earlier passing cases. Do not edit tests, expose private errors, or replay paid requests.'
     },false);
     report.earlyOffNodesRun+=1;
     const patchDecisionId=currentDecision();
@@ -374,6 +385,11 @@ try{
    report.decisions.push({phase:'repair_tree_node',node:node.id,depth:node.depth,
     accepted:patchAccepted,reason:patchRejection});
    report.repairTree=treeSummary(tree);save();
+   if(!patchAccepted&&!check.receipt.pass){
+    const altResult=await runThreeAlternatives({candidate,check,triggerStage:'repair_tree_node_'+node.id,node});
+    candidate=altResult.candidate;check=altResult.check;
+    if(altResult.acceptedAny){patchAccepted=true;patchRejection='ALTERNATIVE_BRANCH_PROGRESS';}
+   }
    if(!patchAccepted&&!check.receipt.pass&&node.depth<RECURSION_DEPTH_LIMIT){
     const childResponse=await callModel('split_failed_tree_node_'+node.id,{
      incident:'Model-authored focused node did not produce measurable independent public-test progress. Decompose the precise unresolved node into 2 to 3 smaller independently verifiable subtasks, with thinking OFF.',
@@ -411,7 +427,7 @@ try{
     publicFailures:check.publicFeedback,
     treeSummary:treeSummary(tree),
     unresolvedNodes:report.unresolvedNodes,
-    instruction:'Return one JSON object with only model-authored exact unique source-span replacements and optional diagnosis. Obey public expected status categories, retain sanitized per-call finish/token/category receipt, never persist private model errors or introduce paid-call retries.'
+    instruction:'Return one JSON object with model-authored exact unique source-span replacements, optional diagnosis and mandatory top-level decisionForensics {choice,rationale,evidence,alternatives,expectedOutcome,uncertainty}. Obey public expected status categories, retain sanitized per-call finish/token/category receipt, never persist private model errors or introduce paid-call retries.'
    },true);
    const repaired=applyModelPatch(candidate.code,fix);
    const verified=runPublicVerification(repaired.code,'public');
@@ -425,9 +441,14 @@ try{
     accepted:verdict.accept,reason:verdict.reason,spans:repaired.spans,
     decisionId:currentDecision()});
    if(verdict.accept){candidate=repaired;check=verified;}
+   else if(!check.receipt.pass){
+    const fallback=await runThreeAlternatives({candidate,check,triggerStage:'on_residual_after_off_tree'});
+    candidate=fallback.candidate;check=fallback.check;
+   }
+  }
   }
  }
- if(process.env.AAU_FORENSICS_SMOKE==='yes'){
+ if(process.env.AAU_FORENSICS_SMOKE==='yes'||process.env.AAU_ALTERNATIVES_SMOKE==='yes'){
   // Forensic validation mode does not claim the historical bug is fixed.
   report.success=false;
  }else if(!check.receipt.pass){

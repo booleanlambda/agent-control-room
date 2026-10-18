@@ -1,6 +1,73 @@
+import {verifyAlternativeDescriptions} from './alternative-branches.mjs';
 import {createHash} from 'node:crypto';
 
 // Read-only verification of the recorded forensic chain and decisions.
+function inspectAlternativeGroups(report,events,decisions,calls){
+ const groups=report?.branchGroups??[],issues=[];
+ if(!Array.isArray(groups))return ['ALTERNATIVE_GROUP_RECORD_INVALID'];
+ const decIds=new Set(decisions.map(x=>x.id)),ids=new Set();
+ for(const g of groups){
+  const groupId=g?.id,summary=g?.summary;
+  if(typeof groupId!=='string'||!/^alternatives_[1-9][0-9]{0,3}$/.test(groupId)||
+   ids.has(groupId)||!summary||summary.required!==3||summary.proposed!==3||
+   summary.branches?.length!==3||summary.attempts?.length>3){
+   issues.push('ALTERNATIVE_GROUP_INVALID');continue;
+  }
+  ids.add(groupId);
+  if(!decIds.has(g.proposalDecisionId)||!events.some(e=>e.kind==='ALTERNATIVES_PROPOSED'&&
+    e.branchGroupId===groupId&&e.decisionId===g.proposalDecisionId))
+   issues.push('ALTERNATIVE_PROPOSAL_UNLINKED');
+  const descSha=s=>createHash('sha256').update(s).digest('hex');
+  const proposalHash=descSha(JSON.stringify(summary.branches.map(b=>({id:b.id,
+   approachSha256:b.approachSha256,hypothesisSha256:b.hypothesisSha256,
+   acceptanceSha256:b.acceptanceSha256}))));
+  if(summary.branches.some(b=>typeof b.approach!=='string'||typeof b.hypothesis!=='string'||
+    typeof b.acceptance!=='string'||
+    descSha(b.approach)!==b.approachSha256||
+    descSha(b.hypothesis)!==b.hypothesisSha256||
+    descSha(b.acceptance)!==b.acceptanceSha256)||
+    proposalHash!==g.proposalSha256||
+    !events.some(e=>e.kind==='ALTERNATIVES_PROPOSED'&&e.branchGroupId===groupId&&
+     e.branchProposalSha256===proposalHash))
+   issues.push('ALTERNATIVE_PROPOSAL_HASH_MISMATCH');
+  if(summary.baselineSha256!==g.baselineCandidateSha256||
+    !verifyAlternativeDescriptions(summary)||
+    new Set(summary.branches.map(x=>x.approachSha256)).size!==3)
+   issues.push('ALTERNATIVE_DISTINCTNESS_OR_BASELINE_INVALID');
+  const selected=events.filter(e=>e.kind==='ALTERNATIVE_SELECTED'&&e.branchGroupId===groupId);
+  const settled=events.filter(e=>e.kind==='ALTERNATIVE_SETTLED'&&e.branchGroupId===groupId);
+  const skipped=events.filter(e=>e.kind==='ALTERNATIVE_SKIPPED'&&e.branchGroupId===groupId);
+  if(selected.length!==summary.selectedCount||settled.length!==summary.settledCount||
+    summary.attempts?.length!==settled.length||
+    selected.some((x,i)=>x.alternativeId!==i+1)||
+    settled.some((x,i)=>x.alternativeId!==i+1))
+   issues.push('ALTERNATIVE_ORDER_OR_COVERAGE_INVALID');
+  const passed=summary.attempts.some(a=>a.verdict==='PASS');
+  if(passed&&(skipped.length!==3-summary.selectedCount||
+    skipped.some((x,i)=>x.alternativeId!==summary.selectedCount+i+1)))
+   issues.push('ALTERNATIVE_SKIP_AUDIT_MISSING');
+  if(g.status==='COMPLETED'){
+   if(summary.activeId!==null||!events.some(e=>e.kind==='ALTERNATIVES_COMPLETED'&&e.branchGroupId===groupId)||
+    (!passed&&summary.settledCount!==3))
+    issues.push('ALTERNATIVE_COMPLETION_INVALID');
+  }else if(g.status==='BLOCKED'){
+   if(!events.some(e=>e.kind==='ALTERNATIVE_INTERRUPTED'&&e.branchGroupId===groupId))
+    issues.push('ALTERNATIVE_BLOCKER_UNRECORDED');
+  }else issues.push('ALTERNATIVE_GROUP_UNFINISHED');
+  for(const a of summary.attempts){
+   const stage='alternative_patch_'+groupId.slice(13)+'_'+a.id;
+   if(!decIds.has(a.decisionId)||!calls.some(c=>c.stage===stage&&
+      c.forensicDecisionId===a.decisionId)||
+      !settled.some(e=>e.alternativeId===a.id&&e.decisionId===a.decisionId))
+    issues.push('ALTERNATIVE_DECISION_UNLINKED');
+   if(a.verdict!=='INVALID_PATCH'&&
+    !(report.tests??[]).some(t=>t.suite==='public'&&t.candidateSha256===a.trialSha256))
+    issues.push('ALTERNATIVE_VERIFIER_RECEIPT_MISSING');
+  }
+ }
+ return [...new Set(issues)];
+}
+
 // Never rewrite the evidence to make missing steps look complete.
 export function inspectForensicsReport(report){
  const decisions=report?.forensics?.modelDecisions;
@@ -58,6 +125,7 @@ export function inspectForensicsReport(report){
  }
  if(events.length&&!events.some(e=>e.kind==='EXECUTION_FINISHED'))
   issues.push('FINAL_OUTCOME_MISSING_AUDIT');
+ issues.push(...inspectAlternativeGroups(report,events,decisions,calls));
  const unique=Array.from(new Set(issues));
  return {
   pass:unique.length===0,issues:unique,
