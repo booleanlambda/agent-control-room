@@ -1,0 +1,47 @@
+name: AAU Kimi thinking-ON final JSON live probe
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/kimi-thinking-on-json-v1-20261018
+    paths:
+      - 'experiments/kimi-thinking-on-shape-probe/**'
+      - '.github/workflows/kimi-thinking-on-shape-probe-live.yml'
+permissions:
+  contents: read
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+jobs:
+  one-live-provider-call:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      AAU_THINKING_ON_SHAPE_PROBE: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate thinking-ON shape probe before using credentials
+        run: |
+          node --check experiments/kimi-thinking-on-shape-probe/live.mjs
+          node --test experiments/kimi-thinking-on-shape-probe/shape-helpers.test.mjs
+          node --check experiments/kimi-thinking-on-shape-probe/diagnostic-acceptance.mjs
+          node --test experiments/kimi-thinking-on-shape-probe/diagnostic-acceptance.test.mjs
+          node --test experiments/kimi-recursion-v24/provider-response-diagnostics.test.mjs
+          node --test experiments/kimi-recursion-v24/thinking-router.test.mjs
+          node --test experiments/kimi-recursion-v24/budget-recovery.test.mjs
+      - name: One Kimi thinking-ON response with 32K completion ceiling
+        working-directory: experiments/kimi-thinking-on-shape-probe
+        env:
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: node live.mjs
+      - name: Preserve sanitized provider and JSON structure receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kimi-thinking-on-sanitized-json-structure
+          path: experiments/kimi-thinking-on-shape-probe/thinking-on-shape-evidence.json
+          if-no-files-found: warn
+          retention-days: 7
