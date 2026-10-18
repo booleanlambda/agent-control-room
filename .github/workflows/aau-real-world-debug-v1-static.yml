@@ -4,6 +4,7 @@ on:
     branches:
       - experiment/kimi-real-aau-debug-v1-20261018
       - experiment/kimi-instant-json-adapter-v1-20261018
+      - experiment/kimi-realbug-rerun-thinking-on-fix-20261018
     paths:
       - 'experiments/real-world-aau-debug-v1/**'
       - '.github/workflows/aau-real-world-debug-v1-static.yml'
@@ -25,6 +26,11 @@ jobs:
           node --test experiments/real-world-aau-debug-v1/plan-parser.test.mjs
           node --check experiments/real-world-aau-debug-v1/output-normalizer.mjs
           node --test experiments/real-world-aau-debug-v1/output-normalizer.test.mjs
+          node --check experiments/kimi-recursion-v24/thinking-on-json-syntax.mjs
+          node --test experiments/kimi-recursion-v24/thinking-on-json-syntax.test.mjs
+          node --test experiments/kimi-recursion-v24/provider-response-diagnostics.test.mjs
+          node --test experiments/kimi-recursion-v24/thinking-router.test.mjs
+          node --test experiments/kimi-recursion-v24/budget-recovery.test.mjs
           node --check experiments/real-world-aau-debug-v1/verify-candidate.mjs
       - name: Confirm real original defect is caught before model edits
         working-directory: experiments/real-world-aau-debug-v1
