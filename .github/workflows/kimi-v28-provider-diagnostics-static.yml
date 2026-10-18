@@ -1,0 +1,34 @@
+name: V28 Provider Diagnostics Offline Regression
+on:
+  push:
+    branches:
+      - experiment/kimi-v28-provider-test
+    paths:
+      - '.github/workflows/kimi-v28-provider-diagnostics-static.yml'
+      - 'experiments/kimi-recursion-v24/live.mjs'
+      - 'experiments/kimi-recursion-v24/provider-response-diagnostics.mjs'
+      - 'experiments/kimi-recursion-v24/provider-response-diagnostics.test.mjs'
+      - 'experiments/kimi-recursion-v24/budget-recovery.test.mjs'
+      - 'continuity.md'
+permissions:
+  contents: read
+jobs:
+  offline-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check syntax without provider or database credentials
+        run: |
+          node --check experiments/kimi-recursion-v24/live.mjs
+          node --check experiments/kimi-recursion-v24/provider-response-diagnostics.mjs
+          node --check experiments/kimi-recursion-v24/provider-response-diagnostics.test.mjs
+      - name: Run fault injection, routing and depth tests offline
+        run: |
+          node --test experiments/kimi-recursion-v24/provider-response-diagnostics.test.mjs
+          node --test experiments/kimi-recursion-v24/budget-recovery.test.mjs
+          node --test experiments/kimi-recursion-v24/thinking-router.test.mjs
+          node --test experiments/kimi-recursion-v24/depth.test.mjs
