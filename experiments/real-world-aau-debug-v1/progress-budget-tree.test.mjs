@@ -25,15 +25,15 @@ test('all root tasks are traversed in model-chosen order',()=>{
  assert.equal(takeRepairNode(t).issue,tasks[1].issue);
  assert.equal(takeRepairNode(t),null);
 });
-test('failed node decomposes into two children, both traversable before remaining siblings',()=>{
+test('failed node decomposes into two children, while independent roots run first',()=>{
  const t=createRepairTree(tasks),parent=takeRepairNode(t);
  const children=[{issue:'Capture sanitized finish reason before hold',acceptance:'Hold report retains exact stop or length'},
   {issue:'Preserve HTTP failure category on 503 response',acceptance:'Finish call records provider_http_error'}];
  const add=addChildRepairNodes(t,parent,children);
  assert.equal(add.added,2);
+ assert.equal(takeRepairNode(t).issue,tasks[1].issue);
  assert.equal(takeRepairNode(t).issue,children[0].issue);
  assert.equal(takeRepairNode(t).issue,children[1].issue);
- assert.equal(takeRepairNode(t).issue,tasks[1].issue);
 });
 test('repeated self-recursion rejected, no infinitely repeating task',()=>{
  const t=createRepairTree(tasks),parent=takeRepairNode(t);
@@ -41,18 +41,30 @@ test('repeated self-recursion rejected, no infinitely repeating task',()=>{
  assert.equal(a.added,0);
  assert.equal(a.reason,'DUPLICATED_OR_RECURSIVE_NODE');
 });
-test('depth-limited recursion is different from fixed total call ceiling',()=>{
+test('breadth-first frontiers preserve all descendants and depth limit',()=>{
  const t=createRepairTree(tasks);
- let parent=takeRepairNode(t);
- for(let d=1;d<=RECURSION_DEPTH_LIMIT;d++){
-  const children=[{issue:'Narrow scoped provenance work '+d,acceptance:'Verify hold receipt for one case '+d},
-   {issue:'Narrow scope for error path '+d,acceptance:'Expected safe category in another case '+d}];
-  assert.equal(addChildRepairNodes(t,parent,children).added,2);
-  parent=takeRepairNode(t);
-  assert.equal(parent.depth,d);
- }
- assert.equal(addChildRepairNodes(t,parent,[{issue:'Beyond maximum depth',acceptance:'Never schedule unbounded work'},
-  {issue:'Second extra depth',acceptance:'Do not accept recursive explosion'}]).reason,'RECURSION_DEPTH_LIMIT');
+ const root=takeRepairNode(t);
+ const children=[{issue:'First subbranch for diagnostic category',acceptance:'Test the recorded category on malformed JSON'},
+  {issue:'Second subbranch for ledger receipt',acceptance:'Test durable receipt on HTTP failure'}];
+ assert.equal(addChildRepairNodes(t,root,children).added,2);
+ // The sibling root gets a fair chance before any recursive subbranch.
+ assert.equal(takeRepairNode(t).issue,tasks[1].issue);
+ const child=takeRepairNode(t);
+ assert.equal(child.depth,1);
+ const second=[{issue:'Check JSON reject category precisely',acceptance:'Keep malformed_model_json status'},
+  {issue:'Check format-safe diagnostic structure',acceptance:'Keep one redacted report entry'}];
+ assert.equal(addChildRepairNodes(t,child,second).added,2);
+ // The other child runs before grandchildren.
+ assert.equal(takeRepairNode(t).issue,children[1].issue);
+ const grandchild=takeRepairNode(t);
+ assert.equal(grandchild.depth,2);
+ const third=[{issue:'Deep scoped JSON parse handling',acceptance:'Emit categorized parse failure'},
+  {issue:'Deep fallback error handling',acceptance:'Do not leak private strings'}];
+ assert.equal(addChildRepairNodes(t,grandchild,third).added,2);
+ assert.equal(takeRepairNode(t).issue,second[1].issue);
+ const deep=takeRepairNode(t);
+ assert.equal(deep.depth,3);
+ assert.equal(addChildRepairNodes(t,deep,third).reason,'RECURSION_DEPTH_LIMIT');
  assert.ok(treeSummary(t).pending>0);
 });
 test('malformed model node never added to queue',()=>{
