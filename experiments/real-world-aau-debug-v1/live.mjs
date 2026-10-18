@@ -390,8 +390,14 @@ try{
    const repaired=applyModelPatch(candidate.code,fix);
    const verified=runPublicVerification(repaired.code,'public');
    const verdict=focusedPatchDecision(check.receipt,verified.receipt);
+   resolveModelDecision(report.forensics,currentDecision(),{
+    outcome:verdict.accept?'PROGRESS':verdict.reason==='PUBLIC_REGRESSION'?'REGRESSION':'NO_PROGRESS',verified:true});
+   audit({kind:verdict.accept?'THINKING_ON_PATCH_ACCEPTED':'THINKING_ON_PATCH_REJECTED',
+    stage:'on_residual_after_off_tree',decisionId:currentDecision(),
+    reasonCode:verdict.reason,candidateSha256:digest(repaired.code)});
    report.decisions.push({phase:'thinking_on_after_tree',
-    accepted:verdict.accept,reason:verdict.reason,spans:repaired.spans});
+    accepted:verdict.accept,reason:verdict.reason,spans:repaired.spans,
+    decisionId:currentDecision()});
    if(verdict.accept){candidate=repaired;check=verified;}
   }
  }
