@@ -4,13 +4,13 @@
 // Only hashes, ordinal IDs and independently observed verdicts are persisted.
 import {createHash} from 'node:crypto';
 const sha=x=>createHash('sha256').update(String(x)).digest('hex');
-const forbidden=/PRIVATE_CANARY|SECRET_URL|bearer\\s+|(?:api[_-]?key|password|secret|token)\\s*[:=]|https?:\\/\\/|BEGIN\\s+(?:RSA|OPENSSH|PRIVATE)\\s+KEY/i;
+const forbidden=/PRIVATE_CANARY|SECRET_URL|bearer\s+|(?:api[_-]?key|password|secret|token)\s*[:=]|https?:\/\/|BEGIN\s+(?:RSA|OPENSSH|PRIVATE)\s+KEY/i;
 function field(value){
  if(typeof value!=='string')return null;
  const s=value.trim();
- return s.length>=12&&s.length<=800&&!forbidden.test(s)&&!/[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]/.test(s)?s:null;
+ return s.length>=12&&s.length<=800&&!forbidden.test(s)&&!/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(s)?s:null;
 }
-function normalized(s){return s.toLowerCase().replace(/\\s+/g,' ').trim();}
+function normalized(s){return s.toLowerCase().replace(/\s+/g,' ').trim();}
 const validHash=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
 export const ALTERNATIVE_COUNT=3;
 export function createAlternativeBranches(answer,baselineSha){
