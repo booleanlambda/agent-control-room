@@ -20,6 +20,8 @@ jobs:
       - name: Validate independent historical benchmark runner syntax
         run: |
           node --check experiments/real-world-aau-debug-v1/live.mjs
+          node --check experiments/real-world-aau-debug-v1/plan-parser.mjs
+          node --test experiments/real-world-aau-debug-v1/plan-parser.test.mjs
           node --check experiments/real-world-aau-debug-v1/verify-candidate.mjs
       - name: Confirm real original defect is caught before model edits
         working-directory: experiments/real-world-aau-debug-v1
