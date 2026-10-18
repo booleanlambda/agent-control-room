@@ -13,7 +13,7 @@ test('nested thinking-off JSON with alternate names and explicit criteria',()=>{
   {id:2,issue:'Retain token receipts',acceptance:'Never overwrite reported token usage'}]);
 });
 test('reject truly missing acceptance, ambiguous plans, duplicates, invalid counts',()=>{
- assert.throws(()=>parseModelOwnedPlan({tasks:[{goal:'Track provider status'},b]}),/MODEL_PLAN_ISSUE_MISSING_OR_SHORT/);
+ assert.throws(()=>parseModelOwnedPlan({tasks:[{goal:'Track provider status'},b]}),/MODEL_PLAN_ACCEPTANCE_MISSING_OR_SHORT/);
  assert.throws(()=>parseModelOwnedPlan({plan:{steps:[a,b]},tasks:[a,b]}),/MODEL_OUTPUT_AMBIGUOUS_CONTAINERS/);
  assert.throws(()=>parseModelOwnedPlan({tasks:[a]}),/MODEL_PLAN_INVALID_COUNT/);
  assert.throws(()=>parseModelOwnedPlan({tasks:[a,a]}),/DUPLICATE_PLAN_NODE/);
