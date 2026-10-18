@@ -44,9 +44,20 @@ const system='You are Kimi K2.6, acting as a software engineer. Your job is to i
 let totalTokens=0;
 async function callModel(label,payload,thinking=false){
  const max_tokens=thinking?32768:4096;
+ const mandatoryDecisionOutput={
+  requirement:'Return one JSON object with decisionForensics at the TOP LEVEL alongside every stage-specific output (tasks, replacements or diagnosis). Decision documentation is REQUIRED even when writing code patches; an otherwise correct patch without it will be rejected.',
+  requiredKey:'decisionForensics',
+  requiredFields:['choice','rationale','evidence','alternatives','expectedOutcome','uncertainty'],
+  evidenceSourceIds:['original_source','public_verifier','provider_receipt','node_context','prior_attempt','compute_budget'],
+  minimumSummaryCharacters:12,
+  allDecisionsMustBeExplained:true,
+  noPrivateReasoningOrProviderSecrets:true
+ };
  const body={model:'kimi-k2.6',thinking:{type:thinking?'enabled':'disabled'},
   temperature:thinking?1:0.6,response_format:{type:'json_object'},max_tokens,stream:false,
-  messages:[{role:'system',content:system},{role:'user',content:JSON.stringify(payload)}]};
+  messages:[{role:'system',content:system},{role:'user',content:JSON.stringify({
+   ...payload,mandatoryDecisionOutput
+  })}]};
  const reservation=budgetReservation({requestBody:JSON.stringify(body),thinking,
   reportedTokens:report.modelCalls.map(x=>x.usage)});
  if(!reservation.permitted){
