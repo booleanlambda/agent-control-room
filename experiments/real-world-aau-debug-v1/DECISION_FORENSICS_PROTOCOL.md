@@ -42,3 +42,15 @@ No change to the original V28 historical source, the public/hidden behavioral co
 - Evidence: `real-world-debug-evidence.json` includes `forensics.modelDecisions` and `forensics.events`.
 
 **Deployment gate:** Research-branch offline tests first; separately authorized live model trial next; only then consider promotion into production AAU/Silas. This protocol is the required acceptance contract, but this branch does **not** assert that production has adopted it.
+
+---
+
+## Three-alternative branch-of-approach protocol (research)
+
+When an independently executed PUBLIC software-repair case fails, Kimi must propose **exactly three distinct, prioritized, testable alternative approaches** with `approach`, `hypothesis`, and `acceptance` fields. Every proposal and implementation response still requires its own valid top-level model-stated `decisionForensics` (choice, evidence, considered alternatives, expected outcome and uncertainty). The host must NEVER synthesize or fill missing approaches or reasons. Branches represent **stated hypotheses and decisions**, not private chain-of-thought.
+
+The deterministic orchestrator runs alternative 1, verifies unchanged four public cases, then runs alternatives 2 and 3 **only if the problem remains unresolved**. A failed or regressed candidate is discarded. A verified partially improved candidate is checkpointed, and the next alternative receives its code plus newly observed public failures; a complete public pass skips remaining alternatives, with explicit forensic skip events. No hidden-case result, test assertion, raw model patch, provider error payload, private reasoning or credential is published. Provider uncertainty, invalid mandatory model forensics, or budget exhaustion stops safely without replaying a paid call.
+
+The immutable recorded audit event chain includes `ALTERNATIVES_PROPOSED`, `ALTERNATIVE_SELECTED`, every independent case and suite result, `ALTERNATIVE_SETTLED`, optional `ALTERNATIVE_INVALID_PATCH`/`ALTERNATIVE_INTERRUPTED`/`ALTERNATIVE_SKIPPED`, and `ALTERNATIVES_COMPLETED`. Events bind to `branchGroupId`, `alternativeId`, model decision ID, request/response/candidate hashes and deterministic test receipt. Sanitized per-branch summaries retain only approach/hypothesis/acceptance hashes, selection index, attempts, verdicts, token receipts through model calls, old/new independent scores and final status. The separate `inspectForensicsReport` check rejects missing, out-of-order, unlinked or unverified branch evidence.
+
+This stage is implemented only on `experiment/aau-three-alternative-forensic-branches-20261018`. Offline tests are separate from live Kimi compliance. No promotion to Silas, production, or main; the research-only `AAU_ALTERNATIVES_SMOKE=yes` mode stops after the initial three-alternative group, avoiding full recursive execution and hidden tests. Real provider calls require a separate controlled run; an offline test passing must not be reported as Kimi correctly diagnosing/fixing a historical bug.
