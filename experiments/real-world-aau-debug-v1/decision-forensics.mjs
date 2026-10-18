@@ -32,13 +32,36 @@ export const MODEL_FORENSICS_INSTRUCTIONS=
  'Keep each statement 1-2 sentences; no step-by-step hidden reasoning, credentials, '+
  'private reasoning_content, source code, quoted error payloads or URLs.';
 
+// Public diagnostic metadata only. Never copy rejected model field text.
+// Allows an investigator to distinguish missing, too short, overlong,
+// credential-looking, or non-string explanations without retaining them.
+export function summarizeForensicFields(answer){
+ const d=answer?.decisionForensics;
+ const constraints={choice:240,rationale:420,expectedOutcome:280,uncertainty:240};
+ const result={containerKind:d===null?'null':Array.isArray(d)?'array':typeof d,fields:{}};
+ for(const [name,max] of Object.entries(constraints)){
+  const value=d?.[name];
+  const kind=value===null?'null':Array.isArray(value)?'array':typeof value;
+  const len=typeof value==='string'?value.trim().length:null;
+  let status='VALID';
+  if(kind!=='string')status='MISSING_OR_NOT_STRING';
+  else if(len<12)status='TOO_SHORT';
+  else if(len>max)status='TOO_LONG';
+  else if(unsafe.test(value)||/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(value))status='UNSAFE_TEXT';
+  result.fields[name]={kind,lengthBand:len===null?null:len===0?'empty':
+   len<12?'under_12':len<=80?'12_to_80':len<=280?'81_to_280':
+   len<=420?'281_to_420':'over_420',status};
+ }
+ return result;
+}
+
 export function validateModelDecision(answer){
  const d=answer?.decisionForensics;
  if(!obj(d))return {ok:false,reason:'MISSING_MODEL_DECISION_FORENSICS'};
  const choice=clean(d.choice,240),rationale=clean(d.rationale,420);
  const expectedOutcome=clean(d.expectedOutcome,280),uncertainty=clean(d.uncertainty,240);
  if(!choice||!rationale||!expectedOutcome||!uncertainty)
-  return {ok:false,reason:'INVALID_MODEL_FORENSIC_SUMMARY'};
+  return {ok:false,reason:'INVALID_MODEL_FORENSIC_SUMMARY',fieldDiagnostic:summarizeForensicFields(answer)};
  if(!Array.isArray(d.evidence)||d.evidence.length<1||d.evidence.length>5)
   return {ok:false,reason:'INVALID_MODEL_FORENSIC_EVIDENCE'};
  const evidence=[];
