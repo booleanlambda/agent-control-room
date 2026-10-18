@@ -32,6 +32,8 @@ jobs:
           node --test experiments/real-world-aau-debug-v1/output-normalizer.test.mjs
           node --check experiments/real-world-aau-debug-v1/public-failure-feedback.mjs
           node --test experiments/real-world-aau-debug-v1/public-failure-feedback.test.mjs
+          node --check experiments/real-world-aau-debug-v1/remediation-exhaustion-route.mjs
+          node --test experiments/real-world-aau-debug-v1/remediation-exhaustion-route.test.mjs
           node --check experiments/kimi-recursion-v24/thinking-on-json-syntax.mjs
           node --test experiments/kimi-recursion-v24/thinking-on-json-syntax.test.mjs
           node --test experiments/kimi-recursion-v24/provider-response-diagnostics.test.mjs
