@@ -13,7 +13,7 @@ export function createLedger(connectionString){
       r.rows[0].marker!=='AAU_V20_ISOLATED_LIVE_WORKER')
      throw Error('NEON_BRANCH_SCOPE_INVALID');
    const s=await pool.query("select count(*)::int as n from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='aau_research_v23' and c.relkind='r' and c.relrowsecurity");
-   if(s.rows[0].n!==3)throw Error('RESEARCH_RLS_NOT_ENABLED');
+   if(s.rows[0].n!==4)throw Error('RESEARCH_RLS_NOT_ENABLED');
   },
   async init(run,problemHash){
    const c=await pool.connect();
@@ -60,6 +60,21 @@ export function createLedger(connectionString){
   async events(run){
    const r=await pool.query('select seq,phase,details from aau_research_v23.events where run_id=$1 order by seq',[run]);
    return r.rows;
+  },
+  async beginCall(run,phase,attempt,digest){
+   const r=await pool.query(
+    'insert into aau_research_v23.calls(run_id,phase,attempt,model_request_hash) values($1,$2,$3,$4) on conflict do nothing returning run_id',
+    [run,phase,attempt,digest]);
+   if(r.rowCount!==1)throw Error('AMBIGUOUS_MODEL_CALL_ALREADY_RECORDED');
+  },
+  async finishCall(run,phase,attempt,status,tokens,finish,responseHash){
+   const r=await pool.query(
+    'update aau_research_v23.calls set status=$4,provider_tokens=$5,finish_reason=$6,response_hash=$7 where run_id=$1 and phase=$2 and attempt=$3 and status=$8',
+    [run,phase,attempt,status,tokens,finish,responseHash,'sent_or_uncertain']);
+   if(r.rowCount!==1)throw Error('MODEL_CALL_PROVENANCE_CONFLICT');
+  },
+  async callLog(run){
+   const r=await pool.query('select phase,attempt,status,provider_tokens,finish_reason,response_hash from aau_research_v23.calls where run_id=$1 order by created_at',[run]);return r.rows;
   },
   async close(){await pool.end()}
  };
