@@ -12,7 +12,7 @@ if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_V24_RESEARCH!=='yes'||
    process.env.AAU_PYTHON_SANDBOX!=='yes')throw Error('RESEARCH_ONLY');
 const digest=x=>createHash('sha256').update(typeof x==='string'?x:JSON.stringify(x)).digest('hex');
 const run=randomUUID(),queue='aau.research.v24.'+run.replaceAll('-','');
-const report={experiment:'V24_CHEAP_KIMI_DEEP_RECURSION_SELF_REMEDIATION',
+const report={experiment:'V24B_KIMI_DEEP_RECURSION_DETERMINISTIC_COST_SUPPORT',
  run,model:'kimi-k2.6',thinking:'disabled',workers:1,maxConcurrentModelCalls:1,
  status:'running',requestedDepth:10,verifiedDepth:0,deepestReached:0,
  exactHiddenPass:false,callCount:0,providerTokens:0,repairCount:0,
@@ -82,24 +82,41 @@ async function evalCode(source,problem){
   return {passed:false,feedback:{reason:'SOURCE_LENGTH_OR_TYPE'}};
  const exec=await runIsolatedPython(source,problem,{timeoutMs:10000});
  if(!exec.ok)return {passed:false,feedback:{reason:exec.error,stderr:String(exec.stderr||'').slice(0,800)}};
- const verified=assess(problem,exec.result);
+ // V24B: deterministic arithmetic companion. The MODEL still supplies
+ // selected IDs and the search strategy. The runtime only recomputes their
+ // unambiguous sum; it never adds/removes controls, computes a proposal,
+ // generates source, or weakens the independent optimum/invariant checker.
+ let result=exec.result,normalized=false,verifiedSum=null;
+ if(Array.isArray(result?.selected)&&
+    !(result.selected.length===0&&result.cost===null)){
+  const ids=new Map(problem.controls.map(c=>[c.id,c.cost]));
+  if(result.selected.every(id=>typeof id==='string'&&ids.has(id))&&
+     new Set(result.selected).size===result.selected.length){
+   verifiedSum=result.selected.reduce((n,id)=>n+ids.get(id),0);
+   normalized=verifiedSum!==result.cost;
+   result={...result,cost:verifiedSum};
+  }
+ }
+ const verified=assess(problem,result);
  return {passed:verified.passed,feedback:verified.passed?
-   {reason:verified.reason,cost:verified.cost??null}:
+   {reason:verified.reason,cost:verified.cost??null,normalizedCost:normalized,
+    rawCost:normalized?exec.result.cost:undefined,verifiedCost:verifiedSum}:
    {reason:verified.reason,details:verified.id??verified.tag??verified.group??null,
      actual:verified.actual??null,limit:verified.required??verified.allowed??null,
-     observed:exec.result}};
+     observed:exec.result,normalizedCost:normalized,verifiedCost:verifiedSum}};
 }
 async function allAncestors(source,depth){
- let inspected=0;
+ let inspected=0,normalizations=[];
  for(let j=0;j<=depth;j++){
   for(let k=0;k<publicCasesFor(j).length;k++){
    const input=publicCasesFor(j)[k],v=await evalCode(source,input);
    inspected++;
+   if(v.feedback?.normalizedCost)normalizations.push({level:j,caseIndex:k,rawCost:v.feedback.rawCost??null,verifiedCost:v.feedback.verifiedCost});
    if(!v.passed)return {passed:false,inspected,
     failure:{level:j,caseIndex:k,input,reason:v.feedback.reason,details:v.feedback}};
   }
  }
- return {passed:true,inspected};
+ return {passed:true,inspected,normalizations};
 }
 function makeNode(state,depth,summary){
  const parent=state.nodes.at(-1);
@@ -151,7 +168,7 @@ async function runPhase(label,state){
   if(type==='verify'){
    const check=await allAncestors(state.source,i);
    state.levelLogs.push({level:i,kind:'verified_computation',passed:check.passed,checks:check.inspected,
-    feedback:check.passed?null:check.failure});
+    feedback:check.passed?null:check.failure,deterministicCostCorrections:check.normalizations??[]});
    if(!check.passed){
     state.lastFailure=check.failure;
     if((state.repairCounts?.[i]??0)>=2)return next(null,{level:i,reason:'REMediation_BUDGET_EXHAUSTED',fail:check.failure.reason},'failed');
@@ -274,6 +291,7 @@ try{
  report.modelCalls=await db.callLog(run);
  report.phaseEvents=await db.events(run);
  report.phaseChainDigest=digest(report.phaseEvents);
+ report.costNormalizations=(final.state.levelLogs||[]).filter(x=>x.kind==='verified_computation').flatMap(x=>x.deterministicCostCorrections||[]);
  if(final.status==='passed'&&
    (report.verifiedDepth!==10||report.nodes.length!==10||!report.exactHiddenPass||!report.rootProof))
   throw Error('FALSE_ROOT_PASS');
@@ -294,6 +312,6 @@ try{
   tokens:report.providerTokens,repairs:report.repairCount,
   hidden:report.exactHiddenPass,acks:report.brokerACKs,
   phaseCount:report.phaseCount??null,rootProof:report.rootProof,
-  cleaned:!!report.queueDeleted,error:report.error??null}));
+  cleaned:!!report.queueDeleted,costNormalizations:report.costNormalizations?.length??0,error:report.error??null}));
  if(report.status!=='passed')process.exitCode=2;
 }
