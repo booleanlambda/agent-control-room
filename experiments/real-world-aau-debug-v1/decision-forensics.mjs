@@ -77,7 +77,9 @@ export function attachModelDecision(ledger,answer,{stage,nodeId=null,parentId=nu
  const entry={id,stage:stageId,recordedAt:new Date().toISOString(),
   nodeId:safeNode(nodeId),parentId:safeNode(parentId),
   requestSha256:safeHash(requestHash),responseSha256:safeHash(responseHash),
-  ...parsed.decision,modelStated:true,independentlyVerified:false,
+  ...parsed.decision,
+  modelClaimSha256:createHash('sha256').update(JSON.stringify(parsed.decision)).digest('hex'),
+  modelStated:true,independentlyVerified:false,
   outcome:'AWAITING_INDEPENDENT_CHECK'};
  ledger.modelDecisions.push(entry);
  return {ok:true,id};
@@ -99,6 +101,7 @@ export function auditEvent(ledger,{kind,stage,decisionId=null,nodeId=null,parent
   reasonCode:allowedCodes.test(reasonCode??'')?reasonCode:null,
   decisionId:typeof decisionId==='string'&&/^decision_[0-9]{1,5}$/.test(decisionId)?decisionId:null,
   nodeId:safeNode(nodeId),parentId:safeNode(parentId),
+  modelClaimSha256:ledger.modelDecisions.find(x=>x.id===decisionId)?.modelClaimSha256??null,
   candidateSha256:safeHash(candidateSha256),
   verification:verification&&permittedVerdicts.has(verification.verdict)?{
    verdict:verification.verdict,
