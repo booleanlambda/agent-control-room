@@ -35,8 +35,8 @@ test('transport timeout, strange server fields and OFF unexpected reasoning clas
 test('live runner persists real classification tokens and finish reason before any manual hold',()=>{
  const src=readFileSync(new URL('./live.mjs',import.meta.url),'utf8');
  assert.match(src,/inspectV28ProviderResponse\(stage,res\.status,j,bodyParsed\)/);
- assert.match(src,/db\.finishCall\(run,stage,attempt,outcome\.category\.toLowerCase\(\),/);
- assert.match(src,/outcome\.receipt\.providerTokens,outcome\.receipt\.finishReason/);
+ assert.match(src,/db\.finishCall\(run,stage,attempt,category\.toLowerCase\(\),/);
+ assert.match(src,/outcome\?\.receipt\?\.providerTokens\?\?null,outcome\?\.receipt\?\.finishReason\?\?null/);
  assert.match(src,/report\.providerCallDiagnostics\.push/);
  assert.match(src,/throw Error\('MODEL_REQUEST_MANUAL_HOLD'\)/);
 });
