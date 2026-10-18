@@ -66,5 +66,5 @@ test('bounded remediation uses model-authored unique-span patches, restores earl
  assert.match(s,/for\(const input of hiddenCases\)/);
  assert.match(s,/await db\.beginCall\(/);
  assert.match(s,/No automatically retried ambiguous paid model call/);
- assert.match(s,/no injected fault/i);
+ assert.match(s,/never injected fault/i);
 });
