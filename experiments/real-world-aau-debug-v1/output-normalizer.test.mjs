@@ -13,7 +13,7 @@ test('nested thinking-off JSON with alternate names and explicit criteria',()=>{
   {id:2,issue:'Retain token receipts',acceptance:'Never overwrite reported token usage'}]);
 });
 test('reject truly missing acceptance, ambiguous plans, duplicates, invalid counts',()=>{
- assert.throws(()=>parseModelOwnedPlan({tasks:[{goal:'Track provider status'},b]}),/MODEL_PLAN_INVALID_NODE/);
+ assert.throws(()=>parseModelOwnedPlan({tasks:[{goal:'Track provider status'},b]}),/MODEL_PLAN_ISSUE_MISSING_OR_SHORT/);
  assert.throws(()=>parseModelOwnedPlan({plan:{steps:[a,b]},tasks:[a,b]}),/MODEL_OUTPUT_AMBIGUOUS_CONTAINERS/);
  assert.throws(()=>parseModelOwnedPlan({tasks:[a]}),/MODEL_PLAN_INVALID_COUNT/);
  assert.throws(()=>parseModelOwnedPlan({tasks:[a,a]}),/DUPLICATE_PLAN_NODE/);
@@ -36,4 +36,27 @@ test('safe format receipt includes structure only, never private content',()=>{
  assert.equal(s.topLevelKeys[0],'result');
  assert.equal(s.taskContainers[0].path,'$.result.steps');
  assert.equal(JSON.stringify(s).includes('SECRET'),false);
+});
+
+test('long genuine Kimi thinking-off explanations are not misclassified as bad JSON',()=>{
+ const issue='Inspect existing catch behavior and preserve provider call evidence. '.repeat(19);
+ const acceptance='Verify durable finish reason and token usage independently. '.repeat(19);
+ assert.ok(issue.length>600);
+ assert.ok(acceptance.length>600);
+ const tasks=parseModelOwnedPlan({tasks:[{issue,acceptance},{
+  issue:'Check transport without retry',acceptance:'Verify no duplicate billing'}]});
+ assert.equal(tasks[0].issue,issue.trim());
+ assert.equal(tasks[0].acceptance,acceptance.trim());
+});
+test('substantive text beyond the document size budget is rejected with a specific reason',()=>{
+ assert.throws(()=>parseModelOwnedPlan({tasks:[{
+  issue:'x'.repeat(2450),acceptance:'Verify provider status is preserved'
+ },{
+  issue:'Check response shape',acceptance:'Verify acceptable JSON object'
+ }]}),/MODEL_PLAN_NODE_TOO_LONG/);
+ assert.throws(()=>parseModelOwnedPlan({tasks:[{
+  issue:'Record status and finish',acceptance:''
+ },{
+  issue:'Check no retry',acceptance:'Avoid duplicate provider call'
+ }]}),/MODEL_PLAN_ACCEPTANCE_MISSING_OR_SHORT/);
 });
