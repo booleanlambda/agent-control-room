@@ -1,0 +1,62 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {GLOBAL_PROVIDER_TOKEN_BUDGET,RECURSION_DEPTH_LIMIT,budgetReservation,createRepairTree,takeRepairNode,addChildRepairNodes,treeSummary} from './progress-budget-tree.mjs';
+const tasks=[{issue:'Preserve request receipt on provider reject',acceptance:'Capture category and finish reason on reject'},
+ {issue:'Sanitize transport error provenance',acceptance:'Never emit exception text or credentials'}];
+test('no arbitrary call-count limit, reserve worst-case 4K or 32K within finite 75K',()=>{
+ assert.equal(GLOBAL_PROVIDER_TOKEN_BUDGET,75000);
+ for(let i=0;i<12;i++){
+  const b=budgetReservation({requestBody:{role:'user',text:'repair this'},thinking:false,
+   reportedTokens:Array.from({length:i},()=>5000)});
+  assert.equal(b.permitted,i<=13);
+  assert.equal(b.completionCeiling,4096);
+ }
+ const over=budgetReservation({requestBody:{text:'large'},thinking:true,reportedTokens:[30000,15000]});
+ assert.equal(over.permitted,false);
+ assert.equal(over.reason,'GLOBAL_COMPUTE_BUDGET_EXHAUSTED');
+ const yes=budgetReservation({requestBody:{text:'small'},thinking:true,reportedTokens:[5000]});
+ assert.equal(yes.permitted,true);
+ assert.equal(yes.completionCeiling,32768);
+});
+test('all root tasks are traversed in model-chosen order',()=>{
+ const t=createRepairTree(tasks);
+ assert.equal(treeSummary(t).pending,2);
+ assert.equal(takeRepairNode(t).issue,tasks[0].issue);
+ assert.equal(takeRepairNode(t).issue,tasks[1].issue);
+ assert.equal(takeRepairNode(t),null);
+});
+test('failed node decomposes into two children, both traversable before remaining siblings',()=>{
+ const t=createRepairTree(tasks),parent=takeRepairNode(t);
+ const children=[{issue:'Capture sanitized finish reason before hold',acceptance:'Hold report retains exact stop or length'},
+  {issue:'Preserve HTTP failure category on 503 response',acceptance:'Finish call records provider_http_error'}];
+ const add=addChildRepairNodes(t,parent,children);
+ assert.equal(add.added,2);
+ assert.equal(takeRepairNode(t).issue,children[0].issue);
+ assert.equal(takeRepairNode(t).issue,children[1].issue);
+ assert.equal(takeRepairNode(t).issue,tasks[1].issue);
+});
+test('repeated self-recursion rejected, no infinitely repeating task',()=>{
+ const t=createRepairTree(tasks),parent=takeRepairNode(t);
+ const a=addChildRepairNodes(t,parent,[tasks[0],tasks[1]]);
+ assert.equal(a.added,0);
+ assert.equal(a.reason,'DUPLICATED_OR_RECURSIVE_NODE');
+});
+test('depth-limited recursion is different from fixed total call ceiling',()=>{
+ const t=createRepairTree(tasks);
+ let parent=takeRepairNode(t);
+ for(let d=1;d<=RECURSION_DEPTH_LIMIT;d++){
+  const children=[{issue:'Narrow scoped provenance work '+d,acceptance:'Verify hold receipt for one case '+d},
+   {issue:'Narrow scope for error path '+d,acceptance:'Expected safe category in another case '+d}];
+  assert.equal(addChildRepairNodes(t,parent,children).added,2);
+  parent=takeRepairNode(t);
+  assert.equal(parent.depth,d);
+ }
+ assert.equal(addChildRepairNodes(t,parent,[{issue:'Beyond maximum depth',acceptance:'Never schedule unbounded work'},
+  {issue:'Second extra depth',acceptance:'Do not accept recursive explosion'}]).reason,'RECURSION_DEPTH_LIMIT');
+ assert.ok(treeSummary(t).pending>0);
+});
+test('malformed model node never added to queue',()=>{
+ const t=createRepairTree(tasks);const p=takeRepairNode(t);
+ assert.equal(addChildRepairNodes(t,p,[{issue:'short',acceptance:'bad'},{issue:'other',acceptance:'bad'}]).added,0);
+ assert.equal(treeSummary(t).pending,1);
+});
