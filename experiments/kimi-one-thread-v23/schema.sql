@@ -6,3 +6,5 @@ create index if not exists v23_outbox_pending on aau_research_v23.outbox(publish
 alter table aau_research_v23.runs enable row level security;
 alter table aau_research_v23.events enable row level security;
 alter table aau_research_v23.outbox enable row level security;
+create table if not exists aau_research_v23.calls(run_id uuid not null references aau_research_v23.runs(run_id),phase text not null,attempt integer not null,model_request_hash text not null,status text not null default 'sent_or_uncertain',provider_tokens integer,finish_reason text,response_hash text,created_at timestamptz not null default now(),primary key(run_id,phase,attempt));
+alter table aau_research_v23.calls enable row level security;
