@@ -53,7 +53,8 @@ test('real thread forbids skipping parent, commits each node after full ancestor
  assert.match(ledger,/for update/);
  assert.match(ledger,/model_request_hash/);
  assert.match(ledger,/values\(\$1,\$2,'level_0'/);
- assert.match(s,/thinking:\{type:'disabled'\}/);
+ assert.match(s,/const cfg=kimiStageRequest\(stage,max_tokens\)/);
+ assert.match(s,/thinking:cfg.thinking/);
  assert.match(s,/response_format:\{type:'json_object'\}/);
  assert.doesNotMatch(s,/searchBestCandidate|certifyImproved|beamOptimize/);
 });
