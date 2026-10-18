@@ -1,0 +1,52 @@
+name: AAU Kimi Real Historical Bug Autonomous Repair
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/kimi-v28-transport-cause-live-v2-20261018
+    paths:
+      - 'experiments/real-world-aau-debug-v1/**'
+      - '.github/workflows/aau-real-world-debug-v1-live.yml'
+permissions:
+  contents: read
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+jobs:
+  live-real-bug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      AAU_REAL_WORLD_DEBUG: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Freeze real historical source and validate independent test runner
+        run: |
+          node --check experiments/real-world-aau-debug-v1/live.mjs
+          node --check experiments/real-world-aau-debug-v1/plan-parser.mjs
+          node --test experiments/real-world-aau-debug-v1/plan-parser.test.mjs
+          node --check experiments/real-world-aau-debug-v1/output-normalizer.mjs
+          node --test experiments/real-world-aau-debug-v1/output-normalizer.test.mjs
+          node --test experiments/real-world-aau-debug-v1/fetch-mock-contract.test.mjs
+          node --check experiments/real-world-aau-debug-v1/verify-candidate.mjs
+          test -s experiments/real-world-aau-debug-v1/legacy-model-source.txt
+      - name: Verify Docker secure offline evaluation
+        run: |
+          docker info --format '{{.ServerVersion}}'
+          docker pull node:22-alpine
+      - name: Run one bounded real-world Kimi diagnosis and remediation trial
+        working-directory: experiments/real-world-aau-debug-v1
+        env:
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: node live.mjs
+      - name: Retain model route, independent scores and sanitized call evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-real-world-historical-provider-debug-proof
+          path: experiments/real-world-aau-debug-v1/real-world-debug-evidence.json
+          if-no-files-found: warn
+          retention-days: 7
