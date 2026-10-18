@@ -13,7 +13,8 @@ import {fetch as scopedFetch,Agent} from 'undici';
 import {transportTimeoutPolicy,makeScopedUndiciAgent} from '../aau-provider-transport/transport-policy.mjs';
 import {makePublicFeedback} from './public-failure-feedback.mjs';
 import {classifyThinkingExhaustion,proposedExhaustionRoute} from './remediation-exhaustion-route.mjs';
-import {focusedPatchDecision,validateNodeOrder,EARLY_REPAIR_MAX_CALLS,FOCUSED_OFF_NODES} from './early-focused-progress.mjs';
+import {focusedPatchDecision} from './early-focused-progress.mjs';
+import {budgetReservation,createRepairTree,takeRepairNode,addChildRepairNodes,treeSummary,GLOBAL_PROVIDER_TOKEN_BUDGET,RECURSION_DEPTH_LIMIT} from './progress-budget-tree.mjs';
 if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_REAL_WORLD_DEBUG!=='yes')throw Error('RESEARCH_ONLY');
 const digest=x=>createHash('sha256').update(String(x)).digest('hex');
 const run=randomUUID(),base=readFileSync(new URL('./legacy-model-source.txt',import.meta.url),'utf8');
@@ -23,23 +24,32 @@ const report={experiment:'REAL_AAU_V28_ORIGINAL_PROVIDER_DIAGNOSTIC_INCIDENT',
  originalCodeSha256:digest(base),status:'running',model:'kimi-k2.6',
  problemType:'actual AAU provider/manual-hold provenance loss',
  planGeneratedByModel:false,noGoldPatchProvided:true,noSyntheticFaultInjection:true,
- proofModelIndependent:true,maxCalls:EARLY_REPAIR_MAX_CALLS,modelCalls:[],decisions:[],tests:[],
- architecture:'early OFF focused nodes then optional targeted ON remediation',
+ proofModelIndependent:true,maxCalls:null,computeBudgetTokens:GLOBAL_PROVIDER_TOKEN_BUDGET,
+ modelCalls:[],decisions:[],tests:[],
+ architecture:'progress-driven recursive OFF nodes, independent public verifier, budget-governed ON',
  modelOwnedEarlyTasks:[],focusedNodeResults:[],earlyOffNodesRun:0,
+ repairTree:{pending:0,visited:0,depthOfNextNode:null,uniqueTasks:0},
+ unresolvedNodes:[],stopReason:null,
  continuedAfterConfirmedExhaustion:false,continuationCalls:0,
  success:false,candidateSha256:null,nonReplayableCalls:true,
  thinkingExhaustion:null,proposedDecomposition:null};
 const save=()=>writeFileSync('real-world-debug-evidence.json',JSON.stringify(report,null,2)+'\n');
 const system='You are Kimi K2.6, acting as a software engineer. Your job is to independently diagnose and fix a REAL historical code defect, not a synthetic exercise. Produce exactly one JSON object, no markdown. Analyze constraints yourself, choose your own decomposition; avoid inventing observed outcomes. Do not request or expose hidden tests. Do not change thinking-mode policy or auto-retry ambiguous paid provider calls.';
-const MAX_CALLS=EARLY_REPAIR_MAX_CALLS;
+// Deliberately no hard numeric maximum on model calls; global compute is finite.
 let totalTokens=0;
 async function callModel(label,payload,thinking=false){
- if(report.modelCalls.length>=MAX_CALLS||totalTokens>=75000)throw Error('RESEARCH_MODEL_CAP_REACHED');
  const max_tokens=thinking?32768:4096;
  const body={model:'kimi-k2.6',thinking:{type:thinking?'enabled':'disabled'},
   temperature:thinking?1:0.6,response_format:{type:'json_object'},max_tokens,stream:false,
   messages:[{role:'system',content:system},{role:'user',content:JSON.stringify(payload)}]};
+ const reservation=budgetReservation({requestBody:JSON.stringify(body),thinking,
+  reportedTokens:report.modelCalls.map(x=>x.usage)});
+ if(!reservation.permitted){
+  report.stopReason=reservation.reason;save();
+  throw Error('GLOBAL_COMPUTE_BUDGET_EXHAUSTED');
+ }
  const receipt={stage:label,thinking:thinking?'enabled':'disabled',
+  budgetReservation:reservation.reservation,remainingTokenBudgetBefore:reservation.remainingBefore,
   completionCeiling:max_tokens,requestSha256:digest(JSON.stringify(body)),
   status:'sent_or_uncertain',usage:null,finishReason:null,
   completionTokens:null,reasoningTokens:null,rawFinalContentStored:false,
@@ -74,6 +84,10 @@ async function callModel(label,payload,thinking=false){
   receipt.finishReason=choice?.finish_reason??null;
   receipt.usage=Number.isSafeInteger(j?.usage?.total_tokens)?j.usage.total_tokens:null;
   if(receipt.usage!==null)totalTokens+=receipt.usage;
+  else if(res.ok){
+   receipt.status='provider_usage_missing_manual_hold';
+   throw Error('MODEL_REQUEST_MANUAL_HOLD');
+  }
   receipt.completionTokens=Number.isSafeInteger(j?.usage?.completion_tokens)?j.usage.completion_tokens:null;
   receipt.reasoningTokens=Number.isSafeInteger(j?.usage?.completion_tokens_details?.reasoning_tokens)?
    j.usage.completion_tokens_details.reasoning_tokens:null;
@@ -87,8 +101,11 @@ async function callModel(label,payload,thinking=false){
     finishReason:receipt.finishReason,
     usage:receipt.usage,completionTokens:receipt.completionTokens,
     reasoningTokens:receipt.reasoningTokens,completionCeiling:max_tokens};
-   report.proposedDecomposition=proposedExhaustionRoute({
-    usedCalls:report.modelCalls.length,maxCalls:MAX_CALLS,confirmed:true});
+   report.proposedDecomposition={
+    nextStage:'decompose_failed_node_with_thinking_off',
+    nextThinkingMode:'disabled',nextCompletionCeiling:4096,
+    computeAvailabilityCheckedBeforeNextRequest:true,
+    paidReplayAuthorized:false};
    throw Error('THINKING_BUDGET_EXHAUSTED');
   }
   if(receipt.finishReason!=='stop'){
@@ -181,7 +198,10 @@ function runPublicVerification(candidate,suite='public'){
  const receipt={suite,pass:p.status===0&&allCasesExecuted&&
   observedCases.every(x=>x.passed===true),exitCode:p.status??null,
   allCasesExecuted,
-  cases:rows.filter(x=>x.case).map(x=>({name:x.case,passed:x.passed,problems:x.problems,status:x.reportedStatus})),
+  cases:rows.filter(x=>x.case).map(x=>({name:x.case,passed:x.passed,
+   problems:x.problems,status:x.reportedStatus,
+   expectedStatus:suite==='public'?x.expectedStatus??null:null,
+   exceptionKind:x.exceptionKind??null})),
   candidateSha256:digest(candidate),runnerErrored:!!p.error,stderrPresent:!!p.stderr};
  report.tests.push(receipt);save();
  return {receipt,publicFeedback};
@@ -204,86 +224,100 @@ try{
  report.decisions.push({phase:'implementation',spans:candidate.spans,diagnosis:typeof proposal.diagnosis==='string'?proposal.diagnosis.slice(0,650):null});
  let check=runPublicVerification(candidate.code,'public');
  if(!check.receipt.pass){
-  // The cheap model itself decomposes PUBLIC failures before any 32K remediation.
-  // Tests were frozen in the source branch; no hidden oracle or gold patch enters prompts.
-  const focusedTasks=parseModelOwnedPlan(await callModel(
-   'early_decompose_public_failures',{
-    incident:'Repair the same historical V28 AAU provider/manual-hold provenance bug. Your first candidate failed the PUBLIC verifier. Before expensive thinking ON, break the remaining independent failures into two or three narrow, testable engineering subproblems.',
-    originalSource:base,
-    currentCandidate:candidate.code,
-    currentCandidateSha256:digest(candidate.code),
-    modelGeneratedPlan:plan,
-    publicFailures:check.publicFeedback,
-    instruction:'Produce 2 or 3 independent tasks, each with an explicit verification criterion, in a JSON object of the form {tasks:[{issue,acceptance},...]}. No replacement code in this stage. Do not invent observed results, disclose hidden tests, retry provider requests or include raw exception messages.'
-   },false));
-  if(!validateNodeOrder(focusedTasks))throw Error('INVALID_FOCUSED_DECOMPOSITION');
-  report.modelOwnedEarlyTasks=focusedTasks;
-  report.decisions.push({phase:'early_off_public_decomposition',tasks:focusedTasks});
-  save();
-  // Two independent focused nodes, 4K OFF each. Verify the ENTIRE public
-  // suite after every node and refuse regressions of prior passing behavior.
-  for(let i=0;i<FOCUSED_OFF_NODES&&i<focusedTasks.length&&
-   !check.receipt.pass;i++){
-   const node=focusedTasks[i];
-   const before=check;
-   const answer=await callModel('focused_off_public_patch_'+(i+1),{
-    incident:'Fix ONE narrowly scoped public failure from the same real AAU historical diagnostic incident.',
-    originalSource:base,
-    currentCandidate:candidate.code,
-    currentCandidateSha256:digest(candidate.code),
-    assignedTask:node,
-    siblingTasks:focusedTasks.filter(x=>x.id!==node.id).map(x=>({
-     id:x.id,issue:x.issue,acceptance:x.acceptance})),
-    publicFailures:check.publicFeedback,
-    previousModelPlan:plan,
-    instruction:'Work on assignedTask only. Return JSON {replacements:[{old:EXACT UNIQUE STRING from currentCandidate,replacement:NEW SOURCE TEXT},...],diagnosis:string}, with up to 3 precise edits. Must preserve all earlier passing cases and constraints. The independent oracle will run the entire public suite before accepting your changes. No hidden tests, no gold patch, no raw secret or error strings, no automatic provider retries.'
-   },false);
-   report.earlyOffNodesRun++;
-   const normalized=normalizeModelOwnedPatches(answer);
-   if(normalized.length>3)throw Error('FOCUSED_PATCH_TOO_MANY_EDITS');
-   const trial=applyModelPatch(candidate.code,answer);
-   const trialCheck=runPublicVerification(trial.code,'public');
-   const verdict=focusedPatchDecision(before.receipt,trialCheck.receipt);
-   report.focusedNodeResults.push({
-    node:node.id,accepted:verdict.accept,reason:verdict.reason,
-    previousCandidateSha256:digest(candidate.code),
-    trialCandidateSha256:digest(trial.code),
-    beforePublicPassed:verdict.previousPassed??null,
-    afterPublicPassed:verdict.currentPassed??null,
-    beforeProblemCount:verdict.previousProblems??null,
-    afterProblemCount:verdict.currentProblems??null
-   });
-   report.decisions.push({phase:'focused_off_node',node:node.id,
-    accepted:verdict.accept,reason:verdict.reason,spans:trial.spans});
-   if(verdict.accept){
-    candidate=trial;
-    check=trialCheck;
+  // Kimi chooses root subproblems; no deterministic patch or hidden tests.
+  const rootTasks=parseModelOwnedPlan(await callModel('decompose_public_failure_tree',{
+   incident:'The original V28 AAU provider-diagnostics code still fails the public executable tests. Decompose every independent unsolved failure into testable repair nodes before patching. Only the model chooses the decomposition.',
+   originalSource:base,currentCandidate:candidate.code,
+   currentCandidateSha256:digest(candidate.code),
+   previousPlan:plan,publicFailures:check.publicFeedback,
+   requirement:'Return 2 to 6 distinct tasks as JSON {tasks:[{issue,acceptance},...]}. Ground tasks in the actual failed public assertions, including expected and observed status categories, sanitized diagnostic report requirements, no data leakage, and ledger invariants. Do not claim the public suite is incomplete when complete. No code or hidden test cases.'
+  },false));
+  const tree=createRepairTree(rootTasks);
+  report.modelOwnedEarlyTasks=rootTasks;
+  report.decisions.push({phase:'public_failure_tree',tasks:rootTasks});
+  report.repairTree=treeSummary(tree);save();
+  // Iterate the model-defined tree until the actual public oracle accepts,
+  // no nodes remain, or the finite compute budget prevents another call.
+  // There is no two-node truncation and no hard model-call-count threshold.
+  while(tree.queue.length>0&&!check.receipt.pass){
+   const node=takeRepairNode(tree);
+   report.repairTree=treeSummary(tree);save();
+   const initialPublic=check;
+   let patchAccepted=false,patchRejection='NOT_ATTEMPTED';
+   try{
+    const answer=await callModel('repair_tree_node_'+node.id,{
+     incident:'One narrow child node in the original V28 provider-diagnostic software repair. Fix this node only, based on independent public proof.',
+     currentCandidate:candidate.code,currentCandidateSha256:digest(candidate.code),
+     node:{id:node.id,depth:node.depth,issue:node.issue,acceptance:node.acceptance},
+     publicFailures:check.publicFeedback,
+     instruction:'Return JSON {replacements:[{old:EXACT UNIQUE SOURCE SPAN in currentCandidate,replacement:NEW SOURCE},...],diagnosis:string}. Only model-authored edits, at most 3 spans. Preserve all earlier passing cases. Do not edit tests, expose private errors, or replay paid requests.'
+    },false);
+    report.earlyOffNodesRun+=1;
+    const edits=normalizeModelOwnedPatches(answer);
+    if(edits.length>3)throw Error('FOCUSED_PATCH_TOO_MANY_EDITS');
+    const trial=applyModelPatch(candidate.code,answer);
+    const trialCheck=runPublicVerification(trial.code,'public');
+    const verdict=focusedPatchDecision(initialPublic.receipt,trialCheck.receipt);
+    patchRejection=verdict.reason;
+    patchAccepted=verdict.accept;
+    report.focusedNodeResults.push({
+     node:node.id,depth:node.depth,accepted:verdict.accept,reason:verdict.reason,
+     previousCandidateSha256:digest(candidate.code),
+     trialCandidateSha256:digest(trial.code),
+     beforePublicPassed:verdict.previousPassed??null,
+     afterPublicPassed:verdict.currentPassed??null,
+     beforeProblemCount:verdict.previousProblems??null,
+     afterProblemCount:verdict.currentProblems??null});
+    if(verdict.accept){candidate=trial;check=trialCheck;}
+   }catch(error){
+    // A failed source-span validation is a *local* cognitive error, not an
+    // uncertain provider call; continue only for allowlisted local failures.
+    const safe=String(error?.message);
+    if(!['MODEL_PATCH_BAD_SPAN','MODEL_PATCH_NOT_EXACTLY_ONE_SPAN',
+         'MODEL_PATCH_NOOP','MODEL_PATCH_TOO_LONG','MODEL_PATCH_NO_CHANGE',
+         'MODEL_PATCH_COUNT_INVALID','FOCUSED_PATCH_TOO_MANY_EDITS',
+         'MODEL_OUTPUT_AMBIGUOUS_CONTAINERS'].includes(safe))throw error;
+    patchRejection='MODEL_AUTHORED_PATCH_INVALID';
    }
-   save();
+   report.decisions.push({phase:'repair_tree_node',node:node.id,depth:node.depth,
+    accepted:patchAccepted,reason:patchRejection});
+   report.repairTree=treeSummary(tree);save();
+   if(!patchAccepted&&!check.receipt.pass&&node.depth<RECURSION_DEPTH_LIMIT){
+    const children=parseModelOwnedPlan(await callModel('split_failed_tree_node_'+node.id,{
+     incident:'Model-authored focused node did not produce measurable independent public-test progress. Decompose the precise unresolved node into 2 to 3 smaller independently verifiable subtasks, with thinking OFF.',
+     parentNode:{id:node.id,depth:node.depth,issue:node.issue,acceptance:node.acceptance},
+     publicFailures:check.publicFeedback,
+     currentCandidate:candidate.code,
+     rejectionCategory:patchRejection,
+     instruction:'Return JSON tasks:[{issue,acceptance},...] with 2 to 3 different smaller tasks, each grounded in current public failures. Do not repeat the parent/sibling task, do not invent test results and do not write code.'
+    },false));
+    const added=addChildRepairNodes(tree,node,children);
+    report.decisions.push({phase:'subdivide_failed_node',node:node.id,
+     depth:node.depth,added:added.added,reason:added.reason});
+    report.repairTree=treeSummary(tree);save();
+   }else if(!patchAccepted&&!check.receipt.pass){
+    report.unresolvedNodes.push({id:node.id,depth:node.depth,
+     reason:patchRejection});
+   }
   }
-  // Thinking ON is *last resort* and receives a narrower residual failure
-  // set, not the full original multi-error task. No extra retry on its failure.
+  // Thinking ON is reserved for remaining public failures *after*
+  // exhaustive traversable OFF nodes, if the same compute budget still
+  // permits its full 32K completion reservation.
   if(!check.receipt.pass){
-   const fix=await callModel('targeted_on_residual_public_remediation',{
-    incident:'The original historical AAU defect still has public failures after Kimi thinking-OFF decomposition and two sequential focused 4K repairs. Fix only the remaining failures while retaining all already-passing behavior.',
-    originalSource:base,
-    currentCandidate:candidate.code,
-    currentCandidateSha256:digest(candidate.code),
-    initialModelPlan:plan,
-    focusedTasks,
-    focusedNodeResults:report.focusedNodeResults.map(x=>({
-     node:x.node,accepted:x.accepted,reason:x.reason,
-     beforePublicPassed:x.beforePublicPassed,afterPublicPassed:x.afterPublicPassed
-    })),
-    remainingPublicFailures:check.publicFeedback,
-    instruction:'Return one JSON object with exact unique source-span replacements and diagnosis. Preserve existing accepted response behavior, token and finish-reason receipts, sanitized per-call diagnostic reports, no duplicate ledger writes, and never disclose provider secrets or retry ambiguous paid calls. Do not touch hidden tests.'
+   const fix=await callModel('on_residual_after_off_tree',{
+    incident:'Kimi has independently traversed the budget-allowed OFF repair tree. Fix remaining real public AAU diagnostic violations without regressing the accepted response.',
+    originalSource:base,currentCandidate:candidate.code,
+    publicFailures:check.publicFeedback,
+    treeSummary:treeSummary(tree),
+    unresolvedNodes:report.unresolvedNodes,
+    instruction:'Return one JSON object with only model-authored exact unique source-span replacements and optional diagnosis. Obey public expected status categories, retain sanitized per-call finish/token/category receipt, never persist private model errors or introduce paid-call retries.'
    },true);
    const repaired=applyModelPatch(candidate.code,fix);
    const verified=runPublicVerification(repaired.code,'public');
-   report.decisions.push({phase:'targeted_on_residual_remediation',
-    spans:repaired.spans,publicPassed:verified.receipt.pass});
-   candidate=repaired;
-   check=verified;
+   const verdict=focusedPatchDecision(check.receipt,verified.receipt);
+   report.decisions.push({phase:'thinking_on_after_tree',
+    accepted:verdict.accept,reason:verdict.reason,spans:repaired.spans});
+   if(verdict.accept){candidate=repaired;check=verified;}
   }
  }
  if(!check.receipt.pass){
