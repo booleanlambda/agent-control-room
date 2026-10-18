@@ -55,7 +55,8 @@ export function inspectV28ProviderResponse(stage,httpStatus,body,bodyParsed=true
   receipt.finalSyntaxOffset=meta.syntaxOffset;
   receipt.finalRecoveryStrategy=meta.recoveryStrategy;
   receipt.finalRecoveryResult=meta.recoveryResult;
-  if(meta.rawSyntax==='invalid'&&meta.recoveryResult!=='accepted'){
+  if(meta.rawSyntax==='invalid'&&
+     !['accepted','parsed_invalid_shape'].includes(meta.recoveryResult)){
    receipt.contentJson='invalid';return result('MALFORMED_MODEL_JSON');
   }
   answer=parsed.answer;
