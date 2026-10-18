@@ -44,7 +44,8 @@ test('full V27 research thread uses centralized router and unchanged public + hi
  assert.match(src,/temperature:cfg.temperature/);
  assert.match(src,/cfg.max_tokens/);
  assert.match(src,/cfg.timeoutMs/);
- assert.match(src,/kimiResponseAcceptable\(stage,choice\)/);
+ const d=readFileSync(new URL('./provider-response-diagnostics.mjs',import.meta.url),'utf8');
+ assert.match(d,/kimiResponseAcceptable\(stage,choice\)/);
  assert.match(src,/thinkingOnlyDuringRepair=/);
  assert.match(src,/state.thinkingReceipt/);
  assert.match(src,/const answer=await model\(label,attempt,state/);
