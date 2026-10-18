@@ -61,7 +61,8 @@ test('real thread forbids skipping parent, commits each node after full ancestor
 test('bounded remediation uses model-authored unique-span patches, restores earlier constraints, never tests hidden before final depth',()=>{
  const s=read('live.mjs');
  assert.match(s,/code\.split\(old\)\.length-1!==1/);
- assert.match(s,/state\.repairCounts\?\.\[i\]\?\?0\)>=2/);
+ assert.match(s,/remainingPatchSlots\(state,i\)/);
+ assert.match(s,/recoveryAfterFailedVerification\(state,i\)/);
  assert.match(s,/previousInvariants:LEVELS\.slice\(0,i\)/);
  assert.match(s,/if\(i===9\)/);
  assert.match(s,/for\(const input of hiddenCases\)/);

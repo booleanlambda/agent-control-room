@@ -1,0 +1,40 @@
+name: AAU V28 Fixed 32K 4K Budgets and Decomposition Verification
+
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/kimi-recursion-repair-thinking-v27
+    paths:
+      - 'experiments/kimi-recursion-v24/**'
+      - '.github/workflows/kimi-budget-decompose-v28.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  offline-budget-fallback-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check all new and modified modules
+        run: |
+          node --check experiments/kimi-recursion-v24/budget-recovery.mjs
+          node --check experiments/kimi-recursion-v24/thinking-router.mjs
+          node --check experiments/kimi-recursion-v24/live.mjs
+          node --check experiments/kimi-recursion-v24/budget-recovery.test.mjs
+      - name: Prove 32K ON 4K OFF and bounded durable fallback without any API calls
+        run: |
+          node --test experiments/kimi-recursion-v24/budget-recovery.test.mjs
+          node --test experiments/kimi-recursion-v24/thinking-router.test.mjs
+          node --test experiments/kimi-recursion-v24/depth.test.mjs
+      - name: Verify public behavioral gates still hold in offline isolated Docker
+        run: |
+          docker info --format '{{.ServerVersion}}'
+          node --test experiments/kimi-recursion-v24/behavioral-gate.test.mjs
+        env:
+          AAU_PYTHON_SANDBOX: 'yes'
