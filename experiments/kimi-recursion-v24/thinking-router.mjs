@@ -11,8 +11,8 @@ export function kimiStageRequest(stage,requestedMaxTokens){
  const mode=kimiStageMode(stage);
  return Object.freeze({model:'kimi-k2.6',thinking:Object.freeze({type:mode}),
   temperature:mode==='enabled'?1.0:0.6,
-  max_tokens:mode==='enabled'?Math.max(requestedMaxTokens,9000):requestedMaxTokens,
-  timeoutMs:mode==='enabled'?280000:175000});
+  max_tokens:mode==='enabled'?Math.max(requestedMaxTokens,16000):requestedMaxTokens,
+  timeoutMs:mode==='enabled'?330000:175000});
 }
 export function kimiResponseAcceptable(stage,choice){
  const mode=kimiStageMode(stage);
