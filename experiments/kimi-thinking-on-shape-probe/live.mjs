@@ -1,7 +1,10 @@
 // Research-only single live Kimi thinking-ON response-shape probe.
 // Preserve *only* sanitized structural/provider metadata; never raw reasoning or final text.
 // Research evaluation only; no production writes.
-import {readFileSync,writeFileSync} from 'node:fs';
+import {readFileSync,writeFileSync,mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {inspectThinkingOnFinalJson} from '../kimi-recursion-v24/thinking-on-json-syntax.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {kimiStageRequest} from '../kimi-recursion-v24/thinking-router.mjs';
 import {inspectV28ProviderResponse,inspectV28TransportFailure} from '../kimi-recursion-v24/provider-response-diagnostics.mjs';
