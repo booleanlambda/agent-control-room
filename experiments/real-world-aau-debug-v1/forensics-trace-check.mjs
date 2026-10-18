@@ -40,6 +40,7 @@ export function inspectForensicsReport(report){
    issues.push('MODEL_DECISION_HAS_NO_CALL');
  }
  for(const c of calls){
+  if(c.status==='model_decision_forensics_invalid')issues.push('PROVIDER_RESPONSE_REJECTED_MISSING_FORENSICS');
   if(c.status==='accepted'){
    if(!decisionById.has(c.forensicDecisionId)||decisionById.get(c.forensicDecisionId)?.stage!==c.stage)
     issues.push('ACCEPTED_PROVIDER_CALL_LACKS_JUSTIFICATION');
