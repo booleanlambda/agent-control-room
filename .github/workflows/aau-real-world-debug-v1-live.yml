@@ -1,11 +1,10 @@
-name: AAU Kimi Real Historical Bug Autonomous Repair
+name: AAU Kimi Tool Selection — Independent One-Shot Challenge
 on:
   pull_request:
     types: [opened]
     branches:
       - experiment/kimi-v28-transport-cause-live-v2-20261018
     paths:
-      - 'experiments/real-world-aau-debug-v1/**'
       - '.github/workflows/aau-real-world-debug-v1-live.yml'
 permissions:
   contents: read
@@ -13,79 +12,62 @@ concurrency:
   group: aau-serial-logistics-model-slot
   cancel-in-progress: false
 jobs:
-  live-real-bug:
+  kimi-tool-selection:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    env:
-      AAU_REAL_WORLD_DEBUG: 'yes'
-      AAU_FORENSICS_SMOKE: 'no'
-      AAU_ALTERNATIVES_SMOKE: 'yes'
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install scoped Undici transport for research-only thinking-ON calls
-        run: npm install --no-save --ignore-scripts --no-package-lock --no-audit --no-fund undici@7.29.1
-      - name: Pin unchanged historical source and independently frozen oracle before paid Kimi calls
-        run: |
-          set -euo pipefail
-          test "$(git hash-object experiments/real-world-aau-debug-v1/legacy-model-source.txt)" = "d9b869626643dabe4fe7ea7447aa19d143b3e6ab"
-          test "$(git hash-object experiments/real-world-aau-debug-v1/verify-candidate.mjs)" = "882e65f3d27a28f1a3134fa0a53a56e137316b78"
-          echo "Immutable historical input and verifier blobs verified against prior forensic baseline."
-      - name: Freeze real historical source and validate independent test runner
-        run: |
-          node --check experiments/real-world-aau-debug-v1/live.mjs
-          node --check experiments/real-world-aau-debug-v1/plan-parser.mjs
-          node --test experiments/real-world-aau-debug-v1/plan-parser.test.mjs
-          node --check experiments/real-world-aau-debug-v1/output-normalizer.mjs
-          node --test experiments/real-world-aau-debug-v1/output-normalizer.test.mjs
-          node --check experiments/real-world-aau-debug-v1/output-normalizer.mjs
-          node --test experiments/real-world-aau-debug-v1/output-normalizer.test.mjs
-          node --check experiments/real-world-aau-debug-v1/public-failure-feedback.mjs
-          node --test experiments/real-world-aau-debug-v1/public-failure-feedback.test.mjs
-          node --check experiments/real-world-aau-debug-v1/remediation-exhaustion-route.mjs
-          node --test experiments/real-world-aau-debug-v1/remediation-exhaustion-route.test.mjs
-          node --check experiments/real-world-aau-debug-v1/fallback-continuation.mjs
-          node --test experiments/real-world-aau-debug-v1/fallback-continuation.test.mjs
-          node --check experiments/real-world-aau-debug-v1/early-focused-progress.mjs
-          node --test experiments/real-world-aau-debug-v1/early-focused-progress.test.mjs
-          node --check experiments/real-world-aau-debug-v1/progress-budget-tree.mjs
-          node --test experiments/real-world-aau-debug-v1/progress-budget-tree.test.mjs
-          node --check experiments/real-world-aau-debug-v1/model-node-validation.mjs
-          node --test experiments/real-world-aau-debug-v1/model-node-validation.test.mjs
-          node --check experiments/real-world-aau-debug-v1/decision-forensics.mjs
-          node --test experiments/real-world-aau-debug-v1/decision-forensics.test.mjs
-          node --test experiments/real-world-aau-debug-v1/decision-forensics-integration.test.mjs
-          node --check experiments/real-world-aau-debug-v1/forensics-trace-check.mjs
-          node --test experiments/real-world-aau-debug-v1/forensics-trace-check.test.mjs
-          node --check experiments/real-world-aau-debug-v1/forensics-verdict.mjs
-          node --test experiments/aau-provider-transport/headers-timeout.test.mjs
-          node --test experiments/aau-provider-transport/transport-policy.test.mjs
-          node --test experiments/aau-provider-transport/scoped-benchmark.test.mjs
-          node --check experiments/aau-provider-transport/transport-policy.mjs
-          node --check experiments/real-world-aau-debug-v1/verify-candidate.mjs
-          test -s experiments/real-world-aau-debug-v1/legacy-model-source.txt
-      - name: Verify Docker secure offline evaluation
-        run: |
-          docker info --format '{{.ServerVersion}}'
-          docker pull node:22-alpine
-      - name: Run one bounded real-world Kimi diagnosis and remediation trial
-        working-directory: experiments/real-world-aau-debug-v1
+      - name: Exactly one real Kimi thinking-OFF tool-planning request
         env:
           MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
-        run: node live.mjs
-      - name: Independently audit live model decisions against provider and executable-test trail
-        if: always()
-        working-directory: experiments/real-world-aau-debug-v1
-        run: node forensics-verdict.mjs
-      - name: Retain model route, independent scores and sanitized call evidence
+        run: |
+          node --input-type=module <<'JAVASCRIPT'
+          import {createHash} from 'node:crypto';
+          import {mkdirSync,writeFileSync} from 'node:fs';
+          const sha=x=>createHash('sha256').update(x).digest('hex');
+          const challenge="A coastal city operates an 80-junction drinking-water network with 65 pipes, 14 pressure sensors, two flow meters, a GIS pipe/valve map, and 30 days of 1-minute sensor readings. Between 01:00 and 04:00 its apparent water loss rises by 18%. Pump schedules change nightly; sensor data have gaps and timestamp drift. There may be two leaks in different pipe segments. A hospital branch must not lose pressure; the utility can add at most two temporary sensors and conduct only one 20-minute valve isolation test. The city needs a ranked shortlist of likely leaking segments, uncertainty, a safe validation plan, and an estimated operational/cost tradeoff. No underlying data files or API credentials have been supplied.";
+          const prompt="You are coordinating a low-cost tool-assisted system, not answering by intuition. Given the challenge below, decide which specific tools, programs, data sources and computational methods the system would need to solve it. Do not try to solve it or pretend you accessed data. Choose tool capabilities based on suitability, cost, and safety, not a preset list. Specify tool name or class, exact role, required inputs and expected outputs, dependency order, a low-cost fallback when applicable, how to verify correctness independently, what cannot be established without real data, and human operational safeguards. Reply in a structured JSON object with arrays named tools, steps, prerequisites, validation, risks and a brief strategy.\\n\\nCHALLENGE:\\nA coastal city operates an 80-junction drinking-water network with 65 pipes, 14 pressure sensors, two flow meters, a GIS pipe/valve map, and 30 days of 1-minute sensor readings. Between 01:00 and 04:00 its apparent water loss rises by 18%. Pump schedules change nightly; sensor data have gaps and timestamp drift. There may be two leaks in different pipe segments. A hospital branch must not lose pressure; the utility can add at most two temporary sensors and conduct only one 20-minute valve isolation test. The city needs a ranked shortlist of likely leaking segments, uncertainty, a safe validation plan, and an estimated operational/cost tradeoff. No underlying data files or API credentials have been supplied.";
+          const system='You are an engineering planner responsible for selecting tools. You have no actual files, tools, test results, or network resources in this single planning call. Do not fabricate measurements. Respond with a JSON object.';
+          const messages=[{role:'system',content:system},{role:'user',content:prompt}];
+          mkdirSync('evidence/tool-selection',{recursive:true});
+          const root={challenge,promptSha256:sha(prompt),model:'kimi-k2.6',thinking:'disabled',max_tokens:4096,temperature:0.6,provider:'Moonshot',timestamp:new Date().toISOString(),responses:[]};
+          const key=String(process.env.MOONSHOT_API_KEY||'').trim();
+          if(!key){root.status='PROVIDER_SECRET_MISSING';writeFileSync('evidence/tool-selection/response.json',JSON.stringify(root,null,2));throw Error(root.status)}
+          const ctrl=AbortSignal.timeout(120000);
+          let res;
+          try{
+            res=await fetch('https://api.moonshot.ai/v1/chat/completions',{
+              method:'POST',signal:ctrl,redirect:'manual',
+              headers:{authorization:'Bearer '+key,'content-type':'application/json',accept:'application/json'},
+              body:JSON.stringify({model:'kimi-k2.6',thinking:{type:'disabled'},temperature:0.6,response_format:{type:'json_object'},max_tokens:4096,stream:false,messages})
+            });
+          }catch(e){
+            root.status=e?.name==='TimeoutError'?'TRANSPORT_TIMEOUT':'TRANSPORT_EXCEPTION';
+            writeFileSync('evidence/tool-selection/response.json',JSON.stringify(root,null,2));throw Error(root.status);
+          }
+          root.httpStatus=res.status;
+          if(!res.ok){root.status='PROVIDER_HTTP_ERROR';writeFileSync('evidence/tool-selection/response.json',JSON.stringify(root,null,2));throw Error(root.status)}
+          const j=await res.json();
+          const choice=j?.choices?.[0];
+          const content=choice?.message?.content??null;
+          root.status='received';root.providerFinishReason=choice?.finish_reason??null;
+          root.tokenUsage=j?.usage??null;
+          root.responseContent=content;
+          root.responseSha256=typeof content==='string'?sha(content):null;
+          try{root.parsed=JSON.parse(content);root.jsonValid=true}catch{root.jsonValid=false}
+          writeFileSync('evidence/tool-selection/response.json',JSON.stringify(root,null,2));
+          console.log('AAU_TOOL_CHALLENGE='+JSON.stringify({promptSha256:root.promptSha256,challenge}));
+          console.log('AAU_KIMI_TOOL_SELECTION='+JSON.stringify({status:root.status,finishReason:root.providerFinishReason,usage:root.tokenUsage,rawContent:root.responseContent,rawContentSha256:root.responseSha256,jsonValid:root.jsonValid}));
+          if(!root.jsonValid||root.providerFinishReason!=='stop')process.exitCode=2;
+          JAVASCRIPT
+      - name: Retain exact original Kimi response and provider receipt
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: aau-real-world-historical-provider-debug-proof
-          path: |
-            experiments/real-world-aau-debug-v1/real-world-debug-evidence.json
-            experiments/real-world-aau-debug-v1/forensic-audit-summary.json
+          name: aau-kimi-tool-selection-raw-response
+          path: evidence/tool-selection/response.json
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 14
