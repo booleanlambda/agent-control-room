@@ -7,6 +7,7 @@ on:
       - experiment/kimi-realbug-rerun-thinking-on-fix-20261018
       - experiment/aau-scoped-undici-live-rerun-20261018
       - experiment/aau-multi-failure-remediation-feedback-20261018
+      - experiment/aau-on-exhaustion-off-decomposition-live-20261018
     paths:
       - 'experiments/real-world-aau-debug-v1/**'
       - '.github/workflows/aau-real-world-debug-v1-static.yml'
@@ -34,6 +35,8 @@ jobs:
           node --test experiments/real-world-aau-debug-v1/public-failure-feedback.test.mjs
           node --check experiments/real-world-aau-debug-v1/remediation-exhaustion-route.mjs
           node --test experiments/real-world-aau-debug-v1/remediation-exhaustion-route.test.mjs
+          node --check experiments/real-world-aau-debug-v1/fallback-continuation.mjs
+          node --test experiments/real-world-aau-debug-v1/fallback-continuation.test.mjs
           node --check experiments/kimi-recursion-v24/thinking-on-json-syntax.mjs
           node --test experiments/kimi-recursion-v24/thinking-on-json-syntax.test.mjs
           node --test experiments/kimi-recursion-v24/provider-response-diagnostics.test.mjs
