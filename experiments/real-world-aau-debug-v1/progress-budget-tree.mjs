@@ -52,8 +52,9 @@ export function addChildRepairNodes(tree,parent,tasks){
     new Set(children.map(x=>x.fingerprint)).size!==children.length)
   return {added:0,reason:'DUPLICATED_OR_RECURSIVE_NODE'};
  for(const x of children)tree.seen.add(x.fingerprint);
- // Children first so the failing subproblem is addressed before unrelated work.
- tree.queue.unshift(...children);
+ // Breadth-first fairness: evaluate all independent root/sibling failures before
+ // spending the entire finite budget subdividing one still-failing branch.
+ tree.queue.push(...children);
  return {added:children.length,reason:'CHILD_DECOMPOSITION_QUEUED'};
 }
 export function treeSummary(tree){
