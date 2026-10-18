@@ -56,9 +56,9 @@ async function model(stage,attempt,state,question,max_tokens){
  outputReservations+=reserve;
  const pause=Math.max(0,lastStart+23000-Date.now());if(pause)await wait(pause);
  lastStart=Date.now();
- let requestDeadlineFired=false,httpHeadersReceived=false;
+ let requestDeadlineFired=false,httpHeadersReceived=false,providerResponseSettled=false;
  const ctrl=new AbortController(),timer=setTimeout(()=>{
-  requestDeadlineFired=true;ctrl.abort();
+  if(!providerResponseSettled){requestDeadlineFired=true;ctrl.abort()}
  },cfg.timeoutMs);
  let outcome=null,durableWriteAttempted=false,durableWriteCompleted=false;
  try{
@@ -70,6 +70,8 @@ async function model(stage,attempt,state,question,max_tokens){
   httpHeadersReceived=true;
   let bodyParsed=true;
   const j=await res.json().catch(()=>{bodyParsed=false;return null});
+  // The timeout applies to the provider, not later ledger commits.
+  providerResponseSettled=true;clearTimeout(timer);
   outcome=inspectV28ProviderResponse(stage,res.status,j,bodyParsed);
   const tokens=outcome.receipt.providerTokens;
   if(tokens!==null){state.providerTokens+=tokens;report.providerTokens=state.providerTokens}
