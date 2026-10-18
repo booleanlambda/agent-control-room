@@ -19,7 +19,7 @@ test('paid model call budget not widened and no catch-based resend',()=>{
  assert.match(code,/const MAX_CALLS=3/);
  assert.match(code,/thinking\?32768:4096/);
  assert.match(code,/stream:false/);
- assert.match(code,/receipt\.status='sent_or_uncertain'/);
+ assert.match(code,/status:'sent_or_uncertain'/);
  assert.equal((code.match(/await providerFetch\(/g)||[]).length,1);
  assert.equal((code.match(/await callModel\(/g)||[]).length,3);
 });
