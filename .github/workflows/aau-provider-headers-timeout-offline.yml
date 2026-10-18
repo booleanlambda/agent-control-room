@@ -23,6 +23,8 @@ jobs:
         run: |
           node --check experiments/aau-provider-transport/headers-timeout.test.mjs
           node --test experiments/aau-provider-transport/headers-timeout.test.mjs
+          node --test experiments/aau-provider-transport/transport-policy.test.mjs
+          node --check experiments/real-world-aau-debug-v1/live.mjs
       - name: Confirm original benchmark preserved no explicit fetch dispatcher
         run: |
           node --input-type=module -e "
