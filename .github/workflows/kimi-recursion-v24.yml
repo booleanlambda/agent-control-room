@@ -1,0 +1,55 @@
+name: AAU V24 Kimi Deep Ten-Level Cognitive Remediation
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - experiment/kimi-one-thread-cognition-v23
+    paths:
+      - 'experiments/kimi-recursion-v24/**'
+      - '.github/workflows/kimi-recursion-v24.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  ten-level-single-kimi-thread:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      AAU_V24_RESEARCH: 'yes'
+      AAU_PYTHON_SANDBOX: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check exact ten-level independent oracle, nested proof, and remediation limits before model calls
+        run: |
+          node --check experiments/kimi-recursion-v24/benchmark.mjs
+          node --check experiments/kimi-recursion-v24/ledger.mjs
+          node --check experiments/kimi-recursion-v24/live.mjs
+          node --test experiments/kimi-recursion-v24/depth.test.mjs
+      - name: Install pinned AMQP + Neon drivers without lifecycle scripts
+        run: npm install --no-save --ignore-scripts amqplib@0.10.9 pg@8.16.3
+      - name: Verify isolated offline Docker Python executor exists before sending paid model calls
+        run: docker info --format '{{.ServerVersion}}'
+      - name: Live single RabbitMQ thread, ten nested Kimi reasoning levels and at most two repairs per failure
+        working-directory: experiments/kimi-recursion-v24
+        env:
+          AMQP_URL: ${{ secrets.AMQP }}
+          NEON_V19_DATABASE_URL: ${{ secrets.NEON_V19_DATABASE_URL }}
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: node live.mjs
+      - name: Retain honest passed, failed, or censored depth and model call provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-kimi-deep-recursion-v24-evidence
+          path: experiments/kimi-recursion-v24/kimi-recursion-v24-evidence.json
+          if-no-files-found: warn
+          retention-days: 7
