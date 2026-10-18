@@ -26,19 +26,17 @@ export function stageProblem(depth,variant=0){
   p.controls.find(x=>x.id==='I').cost+=variant%3;
  }
  // Reveal incremental schema only after the corresponding depth.
- p.requiredTags=depth>=0?['audit','privacy']: [];
+ p.requiredTags=['audit','privacy','rollback','export','analytics'];
  p.mandatory=depth>=1?['D']:[];
- if(depth<2)p.requiredTags=['audit','privacy'];
- else p.requiredTags=['audit','privacy','rollback','export','analytics'];
- if(depth<3)for(const c of p.controls)c.requires=[];
- if(depth<4)for(const c of p.controls)c.excludes=[];
- p.atLeast=depth>=5?[{tag:'resilience',count:1},{tag:'core',count:1}]:[];
- p.atMost=depth>=6?[{tag:'console',count:1},{tag:'monitor',count:2}]:[];
- p.anyOf=depth>=7?[['B','F','K'],['C','H']]:[];
- p.budget=depth>=8?45:999;
+ if(depth<2)for(const c of p.controls)c.requires=[];
+ if(depth<3)for(const c of p.controls)c.excludes=[];
+ p.atLeast=depth>=4?[{tag:'resilience',count:1},{tag:'core',count:1}]:[];
+ p.atMost=depth>=5?[{tag:'console',count:1},{tag:'monitor',count:2}]:[];
+ p.anyOf=depth>=6?[['B','F','K'],['C','H']]:[];
+ p.budget=depth>=7?45:999;
  p.exactly=depth>=8?[{tag:'console',count:1}]:[];
  p.requiresAny=depth>=9?[{id:'H',oneOf:['B','F','K']}]:[];
- if(variant===2&&depth>=8)p.budget=23; // Intentionally valid infeasibility test; no fault injection.
+ if(variant===2&&depth>=7)p.budget=23; // Intentionally valid infeasibility test; no fault injection.
  if(variant===4&&depth>=8)p.exactly=[{tag:'console',count:0}];
  return p;
 }
