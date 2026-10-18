@@ -15,11 +15,15 @@ test('existing application deadlines unchanged and observed',()=>{
  assert.match(code,/receipt\.httpHeadersReceived=headersReceived/);
  assert.match(code,/receipt\.requestDeadlineFired=requestDeadlineFired/);
 });
-test('bounded five distinct stage calls and no catch-based resend',()=>{
- assert.match(code,/const MAX_CALLS=MAX_RESEARCH_CALLS/);
+test('bounded six distinct stages, two OFF focused nodes, no catch-based resend',()=>{
+ assert.match(code,/const MAX_CALLS=EARLY_REPAIR_MAX_CALLS/);
  assert.match(code,/thinking\?32768:4096/);
  assert.match(code,/stream:false/);
  assert.match(code,/status:'sent_or_uncertain'/);
  assert.equal((code.match(/await providerFetch\(/g)||[]).length,1);
  assert.equal((code.match(/await callModel\(/g)||[]).length,5);
+ assert.match(code,/i<FOCUSED_OFF_NODES/);
+ assert.match(code,/const focusedTasks=parseModelOwnedPlan\(await callModel/);
+ assert.match(code,/const verdict=focusedPatchDecision\(before.receipt,trialCheck.receipt\)/);
+ assert.ok(code.indexOf("'early_decompose_public_failures'")<code.indexOf("'targeted_on_residual_public_remediation'"));
 });
