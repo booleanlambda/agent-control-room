@@ -1,3 +1,4 @@
+import {verifyAlternativeDescriptions} from './alternative-branches.mjs';
 import {createHash} from 'node:crypto';
 
 // Read-only verification of the recorded forensic chain and decisions.
@@ -30,6 +31,7 @@ function inspectAlternativeGroups(report,events,decisions,calls){
      e.branchProposalSha256===proposalHash))
    issues.push('ALTERNATIVE_PROPOSAL_HASH_MISMATCH');
   if(summary.baselineSha256!==g.baselineCandidateSha256||
+    !verifyAlternativeDescriptions(summary)||
     new Set(summary.branches.map(x=>x.approachSha256)).size!==3)
    issues.push('ALTERNATIVE_DISTINCTNESS_OR_BASELINE_INVALID');
   const selected=events.filter(e=>e.kind==='ALTERNATIVE_SELECTED'&&e.branchGroupId===groupId);
