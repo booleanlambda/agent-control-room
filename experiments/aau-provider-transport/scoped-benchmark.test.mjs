@@ -27,7 +27,7 @@ test('no fixed call ceiling; full recursive OFF tree guarded by global token bud
  assert.equal((code.match(/await providerFetch\(/g)||[]).length,1);
  assert.match(code,/while\(tree\.queue\.length>0&&\!check\.receipt\.pass\)/);
  assert.match(code,/takeRepairNode\(tree\)/);
- assert.match(code,/addChildRepairNodes\(tree,node,children\)/);
+ assert.match(code,/addChildRepairNodes\(tree,node,childSelection\.tasks\)/);
  assert.match(code,/const verdict=focusedPatchDecision\(initialPublic\.receipt,trialCheck\.receipt\)/);
  assert.ok(code.indexOf("'decompose_public_failure_tree'")<code.indexOf("'on_residual_after_off_tree'"));
 });
