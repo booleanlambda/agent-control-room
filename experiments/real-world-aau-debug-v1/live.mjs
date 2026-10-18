@@ -227,7 +227,18 @@ function runPublicVerification(candidate,suite='public'){
    expectedStatus:suite==='public'?x.expectedStatus??null:null,
    exceptionKind:x.exceptionKind??null})),
   candidateSha256:digest(candidate),runnerErrored:!!p.error,stderrPresent:!!p.stderr};
- report.tests.push(receipt);save();
+ report.tests.push(receipt);
+ const stageName=suite==='public'?'verify_public':'verify_hidden';
+ for(const outcome of receipt.cases){
+  audit({kind:outcome.passed?'CASE_TEST_PASSED':'CASE_TEST_FAILED',
+   stage:stageName,caseId:suite==='public'?outcome.name:null,
+   decisionId:currentDecision(),candidateSha256:receipt.candidateSha256,
+   reasonCode:outcome.passed?'VERIFIED_PASS':'INDEPENDENT_TEST_FAILED'});
+ }
+ audit({kind:'VERIFICATION_SUITE_COMPLETED',stage:stageName,
+  decisionId:currentDecision(),candidateSha256:receipt.candidateSha256,
+  verification:{verdict:receipt.pass?'PASS':'FAIL',suite,
+   casesExecuted:receipt.cases.length,casesPassed:receipt.cases.filter(x=>x.passed).length}});
  return {receipt,publicFeedback};
 }
 try{
@@ -237,7 +248,10 @@ try{
   task:'Inspect code. Identify at least 2 distinct causal subproblems and independent acceptance criteria. Choose the decomposition yourself (2 to 5 tasks). Return {tasks:[{issue,acceptance},...]}. Do not propose code in this stage.',
   originalSource:base
  }));
- report.planGeneratedByModel=true;report.decisions.push({phase:'plan',tasks:plan});save();
+ report.planGeneratedByModel=true;
+ report.decisions.push({phase:'plan',tasks:summarizePlan(plan),decisionId:currentDecision()});
+ resolveModelDecision(report.forensics,currentDecision(),{outcome:'DECOMPOSITION_QUEUED'});
+ audit({kind:'INITIAL_PLAN_ACCEPTED',stage:'discover_and_decompose',decisionId:currentDecision()});
  const proposal=await callModel('implement_model_generated_plan',{
   incident:'Fix the real documented provider receipt loss without changing model thinking policy, provider retry policy, stage sequencing or business logic. Only modify the supplied frozen function.',
   originalSource:base,modelGeneratedPlan:plan,
@@ -245,7 +259,9 @@ try{
   publicAcceptance:['One presend journal, no automatic paid retry','accepted responses still return normal JSON','true ON length is still special','rejected provider response retains finish/tokens/category','manual hold for non-length failures','no duplicate ledger writes on storage failures']
  });
  let candidate=applyModelPatch(base,proposal);
- report.decisions.push({phase:'implementation',spans:candidate.spans,diagnosis:typeof proposal.diagnosis==='string'?proposal.diagnosis.slice(0,650):null});
+ report.decisions.push({phase:'implementation',spans:candidate.spans,decisionId:currentDecision()});
+ audit({kind:'MODEL_PATCH_BUILT',stage:'implement_model_generated_plan',
+  decisionId:currentDecision(),candidateSha256:digest(candidate.code)});
  let check=runPublicVerification(candidate.code,'public');
  if(!check.receipt.pass){
   // Kimi chooses root subproblems; no deterministic patch or hidden tests.
@@ -263,14 +279,21 @@ try{
   if(rootSelection.tasks.length<2)throw Error('INSUFFICIENT_VALID_MODEL_NODES');
   const rootTasks=rootSelection.tasks;
   const tree=createRepairTree(rootTasks);
-  report.modelOwnedEarlyTasks=rootTasks;
-  report.decisions.push({phase:'public_failure_tree',tasks:rootTasks});
+  report.modelOwnedEarlyTasks=summarizePlan(rootTasks);
+  report.decisions.push({phase:'public_failure_tree',tasks:summarizePlan(rootTasks),
+   decisionId:currentDecision()});
+  resolveModelDecision(report.forensics,currentDecision(),{outcome:'DECOMPOSITION_QUEUED'});
+  audit({kind:'ROOT_REPAIR_TREE_CREATED',stage:'decompose_public_failure_tree',
+   decisionId:currentDecision()});
   report.repairTree=treeSummary(tree);save();
   // Iterate the model-defined tree until the actual public oracle accepts,
   // no nodes remain, or the finite compute budget prevents another call.
   // There is no two-node truncation and no hard model-call-count threshold.
   while(tree.queue.length>0&&!check.receipt.pass){
    const node=takeRepairNode(tree);
+   audit({kind:'REPAIR_NODE_SELECTED',stage:'repair_tree_node_'+node.id,
+    nodeId:node.id,parentId:Number.isInteger(node.parent)?node.parent:null,
+    candidateSha256:digest(candidate.code)});
    report.repairTree=treeSummary(tree);save();
    const initialPublic=check;
    let patchAccepted=false,patchRejection='NOT_ATTEMPTED';
@@ -278,7 +301,8 @@ try{
     const answer=await callModel('repair_tree_node_'+node.id,{
      incident:'One narrow child node in the original V28 provider-diagnostic software repair. Fix this node only, based on independent public proof.',
      currentCandidate:candidate.code,currentCandidateSha256:digest(candidate.code),
-     node:{id:node.id,depth:node.depth,issue:node.issue,acceptance:node.acceptance},
+     node:{id:node.id,parentId:Number.isInteger(node.parent)?node.parent:null,
+      depth:node.depth,issue:node.issue,acceptance:node.acceptance},
      publicFailures:check.publicFeedback,
      instruction:'Return JSON {replacements:[{old:EXACT UNIQUE SOURCE SPAN in currentCandidate,replacement:NEW SOURCE},...],diagnosis:string}. Only model-authored edits, at most 3 spans. Preserve all earlier passing cases. Do not edit tests, expose private errors, or replay paid requests.'
     },false);
