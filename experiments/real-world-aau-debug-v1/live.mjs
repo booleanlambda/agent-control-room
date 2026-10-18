@@ -294,7 +294,7 @@ try{
   report.smokeOnly=true;
   report.candidateSha256=digest(candidate.code);
   audit({kind:'FORENSICS_SMOKE_STOP',stage:'execution_final',reasonCode:'SMOKE_STOP_AFTER_PUBLIC_TEST'});
- }else{
+ }else if(!check.receipt.pass){
   const altResult=await runThreeAlternatives({candidate,check,triggerStage:'implement_model_generated_plan'});
   candidate=altResult.candidate;check=altResult.check;
   if(process.env.AAU_ALTERNATIVES_SMOKE==='yes'){
@@ -441,6 +441,10 @@ try{
     accepted:verdict.accept,reason:verdict.reason,spans:repaired.spans,
     decisionId:currentDecision()});
    if(verdict.accept){candidate=repaired;check=verified;}
+   else if(!check.receipt.pass){
+    const fallback=await runThreeAlternatives({candidate,check,triggerStage:'on_residual_after_off_tree'});
+    candidate=fallback.candidate;check=fallback.check;
+   }
   }
   }
  }
