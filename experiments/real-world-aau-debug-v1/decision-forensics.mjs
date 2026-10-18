@@ -30,7 +30,20 @@ export const MODEL_FORENSICS_INSTRUCTIONS=
  '(received, malformed, http_error, timeout) or null. Cite only evidence supplied to you; '+
  'acknowledge missing data as uncertainty. Name at least one alternative and why you declined it. '+
  'Keep each statement 1-2 sentences; no step-by-step hidden reasoning, credentials, '+
- 'private reasoning_content, source code, quoted error payloads or URLs.';
+ 'private reasoning_content, source code, quoted error payloads or URLs. '+
+ 'STRICT VALIDATION: choice, rationale, expectedOutcome and uncertainty must each be '+
+ 'plain strings of at least 12 visible characters. Max lengths: choice 240, rationale 420, '+
+ 'expectedOutcome 280, uncertainty 240. Do not answer uncertainty with a one-word None. '+
+ 'Use keys EXACTLY as spelled and make evidence and alternatives arrays of JSON objects. '+
+ 'Example structure (illustrative only): {"decisionForensics":{"choice":"Inspect the failed public category first.",'+
+ '"rationale":"The supplied public verifier reports a category mismatch.",'+
+ '"evidence":[{"sourceId":"public_verifier","caseId":"malformed",'+
+ '"observation":"A public category assertion did not pass."}],'+
+ '"alternatives":[{"option":"Modify the independent test expectations.",'+
+ '"rejection":"That would weaken the acceptance criteria."}],'+
+ '"expectedOutcome":"The next public test should report the canonical failure category.",'+
+ '"uncertainty":"Other independent test scenarios have not yet been resolved."}}. '+
+ 'Do not copy the example as evidence unless it is supported by the current input.';
 
 // Public diagnostic metadata only. Never copy rejected model field text.
 // Allows an investigator to distinguish missing, too short, overlong,
