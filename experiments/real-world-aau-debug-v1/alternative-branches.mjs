@@ -72,3 +72,12 @@ export function alternativeSummary(state){
    acceptanceSha256:x.acceptanceSha256})),
   attempts:state.records.map(x=>({...x}))};
 }
+
+// Independently verify bounded model-authored descriptions match recorded hashes.
+export function verifyAlternativeDescriptions(summary){
+ if(!Array.isArray(summary?.branches)||summary.branches.length!==3)return false;
+ return summary.branches.every((x,i)=>x.id===i+1&&
+  field(x.approach)===x.approach&&field(x.hypothesis)===x.hypothesis&&
+  field(x.acceptance)===x.acceptance&&sha(x.approach)===x.approachSha256&&
+  sha(x.hypothesis)===x.hypothesisSha256&&sha(x.acceptance)===x.acceptanceSha256);
+}
