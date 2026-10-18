@@ -26,6 +26,8 @@ jobs:
       - name: Freeze real historical source and validate independent test runner
         run: |
           node --check experiments/real-world-aau-debug-v1/live.mjs
+          node --check experiments/real-world-aau-debug-v1/plan-parser.mjs
+          node --test experiments/real-world-aau-debug-v1/plan-parser.test.mjs
           node --check experiments/real-world-aau-debug-v1/verify-candidate.mjs
           test -s experiments/real-world-aau-debug-v1/legacy-model-source.txt
       - name: Verify Docker secure offline evaluation
