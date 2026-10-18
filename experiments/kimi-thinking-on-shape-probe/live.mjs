@@ -97,4 +97,11 @@ try{
  console.log('THINKING_ON_SHAPE_PROBE='+JSON.stringify({
   status:evidence.status,transport:evidence.transport}));
  process.exitCode=2;
-}finally{clearTimeout(timer)}
+}finally{
+ clearTimeout(timer);
+ if(temporaryDirectory!==null){
+  rmSync(temporaryDirectory,{recursive:true,force:true});
+  evidence.tempFinalFileDeleted=true;
+ }
+ save();
+}
