@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 // AAU decision forensics v1: concise MODEL-AUTHORED justifications +
 // deterministic independent runtime observations. Never save reasoning_content,
 // raw prompts, source patches, provider messages, or unverifiable model thoughts.
@@ -73,7 +74,8 @@ export function attachModelDecision(ledger,answer,{stage,nodeId=null,parentId=nu
  const stageId=safeId(stage);
  if(!stageId)return {ok:false,reason:'INVALID_MODEL_FORENSIC_STAGE'};
  const id='decision_'+(ledger.modelDecisions.length+1);
- const entry={id,stage:stageId,nodeId:safeNode(nodeId),parentId:safeNode(parentId),
+ const entry={id,stage:stageId,recordedAt:new Date().toISOString(),
+  nodeId:safeNode(nodeId),parentId:safeNode(parentId),
   requestSha256:safeHash(requestHash),responseSha256:safeHash(responseHash),
   ...parsed.decision,modelStated:true,independentlyVerified:false,
   outcome:'AWAITING_INDEPENDENT_CHECK'};
@@ -91,7 +93,7 @@ export function auditEvent(ledger,{kind,stage,decisionId=null,nodeId=null,parent
   'REJECTED','PENDING','BLOCKED'
  ]);
  const data={
-  seq:ledger.events.length+1,
+  seq:ledger.events.length+1,recordedAt:new Date().toISOString(),
   kind:k,stage:st,
   decisionId:typeof decisionId==='string'&&/^decision_[0-9]{1,5}$/.test(decisionId)?decisionId:null,
   nodeId:safeNode(nodeId),parentId:safeNode(parentId),
@@ -104,6 +106,9 @@ export function auditEvent(ledger,{kind,stage,decisionId=null,nodeId=null,parent
   }:null,
   budget:Number.isSafeInteger(budget)&&budget>=0?budget:null
  };
+ const last=ledger.events[ledger.events.length-1];
+ data.prevHash=last?.hash??'GENESIS';
+ data.hash=createHash('sha256').update(JSON.stringify(data)).digest('hex');
  ledger.events.push(data);
  return data;
 }
