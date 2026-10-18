@@ -11,7 +11,7 @@ import {createLedger} from './ledger.mjs';
 import {reconcileSelectedCost} from './cost-companion.mjs';
 import {behaviorProbesAt} from './behavioral-probes.mjs';
 import {kimiStageRequest,kimiResponseAcceptable} from './thinking-router.mjs';
-import {isKnownThinkingExhaustion,planExhaustion,remainingPatchSlots,parseDecomposition,recoveryAfterFailedVerification} from './budget-recovery.mjs';
+import {planExhaustion,remainingPatchSlots,parseDecomposition,recoveryAfterFailedVerification} from './budget-recovery.mjs';
 import {inspectV28ProviderResponse,classifyV28ThrownError} from './provider-response-diagnostics.mjs';
 if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_V24_RESEARCH!=='yes'||
    process.env.AAU_PYTHON_SANDBOX!=='yes')throw Error('RESEARCH_ONLY');
