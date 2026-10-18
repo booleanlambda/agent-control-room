@@ -119,3 +119,17 @@ test('summary rejection explains which field failed without exposing any field t
  assert.equal(another.fields.rationale.status,'UNSAFE_TEXT');
  assert.equal(JSON.stringify(another).includes('sensitive-value-is-private'),false);
 });
+
+test('field-level redacted rejection diagnostics survive attachModelDecision into runtime receipts',()=>{
+ const ledger=makeForensicLedger();
+ const invalid=structuredClone(good);
+ invalid.decisionForensics.uncertainty='None';
+ const attached=attachModelDecision(ledger,invalid,{stage:'implement_model_generated_plan',
+  requestHash:hash,responseHash:hash});
+ assert.equal(attached.ok,false);
+ assert.equal(attached.reason,'INVALID_MODEL_FORENSIC_SUMMARY');
+ assert.equal(attached.fieldDiagnostic.fields.uncertainty.status,'TOO_SHORT');
+ assert.equal(attached.fieldDiagnostic.fields.choice.status,'VALID');
+ assert.equal(JSON.stringify(attached.fieldDiagnostic).includes('None'),false);
+ assert.equal(ledger.modelDecisions.length,0);
+});
