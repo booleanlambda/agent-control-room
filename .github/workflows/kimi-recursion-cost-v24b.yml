@@ -1,0 +1,54 @@
+name: AAU V24B Depth Ten Kimi with Trusted Cost Companion
+
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/kimi-recursive-remediation-v24
+    paths:
+      - 'experiments/kimi-recursion-v24/**'
+      - '.github/workflows/kimi-recursion-cost-v24b.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  single-thread-ten-depth-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      AAU_V24_RESEARCH: 'yes'
+      AAU_PYTHON_SANDBOX: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Prove deterministic cost correction cannot change selections or bypass exact oracle
+        run: |
+          node --check experiments/kimi-recursion-v24/live.mjs
+          node --check experiments/kimi-recursion-v24/cost-companion.mjs
+          node --test experiments/kimi-recursion-v24/depth.test.mjs
+          node --test experiments/kimi-recursion-v24/cost-companion.test.mjs
+      - name: Install pinned AMQPS and PostgreSQL libraries
+        run: npm install --no-save --ignore-scripts amqplib@0.10.9 pg@8.16.3
+      - name: Confirm isolated Docker Python capability before Kimi requests
+        run: docker info --format '{{.ServerVersion}}'
+      - name: Run cheap Kimi thinking OFF depth-ten cognitive chain with arithmetic co-processor and bounded real remediation
+        working-directory: experiments/kimi-recursion-v24
+        env:
+          AMQP_URL: ${{ secrets.AMQP }}
+          NEON_V19_DATABASE_URL: ${{ secrets.NEON_V19_DATABASE_URL }}
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: node live.mjs
+      - name: Retain verifiable passed-or-failed depth and model repair evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-kimi-recursion-cost-v24b-evidence
+          path: experiments/kimi-recursion-v24/kimi-recursion-v24-evidence.json
+          if-no-files-found: warn
