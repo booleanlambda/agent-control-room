@@ -86,7 +86,9 @@ test('wrapped array is valid syntax but invalid model response shape',()=>{
 });
 test('only thinking-ON gets the wrapper recovery: thinking-OFF unchanged',()=>{
  const v=String.fromCharCode(96).repeat(3);
- const d=check(v+'json\n{"status":"ok"}\n'+v,'level_1');
+ const p=packet(v+'json\n{"status":"ok"}\n'+v,'level_1');
+ delete p.body.choices[0].message.reasoning_content;
+ const d=inspectV28ProviderResponse('level_1',200,p.body);
  assert.equal(d.category,'MALFORMED_MODEL_JSON');
  assert.equal(d.receipt.thinkingOn,false);
  assert.equal(d.receipt.finalRawSyntax,null);
