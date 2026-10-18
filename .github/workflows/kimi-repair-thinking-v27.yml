@@ -2,7 +2,7 @@ name: AAU V27 Thinking ON During Remediation Only
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened]
     branches:
       - experiment/kimi-recursion-invariant-v25
     paths:
