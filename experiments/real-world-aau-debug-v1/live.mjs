@@ -307,6 +307,9 @@ try{
      instruction:'Return JSON {replacements:[{old:EXACT UNIQUE SOURCE SPAN in currentCandidate,replacement:NEW SOURCE},...],diagnosis:string}. Only model-authored edits, at most 3 spans. Preserve all earlier passing cases. Do not edit tests, expose private errors, or replay paid requests.'
     },false);
     report.earlyOffNodesRun+=1;
+    const patchDecisionId=currentDecision();
+    audit({kind:'MODEL_NODE_PATCH_RECEIVED',stage:'repair_tree_node_'+node.id,
+     decisionId:patchDecisionId,nodeId:node.id});
     const edits=normalizeModelOwnedPatches(answer);
     if(edits.length>3)throw Error('FOCUSED_PATCH_TOO_MANY_EDITS');
     const trial=applyModelPatch(candidate.code,answer);
