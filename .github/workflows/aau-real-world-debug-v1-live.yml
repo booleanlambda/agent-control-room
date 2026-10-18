@@ -18,7 +18,8 @@ jobs:
     timeout-minutes: 45
     env:
       AAU_REAL_WORLD_DEBUG: 'yes'
-      AAU_FORENSICS_SMOKE: 'yes'
+      AAU_FORENSICS_SMOKE: 'no'
+      AAU_ALTERNATIVES_SMOKE: 'yes'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -26,6 +27,12 @@ jobs:
           node-version: '22'
       - name: Install scoped Undici transport for research-only thinking-ON calls
         run: npm install --no-save --ignore-scripts --no-package-lock --no-audit --no-fund undici@7.29.1
+      - name: Pin unchanged historical source and independently frozen oracle before paid Kimi calls
+        run: |
+          set -euo pipefail
+          test "$(git hash-object experiments/real-world-aau-debug-v1/legacy-model-source.txt)" = "d9b869626643dabe4fe7ea7447aa19d143b3e6ab"
+          test "$(git hash-object experiments/real-world-aau-debug-v1/verify-candidate.mjs)" = "882e65f3d27a28f1a3134fa0a53a56e137316b78"
+          echo "Immutable historical input and verifier blobs verified against prior forensic baseline."
       - name: Freeze real historical source and validate independent test runner
         run: |
           node --check experiments/real-world-aau-debug-v1/live.mjs
