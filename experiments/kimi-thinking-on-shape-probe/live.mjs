@@ -9,6 +9,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {kimiStageRequest} from '../kimi-recursion-v24/thinking-router.mjs';
 import {inspectV28ProviderResponse,inspectV28TransportFailure} from '../kimi-recursion-v24/provider-response-diagnostics.mjs';
 import {summarizeFinalStructure} from './shape-helpers.mjs';
+import {assessDiagnosticStrategy} from './diagnostic-acceptance.mjs';
 
 if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_THINKING_ON_SHAPE_PROBE!=='yes')
  throw Error('ISOLATED_RESEARCH_ONLY');
@@ -26,7 +27,8 @@ const evidence={probe:'KIMI_THINKING_ON_FINAL_JSON_SHAPE',
  providerReceipt:null,finalSchema:[],messageFields:[],transport:null,
  rawContentStored:false,privateReasoningStored:false,
  tempFinalFileCreated:false,tempFinalFileDeleted:false,
- finalContentSha256:null,inRunnerParseCheck:null};
+ finalContentSha256:null,inRunnerParseCheck:null,
+ semanticAcceptance:null,overallResult:'NOT_EVALUATED'};
 const save=()=>writeFileSync('thinking-on-shape-evidence.json',JSON.stringify(evidence,null,2)+'\n');
 const body={model:cfg.model,thinking:cfg.thinking,temperature:cfg.temperature,
  response_format:{type:'json_object'},max_tokens:cfg.max_tokens,stream:false,
@@ -72,7 +74,13 @@ try{
  const msg=parsed.value?.choices?.[0]?.message;
  evidence.messageFields=['role','content','reasoning_content','reasoning','tool_calls','refusal']
   .filter(k=>Object.hasOwn(msg??{},k));
- if(outcome.answer)evidence.finalSchema=summarizeFinalStructure(outcome.answer);
+ if(outcome.answer){
+  evidence.finalSchema=summarizeFinalStructure(outcome.answer);
+  evidence.semanticAcceptance=assessDiagnosticStrategy(outcome.answer);
+ }
+ evidence.overallResult=outcome.category!=='ACCEPTED'?'FORMAT_OR_PROVIDER_FAILED':
+  evidence.semanticAcceptance?.verdict==='REQUIREMENTS_COVERED'?
+   'FORMAT_AND_REQUIREMENTS_COVERED':'FORMAT_ONLY_REQUIREMENTS_UNMET';
  evidence.httpHeadersReceived=headersReceived;
  evidence.requestDeadlineFired=deadlineFired;
  save();
@@ -83,9 +91,12 @@ try{
   finalContentKind:evidence.providerReceipt.finalContentKind,
   contentJson:evidence.providerReceipt.contentJson,
   finalSchema:evidence.finalSchema,
+  semanticVerdict:evidence.semanticAcceptance?.verdict??null,
+  requirementsMet:evidence.semanticAcceptance?.metCount??0,
+  overallResult:evidence.overallResult,
   elapsedMs:evidence.providerReceipt.elapsedMs
  }));
- if(evidence.status!=='ACCEPTED')process.exitCode=2;
+ if(evidence.overallResult!=='FORMAT_AND_REQUIREMENTS_COVERED')process.exitCode=2;
 }catch(e){
  evidence.transport=inspectV28TransportFailure(e,{
   elapsedMs:Date.now()-started,httpHeadersReceived:headersReceived,
