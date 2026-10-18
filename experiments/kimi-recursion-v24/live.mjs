@@ -10,16 +10,17 @@ import {LEVELS,publicCasesFor,hiddenCases,stageHash,assess,sha} from './benchmar
 import {createLedger} from './ledger.mjs';
 import {reconcileSelectedCost} from './cost-companion.mjs';
 import {behaviorProbesAt} from './behavioral-probes.mjs';
+import {kimiStageRequest,kimiResponseAcceptable} from './thinking-router.mjs';
 if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_V24_RESEARCH!=='yes'||
    process.env.AAU_PYTHON_SANDBOX!=='yes')throw Error('RESEARCH_ONLY');
 const digest=x=>createHash('sha256').update(typeof x==='string'?x:JSON.stringify(x)).digest('hex');
 const run=randomUUID(),queue='aau.research.v24.'+run.replaceAll('-','');
-const report={experiment:'V25_BEHAVIORAL_INVARIANT_COMPLETENESS',
+const report={experiment:'V27_REMEDIATION_THINKING_ONLY',
  run,model:'kimi-k2.6',thinking:'disabled',workers:1,maxConcurrentModelCalls:1,
  status:'running',requestedDepth:10,verifiedDepth:0,deepestReached:0,
  exactHiddenPass:false,callCount:0,providerTokens:0,repairCount:0,
  repairs:[],nodes:[],phaseEvents:[],brokerACKs:0,brokerPublished:0,
- noInjectedDefects:true,behavioralInvariantGate:true,architecture:'one durable RabbitMQ thread + isolated Neon checkpoint and transactional outbox + general Python sandbox + independent stage/hidden oracle',
+ noInjectedDefects:true,behavioralInvariantGate:true,repairThinkingOnly:true,thinkingRouting:[],architecture:'one durable RabbitMQ thread + isolated Neon checkpoint and transactional outbox + general Python sandbox + independent stage/hidden oracle',
  modelMakesAlgorithms:true,oracleNotModelAccessible:true,
  caveats:['Only a single spine of ten semantically dependent proof nodes, not a 1024-leaf binary recursion tree',
  'The levels and per-level constraints are revealed sequentially but were selected by the experiment designer',
@@ -37,9 +38,15 @@ const safe=e=>{const s=String(e?.message||e);return /^[A-Z0-9_]+$/.test(s)?s:'RE
 async function model(stage,attempt,state,question,max_tokens){
  if(state.providerCalls>=modelCap||state.providerTokens>=tokenCap)throw Error('MODEL_BUDGET_REACHED');
  const messages=[{role:'system',content:SYSTEM},{role:'user',content:JSON.stringify(question)}];
- const body={model:'kimi-k2.6',thinking:{type:'disabled'},temperature:0.6,
-   response_format:{type:'json_object'},max_tokens,stream:false,messages};
- const reserve=Math.ceil(JSON.stringify(messages).length/2)+max_tokens;
+ const cfg=kimiStageRequest(stage,max_tokens);
+ // Mode choice is derived ONLY from the stage name; neither prompts nor
+ // arbitrary model output can enable thinking for routine cognition.
+ const body={model:cfg.model,thinking:cfg.thinking,temperature:cfg.temperature,
+   response_format:{type:'json_object'},max_tokens:cfg.max_tokens,stream:false,messages};
+ state.thinkingRouting??=[];
+ state.thinkingRouting.push({stage,attempt,mode:cfg.thinking.type,tokenCeiling:cfg.max_tokens});
+ report.thinkingRouting.push({stage,attempt,mode:cfg.thinking.type,tokenCeiling:cfg.max_tokens});
+ const reserve=Math.ceil(JSON.stringify(messages).length/2)+cfg.max_tokens;
  if(outputReservations+reserve>outputReservationCap)throw Error('RESERVATION_CAP_REACHED');
  // Presend durable journal: if uncertain, a replay is NOT permitted.
  await db.beginCall(run,stage,attempt,digest(body));
@@ -47,7 +54,7 @@ async function model(stage,attempt,state,question,max_tokens){
  outputReservations+=reserve;
  const pause=Math.max(0,lastStart+23000-Date.now());if(pause)await wait(pause);
  lastStart=Date.now();
- const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),175000);
+ const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),cfg.timeoutMs);
  try{
   const key=String(process.env.MOONSHOT_API_KEY||'').trim();
   if(!key)throw Error('PROVIDER_SECRET_MISSING');
@@ -58,10 +65,16 @@ async function model(stage,attempt,state,question,max_tokens){
   const tokens=j?.usage?.total_tokens;
   if(Number.isSafeInteger(tokens)&&tokens>=0){state.providerTokens+=tokens;report.providerTokens=state.providerTokens}
   const choice=j?.choices?.[0],finish=choice?.finish_reason;
-  if(!res.ok||finish!=='stop'||choice?.message?.reasoning_content)
+  if(!res.ok||!kimiResponseAcceptable(stage,choice))
    throw Error('PROVIDER_INCOMPLETE_OR_REJECTED');
   let answer;try{answer=JSON.parse(choice?.message?.content??'')}catch{throw Error('BAD_MODEL_JSON')}
   if(!answer||typeof answer!=='object'||Array.isArray(answer))throw Error('MODEL_RESPONSE_SHAPE');
+  // Store receipt metadata only; never persist or display raw internal reasoning.
+  state.thinkingReceipt??=[];
+  state.thinkingReceipt.push({stage,attempt,mode:cfg.thinking.type,
+    reasoningReturned:!!choice?.message?.reasoning_content,
+    completionTokens:j?.usage?.completion_tokens??null,
+    reportedReasoningTokens:j?.usage?.completion_tokens_details?.reasoning_tokens??null});
   await db.finishCall(run,stage,attempt,'received',tokens??null,finish,digest(choice.message.content));
   return answer;
  }catch(e){
@@ -297,6 +310,9 @@ try{
  report.modelCalls=await db.callLog(run);
  report.phaseEvents=await db.events(run);
  report.phaseChainDigest=digest(report.phaseEvents);
+ report.thinkingRouting=final.state.thinkingRouting||[];
+ report.thinkingReceipt=final.state.thinkingReceipt||[];
+ report.thinkingOnlyDuringRepair=report.thinkingRouting.every(x=>(x.mode==='enabled')===/^repair_[0-9]$/.test(x.stage));
  report.costNormalizations=(final.state.levelLogs||[]).filter(x=>x.kind==='verified_computation').flatMap(x=>x.deterministicCostCorrections||[]);
  if(final.status==='passed'&&
    (report.verifiedDepth!==10||report.nodes.length!==10||!report.exactHiddenPass||!report.rootProof))
@@ -318,6 +334,6 @@ try{
   tokens:report.providerTokens,repairs:report.repairCount,
   hidden:report.exactHiddenPass,acks:report.brokerACKs,
   phaseCount:report.phaseCount??null,rootProof:report.rootProof,
-  cleaned:!!report.queueDeleted,costNormalizations:report.costNormalizations?.length??0,error:report.error??null}));
+  cleaned:!!report.queueDeleted,repairThinkingOnly:report.thinkingOnlyDuringRepair??false,thinkingStages:report.thinkingRouting?.filter(x=>x.mode==='enabled').length??0,costNormalizations:report.costNormalizations?.length??0,error:report.error??null}));
  if(report.status!=='passed')process.exitCode=2;
 }
