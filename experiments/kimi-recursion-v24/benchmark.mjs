@@ -72,6 +72,10 @@ export function feasibility(problem,selected){
  if(cost>problem.budget)return {valid:false,reason:'BUDGET_EXCEEDED',cost,budget:problem.budget};
  return {valid:true,cost};
 }
+function lexicalLess(a,b){
+ for(let i=0;i<Math.min(a.length,b.length);i++)if(a[i]!==b[i])return a[i]<b[i];
+ return a.length<b.length;
+}
 export function exactOracle(problem){
  if(problem.controls.length>16)throw Error('ORACLE_TOO_LARGE');
  const ids=problem.controls.map(x=>x.id);
@@ -82,7 +86,7 @@ export function exactOracle(problem){
   if(!f.valid)continue;
   count++;
   if(!best||f.cost<best.cost||
-    f.cost===best.cost&&JSON.stringify(sel)<JSON.stringify(best.selected))
+    f.cost===best.cost&&lexicalLess(sel,best.selected))
    best={selected:sel,cost:f.cost};
  }
  return {selected:best?.selected??[],cost:best?.cost??null,feasibleSubsets:count};
