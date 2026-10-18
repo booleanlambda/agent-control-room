@@ -34,10 +34,15 @@ async function callModel(label,payload,thinking=false){
   completionCeiling:max_tokens,requestSha256:digest(JSON.stringify(body)),
   status:'sent_or_uncertain',usage:null,finishReason:null,
   completionTokens:null,reasoningTokens:null,rawFinalContentStored:false,
+  elapsedMs:null,httpHeadersReceived:false,requestDeadlineFired:false,
   rawReasoningStored:false,finalJsonDiagnostic:null};
  report.modelCalls.push(receipt);save();
  const controller=new AbortController();
- const timer=setTimeout(()=>controller.abort(),thinking?720000:175000);
+ const requestStartedAt=Date.now();
+ let headersReceived=false,requestDeadlineFired=false;
+ const timer=setTimeout(()=>{
+  requestDeadlineFired=true;controller.abort();
+ },thinking?720000:175000);
  try{
   const key=String(process.env.MOONSHOT_API_KEY||'').trim();
   if(!key)throw Error('RESEARCH_API_KEY_MISSING');
@@ -45,7 +50,9 @@ async function callModel(label,payload,thinking=false){
    method:'POST',redirect:'manual',signal:controller.signal,
    headers:{authorization:'Bearer '+key,'content-type':'application/json',accept:'application/json'},
    body:JSON.stringify(body)});
+  headersReceived=true;
   const j=await res.json().catch(()=>null);
+  receipt.httpHeadersReceived=headersReceived;
   receipt.httpStatus=res.status;
   const choice=j?.choices?.[0];
   receipt.finishReason=choice?.finish_reason??null;
@@ -81,13 +88,22 @@ async function callModel(label,payload,thinking=false){
   save();return answer;
  }catch(e){
   if(receipt.status==='sent_or_uncertain'){
-   const transport=inspectV28TransportFailure(e);
+   const transport=inspectV28TransportFailure(e,{
+    elapsedMs:Date.now()-requestStartedAt,
+    httpHeadersReceived:headersReceived,requestDeadlineFired
+   });
    receipt.status=transport.category==='TRANSPORT_TIMEOUT_OR_ABORT'?
     'transport_timeout_or_abort':'transport_or_client_error';
    receipt.transportDiagnostic=transport;
   }
   save();throw Error('MODEL_REQUEST_MANUAL_HOLD');
- }finally{clearTimeout(timer)}
+ }finally{
+  clearTimeout(timer);
+  receipt.elapsedMs=Date.now()-requestStartedAt;
+  receipt.httpHeadersReceived=headersReceived;
+  receipt.requestDeadlineFired=requestDeadlineFired;
+  save();
+ }
 }
 function applyModelPatch(src,answer){
  // Kimi thinking-OFF output is validated semantically after normalization.
