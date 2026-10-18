@@ -95,6 +95,8 @@ test('unrecognized exception names and error codes are not copied into evidence'
 test('runner binds elapsed clock, header observation and allowlisted code into durable hold event',()=>{
  const src=readFileSync(new URL('./live.mjs',import.meta.url),'utf8');
  assert.match(src,/requestDeadlineFired=true;ctrl\.abort\(\)/);
+ assert.match(src,/if\(!providerResponseSettled\)\{requestDeadlineFired=true;ctrl\.abort\(\)\}/);
+ assert.match(src,/providerResponseSettled=true;clearTimeout\(timer\)/);
  assert.match(src,/httpHeadersReceived=true;/);
  assert.match(src,/inspectV28TransportFailure\(e,\{/);
  assert.match(src,/elapsedMs:Date\.now\(\)-lastStart,httpHeadersReceived,requestDeadlineFired/);
