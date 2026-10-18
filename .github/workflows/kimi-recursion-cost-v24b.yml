@@ -2,7 +2,7 @@ name: AAU V24B Depth Ten Kimi with Trusted Cost Companion
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened]
     branches:
       - experiment/kimi-recursive-remediation-v24
     paths:
