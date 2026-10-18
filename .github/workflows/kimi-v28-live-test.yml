@@ -1,0 +1,59 @@
+name: AAU V28 Live Kimi Budget and Recovery Verification
+
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/kimi-32k-exhaustion-decompose-v28
+    paths:
+      - 'experiments/kimi-recursion-v24/**'
+      - '.github/workflows/kimi-v28-live-test.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  live-one-thread-v28:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      AAU_V24_RESEARCH: 'yes'
+      AAU_PYTHON_SANDBOX: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Static check of frozen 32K ON / 4K OFF recovery runtime
+        run: |
+          node --check experiments/kimi-recursion-v24/live.mjs
+          node --check experiments/kimi-recursion-v24/budget-recovery.mjs
+          node --check experiments/kimi-recursion-v24/thinking-router.mjs
+          node --test experiments/kimi-recursion-v24/budget-recovery.test.mjs
+          node --test experiments/kimi-recursion-v24/thinking-router.test.mjs
+          node --test experiments/kimi-recursion-v24/depth.test.mjs
+      - name: Install bounded AMQP / Neon drivers without install scripts
+        run: npm install --no-save --ignore-scripts amqplib@0.10.9 pg@8.16.3
+      - name: Confirm offline code execution before any Kimi calls
+        run: docker info --format '{{.ServerVersion}}'
+      - name: Revalidate independent behavioral gate with archived actual omission
+        run: node --test experiments/kimi-recursion-v24/behavioral-gate.test.mjs
+      - name: Run actual Kimi K2.6 with V28 budget and recovery policy
+        working-directory: experiments/kimi-recursion-v24
+        env:
+          AMQP_URL: ${{ secrets.AMQP }}
+          NEON_V19_DATABASE_URL: ${{ secrets.NEON_V19_DATABASE_URL }}
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: node live.mjs
+      - name: Retain actual Kimi response receipts, stage routing and all final evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-kimi-v28-actual-budget-recovery-evidence
+          path: experiments/kimi-recursion-v24/kimi-recursion-v24-evidence.json
+          if-no-files-found: warn
+          retention-days: 7
