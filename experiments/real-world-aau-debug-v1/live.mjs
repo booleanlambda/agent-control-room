@@ -410,11 +410,15 @@ try{
  }
  report.candidateSha256=digest(candidate.code);
 }catch(e){
+ const failure=/^[A-Z0-9_]+$/.test(String(e?.message))?e.message:'REDACTED_FAILURE';
+ audit({kind:'EXECUTION_BLOCKED',stage:'execution_final',reasonCode:failure});
  report.status=e?.message==='THINKING_BUDGET_EXHAUSTED'?
   'thinking_budget_exhausted_decomposition_pending':'blocked';
  report.errorCategory=/^[A-Z0-9_]+$/.test(String(e.message))?e.message:'REDACTED_FAILURE';
 }finally{
  report.providerTokens=totalTokens;
+ audit({kind:'EXECUTION_FINISHED',stage:'execution_final',
+  reasonCode:report.success?'VERIFIED_SUCCESS':'UNVERIFIED_OR_BLOCKED',budget:totalTokens});
  save();
  console.log('AAU_REAL_WORLD_FINAL='+JSON.stringify({
   status:report.status,success:report.success,modelCalls:report.modelCalls.length,
