@@ -30,7 +30,10 @@ const fenceRE=new RegExp('^'+tick.repeat(3)+'(?:json)?[ \\t]*\\r?\\n([\\s\\S]*?)
 function completeJsonFence(value){
  const trimmed=value.trim();
  const m=fenceRE.exec(trimmed);
- return m?.[1]??null;
+ if(!m)return null;
+ // More than one fence is ambiguous. Do not select an arbitrary object.
+ if(m[1].includes(tick.repeat(3)))return null;
+ return m[1];
 }
 export function inspectThinkingOnFinalJson(content){
  const meta={
