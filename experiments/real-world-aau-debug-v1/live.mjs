@@ -273,7 +273,7 @@ try{
  const proposal=await callModel('implement_model_generated_plan',{
   incident:'Fix the real documented provider receipt loss without changing model thinking policy, provider retry policy, stage sequencing or business logic. Only modify the supplied frozen function.',
   originalSource:base,modelGeneratedPlan:plan,
-  interface:'Return JSON {replacements:[{old:EXACT UNIQUE ORIGINAL SOURCE SPAN, replacement:NEW SOURCE TEXT},...],diagnosis:string}. Apply changes to originalSource in order. No changes to tests. Target up to 7 local replacements. Existing db.finishCall(run,stage,attempt,status,tokens,finish,responseHash) writes one receipt; report may accept providerCallDiagnostics array. Preserve provider usage on rejection and never use a second finishCall after a failed ledger write. Distinguish malformed JSON, HTTP failure, incomplete stop/length response, transport/timeout. One valid repair_ stage + length still returns THINKING_EXHAUSTED. No raw provider error messages or secrets in reports.',
+  interface:'Return JSON {replacements:[{old:EXACT UNIQUE ORIGINAL SOURCE SPAN, replacement:NEW SOURCE TEXT},...],diagnosis:string,decisionForensics:{choice,rationale,evidence,alternatives,expectedOutcome,uncertainty}}. Apply changes to originalSource in order. No changes to tests. Target up to 7 local replacements. Existing db.finishCall(run,stage,attempt,status,tokens,finish,responseHash) writes one receipt; report may accept providerCallDiagnostics array. Preserve provider usage on rejection and never use a second finishCall after a failed ledger write. Distinguish malformed JSON, HTTP failure, incomplete stop/length response, transport/timeout. One valid repair_ stage + length still returns THINKING_EXHAUSTED. No raw provider error messages or secrets in reports.',
   publicAcceptance:['One presend journal, no automatic paid retry','accepted responses still return normal JSON','true ON length is still special','rejected provider response retains finish/tokens/category','manual hold for non-length failures','no duplicate ledger writes on storage failures']
  });
  let candidate=applyModelPatch(base,proposal);
@@ -341,7 +341,7 @@ try{
      node:{id:node.id,parentId:Number.isInteger(node.parent)?node.parent:null,
       depth:node.depth,issue:node.issue,acceptance:node.acceptance},
      publicFailures:check.publicFeedback,
-     instruction:'Return JSON {replacements:[{old:EXACT UNIQUE SOURCE SPAN in currentCandidate,replacement:NEW SOURCE},...],diagnosis:string}. Only model-authored edits, at most 3 spans. Preserve all earlier passing cases. Do not edit tests, expose private errors, or replay paid requests.'
+     instruction:'Return JSON {replacements:[{old:EXACT UNIQUE SOURCE SPAN in currentCandidate,replacement:NEW SOURCE},...],diagnosis:string,decisionForensics:{choice,rationale,evidence,alternatives,expectedOutcome,uncertainty}}. Only model-authored edits, at most 3 spans. Preserve all earlier passing cases. Do not edit tests, expose private errors, or replay paid requests.'
     },false);
     report.earlyOffNodesRun+=1;
     const patchDecisionId=currentDecision();
@@ -427,7 +427,7 @@ try{
     publicFailures:check.publicFeedback,
     treeSummary:treeSummary(tree),
     unresolvedNodes:report.unresolvedNodes,
-    instruction:'Return one JSON object with only model-authored exact unique source-span replacements and optional diagnosis. Obey public expected status categories, retain sanitized per-call finish/token/category receipt, never persist private model errors or introduce paid-call retries.'
+    instruction:'Return one JSON object with model-authored exact unique source-span replacements, optional diagnosis and mandatory top-level decisionForensics {choice,rationale,evidence,alternatives,expectedOutcome,uncertainty}. Obey public expected status categories, retain sanitized per-call finish/token/category receipt, never persist private model errors or introduce paid-call retries.'
    },true);
    const repaired=applyModelPatch(candidate.code,fix);
    const verified=runPublicVerification(repaired.code,'public');
