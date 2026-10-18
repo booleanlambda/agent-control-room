@@ -1,0 +1,57 @@
+name: AAU V27 Thinking ON During Remediation Only
+
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/kimi-recursion-invariant-v25
+    paths:
+      - 'experiments/kimi-recursion-v24/thinking-router*'
+      - 'experiments/kimi-recursion-v24/live.mjs'
+      - 'experiments/kimi-repair-v27/**'
+      - '.github/workflows/kimi-repair-thinking-v27.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  single-thinking-on-repair-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      AAU_V27_REPAIR_PROBE: 'yes'
+      AAU_PYTHON_SANDBOX: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Static and executable regression check for repair-only thinking
+        run: |
+          node --check experiments/kimi-recursion-v24/thinking-router.mjs
+          node --check experiments/kimi-recursion-v24/live.mjs
+          node --check experiments/kimi-repair-v27/live-repair-probe.mjs
+          node --test experiments/kimi-recursion-v24/thinking-router.test.mjs
+          node --test experiments/kimi-recursion-v24/depth.test.mjs
+      - name: Install pinned research-only Neon and AMQP clients
+        run: npm install --no-save --ignore-scripts pg@8.16.3 amqplib@0.10.9
+      - name: Confirm offline sandbox available before model call
+        run: docker info --format '{{.ServerVersion}}'
+      - name: One real Kimi thinking-ON remediation of archived V25 bug
+        working-directory: experiments/kimi-repair-v27
+        env:
+          NEON_V19_DATABASE_URL: ${{ secrets.NEON_V19_DATABASE_URL }}
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: node live-repair-probe.mjs
+      - name: Preserve provider response and exact public verification receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-kimi-repair-thinking-v27-evidence
+          path: experiments/kimi-repair-v27/repair-probe-v27-evidence.json
+          if-no-files-found: warn
+          retention-days: 7

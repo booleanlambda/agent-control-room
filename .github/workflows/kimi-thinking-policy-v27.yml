@@ -1,0 +1,36 @@
+name: AAU V27 Static Thinking Mode Policy Regression
+
+on:
+  pull_request:
+    types: [synchronize]
+    branches:
+      - experiment/kimi-recursion-invariant-v25
+    paths:
+      - 'experiments/kimi-recursion-v24/thinking-router.mjs'
+      - 'experiments/kimi-recursion-v24/thinking-router.test.mjs'
+      - 'experiments/kimi-recursion-v24/live.mjs'
+      - '.github/workflows/kimi-thinking-policy-v27.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-mode-isolation-without-paid-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Ensure thinking is enabled for repair only and original tree gates remain
+        run: |
+          node --check experiments/kimi-recursion-v24/thinking-router.mjs
+          node --check experiments/kimi-recursion-v24/live.mjs
+          node --test experiments/kimi-recursion-v24/thinking-router.test.mjs
+          node --test experiments/kimi-recursion-v24/depth.test.mjs
+          node --test experiments/kimi-recursion-v24/cost-companion.test.mjs
+      - name: Verify production secrets are not available to this workflow
+        run: |
+          test -z "$MOONSHOT_API_KEY"
+          test -z "$NEON_V19_DATABASE_URL"
+          test -z "$AMQP_URL"
