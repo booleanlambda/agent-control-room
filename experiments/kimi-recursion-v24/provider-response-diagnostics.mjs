@@ -2,6 +2,7 @@
 // Never log or persist provider messages, raw reasoning, secrets or model source.
 import {isKnownThinkingExhaustion} from './budget-recovery.mjs';
 import {kimiResponseAcceptable} from './thinking-router.mjs';
+import {inspectThinkingOnFinalJson} from './thinking-on-json-syntax.mjs';
 const integerOrNull=x=>Number.isSafeInteger(x)&&x>=0?x:null;
 const safeFinish=x=>typeof x==='string'&&/^[a-zA-Z0-9_.-]{1,48}$/.test(x)?x:null;
 export function inspectV28ProviderResponse(stage,httpStatus,body,bodyParsed=true){
@@ -10,13 +11,28 @@ export function inspectV28ProviderResponse(stage,httpStatus,body,bodyParsed=true
  const content=typeof choice?.message?.content==='string'?choice.message.content:'';
  const finishReason=safeFinish(choice?.finish_reason);
  const providerTokens=integerOrNull(body?.usage?.total_tokens);
+ const thinkingOn=/^repair_[0-9]$/.test(stage);
+ const message=choice?.message;
+ const contentKind=message===null?'null':
+  message===undefined?'missing':
+  !Object.hasOwn(message,'content')?'missing':
+  message.content===null?'null':
+  Array.isArray(message.content)?'array':typeof message.content;
+ const reasoningPresent=thinkingOn&&(
+  (typeof message?.reasoning_content==='string'&&message.reasoning_content.length>0)||
+  (typeof message?.reasoning==='string'&&message.reasoning.length>0));
  const receipt={
   stage, httpStatus:Number.isInteger(httpStatus)&&httpStatus>=100&&httpStatus<=599?httpStatus:null,
   finishReason, providerTokens,
   promptTokens:integerOrNull(body?.usage?.prompt_tokens),
   completionTokens:integerOrNull(body?.usage?.completion_tokens),
   reasoningTokens:integerOrNull(body?.usage?.completion_tokens_details?.reasoning_tokens),
-  contentJson:'not_checked', errorCategory:null
+  contentJson:'not_checked', errorCategory:null,
+  // Kimi thinking-ON response shape only. Never persist reasoning text.
+  thinkingOn, reasoningPresent, finalContentKind:thinkingOn?contentKind:null,
+  finalJsonKeys:[],
+  finalSyntaxClass:null,finalSyntaxOffset:null,finalRawContentChars:null,
+  finalRawSyntax:null,finalRecoveryStrategy:'NONE',finalRecoveryResult:'not_attempted'
  };
  const result=(category,answer=null)=>{
   receipt.errorCategory=category;
@@ -30,11 +46,31 @@ export function inspectV28ProviderResponse(stage,httpStatus,body,bodyParsed=true
  if(!content.trim())return result('EMPTY_MODEL_CONTENT');
  if(!kimiResponseAcceptable(stage,choice))return result('MODEL_RESPONSE_CONTRACT_REJECTED');
  let answer;
- try{answer=JSON.parse(content)}catch{receipt.contentJson='invalid';return result('MALFORMED_MODEL_JSON')}
+ if(thinkingOn){
+  const parsed=inspectThinkingOnFinalJson(content);
+  const meta=parsed.meta;
+  receipt.finalRawContentChars=meta.rawContentChars;
+  receipt.finalRawSyntax=meta.rawSyntax;
+  receipt.finalSyntaxClass=meta.syntaxClass;
+  receipt.finalSyntaxOffset=meta.syntaxOffset;
+  receipt.finalRecoveryStrategy=meta.recoveryStrategy;
+  receipt.finalRecoveryResult=meta.recoveryResult;
+  if(meta.rawSyntax==='invalid'&&
+     !['accepted','parsed_invalid_shape'].includes(meta.recoveryResult)){
+   receipt.contentJson='invalid';return result('MALFORMED_MODEL_JSON');
+  }
+  answer=parsed.answer;
+ }else{
+  try{answer=JSON.parse(content)}catch{receipt.contentJson='invalid';return result('MALFORMED_MODEL_JSON')}
+ }
  if(!answer||typeof answer!=='object'||Array.isArray(answer)){
   receipt.contentJson='invalid_shape';return result('MODEL_RESPONSE_SHAPE');
  }
  receipt.contentJson='valid_object';
+ if(thinkingOn){
+  receipt.finalJsonKeys=Object.keys(answer)
+   .filter(k=>/^[a-zA-Z_][a-zA-Z_0-9]{0,35}$/.test(k)).slice(0,12);
+ }
  return result('ACCEPTED',answer);
 }
 // Only these literal code/name values are allowed into persisted receipts.

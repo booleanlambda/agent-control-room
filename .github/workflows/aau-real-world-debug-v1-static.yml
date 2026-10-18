@@ -1,0 +1,61 @@
+name: AAU Real-World Historical Bug Offline Calibration
+on:
+  push:
+    branches:
+      - experiment/kimi-real-aau-debug-v1-20261018
+      - experiment/kimi-instant-json-adapter-v1-20261018
+      - experiment/kimi-realbug-rerun-thinking-on-fix-20261018
+      - experiment/aau-scoped-undici-live-rerun-20261018
+    paths:
+      - 'experiments/real-world-aau-debug-v1/**'
+      - '.github/workflows/aau-real-world-debug-v1-static.yml'
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install scoped Undici 7.x test client without scripts
+        run: npm install --no-save --ignore-scripts --no-package-lock --no-audit --no-fund undici@7.29.1
+      - name: Validate independent historical benchmark runner syntax
+        run: |
+          node --check experiments/real-world-aau-debug-v1/live.mjs
+          node --check experiments/real-world-aau-debug-v1/plan-parser.mjs
+          node --test experiments/real-world-aau-debug-v1/plan-parser.test.mjs
+          node --check experiments/real-world-aau-debug-v1/output-normalizer.mjs
+          node --test experiments/real-world-aau-debug-v1/output-normalizer.test.mjs
+          node --check experiments/kimi-recursion-v24/thinking-on-json-syntax.mjs
+          node --test experiments/kimi-recursion-v24/thinking-on-json-syntax.test.mjs
+          node --test experiments/kimi-recursion-v24/provider-response-diagnostics.test.mjs
+          node --test experiments/kimi-recursion-v24/thinking-router.test.mjs
+          node --test experiments/kimi-recursion-v24/budget-recovery.test.mjs
+          node --test experiments/aau-provider-transport/headers-timeout.test.mjs
+          node --test experiments/aau-provider-transport/transport-policy.test.mjs
+          node --test experiments/aau-provider-transport/scoped-benchmark.test.mjs
+          node --check experiments/real-world-aau-debug-v1/verify-candidate.mjs
+      - name: Confirm real original defect is caught before model edits
+        working-directory: experiments/real-world-aau-debug-v1
+        run: |
+          set -eu
+          if node verify-candidate.mjs all legacy-model-source.txt > /tmp/aau-realbug-baseline.txt; then
+            echo 'Historical vulnerable source unexpectedly passed independent cases.'
+            exit 1
+          fi
+          node --input-type=module -e "
+            import fs from 'node:fs';
+            const s=fs.readFileSync('/tmp/aau-realbug-baseline.txt','utf8');
+            const cases=s.split('\n').filter(Boolean).flatMap(x=>{try{return [JSON.parse(x)]}catch{return []}}).filter(x=>x.case);
+            if(cases.length!==8)throw Error('TEST_HARNESS_DID_NOT_EXERCISE_8');
+            const failures=cases.filter(x=>!x.passed);
+            if(failures.length<3)throw Error('HISTORICAL_DEFECT_NOT_REPRODUCED');
+            console.log('Historical AAU bug reproduced: '+failures.length+' of 8 cases failed as expected.');
+          "
+      - name: Check Docker isolation support without inference
+        run: |
+          docker info --format '{{.ServerVersion}}'
+          docker pull node:22-alpine
