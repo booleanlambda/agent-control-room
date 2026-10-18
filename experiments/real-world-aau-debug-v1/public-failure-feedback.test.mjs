@@ -48,3 +48,16 @@ test('all pass only when each public case has valid result with zero problems',(
  assert.equal(fb.complete,true);assert.equal(fb.failedCases.length,0);
  assert.equal(fb.passedCases,4);
 });
+
+test('unexpected model exception keeps safe exception kind, no raw detail',()=>{
+ const data=structuredClone(example);
+ data.cases[1].problems=['candidate exception during verification'];
+ data.cases[1].exceptionKind='ReferenceError';
+ const feedback=makePublicFeedback(data);
+ assert.deepEqual(feedback.failedCases[0].failureCodes,['CANDIDATE_EXCEPTION']);
+ assert.equal(feedback.failedCases[0].exceptionKind,'ReferenceError');
+ data.cases[1].exceptionKind='ReferenceError: token=private';
+ const unsafe=makePublicFeedback(data);
+ assert.equal(unsafe.failedCases[0].exceptionKind,null);
+ assert.equal(JSON.stringify(unsafe).includes('token=private'),false);
+});
