@@ -62,7 +62,16 @@ async function exercise(key){
  vm.runInNewContext(code+'\nresult=model;',context,{timeout:5000});
  let value=null,hold=false;
  try{value=await context.result(scenario.phase,scenario.phase.startsWith('repair_')?1:0,state,{ticket:'actual-v28'},3100)}
- catch(e){hold=e?.message==='MODEL_REQUEST_MANUAL_HOLD';if(!hold)throw Error('UNSAFE_ERROR_LEAK_OR_WRONG_HOLD')}
+ catch(e){
+  hold=e?.message==='MODEL_REQUEST_MANUAL_HOLD';
+  if(!hold){
+   // Do not leak exception.message, stack, cause, or provider/source text.
+   const kind=['ReferenceError','TypeError','SyntaxError','RangeError','Error'].includes(e?.name)?e.name:'OTHER';
+   const error=new Error('UNSAFE_ERROR_LEAK_OR_WRONG_HOLD');
+   error.candidateExceptionKind=kind;
+   throw error;
+  }
+ }
  const last=events.finish.at(-1);
  const problems=[];
  if(events.begin.length!==1)problems.push('one durable presend expected');
@@ -90,7 +99,11 @@ for(const key of selected){
  // the other public cases or raw-stack-leak into feedback.
  let x;
  try{x=await exercise(key)}
- catch{x={case:key,passed:false,problems:['candidate exception during verification'],reportedStatus:null}}
+ catch(e){
+  const kind=['ReferenceError','TypeError','SyntaxError','RangeError','Error'].includes(e?.candidateExceptionKind)?e.candidateExceptionKind:'OTHER';
+  x={case:key,passed:false,problems:['candidate exception during verification'],
+   exceptionKind:kind,reportedStatus:null};
+ }
  console.log(JSON.stringify(x));
  if(!x.passed)failures++;
 }
