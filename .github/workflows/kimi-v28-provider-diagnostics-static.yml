@@ -4,11 +4,15 @@ on:
     branches:
       - experiment/kimi-v28-provider-test
       - experiment/kimi-v28-diagnostics-live-20261018
+      - experiment/kimi-thinking-on-json-v1-20261018
+      - experiment/kimi-thinking-on-json-recovery-v1-20261018
     paths:
       - '.github/workflows/kimi-v28-provider-diagnostics-static.yml'
       - 'experiments/kimi-recursion-v24/live.mjs'
       - 'experiments/kimi-recursion-v24/provider-response-diagnostics.mjs'
       - 'experiments/kimi-recursion-v24/provider-response-diagnostics.test.mjs'
+      - 'experiments/kimi-recursion-v24/thinking-on-json-syntax.mjs'
+      - 'experiments/kimi-recursion-v24/thinking-on-json-syntax.test.mjs'
       - 'experiments/kimi-recursion-v24/budget-recovery.test.mjs'
       - 'continuity.md'
 permissions:
@@ -27,9 +31,12 @@ jobs:
           node --check experiments/kimi-recursion-v24/live.mjs
           node --check experiments/kimi-recursion-v24/provider-response-diagnostics.mjs
           node --check experiments/kimi-recursion-v24/provider-response-diagnostics.test.mjs
+          node --check experiments/kimi-recursion-v24/thinking-on-json-syntax.mjs
+          node --check experiments/kimi-recursion-v24/thinking-on-json-syntax.test.mjs
       - name: Run fault injection, routing and depth tests offline
         run: |
           node --test experiments/kimi-recursion-v24/provider-response-diagnostics.test.mjs
+          node --test experiments/kimi-recursion-v24/thinking-on-json-syntax.test.mjs
           node --test experiments/kimi-recursion-v24/budget-recovery.test.mjs
           node --test experiments/kimi-recursion-v24/thinking-router.test.mjs
           node --test experiments/kimi-recursion-v24/depth.test.mjs

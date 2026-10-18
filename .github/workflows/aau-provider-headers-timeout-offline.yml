@@ -1,0 +1,37 @@
+name: AAU Provider Headers Timeout Isolated Reproduction
+on:
+  push:
+    branches:
+      - experiment/aau-moonshot-header-timeout-investigation-20261018
+    paths:
+      - 'experiments/aau-provider-transport/**'
+      - '.github/workflows/aau-provider-headers-timeout-offline.yml'
+permissions:
+  contents: read
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install matching Undici dependency for local-only loopback test
+        run: npm install --prefix experiments/aau-provider-transport --no-save --ignore-scripts --no-package-lock --no-audit --no-fund undici@7.29.1
+      - name: Demonstrate why 720s application limit cannot override 300s HTTP header limit
+        run: |
+          node --check experiments/aau-provider-transport/headers-timeout.test.mjs
+          node --test experiments/aau-provider-transport/headers-timeout.test.mjs
+          node --test experiments/aau-provider-transport/transport-policy.test.mjs
+          node --check experiments/real-world-aau-debug-v1/live.mjs
+      - name: Confirm original benchmark preserved no explicit fetch dispatcher
+        run: |
+          node --input-type=module -e "
+            import {readFileSync} from 'node:fs';
+            const s=readFileSync('experiments/real-world-aau-debug-v1/live.mjs','utf8');
+            if(!s.includes('},thinking?720000:175000);')||!s.includes('requestDeadlineFired=true;controller.abort()'))throw Error('STAGE_TIMEOUT_CHANGED');
+            if(!s.includes('const res=await fetch('))throw Error('FETCH_CHANGED');
+            if(s.includes('dispatcher:'))throw Error('ALREADY_CONFIGURED');
+            console.log('Original benchmark uses global fetch without explicit dispatcher, with ON abort 720000ms');
+          "
