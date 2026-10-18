@@ -11,6 +11,7 @@ on:
       - experiment/aau-early-off-focused-nodes-20261018
       - experiment/aau-progress-budget-tree-20261018
       - experiment/aau-mandatory-decision-forensics-20261018
+      - experiment/aau-decision-forensics-live-20261018
     paths:
       - 'experiments/real-world-aau-debug-v1/**'
       - 'experiments/aau-provider-transport/**'
@@ -50,6 +51,9 @@ jobs:
           node --check experiments/real-world-aau-debug-v1/decision-forensics.mjs
           node --test experiments/real-world-aau-debug-v1/decision-forensics.test.mjs
           node --test experiments/real-world-aau-debug-v1/decision-forensics-integration.test.mjs
+          node --check experiments/real-world-aau-debug-v1/forensics-trace-check.mjs
+          node --test experiments/real-world-aau-debug-v1/forensics-trace-check.test.mjs
+          node --check experiments/real-world-aau-debug-v1/forensics-verdict.mjs
           node --test experiments/real-world-aau-debug-v1/historical-exhaustion-replay.test.mjs
           node --check experiments/kimi-recursion-v24/thinking-on-json-syntax.mjs
           node --test experiments/kimi-recursion-v24/thinking-on-json-syntax.test.mjs
