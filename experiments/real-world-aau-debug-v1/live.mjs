@@ -50,7 +50,8 @@ async function callModel(label,payload,thinking=false){
  const reservation=budgetReservation({requestBody:JSON.stringify(body),thinking,
   reportedTokens:report.modelCalls.map(x=>x.usage)});
  if(!reservation.permitted){
-  report.stopReason=reservation.reason;save();
+  report.stopReason=reservation.reason;
+  audit({kind:'BUDGET_BLOCKED',stage:label,reasonCode:'GLOBAL_COMPUTE_BUDGET_EXHAUSTED',budget:reservation.remainingBefore});
   throw Error('GLOBAL_COMPUTE_BUDGET_EXHAUSTED');
  }
  const receipt={stage:label,thinking:thinking?'enabled':'disabled',
@@ -62,7 +63,10 @@ async function callModel(label,payload,thinking=false){
   rawReasoningStored:false,finalJsonDiagnostic:null,
   clientTimeoutPolicy:thinking?transportTimeoutPolicy(true):null,
   scopedUndiciUsed:thinking};
- report.modelCalls.push(receipt);save();
+ report.modelCalls.push(receipt);
+ audit({kind:'PROVIDER_CALL_PREPARED',stage:label,
+  budget:reservation.remainingBefore,
+  nodeId:Number((label.match(/(?:repair_tree_node_|split_failed_tree_node_)([0-9]+)$/)||[])[1])||null});
  // Use an explicit per-call Undici dispatcher ONLY for thinking-ON.
  // Its headers/body deadlines are beyond the existing 720s application abort;
  // thinking-OFF preserves its original global-fetch path and 175s deadline.
@@ -137,7 +141,20 @@ async function callModel(label,payload,thinking=false){
   if(!answer||Array.isArray(answer)||typeof answer!=='object'){
    receipt.status='invalid_shape';throw Error('MODEL_REQUEST_MANUAL_HOLD')
   }
-  receipt.status='accepted';receipt.contentSha256=digest(text);
+  receipt.contentSha256=digest(text);
+  const reason=attachModelDecision(report.forensics,answer,{
+   stage:label,nodeId:Number((label.match(/(?:repair_tree_node_|split_failed_tree_node_)([0-9]+)$/)||[])[1])||null,
+   parentId:payload?.parentNode?.id??payload?.node?.parentId??null,
+   requestHash:receipt.requestSha256,responseHash:receipt.contentSha256});
+  if(!reason.ok){
+   receipt.status='model_decision_forensics_invalid';
+   receipt.forensicsFailureCode=reason.reason;
+   audit({kind:'MODEL_FORENSICS_REJECTED',stage:label,reasonCode:reason.reason});
+   throw Error('MODEL_DECISION_FORENSICS_MISSING');
+  }
+  receipt.forensicDecisionId=reason.id;
+  receipt.status='accepted';
+  audit({kind:'MODEL_DECISION_RECORDED',stage:label,decisionId:reason.id});
   // Retain safe SHAPE METADATA to diagnose contract drift; no raw content.
   receipt.responseStructure=safeStructureSummary(answer);
   save();return answer;
@@ -152,7 +169,8 @@ async function callModel(label,payload,thinking=false){
    receipt.transportDiagnostic=transport;
   }
   save();
-  if(e?.message==='THINKING_BUDGET_EXHAUSTED')throw e;
+  if(e?.message==='THINKING_BUDGET_EXHAUSTED'||
+     e?.message==='MODEL_DECISION_FORENSICS_MISSING')throw e;
   throw Error('MODEL_REQUEST_MANUAL_HOLD');
  }finally{
   clearTimeout(timer);
@@ -161,7 +179,8 @@ async function callModel(label,payload,thinking=false){
   receipt.elapsedMs=Date.now()-requestStartedAt;
   receipt.httpHeadersReceived=headersReceived;
   receipt.requestDeadlineFired=requestDeadlineFired;
-  save();
+  audit({kind:'PROVIDER_CALL_SETTLED',stage:label,decisionId:receipt.forensicDecisionId,
+   reasonCode:receipt.status.toUpperCase(),budget:Number.isInteger(receipt.usage)?receipt.usage:null});
  }
 }
 function applyModelPatch(src,answer){
