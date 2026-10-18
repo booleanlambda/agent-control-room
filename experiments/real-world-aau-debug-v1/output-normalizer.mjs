@@ -48,8 +48,12 @@ export function parseModelOwnedPlan(output){
  const normalized=tasks.map((t,i)=>{
   if(!obj(t))throw Error('MODEL_PLAN_INVALID_NODE');
   const issue=prose(t,ISSUE),acceptance=prose(t,ACCEPT);
-  if(!issue||issue.length<8||issue.length>600||!acceptance||acceptance.length<8||acceptance.length>600)
-   throw Error('MODEL_PLAN_INVALID_NODE');
+  // Thinking OFF may write long but valid, substantive task descriptions.
+  // Do not reject the content merely for exceeding an arbitrary 600 chars.
+  if(!issue||issue.length<8)throw Error('MODEL_PLAN_ISSUE_MISSING_OR_SHORT');
+  if(!acceptance||acceptance.length<8)throw Error('MODEL_PLAN_ACCEPTANCE_MISSING_OR_SHORT');
+  if(issue.length>2400||acceptance.length>2400)
+   throw Error('MODEL_PLAN_NODE_TOO_LONG');
   return {id:i+1,issue,acceptance};
  });
  if(new Set(normalized.map(x=>x.issue.toLowerCase())).size!==normalized.length)
