@@ -26,7 +26,7 @@ async function runThreeAlternatives({candidate,check,triggerStage,node=null}){
  catch(e){
   if(!['THREE_ALTERNATIVES_REQUIRED','ALTERNATIVE_NODE_INVALID',
        'ALTERNATIVE_APPROACH_DUPLICATED','ALTERNATIVE_BASELINE_HASH_INVALID'].includes(e?.message))throw e;
-  resolveModelDecision(report.forensics,proposalDecisionId,{outcome:'REJECTED'});
+  resolveModelDecision(proposalDecisionId,{outcome:'REJECTED'});
   audit({kind:'ALTERNATIVES_PROPOSAL_REJECTED',stage:proposalStage,
    decisionId:proposalDecisionId,reasonCode:e.message,candidateSha256:baseHash});
   throw Error('MODEL_ALTERNATIVES_INVALID');
@@ -36,7 +36,7 @@ async function runThreeAlternatives({candidate,check,triggerStage,node=null}){
   baselineCandidateSha256:baseHash,status:'ACTIVE',nodeId:node?.id??null,
   summary:alternativeSummary(state)};
  report.branchGroups.push(group);
- resolveModelDecision(report.forensics,proposalDecisionId,{outcome:'DECOMPOSITION_QUEUED'});
+ resolveModelDecision(proposalDecisionId,{outcome:'DECOMPOSITION_QUEUED'});
  audit({kind:'ALTERNATIVES_PROPOSED',stage:proposalStage,decisionId:proposalDecisionId,
   candidateSha256:baseHash,branchGroupId:groupId});
  save();
@@ -81,13 +81,13 @@ async function runThreeAlternatives({candidate,check,triggerStage,node=null}){
    reason=comparison.reason;
    verdict=verified.receipt.pass?'PASS':comparison.accept?'PROGRESS':
     comparison.reason==='PUBLIC_REGRESSION'?'REGRESSION':'NO_PROGRESS';
-   resolveModelDecision(report.forensics,decisionId,{outcome:verdict==='PASS'?'PASS':
+   resolveModelDecision(decisionId,{outcome:verdict==='PASS'?'PASS':
     verdict==='PROGRESS'?'PROGRESS':verdict==='REGRESSION'?'REGRESSION':'NO_PROGRESS',verified:true});
    if(comparison.accept){candidate=trial;check=verified;acceptedAny=true;}
   }catch(e){
    if(!allowedLocalPatchErrors.has(e?.message))throw e;
    reason=e.message;
-   resolveModelDecision(report.forensics,decisionId,{outcome:'REJECTED',verified:false});
+   resolveModelDecision(decisionId,{outcome:'REJECTED',verified:false});
    audit({kind:'ALTERNATIVE_INVALID_PATCH',stage,decisionId,reasonCode:reason,
     branchGroupId:groupId,alternativeId:option.id,candidateSha256:sourceHash});
   }
