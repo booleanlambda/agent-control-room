@@ -1,6 +1,6 @@
 // Research-only single live Kimi thinking-ON response-shape probe.
 // Preserve *only* sanitized structural/provider metadata; never raw reasoning or final text.
-// No retries, no production writes, no hidden answer or reference repair.
+// Research evaluation only; no production writes.
 import {readFileSync,writeFileSync} from 'node:fs';
 import {createHash,randomUUID} from 'node:crypto';
 import {kimiStageRequest} from '../kimi-recursion-v24/thinking-router.mjs';
