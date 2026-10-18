@@ -2,7 +2,7 @@ name: AAU V24B Kimi Deep Recursion Trusted Arithmetic
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened]
     branches:
       - experiment/kimi-recursive-remediation-v24
     paths:
