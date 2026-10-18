@@ -857,3 +857,25 @@ Before another billable trial, add to the *public-only* remediation feedback a *
 - Production Silas/AAU untouched, no redeploy, no shared model default switched. Current status is **configured and deterministic tests passed; provider enabled mode observed; actual thinking-ON remediation efficacy not yet established**. More paid trials should be explicit, not triggered by routine commits.
 
 **Follow-up research, if requested:** compare thinking-ON vs prior OFF failures under controlled public tests with response caps adequate to avoid reasoning-token truncation, same model and model-authored patch limits. Keep the provenance of each original source, no oracle gold answers, and report token cost/latency as a tradeoff of enabling thinking selectively.
+
+---
+
+## V28 — 32K remediation thinking, 4K OFF, budget-exhausted OFF decomposition (2026-10-18)
+
+**Implemented on isolated research branch; OFFLINE CI VERIFIED; not yet live-provider tested and NOT deployed.** [Draft PR #77](https://github.com/booleanlambda/agent-control-room/pull/77), branch \`experiment/kimi-32k-exhaustion-decompose-v28\` relative to V27. [GitHub Actions run 39122543990](https://github.com/booleanlambda/agent-control-room/actions/runs/39122543990), job \`117660893908\`: success; syntax, pure state transitions, inherited router/depth regressions and archived behavioral-gate replay all passed. **No production or Silas changes, no provider/secrets in CI, zero live model calls for V28.**
+
+### Fixed budget policy
+- Kimi K2.6 thinking enabled ONLY in \`repair_[0-9]\` model calls. Fixed \`max_tokens = 32768\`; temperature 1; up to 720 seconds request ceiling. As documented for Moonshot, **32,768 is the SHARED completion ceiling for internal reasoning and final answer**, not a separate guaranteed reasoning budget plus final output. A completed valid JSON repair may use fewer.
+- Every Kimi thinking-OFF call uses \`max_tokens = 4096\`, temperature 0.6: \`level_[0-9]\`, \`decompose_[0-9]\`, \`repair_piece_[0-9]\` and \`synthesize\`. The supplied per-call caller max cannot silently override these fixed architecture ceilings.
+- Only a **successfully received provider response** with \`finish_reason = length\` on a \`repair_N\` thinking-ON stage is an authenticated completed 32K output-budget exhaustion. Persist call outcome \`budget_exhausted\`, usage, hash and thinking metadata; do not treat it as a model-authored logical patch or mark a logical repair attempt used. Never reuse incomplete code. Provider timeout, transport/network failure, missing receipt, incomplete JSON or OFF-stage truncation remains uncertain/manual hold with NO automatic retry.
+
+### Bounded decomposition on exhaustion
+- At most **one** exhaustion-driven decomposition per cognitive node. Durable research Neon state captures source code hash, last failed public verifier evidence, previous verified node sequence and logical repair counter. RabbitMQ transactional outbox sends one \`decompose_N\` stage with thinking OFF (4K).
+- \`decompose_N\` returns **1–2 validated small tasks**, each defined by focused code region or fault hypothesis and a behavioral acceptance criterion. No gold answer or hidden problem sent. Tasks and pointer are saved in the persisted run state.
+- \`repair_piece_N\` executes one scoped thinking-OFF 4K localized Python source patch at a time; at most **two total completed logical patch attempts** per parent node across thinking-ON and decomposed-child patches, with at most two children. Every candidate patch, including a child patch, re-runs all original ancestor public cases and each behavioral-invariant counterexample. Only independently proved acceptance permits next parent depth.
+- Upon failed child proof, try the next allowed decomposition task if there is a remaining patch slot. If tasks/slots are exhausted, terminal \`blocked\` or \`failed\`; **no automatic repeat of the 32K model call, no escalating beyond 32K, no exhausted-source restart and no infinite recursion**.
+- Previous 24-provider-call and 75K-reported-token run caps, research-only Neon scope marker, RabbitMQ ACK-after-commit, per-run queue cleanup, unchanged independent hidden verifier and model-authored patches retained. Decision engines never substitute an expected selection.
+
+### Evidence limitations and next gate
+- V28 tests are **pure/offline CI with static source structure, deterministic transition tests and archived executable behavioral checks**. They verify the intended single-exhaustion policy and no inadvertent thinking-mode escalation, but **no live Kimi thinking-ON 32K exhaustion, live agent-generated decomposition or full ten-deep traversal has been exercised under V28 yet**. A separate explicit authorization should precede another expensive paid experiment.
+- V27's prior Kimi thinking-ON 9K generation used 8,999 reported reasoning tokens and exhausted without returning a patch. V28 changes **only the authorized budget routing and bounded fallback**, not Kimi weights, verification rules or production model selection.
