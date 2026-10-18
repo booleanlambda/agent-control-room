@@ -276,7 +276,20 @@ try{
  audit({kind:'MODEL_PATCH_BUILT',stage:'implement_model_generated_plan',
   decisionId:currentDecision(),candidateSha256:digest(candidate.code)});
  let check=runPublicVerification(candidate.code,'public');
- if(!check.receipt.pass){
+ const initialDecisionId=currentDecision();
+ resolveModelDecision(report.forensics,initialDecisionId,{
+  outcome:check.receipt.pass?'PASS':'NO_PROGRESS',verified:true});
+ audit({kind:'INITIAL_PATCH_VERIFIED',stage:'implement_model_generated_plan',
+  decisionId:initialDecisionId,candidateSha256:digest(candidate.code),
+  verification:{verdict:check.receipt.pass?'PASS':'FAIL',suite:'public',
+   casesExecuted:check.receipt.cases.length,
+   casesPassed:check.receipt.cases.filter(x=>x.passed).length}});
+ if(process.env.AAU_FORENSICS_SMOKE==='yes'){
+  report.status='forensics_smoke_completed';
+  report.smokeOnly=true;
+  report.candidateSha256=digest(candidate.code);
+  audit({kind:'FORENSICS_SMOKE_STOP',stage:'execution_final',reasonCode:'SMOKE_STOP_AFTER_PUBLIC_TEST'});
+ }else if(!check.receipt.pass){
   // Kimi chooses root subproblems; no deterministic patch or hidden tests.
   const rootResponse=await callModel('decompose_public_failure_tree',{
    incident:'The original V28 AAU provider-diagnostics code still fails the public executable tests. Decompose every independent unsolved failure into testable repair nodes before patching. Only the model chooses the decomposition.',
@@ -414,7 +427,10 @@ try{
    if(verdict.accept){candidate=repaired;check=verified;}
   }
  }
- if(!check.receipt.pass){
+ if(process.env.AAU_FORENSICS_SMOKE==='yes'){
+  // Forensic validation mode does not claim the historical bug is fixed.
+  report.success=false;
+ }else if(!check.receipt.pass){
   report.status='failed_public_verification';
  }else{
   const hidden=runPublicVerification(candidate.code,'hidden');
