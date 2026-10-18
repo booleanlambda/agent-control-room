@@ -1,0 +1,56 @@
+name: AAU V25 Behavioral Invariant-Completeness Kimi Recovery
+
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/kimi-recursion-trusted-cost-v24b
+    paths:
+      - 'experiments/kimi-recursion-v24/**'
+      - '.github/workflows/kimi-invariant-v25.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  isolated-ten-depth-invariant-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 36
+    env:
+      AAU_V24_RESEARCH: 'yes'
+      AAU_PYTHON_SANDBOX: 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check isolated offline Docker executor before any model calls
+        run: docker info --format '{{.ServerVersion}}'
+      - name: Install pinned research-only AMQPS and PostgreSQL clients without lifecycle scripts
+        run: npm install --no-save --ignore-scripts amqplib@0.10.9 pg@8.16.3
+      - name: Prove behavioral probes discriminate all ten rules and replay real omitted-constraint Kimi failure
+        run: |
+          node --check experiments/kimi-recursion-v24/behavioral-probes.mjs
+          node --check experiments/kimi-recursion-v24/live.mjs
+          node --test experiments/kimi-recursion-v24/behavioral-gate.test.mjs
+          node --test experiments/kimi-recursion-v24/depth.test.mjs
+          node --test experiments/kimi-recursion-v24/cost-companion.test.mjs
+      - name: One authorized Kimi thinking OFF deep recursion with behavioral self-remediation gate
+        working-directory: experiments/kimi-recursion-v24
+        env:
+          AMQP_URL: ${{ secrets.AMQP }}
+          NEON_V19_DATABASE_URL: ${{ secrets.NEON_V19_DATABASE_URL }}
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: node live.mjs
+      - name: Retain honest level, public behavioral failures, repairs, hidden result, and call provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-kimi-behavioral-invariants-v25-evidence
+          path: experiments/kimi-recursion-v24/kimi-recursion-v24-evidence.json
+          if-no-files-found: warn
+          retention-days: 7
