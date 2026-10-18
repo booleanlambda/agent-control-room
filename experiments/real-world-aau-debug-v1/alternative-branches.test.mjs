@@ -21,7 +21,8 @@ test('exactly three distinct model-authored approaches, immutable order and hash
  assert.equal(alternativeSummary(state).proposed,3);
  assert.equal(alternativeSummary(state).attempts.length,0);
  assert.equal(alternativeSummary(state).branches.length,3);
- assert.equal(JSON.stringify(alternativeSummary(state)).includes('Correct the malformed'),false);
+ assert.equal(alternativeSummary(state).branches[0].approach,'Correct the malformed response classification.');
+ assert.equal(alternativeSummary(state).branches[0].hypothesis,'The JSON catch loses the canonical classification.');
  assert.equal(selectNextAlternative(state).id,1);
  assert.throws(()=>selectNextAlternative(state),/ALTERNATIVE_STILL_ACTIVE/);
  assert.equal(settleAlternative(state,{id:1,verdict:'NO_PROGRESS',decisionId:'decision_4',
@@ -63,6 +64,8 @@ test('reject missing, duplicated or unsafe model proposals rather than synthesiz
  assert.throws(()=>createAlternativeBranches(duplicate,h(0)),/ALTERNATIVE_APPROACH_DUPLICATED/);
  const missing=plan();missing.branches[1].hypothesis='';
  assert.throws(()=>createAlternativeBranches(missing,h(0)),/ALTERNATIVE_NODE_INVALID/);
+ const unsafe=plan();unsafe.branches[2].hypothesis='Expose bearer abcdefghijklmnopqrstuvwxyz secret';
+ assert.throws(()=>createAlternativeBranches(unsafe,h(0)),/ALTERNATIVE_NODE_INVALID/);
  assert.throws(()=>createAlternativeBranches(plan(),'invalid-hash'),/ALTERNATIVE_BASELINE_HASH_INVALID/);
 });
 test('refuse out-of-order outcomes and bad candidate proofs',()=>{
