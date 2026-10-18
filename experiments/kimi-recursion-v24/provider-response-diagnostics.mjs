@@ -37,7 +37,42 @@ export function inspectV28ProviderResponse(stage,httpStatus,body,bodyParsed=true
  receipt.contentJson='valid_object';
  return result('ACCEPTED',answer);
 }
+// Only these literal code/name values are allowed into persisted receipts.
+// Never promote arbitrary error.message, stack, URL, hostname or cause objects.
+const safeExceptionNames=new Set([
+ 'Error','TypeError','AbortError','TimeoutError','NetworkError',
+ 'AggregateError','SyntaxError','RangeError','ReferenceError'
+]);
+const safeNetworkCodes=new Set([
+ 'ABORT_ERR','ECONNRESET','ETIMEDOUT','ECONNREFUSED','EAI_AGAIN',
+ 'ENOTFOUND','EPIPE','ERR_SOCKET_CLOSED','ERR_NETWORK',
+ 'UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT','UND_ERR_BODY_TIMEOUT',
+ 'UND_ERR_SOCKET','UND_ERR_REQ_CONTENT_LENGTH_MISMATCH',
+ 'UND_ERR_REQUEST_ABORTED','UND_ERR_RESPONSE_STATUS_CODE',
+ 'CERT_HAS_EXPIRED','SELF_SIGNED_CERT_IN_CHAIN','ERR_TLS_CERT_ALTNAME_INVALID'
+]);
+const timeoutCodes=new Set(['ETIMEDOUT','UND_ERR_CONNECT_TIMEOUT',
+ 'UND_ERR_HEADERS_TIMEOUT','UND_ERR_BODY_TIMEOUT']);
+const safeName=x=>safeExceptionNames.has(x)?x:'OTHER_ERROR';
+const safeCode=x=>safeNetworkCodes.has(x)?x:null;
+export function inspectV28TransportFailure(error,{
+ elapsedMs=null,httpHeadersReceived=false,requestDeadlineFired=false
+}={}){
+ const exceptionName=safeName(error?.name);
+ const errorCode=safeCode(error?.code);
+ const causeCode=safeCode(error?.cause?.code);
+ const elapsed=Number.isSafeInteger(elapsedMs)&&elapsedMs>=0&&elapsedMs<=3600000
+  ?elapsedMs:null;
+ const ownDeadline=requestDeadlineFired===true;
+ const timeout=ownDeadline||exceptionName==='AbortError'||exceptionName==='TimeoutError'
+  ||timeoutCodes.has(errorCode)||timeoutCodes.has(causeCode);
+ return Object.freeze({
+  exceptionName,errorCode,causeCode,elapsedMs:elapsed,
+  httpHeadersReceived:httpHeadersReceived===true,
+  requestDeadlineFired:ownDeadline,
+  category:timeout?'TRANSPORT_TIMEOUT_OR_ABORT':'TRANSPORT_OR_CLIENT_ERROR'
+ });
+}
 export function classifyV28ThrownError(error){
- return error?.name==='AbortError'||error?.name==='TimeoutError'
-  ?'TRANSPORT_TIMEOUT_OR_ABORT':'TRANSPORT_OR_CLIENT_ERROR';
+ return inspectV28TransportFailure(error).category;
 }
