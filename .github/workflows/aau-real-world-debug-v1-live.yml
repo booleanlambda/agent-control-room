@@ -23,6 +23,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install scoped Undici transport for research-only thinking-ON calls
+        run: npm install --no-save --ignore-scripts --no-package-lock --no-audit --no-fund undici@7.29.1
       - name: Freeze real historical source and validate independent test runner
         run: |
           node --check experiments/real-world-aau-debug-v1/live.mjs
@@ -32,6 +34,9 @@ jobs:
           node --test experiments/real-world-aau-debug-v1/output-normalizer.test.mjs
           node --check experiments/real-world-aau-debug-v1/output-normalizer.mjs
           node --test experiments/real-world-aau-debug-v1/output-normalizer.test.mjs
+          node --test experiments/aau-provider-transport/headers-timeout.test.mjs
+          node --test experiments/aau-provider-transport/transport-policy.test.mjs
+          node --check experiments/aau-provider-transport/transport-policy.mjs
           node --check experiments/real-world-aau-debug-v1/verify-candidate.mjs
           test -s experiments/real-world-aau-debug-v1/legacy-model-source.txt
       - name: Verify Docker secure offline evaluation
