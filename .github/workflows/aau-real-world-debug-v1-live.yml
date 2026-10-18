@@ -44,6 +44,8 @@ jobs:
           node --test experiments/real-world-aau-debug-v1/early-focused-progress.test.mjs
           node --check experiments/real-world-aau-debug-v1/progress-budget-tree.mjs
           node --test experiments/real-world-aau-debug-v1/progress-budget-tree.test.mjs
+          node --check experiments/real-world-aau-debug-v1/model-node-validation.mjs
+          node --test experiments/real-world-aau-debug-v1/model-node-validation.test.mjs
           node --test experiments/aau-provider-transport/headers-timeout.test.mjs
           node --test experiments/aau-provider-transport/transport-policy.test.mjs
           node --test experiments/aau-provider-transport/scoped-benchmark.test.mjs
