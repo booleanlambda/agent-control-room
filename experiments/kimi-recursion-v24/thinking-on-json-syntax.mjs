@@ -70,7 +70,9 @@ export function inspectThinkingOnFinalJson(content){
  if(candidate.length>MAX_CHARS)return {answer:null,meta};
  try{
   const answer=JSON.parse(candidate);
-  if(!answer||typeof answer!=='object'||Array.isArray(answer))return {answer,meta};
+  if(!answer||typeof answer!=='object'||Array.isArray(answer)){
+   meta.recoveryResult='parsed_invalid_shape';return {answer,meta};
+  }
   meta.recoveryResult='accepted';
   return {answer,meta};
  }catch{
