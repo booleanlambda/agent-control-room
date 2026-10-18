@@ -7,6 +7,8 @@ import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {parseModelOwnedPlan,normalizeModelOwnedPatches,safeStructureSummary} from './output-normalizer.mjs';
+import {inspectThinkingOnFinalJson} from '../kimi-recursion-v24/thinking-on-json-syntax.mjs';
+import {inspectV28TransportFailure} from '../kimi-recursion-v24/provider-response-diagnostics.mjs';
 if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_REAL_WORLD_DEBUG!=='yes')throw Error('RESEARCH_ONLY');
 const digest=x=>createHash('sha256').update(String(x)).digest('hex');
 const run=randomUUID(),base=readFileSync(new URL('./legacy-model-source.txt',import.meta.url),'utf8');
@@ -30,7 +32,9 @@ async function callModel(label,payload,thinking=false){
   messages:[{role:'system',content:system},{role:'user',content:JSON.stringify(payload)}]};
  const receipt={stage:label,thinking:thinking?'enabled':'disabled',
   completionCeiling:max_tokens,requestSha256:digest(JSON.stringify(body)),
-  status:'sent_or_uncertain',usage:null,finishReason:null};
+  status:'sent_or_uncertain',usage:null,finishReason:null,
+  completionTokens:null,reasoningTokens:null,rawFinalContentStored:false,
+  rawReasoningStored:false,finalJsonDiagnostic:null};
  report.modelCalls.push(receipt);save();
  const controller=new AbortController();
  const timer=setTimeout(()=>controller.abort(),thinking?720000:175000);
@@ -47,11 +51,27 @@ async function callModel(label,payload,thinking=false){
   receipt.finishReason=choice?.finish_reason??null;
   receipt.usage=Number.isSafeInteger(j?.usage?.total_tokens)?j.usage.total_tokens:null;
   if(receipt.usage!==null)totalTokens+=receipt.usage;
+  receipt.completionTokens=Number.isSafeInteger(j?.usage?.completion_tokens)?j.usage.completion_tokens:null;
+  receipt.reasoningTokens=Number.isSafeInteger(j?.usage?.completion_tokens_details?.reasoning_tokens)?
+   j.usage.completion_tokens_details.reasoning_tokens:null;
   if(!res.ok){receipt.status='provider_http_error';throw Error('MODEL_REQUEST_MANUAL_HOLD')}
   if(receipt.finishReason!=='stop'){receipt.status='incomplete_response';throw Error('MODEL_REQUEST_MANUAL_HOLD')}
   const text=choice?.message?.content;
   if(typeof text!=='string'||!text.trim()){receipt.status='empty_response';throw Error('MODEL_REQUEST_MANUAL_HOLD')}
-  let answer;try{answer=JSON.parse(text)}catch{receipt.status='malformed_json';throw Error('MODEL_REQUEST_MANUAL_HOLD')}
+  // Thinking ON can return valid JSON wrapped in a complete Markdown JSON fence.
+  // Recover only that exact wrapper or a leading BOM; no reasoning text, patch
+  // synthesis, speculative JSON repair or second provider request is involved.
+  let answer;
+  if(thinking){
+   const parsed=inspectThinkingOnFinalJson(text);
+   receipt.finalJsonDiagnostic=parsed.meta;
+   if(parsed.meta.rawSyntax==='invalid'&&parsed.meta.recoveryResult!=='accepted'){
+    receipt.status='malformed_json';throw Error('MODEL_REQUEST_MANUAL_HOLD');
+   }
+   answer=parsed.answer;
+  }else{
+   try{answer=JSON.parse(text)}catch{receipt.status='malformed_json';throw Error('MODEL_REQUEST_MANUAL_HOLD')}
+  }
   if(!answer||Array.isArray(answer)||typeof answer!=='object'){
    receipt.status='invalid_shape';throw Error('MODEL_REQUEST_MANUAL_HOLD')
   }
@@ -60,8 +80,12 @@ async function callModel(label,payload,thinking=false){
   receipt.responseStructure=safeStructureSummary(answer);
   save();return answer;
  }catch(e){
-  if(receipt.status==='sent_or_uncertain')receipt.status=e?.name==='AbortError'?
-   'timeout_or_abort':'transport_or_client_error';
+  if(receipt.status==='sent_or_uncertain'){
+   const transport=inspectV28TransportFailure(e);
+   receipt.status=transport.category==='TRANSPORT_TIMEOUT_OR_ABORT'?
+    'transport_timeout_or_abort':'transport_or_client_error';
+   receipt.transportDiagnostic=transport;
+  }
   save();throw Error('MODEL_REQUEST_MANUAL_HOLD');
  }finally{clearTimeout(timer)}
 }
