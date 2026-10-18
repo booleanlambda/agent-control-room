@@ -16,6 +16,19 @@ function inspectAlternativeGroups(report,events,decisions,calls){
   if(!decIds.has(g.proposalDecisionId)||!events.some(e=>e.kind==='ALTERNATIVES_PROPOSED'&&
     e.branchGroupId===groupId&&e.decisionId===g.proposalDecisionId))
    issues.push('ALTERNATIVE_PROPOSAL_UNLINKED');
+  const descSha=s=>createHash('sha256').update(s).digest('hex');
+  const proposalHash=descSha(JSON.stringify(summary.branches.map(b=>({id:b.id,
+   approachSha256:b.approachSha256,hypothesisSha256:b.hypothesisSha256,
+   acceptanceSha256:b.acceptanceSha256}))));
+  if(summary.branches.some(b=>typeof b.approach!=='string'||typeof b.hypothesis!=='string'||
+    typeof b.acceptance!=='string'||
+    descSha(b.approach)!==b.approachSha256||
+    descSha(b.hypothesis)!==b.hypothesisSha256||
+    descSha(b.acceptance)!==b.acceptanceSha256)||
+    proposalHash!==g.proposalSha256||
+    !events.some(e=>e.kind==='ALTERNATIVES_PROPOSED'&&e.branchGroupId===groupId&&
+     e.branchProposalSha256===proposalHash))
+   issues.push('ALTERNATIVE_PROPOSAL_HASH_MISMATCH');
   if(summary.baselineSha256!==g.baselineCandidateSha256||
     new Set(summary.branches.map(x=>x.approachSha256)).size!==3)
    issues.push('ALTERNATIVE_DISTINCTNESS_OR_BASELINE_INVALID');
