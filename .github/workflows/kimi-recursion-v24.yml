@@ -1,10 +1,10 @@
-name: AAU V24 Kimi Deep Ten-Level Cognitive Remediation
+name: AAU V24B Kimi Deep Recursion Trusted Arithmetic
 
 on:
   pull_request:
     types: [opened, synchronize]
     branches:
-      - experiment/kimi-one-thread-cognition-v23
+      - experiment/kimi-recursive-remediation-v24
     paths:
       - 'experiments/kimi-recursion-v24/**'
       - '.github/workflows/kimi-recursion-v24.yml'
@@ -33,6 +33,8 @@ jobs:
           node --check experiments/kimi-recursion-v24/benchmark.mjs
           node --check experiments/kimi-recursion-v24/ledger.mjs
           node --check experiments/kimi-recursion-v24/live.mjs
+          node --check experiments/kimi-recursion-v24/cost-companion.mjs
+          node --test experiments/kimi-recursion-v24/cost-companion.test.mjs
           node --test experiments/kimi-recursion-v24/depth.test.mjs
       - name: Install pinned AMQP + Neon drivers without lifecycle scripts
         run: npm install --no-save --ignore-scripts amqplib@0.10.9 pg@8.16.3
@@ -49,7 +51,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: aau-kimi-deep-recursion-v24-evidence
+          name: aau-kimi-deep-recursion-v24b-evidence
           path: experiments/kimi-recursion-v24/kimi-recursion-v24-evidence.json
           if-no-files-found: warn
           retention-days: 7
