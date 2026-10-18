@@ -993,3 +993,26 @@ The runner correctly entered **thinking-ON remediation only on failed public pro
 **Conclusion:** This was an authentic software engineering problem with verifiable original fault and model-selected plan. Kimi thinking OFF showed accurate diagnosis and a partially effective attempted code repair. It did **not** pass complete independent public validation or hidden validation; no claim of generic real-world or self-remediation success is justified. The validator's literal-label assumptions should be normalized for future tests using a predeclared mapping, while continuing to distinguish genuine timeout classification failures. Avoid repeated expensive paid trials solely to recover an ambiguous provider response. This was not a full RabbitMQ/Neon-recursion runtime and should not be counted as another ten-depth architecture result.
 
 **Experiments remain isolated; no production merge or Silas wake.**
+
+---
+
+## Real AAU bug benchmark — Kimi JSON adapter and Fetch-mock corrected live trial (2026-10-18)
+
+**User-authorized bounded paid research trial; not production.** [Draft PR #85](https://github.com/booleanlambda/agent-control-room/pull/85), [GitHub Actions #39137214623](https://github.com/booleanlambda/agent-control-room/actions/runs/39137214623): completed with job **failure** because live autonomous repair was not independently verified, while preflight syntax, Kimi JSON adapter, corrected Fetch mock and Docker checks passed. Actual independent evidence [artifact 12139804567](https://github.com/booleanlambda/agent-control-room/actions/runs/39137214623/artifacts/12139804567); download `aau-kimi-realbug-corrected-live-v5.zip`; run UUID `5faafcc8-1588-47b3-8d9a-87a3e22a792a`. The historical source was the actual vulnerable experimental V28 model() from blob `649f8af2247cc9fa69cd6360397f89838e5fa43a`, not the later known fix. Model did not see the reference repair or withheld tests.
+
+**Offline prerequisite:** [GitHub Actions #39137165494](https://github.com/booleanlambda/agent-control-room/actions/runs/39137165494) **success** after fixing a benchmark bug: a mock Fetch response originally exposed `response.json()` but not standard `response.text()`, causing false negatives for a valid model-authored body-reading implementation. The mock now provides both, and it separately validates this compatibility without masking the historical defect. The evaluator also predeclares constrained semantic category aliases instead of requiring an identical label when the failure mechanism is equivalent; generic `uncertain_or_rejected` or `transport_or_unknown` remains unacceptable for a timeout.
+
+**Actual live calls:**
+- `discover_and_decompose`: thinking **OFF**, HTTP 200, `finish_reason=stop`, **1,657** tokens; model-authored plan has four distinct subproblems, with `tasks[]` containing `issue` and `acceptance`. Adapter successfully accepted it.
+- `implement_model_generated_plan`: thinking **OFF**, HTTP 200, `finish_reason=stop`, **4,721** tokens; model authored one exact-span replacement and diagnosis, parsed by the adapter.
+- `remediate_failed_public_test`: thinking **ON**, up to 32,768 completion tokens; **transport_or_client_error**, finish reason and provider token receipt **unavailable**, no accepted repair output, not retried. The 6,378 cumulative reported tokens exclude this third ambiguous request.
+
+**Independent PUBLIC executable verification of the model-authored code (no network, read-only Docker): 3/4 passed.**
+- `received`: **PASS**; valid response returned and logged correctly.
+- `malformed`: **PASS**; malformed JSON categorized as `bad_json`, an accepted precise semantic equivalent.
+- `http_error`: **PASS**; HTTP 503 categorized as `http_error`, with expected no-usage metadata.
+- `timeout`: **FAIL**; candidate logged `uncertain_or_rejected` instead of a specific transport timeout/abort category and omitted a sanitized diagnostic report.
+
+The independent **HIDDEN** verifier was intentionally **not run** because the public gate failed. The final status is `blocked`, `success=false`. The thinking-ON retry is **not** proof of ineffective reasoning, because no completed response was received; no 32K exhaustion occurred or was confirmed. The user-requested JSON-shape adapter itself successfully handled the live responses; however, the complete autonomous real-world repair did **not** pass. No production or Silas change, no automatic retry of an ambiguous paid call, and no further paid benchmark launched.
+
+**Architectural lesson:** after removing JSON-shape and Fetch-mock artifacts, Kimi thinking-OFF independently corrected three of four actual failure behaviors. The next engineering target is deterministic transport/timeout classification and protection of response provenance, and a separate verification that thinking-ON remediation actually returns and repairs a failing candidate. Preserve every original uncategorized call as unknown; do not infer the underlying provider failure mechanism without evidence.
