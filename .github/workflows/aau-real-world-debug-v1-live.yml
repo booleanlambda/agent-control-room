@@ -34,6 +34,8 @@ jobs:
           node --test experiments/real-world-aau-debug-v1/output-normalizer.test.mjs
           node --check experiments/real-world-aau-debug-v1/output-normalizer.mjs
           node --test experiments/real-world-aau-debug-v1/output-normalizer.test.mjs
+          node --check experiments/real-world-aau-debug-v1/public-failure-feedback.mjs
+          node --test experiments/real-world-aau-debug-v1/public-failure-feedback.test.mjs
           node --test experiments/aau-provider-transport/headers-timeout.test.mjs
           node --test experiments/aau-provider-transport/transport-policy.test.mjs
           node --test experiments/aau-provider-transport/scoped-benchmark.test.mjs
