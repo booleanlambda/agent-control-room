@@ -16,6 +16,7 @@ import {classifyThinkingExhaustion,proposedExhaustionRoute} from './remediation-
 import {focusedPatchDecision} from './early-focused-progress.mjs';
 import {budgetReservation,createRepairTree,takeRepairNode,addChildRepairNodes,treeSummary,GLOBAL_PROVIDER_TOKEN_BUDGET,RECURSION_DEPTH_LIMIT} from './progress-budget-tree.mjs';
 import {selectValidModelOwnedNodes} from './model-node-validation.mjs';
+import {makeForensicLedger,auditEvent,attachModelDecision,resolveModelDecision,MODEL_FORENSICS_INSTRUCTIONS} from './decision-forensics.mjs';
 if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_REAL_WORLD_DEBUG!=='yes')throw Error('RESEARCH_ONLY');
 const digest=x=>createHash('sha256').update(String(x)).digest('hex');
 const run=randomUUID(),base=readFileSync(new URL('./legacy-model-source.txt',import.meta.url),'utf8');
@@ -26,7 +27,7 @@ const report={experiment:'REAL_AAU_V28_ORIGINAL_PROVIDER_DIAGNOSTIC_INCIDENT',
  problemType:'actual AAU provider/manual-hold provenance loss',
  planGeneratedByModel:false,noGoldPatchProvided:true,noSyntheticFaultInjection:true,
  proofModelIndependent:true,maxCalls:null,computeBudgetTokens:GLOBAL_PROVIDER_TOKEN_BUDGET,
- modelCalls:[],decisions:[],tests:[],
+ modelCalls:[],decisions:[],tests:[],forensics:makeForensicLedger(),
  architecture:'progress-driven recursive OFF nodes, independent public verifier, budget-governed ON',
  modelOwnedEarlyTasks:[],focusedNodeResults:[],earlyOffNodesRun:0,
  repairTree:{pending:0,visited:0,depthOfNextNode:null,uniqueTasks:0},
@@ -35,7 +36,10 @@ const report={experiment:'REAL_AAU_V28_ORIGINAL_PROVIDER_DIAGNOSTIC_INCIDENT',
  success:false,candidateSha256:null,nonReplayableCalls:true,
  thinkingExhaustion:null,proposedDecomposition:null};
 const save=()=>writeFileSync('real-world-debug-evidence.json',JSON.stringify(report,null,2)+'\n');
-const system='You are Kimi K2.6, acting as a software engineer. Your job is to independently diagnose and fix a REAL historical code defect, not a synthetic exercise. Produce exactly one JSON object, no markdown. Analyze constraints yourself, choose your own decomposition; avoid inventing observed outcomes. Do not request or expose hidden tests. Do not change thinking-mode policy or auto-retry ambiguous paid provider calls.';
+const audit=fields=>{const entry=auditEvent(report.forensics,fields);save();return entry};
+const summarizePlan=tasks=>tasks.map(t=>({id:t.id,issueSha256:digest(t.issue),acceptanceSha256:digest(t.acceptance)}));
+const currentDecision=()=>report.modelCalls.at(-1)?.forensicDecisionId??null;
+const system='You are Kimi K2.6, acting as a software engineer. Your job is to independently diagnose and fix a REAL historical code defect, not a synthetic exercise. Produce exactly one JSON object, no markdown. Analyze constraints yourself, choose your own decomposition; avoid inventing observed outcomes. Do not request or expose hidden tests. Do not change thinking-mode policy or auto-retry ambiguous paid provider calls. '+MODEL_FORENSICS_INSTRUCTIONS;
 // Deliberately no hard numeric maximum on model calls; global compute is finite.
 let totalTokens=0;
 async function callModel(label,payload,thinking=false){
