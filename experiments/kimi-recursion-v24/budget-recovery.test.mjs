@@ -69,7 +69,9 @@ test('bounded instant-mode decomposition is validated and may never become a loo
 });
 test('full stage engine checkpoints known budget exhaustion, asks OFF decomposition, then verifies all prior invariants',()=>{
  const s=readFileSync(new URL('./live.mjs',import.meta.url),'utf8');
- assert.match(s,/isKnownThinkingExhaustion\(stage,choice,res\.ok\)/);
+ assert.match(s,/inspectV28ProviderResponse\(stage,res\.status,j,bodyParsed\)/);
+ const d=readFileSync(new URL('./provider-response-diagnostics.mjs',import.meta.url),'utf8');
+ assert.match(d,/isKnownThinkingExhaustion\(stage,choice,true\)/);
  assert.match(s,/db\.finishCall\(run,stage,attempt,'budget_exhausted'/);
  assert.match(s,/return THINKING_EXHAUSTED/);
  assert.match(s,/if\(answer===THINKING_EXHAUSTED\)/);

@@ -10,8 +10,9 @@ import {LEVELS,publicCasesFor,hiddenCases,stageHash,assess,sha} from './benchmar
 import {createLedger} from './ledger.mjs';
 import {reconcileSelectedCost} from './cost-companion.mjs';
 import {behaviorProbesAt} from './behavioral-probes.mjs';
-import {kimiStageRequest,kimiResponseAcceptable} from './thinking-router.mjs';
-import {isKnownThinkingExhaustion,planExhaustion,remainingPatchSlots,parseDecomposition,recoveryAfterFailedVerification} from './budget-recovery.mjs';
+import {kimiStageRequest} from './thinking-router.mjs';
+import {planExhaustion,remainingPatchSlots,parseDecomposition,recoveryAfterFailedVerification} from './budget-recovery.mjs';
+import {inspectV28ProviderResponse,inspectV28TransportFailure} from './provider-response-diagnostics.mjs';
 if(process.env.GITHUB_ACTIONS!=='true'||process.env.AAU_V24_RESEARCH!=='yes'||
    process.env.AAU_PYTHON_SANDBOX!=='yes')throw Error('RESEARCH_ONLY');
 const digest=x=>createHash('sha256').update(typeof x==='string'?x:JSON.stringify(x)).digest('hex');
@@ -21,7 +22,7 @@ const report={experiment:'V28_32K_THINKING_4K_INSTANT_DECOMPOSE_ON_EXHAUSTION',
  status:'running',requestedDepth:10,verifiedDepth:0,deepestReached:0,
  exactHiddenPass:false,callCount:0,providerTokens:0,repairCount:0,
  repairs:[],nodes:[],phaseEvents:[],brokerACKs:0,brokerPublished:0,
- noInjectedDefects:true,behavioralInvariantGate:true,repairThinkingOnly:true,thinkingRouting:[],thinkingExhaustions:[],decompositionBudgetPolicy:{maxTasks:2,maxDecompositionsPerNode:1},architecture:'one durable RabbitMQ thread + isolated Neon checkpoint and transactional outbox + general Python sandbox + independent stage/hidden oracle',
+ noInjectedDefects:true,behavioralInvariantGate:true,repairThinkingOnly:true,thinkingRouting:[],thinkingExhaustions:[],providerCallDiagnostics:[],decompositionBudgetPolicy:{maxTasks:2,maxDecompositionsPerNode:1},architecture:'one durable RabbitMQ thread + isolated Neon checkpoint and transactional outbox + general Python sandbox + independent stage/hidden oracle',
  modelMakesAlgorithms:true,oracleNotModelAccessible:true,
  caveats:['Only a single spine of ten semantically dependent proof nodes, not a 1024-leaf binary recursion tree',
  'The levels and per-level constraints are revealed sequentially but were selected by the experiment designer',
@@ -41,8 +42,7 @@ async function model(stage,attempt,state,question,max_tokens){
  if(state.providerCalls>=modelCap||state.providerTokens>=tokenCap)throw Error('MODEL_BUDGET_REACHED');
  const messages=[{role:'system',content:SYSTEM},{role:'user',content:JSON.stringify(question)}];
  const cfg=kimiStageRequest(stage,max_tokens);
- // Mode choice is derived ONLY from the stage name; neither prompts nor
- // arbitrary model output can enable thinking for routine cognition.
+ // Mode choice is derived ONLY from the stage name, never model output.
  const body={model:cfg.model,thinking:cfg.thinking,temperature:cfg.temperature,
    response_format:{type:'json_object'},max_tokens:cfg.max_tokens,stream:false,messages};
  state.thinkingRouting??=[];
@@ -50,52 +50,106 @@ async function model(stage,attempt,state,question,max_tokens){
  report.thinkingRouting.push({stage,attempt,mode:cfg.thinking.type,tokenCeiling:cfg.max_tokens});
  const reserve=Math.ceil(JSON.stringify(messages).length/2)+cfg.max_tokens;
  if(outputReservations+reserve>outputReservationCap)throw Error('RESERVATION_CAP_REACHED');
- // Presend durable journal: if uncertain, a replay is NOT permitted.
+ // Never re-send an ambiguous paid model call. Existing durable presend journal.
  await db.beginCall(run,stage,attempt,digest(body));
  state.providerCalls++;report.callCount=state.providerCalls;
  outputReservations+=reserve;
  const pause=Math.max(0,lastStart+23000-Date.now());if(pause)await wait(pause);
  lastStart=Date.now();
- const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),cfg.timeoutMs);
+ let requestDeadlineFired=false,httpHeadersReceived=false,providerResponseSettled=false;
+ const ctrl=new AbortController(),timer=setTimeout(()=>{
+  if(!providerResponseSettled){requestDeadlineFired=true;ctrl.abort()}
+ },cfg.timeoutMs);
+ let outcome=null,durableWriteAttempted=false,durableWriteCompleted=false;
  try{
   const key=String(process.env.MOONSHOT_API_KEY||'').trim();
   if(!key)throw Error('PROVIDER_SECRET_MISSING');
   const res=await fetch('https://api.moonshot.ai/v1/chat/completions',{method:'POST',signal:ctrl.signal,
     redirect:'manual',headers:{authorization:'Bearer '+key,'content-type':'application/json',accept:'application/json'},
     body:JSON.stringify(body)});
-  const j=await res.json().catch(()=>({}));
-  const tokens=j?.usage?.total_tokens;
-  if(Number.isSafeInteger(tokens)&&tokens>=0){state.providerTokens+=tokens;report.providerTokens=state.providerTokens}
-  const choice=j?.choices?.[0],finish=choice?.finish_reason;
-  if(isKnownThinkingExhaustion(stage,choice,res.ok)){
-   // Explicit provider finish_reason=length is definite output-budget
-   // exhaustion, not a logical patch failure and not a transport retry.
-   const receipt={stage,attempt,mode:cfg.thinking.type,finishReason:finish,
-    tokenCeiling:cfg.max_tokens,providerTokens:tokens??null,
-    reportedReasoningTokens:j?.usage?.completion_tokens_details?.reasoning_tokens??null,
-    reasoningReturned:!!choice.message?.reasoning_content};
+  httpHeadersReceived=true;
+  let bodyParsed=true;
+  const j=await res.json().catch(()=>{bodyParsed=false;return null});
+  // The timeout applies to the provider, not later ledger commits.
+  providerResponseSettled=true;clearTimeout(timer);
+  outcome=inspectV28ProviderResponse(stage,res.status,j,bodyParsed);
+  const tokens=outcome.receipt.providerTokens;
+  if(tokens!==null){state.providerTokens+=tokens;report.providerTokens=state.providerTokens}
+  if(outcome.category==='THINKING_BUDGET_EXHAUSTED'){
+   // The ONLY approved transition to 4K OFF decomposition remains the
+   // completed ON repair with provider HTTP success + finish_reason=length.
+   durableWriteAttempted=true;
+   await db.finishCall(run,stage,attempt,'budget_exhausted',tokens,outcome.receipt.finishReason,
+    outcome.content?digest(outcome.content):null);
+   durableWriteCompleted=true;
+   const receipt={stage,attempt,mode:cfg.thinking.type,finishReason:outcome.receipt.finishReason,
+    tokenCeiling:cfg.max_tokens,providerTokens:tokens,
+    reportedReasoningTokens:outcome.receipt.reasoningTokens,
+    reasoningReturned:!!j?.choices?.[0]?.message?.reasoning_content};
    state.thinkingExhaustions??=[];
    state.thinkingExhaustions.push(receipt);
    report.thinkingExhaustions.push(receipt);
-   await db.finishCall(run,stage,attempt,'budget_exhausted',tokens??null,finish,
-    digest(choice.message?.content??''));
+   report.providerCallDiagnostics.push({...outcome.receipt,attempt,ledgerPersisted:true,
+    elapsedMs:Date.now()-lastStart,httpHeadersReceived});
    return THINKING_EXHAUSTED;
   }
-  if(!res.ok||!kimiResponseAcceptable(stage,choice))
-   throw Error('PROVIDER_INCOMPLETE_OR_REJECTED');
-  let answer;try{answer=JSON.parse(choice?.message?.content??'')}catch{throw Error('BAD_MODEL_JSON')}
-  if(!answer||typeof answer!=='object'||Array.isArray(answer))throw Error('MODEL_RESPONSE_SHAPE');
-  // Store receipt metadata only; never persist or display raw internal reasoning.
+  if(outcome.category!=='ACCEPTED')throw Error('PROVIDER_RESPONSE_REJECTED');
+  // Persist a receipt before making an accepted answer available to cognition.
+  durableWriteAttempted=true;
+  await db.finishCall(run,stage,attempt,'received',tokens,outcome.receipt.finishReason,
+   outcome.content?digest(outcome.content):null);
+  durableWriteCompleted=true;
   state.thinkingReceipt??=[];
   state.thinkingReceipt.push({stage,attempt,mode:cfg.thinking.type,
-    reasoningReturned:!!choice?.message?.reasoning_content,
-    completionTokens:j?.usage?.completion_tokens??null,
-    reportedReasoningTokens:j?.usage?.completion_tokens_details?.reasoning_tokens??null});
-  await db.finishCall(run,stage,attempt,'received',tokens??null,finish,digest(choice.message.content));
-  return answer;
+   reasoningReturned:!!j?.choices?.[0]?.message?.reasoning_content,
+   completionTokens:outcome.receipt.completionTokens,
+   reportedReasoningTokens:outcome.receipt.reasoningTokens});
+  report.providerCallDiagnostics.push({...outcome.receipt,attempt,ledgerPersisted:true,
+    elapsedMs:Date.now()-lastStart,httpHeadersReceived});
+  return outcome.answer;
  }catch(e){
-  await db.finishCall(run,stage,attempt,'uncertain_or_rejected',null,null,null).catch(()=>{});
-  throw Error('MODEL_REQUEST_MANUAL_HOLD');
+  // Never overwrite the original provider category, HTTP code, finish
+  // reason or token count with an undifferentiated manual-hold result.
+  // If a ledger write was attempted but failed, the commit is uncertain:
+  // do not write it again or re-send the model request.
+  const transport=inspectV28TransportFailure(e,{
+   elapsedMs:Date.now()-lastStart,httpHeadersReceived,requestDeadlineFired
+  });
+  let category=durableWriteAttempted&&!durableWriteCompleted
+   ?'LEDGER_WRITE_FAILURE'
+   :outcome?.category||(
+    e?.message==='PROVIDER_SECRET_MISSING'
+     ?'PROVIDER_CONFIGURATION_ERROR':transport.category);
+  let ledgerPersisted=durableWriteCompleted;
+  if(!durableWriteAttempted){
+   durableWriteAttempted=true;
+   try{
+    await db.finishCall(run,stage,attempt,category.toLowerCase(),
+     outcome?.receipt?.providerTokens??null,outcome?.receipt?.finishReason??null,
+     outcome?.content?digest(outcome.content):null);
+    durableWriteCompleted=true;ledgerPersisted=true;
+   }catch{
+    // The storage attempt itself is ambiguous. Never conceal the
+    // provider-side diagnosis, never attempt an unsafe ledger replay.
+    ledgerPersisted=false;
+   }
+  }
+  const receipt=outcome?.receipt||{
+   stage,httpStatus:null,finishReason:null,providerTokens:null,promptTokens:null,
+   completionTokens:null,reasoningTokens:null,contentJson:'not_received'
+  };
+  // Only allowlisted codes/names and bounded timing fields become durable.
+  // No raw exception, stack, cause, request URI or provider reasoning.
+  const diagnostic={...receipt,attempt,errorCategory:category,
+   exceptionName:transport.exceptionName,errorCode:transport.errorCode,
+   causeCode:transport.causeCode,elapsedMs:transport.elapsedMs,
+   httpHeadersReceived:transport.httpHeadersReceived,
+   requestDeadlineFired:transport.requestDeadlineFired,
+   ledgerPersisted,ledgerWriteFailed:!ledgerPersisted};
+  report.providerCallDiagnostics.push(diagnostic);
+  const hold=new Error('MODEL_REQUEST_MANUAL_HOLD');
+  hold.diagnostic=diagnostic;
+  throw hold;
  }finally{clearTimeout(timer)}
 }
 function applyPatch(code,answer){
@@ -378,7 +432,8 @@ try{
   let next;
   try{next=await runPhase(before.next_phase,before.state)}
   catch(e){next={phase:null,status:'manual_hold',state:before.state,
-   event:{stage:before.next_phase,reason:safe(e)}}}
+   event:{stage:before.next_phase,reason:safe(e),
+    providerDiagnostic:e?.diagnostic||null}}}
   if((await db.advance(run,before.seq,before.next_phase,next.phase,next.status,next.state,next.event))!=='COMMITTED')
    throw Error('DURABLE_COMMIT_NOT_APPLIED');
   channel.ack(msg);report.brokerACKs++;
