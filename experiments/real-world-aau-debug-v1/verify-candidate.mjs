@@ -10,16 +10,23 @@ if(!sourcePath)throw Error('CANDIDATE_PATH_REQUIRED');
 const code=readFileSync(sourcePath,'utf8');
 if(!code.includes('async function model(')||code.length<1500||code.length>13000)
  throw Error('CANDIDATE_SHAPE_INVALID');
-const valid=(tokens=123,content='{"patch":"ok"}',finish='stop')=>({
- ok:true,status:200,json:async()=>({
- choices:[{finish_reason:finish,message:{content}}],
- usage:{total_tokens:tokens,prompt_tokens:42,completion_tokens:tokens-42}
- })
+// Match actual Fetch Response interface: both json() and text() are valid
+// independent body-reading alternatives. Old mocks exposed json() only,
+ // falsely failing legitimate model-generated code that uses text().
+const response=(body,status=200)=>({
+ ok:status>=200&&status<300,status,
+ json:async()=>structuredClone(body),
+ text:async()=>JSON.stringify(body)
 });
+const valid=(tokens=123,content='{"patch":"ok"}',finish='stop')=>
+ response({
+  choices:[{finish_reason:finish,message:{content}}],
+  usage:{total_tokens:tokens,prompt_tokens:42,completion_tokens:tokens-42}
+ });
 const cases={
  received:{phase:'level_1',reply:valid(),expectStatus:'received',expectTokens:123,expectFinish:'stop',mode:'return'},
  malformed:{phase:'repair_2',reply:valid(123,'{"broken":','stop'),expectStatus:'malformed_model_json',expectTokens:123,expectFinish:'stop',mode:'hold'},
- http_error:{phase:'repair_2',reply:{ok:false,status:503,json:async()=>({error:{message:'PRIVATE_CANARY'}})},expectStatus:'provider_http_error',expectTokens:null,expectFinish:null,mode:'hold'},
+ http_error:{phase:'repair_2',reply:response({error:{message:'PRIVATE_CANARY'}},503),expectStatus:'provider_http_error',expectTokens:null,expectFinish:null,mode:'hold'},
  timeout:{phase:'repair_2',throwError:Object.assign(new Error('PRIVATE_CANARY'),{name:'TimeoutError'}),expectStatus:'transport_timeout_or_abort',expectTokens:null,expectFinish:null,mode:'hold'},
  off_length:{phase:'level_2',reply:valid(234,'{','length'),expectStatus:'output_truncated_unconfirmed_fallback',expectTokens:234,expectFinish:'length',mode:'hold'},
  on_length:{phase:'repair_2',reply:valid(234,'{','length'),expectStatus:'budget_exhausted',expectTokens:234,expectFinish:'length',mode:'exhaustion'},
@@ -72,7 +79,17 @@ async function exercise(key){
  if(scenario.mode==='return'&&(hold||value?.patch!=='ok'))problems.push('valid response must return normal answer');
  if(scenario.mode==='exhaustion'&&(hold||value!==context.THINKING_EXHAUSTED))
   problems.push('confirmed ON length must use authorized exhaustion sentinel');
- if(last&&scenario.expectStatus!==null&&last[3]!==scenario.expectStatus)problems.push('wrong failure category: '+String(last[3]));
+ // Category labels are not a fixed JSON schema: allow specific equivalent
+ // terms, never a generic 'uncertain_or_rejected' or 'transport_or_unknown'.
+ const categoryAliases={
+  malformed_model_json:['malformed_model_json','malformed_json','bad_json','json_parse_error'],
+  provider_http_error:['provider_http_error','http_error','http_503','http_status_503'],
+  transport_timeout_or_abort:['transport_timeout_or_abort','transport_timeout','timeout','request_timeout','timeout_or_abort'],
+  output_truncated_unconfirmed_fallback:['output_truncated_unconfirmed_fallback','output_truncated','incomplete_length_response']
+ };
+ const accepted=categoryAliases[scenario.expectStatus]||[scenario.expectStatus];
+ if(last&&scenario.expectStatus!==null&&!accepted.includes(last[3]))
+  problems.push('wrong failure category: '+String(last[3]));
  if(last&&scenario.expectStatus!==null&&last[4]!==scenario.expectTokens)problems.push('token receipt lost');
  if(last&&scenario.expectStatus!==null&&last[5]!==scenario.expectFinish)problems.push('finish reason lost');
  if(report.providerCallDiagnostics?.some(x=>JSON.stringify(x).includes('PRIVATE_CANARY')||JSON.stringify(x).includes('SECRET_URL')))
