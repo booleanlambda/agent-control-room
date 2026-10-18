@@ -799,3 +799,21 @@ Ablate baseline model **with general-purpose Python once** versus durable multi-
 
 ### Next gate (not launched)
 Repeat the same frozen v24b config with controlled seeds and a one-shot Kimi-write-code baseline. Then challenge **multiple independent unfamiliar problem families** and more than one nested branch while keeping per-call budget/Neon checkpointing/strict unknown-provider retry stops. Report exact pass rate, per-level remediation cost, nonoptimum failures, and cost tradeoffs. Do not introduce a more powerful LLM hidden behind Kimi or imply that RabbitMQ creates reasoning on its own.
+
+
+### V24B supplementary repetitions and paid-run safety — independently reconciled
+
+After the independently verified run above, two additional workflows started through overlapping GitHub Actions PR-update triggers. These are **NOT parts of the same cognition thread**; report each as a distinct run with its own model calls and provider tokens.
+
+| Isolated Neon research run UUID | Verified depth | Kimi calls | Provider-reported tokens | Model-authored repair attempts | Final state |
+|---|---:|---:|---:|---:|---|
+| `162d378d-7562-4d87-bd1f-ef0b9e19839f` | **9**, but hidden variant failed `EXACT_TAG_COUNT` | 11 | 19,597 | 1 | failed |
+| `366aecae-3eec-4822-8166-f45fd956ccf9` | **10**, both held-out hidden variants exact | 16 | 37,825 | 5 | **passed** |
+| `c6fe225b-7ca8-4a10-bfba-afa26641d0ab` | **2** | 5 | 15,221 | 2 | failed |
+| `eb394afe-7d1f-41ca-82da-58f1ef3b1ba8` | **3** | 6 | 8,829 | 2 | failed |
+
+The 5-call failed run is [Actions 39085292461](https://github.com/booleanlambda/agent-control-room/actions/runs/39085292461); the 6-call failed run is [Actions 39085911753](https://github.com/booleanlambda/agent-control-room/actions/runs/39085911753). The second paid retest was accidentally dispatched because a second workflow `.github/workflows/kimi-recursion-v24.yml` also matched PR updates; a documentation-only update then triggered another workflow pair. CI automatically cancelled one of the duplicates before inference.
+
+**Safety remediation applied, verified:** Both existing research workflows `.github/workflows/kimi-recursion-cost-v24b.yml` and `.github/workflows/kimi-recursion-v24.yml` now listen only to `pull_request.types: [opened]`, **not `synchronize`**, to stop ordinary documentation commits from triggering another paid experiment. Changes were committed with `[skip ci]`; GitHub Actions lookup for both safety commits returned **no additional runs**. No new model inference requested by these safety edits.
+
+**Correct interpretation:** Four observed live V24B attempts had substantially different outcomes (9-depth hidden failure, 10-depth exact success, 2-depth failure, 3-depth failure). They were not a prespecified repeated-trial protocol with rigorously frozen source revisions, so do **NOT** publish a calibrated 25% success-rate claim. There is **one real full-depth success, not reliable repeatability**. The exact successful run required real Kimi code remediation; its `costNormalizations=0` means the new deterministic cost helper made no observed corrections in that success. Its verified capability is **architecture-assisted long-horizon recursive task execution**, not an increase to Kimi's native model reasoning, and the failed repetitions show significant variability. Preserve all failures. Further paid trials require a new explicitly authorized experiment or manual dispatch, rather than CI automatically retrying on changes.
