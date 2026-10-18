@@ -141,3 +141,20 @@ test('independent auditor detects a deleted branch result and cannot be fooled b
  f.report.branchGroups[0].summary.attempts.pop();
  assert.ok(inspectForensicsReport(f.report).issues.includes('ALTERNATIVE_ORDER_OR_COVERAGE_INVALID'));
 });
+
+
+test('model-authored branch descriptions are sealed into forensic event chain',async()=>{
+ const f=fixture({scores:[1,1,1]});
+ await f.executor({candidate:f.candidate,check:f.check,triggerStage:'initial_patch'});
+ assert.deepEqual(finishAndAudit(f).issues,[]);
+ f.report.branchGroups[0].summary.branches[0].hypothesis='Different unverified explanation inserted after execution.';
+ assert.ok(inspectForensicsReport(f.report).issues.includes('ALTERNATIVE_PROPOSAL_HASH_MISMATCH'));
+});
+test('even updating branch-local hashes cannot bypass sealed proposal event',async()=>{
+ const f=fixture({scores:[1,1,1]});
+ await f.executor({candidate:f.candidate,check:f.check,triggerStage:'initial_patch'});
+ const b=f.report.branchGroups[0].summary.branches[0];
+ b.hypothesis='A replaced model-authored branch hypothesis lacking its original provenance.';
+ b.hypothesisSha256=sha(b.hypothesis);
+ assert.ok(inspectForensicsReport(f.report).issues.includes('ALTERNATIVE_PROPOSAL_HASH_MISMATCH'));
+});
