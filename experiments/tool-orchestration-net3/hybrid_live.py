@@ -135,13 +135,13 @@ def best_evidence():
 
 def quality_candidate():
     """Only actual executed nonlinear EPANET results are eligible."""
-    return next((x for x in best_evidence() if x["rmse"]<=QUALITY_THRESHOLD_M),None)
+    return next((x for x in best_evidence() if x["tool"]=="optimize_pair" and x["rmse"]<=QUALITY_THRESHOLD_M),None)
 
 def confirmation(candidate):
     if candidate is None:
         return None
     for e in evaluations:
-        if e["tool"]!="simulate_pair":
+        if e["tool"]!="simulate_pair" or e["tool_turn"]==candidate["tool_turn"]:
             continue
         if set(e["nodes"])!=set(candidate["nodes"]):
             continue
