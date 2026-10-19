@@ -11,12 +11,12 @@ from prepare import OUT
 from tools_runtime import TOOLS, execute
 
 MODEL="kimi-k2.6"
-MAX_TOTAL_TOKENS=75000
-MAX_OUTPUT_TOKENS=4096
+MAX_TOTAL_TOKENS=100000
+MAX_OUTPUT_TOKENS=32768
 TOKEN_COUNT=0
 events=[]
 previous="0"*64
-audit={"model":MODEL,"mode":"thinking_off","max_per_call_output_tokens":MAX_OUTPUT_TOKENS,
+audit={"model":MODEL,"mode":"thinking_on","max_per_call_output_tokens":MAX_OUTPUT_TOKENS,
        "tool_contract":TOOLS,"budget_provider_tokens":MAX_TOTAL_TOKENS,"max_model_calls":None,"calls":[],
        "tool_events":[],"status":"started","final":None}
 def sha(s):
@@ -42,7 +42,7 @@ def call_kimi(messages):
     if available<512:
         raise RuntimeError("MODEL_TOKEN_BUDGET")
     output_limit=min(MAX_OUTPUT_TOKENS,available)
-    body=json.dumps({"model":MODEL,"thinking":{"type":"disabled"},"temperature":0.6,
+    body=json.dumps({"model":MODEL,"thinking":{"type":"enabled"},"temperature":1.0,
                      "response_format":{"type":"json_object"},"max_tokens":output_limit,
                      "stream":False,"messages":messages}).encode()
     req=urllib.request.Request("https://api.moonshot.ai/v1/chat/completions",
@@ -58,10 +58,16 @@ def call_kimi(messages):
     receipt={"call":len(audit["calls"])+1,"finish_reason":c.get("finish_reason"),
              "model":data.get("model",MODEL),"usage":usage,
              "response_content":raw,"response_sha256":sha(raw),
-             "raw_message_hash":sha(json.dumps(c.get("message",{}),sort_keys=True))}
+             "raw_message_hash":sha(json.dumps(c.get("message",{}),sort_keys=True)),
+             "thinking_enabled":True,
+             "reasoning_tokens":(usage.get("completion_tokens_details") or {}).get("reasoning_tokens"),
+             "reasoning_content_sha256":sha(c.get("message",{}).get("reasoning_content") or ""),
+             "reasoning_content_present":bool(c.get("message",{}).get("reasoning_content"))}
     audit["calls"].append(receipt)
     record({"kind":"MODEL_RESPONSE","call":receipt["call"],
             "hash":receipt["response_sha256"],"tokens":usage.get("total_tokens"),
+            "reasoning_tokens":receipt["reasoning_tokens"],
+            "reasoning_content_sha256":receipt["reasoning_content_sha256"],
             "finish":receipt["finish_reason"]})
     persist()
     if c.get("finish_reason")!="stop":
@@ -77,7 +83,7 @@ def main():
        "Use tools to inspect real simulated observations, calculate hypotheses, verify "
        "your proposed pair with full EPANET hydraulics, and then submit. "
        "Do not claim to have conducted a real hospital safety test. "
-       "Decide which tools to use and in what order. No arbitrary model-turn ceiling; total provider compute budget is 75000 tokens. Submit your best-supported ranked result once evidence is sufficient, rather than indefinitely exploring. The answer is assessed independently after your final reply. "
+       "Decide which tools to use and in what order. No arbitrary model-turn ceiling; total provider compute budget is 100000 tokens. Submit your best-supported ranked result once evidence is sufficient, rather than indefinitely exploring. The answer is assessed independently after your final reply. "
        "On each turn produce JSON only. Tool call schema: "
        "{\"type\":\"tool\",\"name\":\"one listed tool name\",\"arguments\":{},\"why\":\"brief justification\"}. "
        "Finish schema: {\"type\":\"final\",\"ranked_pairs\":[{\"nodes\":[\"node1\",\"node2\"],"
