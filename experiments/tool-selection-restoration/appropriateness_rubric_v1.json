@@ -1,0 +1,40 @@
+{
+  "id": "AAU_TOOL_APPROPRIATENESS_SUPPLEMENT_V1",
+  "purpose": "Separate preregistered test of whether independently named tools are suitable, integrable and auditable, not mere requirement coverage. Original 11-criterion rubric remains binding and unchanged.",
+  "graders_are_separate_from_agent": true,
+  "critical_requirements": [
+    {
+      "id": "A1",
+      "test": "Capability substantiation",
+      "pass": "Each critical operation has at least one real executable engine with plausible API, correct operational mode, clear required inputs and outputs, and an honest limitation; no static approximation presented as proof of unmodeled phenomena."
+    },
+    {
+      "id": "A2",
+      "test": "Problem applicability",
+      "pass": "Each essential tool is suitable for the actual 3-phase distribution problem, six-scenario planning, crew scheduling, and needed protection/safety checks, or explicitly delegates missing functions to a capable named tool; no ungrounded SLA guarantee."
+    },
+    {
+      "id": "A3",
+      "test": "Composition and contract closure",
+      "pass": "Candidate solver, validators, graph/crew engines and audit workflow exchange defined compatible artifacts and units with no uncovered mandatory operation, and infeasibility flows back into remediation; unresolved joins are marked as blockers."
+    },
+    {
+      "id": "A4",
+      "test": "Independent testability and rejection",
+      "pass": "Every high-consequence claim has a reproducible verification test, acceptance evidence, explicit rejection conditions, and a distinct independent checker not simply trusting the proposing optimizer."
+    },
+    {
+      "id": "A5",
+      "test": "Honest prerequisites and implementation feasibility",
+      "pass": "Distinguishes what is runnable now from what requires missing network/relay/SCADA data, licensing, custom glue or benchmarks; provides a staged low-cost implementation and fallback, not fabricated execution."
+    }
+  ],
+  "other_conditions": [
+    "No numeric real-world restoration schedule may be invented.",
+    "If any original critical criterion C1..C8 fails, stage one fails.",
+    "If any appropriateness critical gate A1..A5 fails, stage one fails.",
+    "The original historical K2.6 score and trial remain unchanged.",
+    "Stage two prohibited absent both gates passing."
+  ],
+  "origin": "Frozen before revised Kimi K2.6 prompt is executed; NOT provided to model."
+}

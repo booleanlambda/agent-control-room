@@ -1,0 +1,72 @@
+name: AAU stage-one external capability and interface proof gate
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - experiment/kimi-v28-transport-cause-live-v2-20261018
+    paths:
+      - 'experiments/tool-selection-restoration/**'
+      - '.github/workflows/aau-real-world-debug-v1-live.yml'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+jobs:
+  verify-toolchain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Check frozen challenge rubric external verification specs and code
+        run: |
+          set -euo pipefail
+          test "$(git hash-object experiments/tool-selection-restoration/challenge.json)" = "e51781a1a000f59f8c5ba508698c513d6c90bdb6"
+          test "$(git hash-object experiments/tool-selection-restoration/rubric.json)" = "e19e740ebbe52c8772faa34685ffb4165b3883ec"
+          test "$(git hash-object experiments/tool-selection-restoration/appropriateness_rubric_v1.json)" = "2eab486b7a95ca635637769bf78a4da9a704e380"
+          test "$(git hash-object experiments/tool-selection-restoration/external_tool_proof_obligations_v1.json)" = "7438a9881d6791ecb7f1b45f9b103bcdecb510b2"
+          test "$(git hash-object experiments/tool-selection-restoration/tool_selection_proof_gate.py)" = "cd4f5018741f1411f1d636502ab40fd34ee40511"
+          test "$(git hash-object experiments/tool-selection-restoration/tool_capability_smoke_probes.py)" = "425277b584366964ea8f444f7173fdbb4b301c26"
+          test "$(git hash-object experiments/tool-selection-restoration/test_tool_selection_proof_gate.py)" = "fc85981436dbdd451356049b77ccc490ba0aa70d"
+          python -m py_compile experiments/tool-selection-restoration/tool_selection_proof_gate.py experiments/tool-selection-restoration/tool_capability_smoke_probes.py experiments/tool-selection-restoration/test_tool_selection_proof_gate.py
+          echo "PREEXISTING_CHALLENGE_AND_RUBRICS_FROZEN; NO_LLM_CALL; NO_STAGE2"
+      - name: Download and preserve original immutable K2.6 A B C and D evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 39317382580 -R booleanlambda/agent-control-room -n aau-k26-stage1-v41-repair-delta-evidence -D experiments/tool-selection-restoration/proof_replay
+          test -s experiments/tool-selection-restoration/proof_replay/v41_evidence/v41-composed-evidence-bundle.json
+      - name: Install only libraries for small isolated capability probes
+        run: |
+          python -m pip install --disable-pip-version-check "networkx>=3.3,<4" "opendssdirect.py>=0.9,<1.0" "pyomo>=6.8,<7" "highspy>=1.7,<2" "scipy>=1.13,<2"
+          python -m venv --clear .aau-ortools-venv
+          .aau-ortools-venv/bin/python -m pip install --disable-pip-version-check "ortools==9.12.4544"
+      - name: Execute actual tiny computational tool capability probes
+        env:
+          AAU_ORTOOLS_PYTHON: ${{ github.workspace }}/.aau-ortools-venv/bin/python
+        run: |
+          python experiments/tool-selection-restoration/tool_capability_smoke_probes.py experiments/tool-selection-restoration/proof_output/smoke-results.json
+      - name: False-pass regression and adversarial interface mutation tests
+        run: |
+          python experiments/tool-selection-restoration/test_tool_selection_proof_gate.py
+      - name: Independently assess actual K2.6 model tool plan against external obligations
+        run: |
+          python experiments/tool-selection-restoration/tool_selection_proof_gate.py \
+            experiments/tool-selection-restoration/proof_replay/v41_evidence/v41-composed-evidence-bundle.json \
+            experiments/tool-selection-restoration/external_tool_proof_obligations_v1.json \
+            experiments/tool-selection-restoration/proof_output/smoke-results.json \
+            experiments/tool-selection-restoration/proof_output/tool-proof-verdict.json
+      - name: Preserve verified output and original input references
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-v41-external-tool-proof-gate-receipts
+          path: |
+            experiments/tool-selection-restoration/external_tool_proof_obligations_v1.json
+            experiments/tool-selection-restoration/proof_output/
+          if-no-files-found: warn
+          retention-days: 14
