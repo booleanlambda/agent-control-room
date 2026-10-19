@@ -9,6 +9,7 @@ import math
 from pathlib import Path
 import sys
 import traceback
+import subprocess
 
 def version(pkg):
     try: return importlib.metadata.version(pkg)
@@ -112,18 +113,30 @@ PROBES={"opendss_unbalanced":opendss_unbalanced,"highs_mip":highs_mip,
         "scipy_interpolation":scipy_interpolation,"stdlib_manifest":stdlib_manifest}
 
 def run():
+    # Every library loads in a fresh process. In particular HiGHS and OR-Tools
+    # can embed different ABI builds of libhighs; a shared interpreter may crash.
     out={"scope":"Narrow, non-domain-certifying executable capability probes",
+         "isolation":"independent subprocess per package",
          "probes":{},"stage2_authorized":False}
-    for name,func in PROBES.items():
+    for name in PROBES:
         try:
-            evidence=func()
-            out["probes"][name]={"status":"PASS_NARROW_CAPABILITY_ONLY","evidence":evidence}
+            child=subprocess.run([sys.executable,str(Path(__file__).resolve()),"--one",name],
+                        capture_output=True,text=True,timeout=90,check=False)
+            if child.returncode!=0:
+                raise RuntimeError("isolated probe failed: "+child.stderr[-200:])
+            result=json.loads(child.stdout)
+            out["probes"][name]={"status":"PASS_NARROW_CAPABILITY_ONLY","evidence":result}
         except Exception as exc:
             out["probes"][name]={"status":"FAIL_OR_UNAVAILABLE","error_class":type(exc).__name__,
-                 "error_message":str(exc)[:200]}
+                 "error_message":str(exc)[-260:]}
     return out
 
 if __name__=="__main__":
+    if len(sys.argv)==3 and sys.argv[1]=="--one":
+        name=sys.argv[2]
+        if name not in PROBES:raise SystemExit("UNKNOWN_SMOKE_PROBE")
+        print(json.dumps(PROBES[name]()))
+        raise SystemExit(0)
     obj=run()
     target=Path(sys.argv[1]) if len(sys.argv)>1 else Path("tool-probe-evidence.json")
     target.parent.mkdir(parents=True,exist_ok=True)
