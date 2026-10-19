@@ -10,6 +10,7 @@ from pathlib import Path
 import sys
 import traceback
 import subprocess
+import os
 
 def version(pkg):
     try: return importlib.metadata.version(pkg)
@@ -120,7 +121,13 @@ def run():
          "probes":{},"stage2_authorized":False}
     for name in PROBES:
         try:
-            child=subprocess.run([sys.executable,str(Path(__file__).resolve()),"--one",name],
+            # OR-Tools and HiGHS ship native solver libraries. A distinct
+            # subprocess is not enough when both wheels are installed into
+            # the same venv: isolate OR-Tools' dependencies as well.
+            interpreter=(os.environ.get("AAU_ORTOOLS_PYTHON") or sys.executable) if name=="ortools_vrp" else sys.executable
+            if not Path(interpreter).exists():
+                raise RuntimeError("ISOLATED_PROBE_INTERPRETER_MISSING: "+interpreter)
+            child=subprocess.run([interpreter,str(Path(__file__).resolve()),"--one",name],
                         capture_output=True,text=True,timeout=90,check=False)
             if child.returncode!=0:
                 raise RuntimeError("isolated probe failed: "+child.stderr[-200:])
