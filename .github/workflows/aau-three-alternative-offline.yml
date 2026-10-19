@@ -1,0 +1,50 @@
+name: AAU Three Alternatives Independent Offline Acceptance
+on:
+  push:
+    branches:
+      - experiment/aau-three-alternative-forensic-branches-20261018
+    paths:
+      - 'experiments/real-world-aau-debug-v1/**'
+      - '.github/workflows/aau-three-alternative-offline.yml'
+permissions:
+  contents: read
+  statuses: write
+jobs:
+  three-alternative-offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test real branch scheduler and falsifiable rollback
+        run: |
+          set -euo pipefail
+          node --check experiments/real-world-aau-debug-v1/alternative-branches.mjs
+          node --test experiments/real-world-aau-debug-v1/alternative-branches.test.mjs
+          node --check experiments/real-world-aau-debug-v1/alternative-executor.mjs
+          node --test experiments/real-world-aau-debug-v1/alternative-executor.test.mjs
+      - name: Verify forensic ledger and live integration without provider calls
+        run: |
+          set -euo pipefail
+          node --check experiments/real-world-aau-debug-v1/live.mjs
+          node --check experiments/real-world-aau-debug-v1/decision-forensics.mjs
+          node --check experiments/real-world-aau-debug-v1/forensics-trace-check.mjs
+          node --test experiments/real-world-aau-debug-v1/decision-forensics.test.mjs
+          node --test experiments/real-world-aau-debug-v1/decision-forensics-integration.test.mjs
+          node --test experiments/real-world-aau-debug-v1/forensics-trace-check.test.mjs
+      - name: Publish independent exact-commit test status
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RESULT: ${{ job.status }}
+        run: |
+          if [ "$RESULT" = "success" ]; then state=success; else state=failure; fi
+          json=$(printf '{"state":"%s","context":"AAU/three-alternative-offline","description":"Offline branch traversal and forensic regressions %s","target_url":"https://github.com/%s/actions/runs/%s"}' "$state" "$state" "${{ github.repository }}" "${{ github.run_id }}")
+          curl --silent --show-error --fail-with-body -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "$json" >/dev/null
