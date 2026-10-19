@@ -1,4 +1,4 @@
-name: AAU Kimi Net3 Real Tool Execution Experiment
+name: AAU Net3 Kimi Resume From 15 Verified Decisions
 on:
   pull_request:
     types: [opened]
@@ -9,13 +9,14 @@ on:
       - '.github/workflows/aau-real-world-debug-v1-live.yml'
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: aau-serial-logistics-model-slot
   cancel-in-progress: false
 jobs:
   real-tool-execution:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -31,11 +32,18 @@ jobs:
           python experiments/tool-orchestration-net3/prepare.py
           cd experiments/tool-orchestration-net3
           python -c "from tools_runtime import execute; a=execute('inspect_network',{}); assert a['junction_count']>20 and a['sensor_count']==14; b=execute('inspect_observations',{}); assert b['number_of_sensors']==14; print('NETWORK_TOOL_PREFLIGHT_OK')"
-      - name: One bounded live Kimi tool-orchestration sequence, no replay
+      - name: Retrieve immutable prior fifteen-turn tool and provider receipts
+        uses: actions/download-artifact@v4
+        with:
+          run-id: 39186812705
+          name: aau-net3-kimi-preserved-15-turn-continuation-evidence
+          path: experiments/tool-orchestration-net3/evidence
+          github-token: ${{ github.token }}
+      - name: Validate prior receipt and continue Kimi without replaying paid calls
         working-directory: experiments/tool-orchestration-net3
         env:
           MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
-        run: python live.py
+        run: python continue.py
       - name: Independent sealed-answer and forensic-chain verification
         if: always()
         working-directory: experiments/tool-orchestration-net3
@@ -52,6 +60,7 @@ jobs:
           name: aau-net3-real-kimi-tool-execution-and-independent-evidence
           path: |
             experiments/tool-orchestration-net3/evidence/trial.json
+            experiments/tool-orchestration-net3/evidence/trial-before-continuation.json
             experiments/tool-orchestration-net3/evidence/independent-verdict.json
             experiments/tool-orchestration-net3/evidence/observations.json
             experiments/tool-orchestration-net3/evidence/sealed_truth.json
