@@ -131,11 +131,11 @@ def main():
             receipt["normalization"]="none"
             # Preserve raw bytes. Remove ONLY a whole-response Markdown fence.
             trimmed=raw.strip()
-            if trimmed.startswith("```json\\n") and trimmed.endswith("\\n```"):
-                clean=trimmed[len("```json\\n"):-len("\\n```")]
+            if trimmed.startswith("```json\n") and trimmed.endswith("\n```"):
+                clean=trimmed[len("```json\n"):-len("\n```")]
                 receipt["normalization"]="outer_markdown_json_fence_only"
-            elif trimmed.startswith("```\\n") and trimmed.endswith("\\n```"):
-                clean=trimmed[len("```\\n"):-len("\\n```")]
+            elif trimmed.startswith("```\n") and trimmed.endswith("\n```"):
+                clean=trimmed[len("```\n"):-len("\n```")]
                 receipt["normalization"]="outer_markdown_fence_only"
             proposal=json.loads(clean)
             receipt["normalized_response_sha256"]=sha(clean.encode())
