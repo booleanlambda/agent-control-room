@@ -21,7 +21,7 @@ MAX_ON_OUTPUT=32768
 MODEL_CALL_TIMEOUT_S={"off":180,"on":600}
 QUALITY_THRESHOLD_M=0.001  # 1mm tolerance for noiseless 5dp synthetic pressures
 PLATEAU_ACTIONS=4
-BUDGET_REVIEW_FRACTION=0.80
+BUDGET_REVIEW_FRACTION=0.70
 
 prior="0"*64
 events=[]
@@ -70,10 +70,12 @@ def request(messages, mode):
     if not key:
         raise RuntimeError("PROVIDER_SECRET_MISSING")
     allowance=TOTAL_PROVIDER_TOKEN_BUDGET-tokens
-    estimate_input=(len(json.dumps(messages,ensure_ascii=False))+2)//3
+    # Conservative input accounting: prior 3-chars/token guess under-reserved.
+    # Keep a non-spendable 2048-token buffer, and a full reasoning-output allowance.
+    estimate_input=max(2048,(len(json.dumps(messages,ensure_ascii=False))+1)//2)
     max_out=min(MAX_OFF_OUTPUT if mode=="off" else MAX_ON_OUTPUT,
-                allowance-estimate_input)
-    if max_out<512:
+                allowance-estimate_input-2048)
+    if (mode=="on" and max_out<12000) or (mode=="off" and max_out<512):
         raise RuntimeError("MODEL_TOKEN_BUDGET")
     payload={
        "model":MODEL,
@@ -168,6 +170,16 @@ def reviewed_evidence():
       "measurement_precision":"0.00001 m pressure rounding, synthetic and noise-free",
       "quality_threshold_m":QUALITY_THRESHOLD_M,
       "total_tool_actions":len(audit["tool_events"]),
+      "all_pair_search_executed":any(t["name"]=="fit_two_leaks" and
+                                    t["result"].get("hypotheses_examined")==4186
+                                    for t in audit["tool_events"]),
+      "all_pair_search_summaries":[{
+            "turn":t["turn"],
+            "hypotheses_examined":t["result"].get("hypotheses_examined"),
+            "top_pairs":t["result"].get("top_pairs",[])[:25]}
+            for t in audit["tool_events"]
+            if t["name"]=="fit_two_leaks" and t["result"].get("hypotheses_examined")==4186][-2:],
+      "all_distinct_tested_pairs":[list(sorted(x["nodes"])) for x in best_evidence()],
       "last_6_tool_actions":[{"turn":x["turn"],"name":x["name"],"args":x["args"],
          "result":x["result"],"sha256":x["result_sha256"]}
           for x in audit["tool_events"][-6:]],
@@ -257,7 +269,11 @@ def on_review(trigger, proposed=None):
         "pair at the same coefficients with RMSE <= 0.001 m. "
         "Otherwise request targeted additional tools, or abstain. "
         "Do not launch tools yourself, don't keep verifying without articulating a "
-        "material question. JSON ONLY: "
+        "material question. The all-junction screening tool is exhaustive; if its "
+        "hypotheses_examined equals 4186 do NOT recommend running the same broad "
+        "screen again unless you identify a distinct new reason. Recommend targeted "
+        "untested junction pairs with exact tool arguments when remediation is needed. "
+        "JSON ONLY: "
         "{\"decision\":\"accept|remediate|abstain\","
         "\"ranked_pairs\":[{\"nodes\":[\"a\",\"b\"],\"coefficients\":[0.01,0.01]}],"
         "\"next_action\":\"a specific tool and its arguments, if remediation\","
@@ -316,6 +332,43 @@ def on_review(trigger, proposed=None):
        "remaining_provider_tokens":max(0,TOTAL_PROVIDER_TOKEN_BUDGET-tokens)})})
     return False
 
+def compact_off_context():
+    """Explicitly compact long model-context history without discarding forensic receipts.
+    No data is silently truncated: old actions remain in trial.json and a deterministic
+    ledger of all tool calls is supplied with every compacted request.
+    """
+    global off_messages
+    if len(off_messages)<=18:
+        return
+    old=off_messages
+    original_hash=sha(json.dumps(old,sort_keys=True))
+    ledger=[]
+    for t in audit["tool_events"]:
+        r=t["result"]
+        entry={"turn":t["turn"],"tool":t["name"],"arguments":t["args"],
+               "error":r.get("error"),"nonlinear_rmse_m":r.get("full_simulation_rmse_m"),
+               "nodes":r.get("nodes"),
+               "coefficients":r.get("fitted_coefficients",r.get("coefficients"))}
+        if t["name"]=="fit_two_leaks" and r.get("hypotheses_examined"):
+            entry["all_pairs_screened"]=r["hypotheses_examined"]
+            entry["ranked_candidates"]=r.get("top_pairs",[])[:15]
+        ledger.append(entry)
+    summary={"history_compaction":"EXPLICIT_AUDITED_RECAP",
+             "every_prior_tool_action":ledger,
+             "all_past_full_epanet_results":best_evidence(),
+             "all_prior_review_decisions":[{
+                "trigger":r["trigger"],"decision":r["decision"],
+                "accepted":r["authorized_acceptance"]} for r in audit["reviews"]],
+             "full_original_raw_transcript_preserved_in_trial_json":True,
+             "prior_context_sha256":original_hash}
+    off_messages=old[:2]+[{"role":"user","content":json.dumps(summary)}]+old[-10:]
+    record({"kind":"CONTEXT_COMPACTED","model_mode":"off",
+            "before_sha256":original_hash,
+            "original_message_count":len(old),"replayed_recent_messages":10,
+            "recap_includes_all_tool_receipts":len(ledger),
+            "new_context_sha256":sha(json.dumps(off_messages,sort_keys=True))})
+    persist()
+
 def main():
     global off_messages
     visible=json.loads((OUT/"observations.json").read_text())
@@ -354,6 +407,7 @@ def main():
             record({"kind":"STOP","reason":audit["status"]})
             break
         try:
+            compact_off_context()
             decision,raw=request(off_messages,"off")
             off_messages.append({"role":"assistant","content":raw})
             if decision.get("type")=="tool":
