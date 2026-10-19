@@ -1,10 +1,11 @@
-name: AAU Kimi Tool Selection — Independent One-Shot Challenge
+name: AAU Kimi Net3 Real Tool Execution Experiment
 on:
   pull_request:
     types: [opened]
     branches:
       - experiment/kimi-v28-transport-cause-live-v2-20261018
     paths:
+      - 'experiments/tool-orchestration-net3/**'
       - '.github/workflows/aau-real-world-debug-v1-live.yml'
 permissions:
   contents: read
@@ -12,62 +13,48 @@ concurrency:
   group: aau-serial-logistics-model-slot
   cancel-in-progress: false
 jobs:
-  kimi-tool-selection:
+  real-tool-execution:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-python@v5
         with:
-          node-version: '22'
-      - name: Exactly one real Kimi thinking-OFF tool-planning request
+          python-version: '3.11'
+      - name: Install public WNTR and numerical analysis packages
+        run: |
+          python -m pip install --disable-pip-version-check "wntr==1.3.2"
+          python -c "import wntr, numpy, scipy; print('WNTR:',wntr.__version__)"
+      - name: Prepare public Net3 network and sealed synthetic observations
+        run: |
+          python -m py_compile experiments/tool-orchestration-net3/{prepare,tools_runtime,live,verifier}.py
+          python experiments/tool-orchestration-net3/prepare.py
+          cd experiments/tool-orchestration-net3
+          python -c "from tools_runtime import execute; a=execute('inspect_network',{}); assert a['junction_count']>20 and a['sensor_count']==14; b=execute('inspect_observations',{}); assert b['number_of_sensors']==14; print('NETWORK_TOOL_PREFLIGHT_OK')"
+      - name: One bounded live Kimi tool-orchestration sequence, no replay
+        working-directory: experiments/tool-orchestration-net3
         env:
           MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: python live.py
+      - name: Independent sealed-answer and forensic-chain verification
+        if: always()
+        working-directory: experiments/tool-orchestration-net3
         run: |
-          node --input-type=module <<'JAVASCRIPT'
-          import {createHash} from 'node:crypto';
-          import {mkdirSync,writeFileSync} from 'node:fs';
-          const sha=x=>createHash('sha256').update(x).digest('hex');
-          const challenge="A coastal city operates an 80-junction drinking-water network with 65 pipes, 14 pressure sensors, two flow meters, a GIS pipe/valve map, and 30 days of 1-minute sensor readings. Between 01:00 and 04:00 its apparent water loss rises by 18%. Pump schedules change nightly; sensor data have gaps and timestamp drift. There may be two leaks in different pipe segments. A hospital branch must not lose pressure; the utility can add at most two temporary sensors and conduct only one 20-minute valve isolation test. The city needs a ranked shortlist of likely leaking segments, uncertainty, a safe validation plan, and an estimated operational/cost tradeoff. No underlying data files or API credentials have been supplied.";
-          const prompt="You are coordinating a low-cost tool-assisted system, not answering by intuition. Given the challenge below, decide which specific tools, programs, data sources and computational methods the system would need to solve it. Do not try to solve it or pretend you accessed data. Choose tool capabilities based on suitability, cost, and safety, not a preset list. Specify tool name or class, exact role, required inputs and expected outputs, dependency order, a low-cost fallback when applicable, how to verify correctness independently, what cannot be established without real data, and human operational safeguards. Reply in a structured JSON object with arrays named tools, steps, prerequisites, validation, risks and a brief strategy.\\n\\nCHALLENGE:\\nA coastal city operates an 80-junction drinking-water network with 65 pipes, 14 pressure sensors, two flow meters, a GIS pipe/valve map, and 30 days of 1-minute sensor readings. Between 01:00 and 04:00 its apparent water loss rises by 18%. Pump schedules change nightly; sensor data have gaps and timestamp drift. There may be two leaks in different pipe segments. A hospital branch must not lose pressure; the utility can add at most two temporary sensors and conduct only one 20-minute valve isolation test. The city needs a ranked shortlist of likely leaking segments, uncertainty, a safe validation plan, and an estimated operational/cost tradeoff. No underlying data files or API credentials have been supplied.";
-          const system='You are an engineering planner responsible for selecting tools. You have no actual files, tools, test results, or network resources in this single planning call. Do not fabricate measurements. Respond with a JSON object.';
-          const messages=[{role:'system',content:system},{role:'user',content:prompt}];
-          mkdirSync('evidence/tool-selection',{recursive:true});
-          const root={challenge,promptSha256:sha(prompt),model:'kimi-k2.6',thinking:'disabled',max_tokens:4096,temperature:0.6,provider:'Moonshot',timestamp:new Date().toISOString(),responses:[]};
-          const key=String(process.env.MOONSHOT_API_KEY||'').trim();
-          if(!key){root.status='PROVIDER_SECRET_MISSING';writeFileSync('evidence/tool-selection/response.json',JSON.stringify(root,null,2));throw Error(root.status)}
-          const ctrl=AbortSignal.timeout(120000);
-          let res;
-          try{
-            res=await fetch('https://api.moonshot.ai/v1/chat/completions',{
-              method:'POST',signal:ctrl,redirect:'manual',
-              headers:{authorization:'Bearer '+key,'content-type':'application/json',accept:'application/json'},
-              body:JSON.stringify({model:'kimi-k2.6',thinking:{type:'disabled'},temperature:0.6,response_format:{type:'json_object'},max_tokens:4096,stream:false,messages})
-            });
-          }catch(e){
-            root.status=e?.name==='TimeoutError'?'TRANSPORT_TIMEOUT':'TRANSPORT_EXCEPTION';
-            writeFileSync('evidence/tool-selection/response.json',JSON.stringify(root,null,2));throw Error(root.status);
-          }
-          root.httpStatus=res.status;
-          if(!res.ok){root.status='PROVIDER_HTTP_ERROR';writeFileSync('evidence/tool-selection/response.json',JSON.stringify(root,null,2));throw Error(root.status)}
-          const j=await res.json();
-          const choice=j?.choices?.[0];
-          const content=choice?.message?.content??null;
-          root.status='received';root.providerFinishReason=choice?.finish_reason??null;
-          root.tokenUsage=j?.usage??null;
-          root.responseContent=content;
-          root.responseSha256=typeof content==='string'?sha(content):null;
-          try{root.parsed=JSON.parse(content);root.jsonValid=true}catch{root.jsonValid=false}
-          writeFileSync('evidence/tool-selection/response.json',JSON.stringify(root,null,2));
-          console.log('AAU_TOOL_CHALLENGE='+JSON.stringify({promptSha256:root.promptSha256,challenge}));
-          console.log('AAU_KIMI_TOOL_SELECTION='+JSON.stringify({status:root.status,finishReason:root.providerFinishReason,usage:root.tokenUsage,rawContent:root.responseContent,rawContentSha256:root.responseSha256,jsonValid:root.jsonValid}));
-          if(!root.jsonValid||root.providerFinishReason!=='stop')process.exitCode=2;
-          JAVASCRIPT
-      - name: Retain exact original Kimi response and provider receipt
+          if test -f evidence/trial.json && test -f evidence/sealed_truth.json; then
+            python verifier.py
+          else
+            echo "NO_COMPLETED_LIVE_TRIAL"
+          fi
+      - name: Retain unedited Kimi tool calls, oracle verdict, and benchmark inputs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: aau-kimi-tool-selection-raw-response
-          path: evidence/tool-selection/response.json
+          name: aau-net3-real-kimi-tool-execution-and-independent-evidence
+          path: |
+            experiments/tool-orchestration-net3/evidence/trial.json
+            experiments/tool-orchestration-net3/evidence/independent-verdict.json
+            experiments/tool-orchestration-net3/evidence/observations.json
+            experiments/tool-orchestration-net3/evidence/sealed_truth.json
+            experiments/tool-orchestration-net3/evidence/input-sha256.txt
           if-no-files-found: warn
           retention-days: 14
