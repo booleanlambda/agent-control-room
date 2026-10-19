@@ -1,0 +1,71 @@
+{
+  "id": "aau-hard-restoration-tool-selection-v1",
+  "frozen_before_model_response": true,
+  "evaluation_policy": "Assistant grades grounded response against this preregistered rubric after raw provider response is stored. No grading rubric, tool answer key, or scoring keyword list is sent to Kimi. Required score: all critical gates pass, at least 9 of 11 criteria pass. A merely named tool without correct role/inputs/outputs does not count.",
+  "categories": [
+    {
+      "id": "C1",
+      "critical": true,
+      "requirement": "A named executable 3-phase unbalanced distribution power-flow engine with feeder faults/switch states and limitations, such as OpenDSS/OpenDSSDirect.py, GridLAB-D, or equivalent."
+    },
+    {
+      "id": "C2",
+      "critical": true,
+      "requirement": "A capable multi-period MILP/MINLP decomposition or stochastic optimization modeling stack with a real solver (Pyomo/JuMP + HiGHS/SCIP/Gurobi/CPLEX or equivalent); addresses discrete switching and hourly scheduling."
+    },
+    {
+      "id": "C3",
+      "critical": true,
+      "requirement": "A distinct network-graph and radiality/islanding connectivity validator, with treatment of permitted microgrids and isolation of faulted components."
+    },
+    {
+      "id": "C4",
+      "critical": true,
+      "requirement": "Coupled road-network routing/scheduling and labor/crew qualifications with repair precedence, road closures, time windows and mobile-generator transport (e.g. OR-Tools/vehicle routing plus geospatial routing)."
+    },
+    {
+      "id": "C5",
+      "critical": true,
+      "requirement": "End-to-end safety and power-feasibility verification: 3-phase voltage, phase imbalance, thermal, protection, cold-load, generator grid-forming and synchronization; operator signoff, no live commands."
+    },
+    {
+      "id": "C6",
+      "critical": true,
+      "requirement": "Actual uncertainty modeling across six scenarios, scenario probabilities with stress testing or robust bounds and rolling re-optimization; no false independence claims."
+    },
+    {
+      "id": "C7",
+      "critical": true,
+      "requirement": "Identifies missing physical/operational inputs and does NOT fabricate a numerical result or assume all DER is grid forming."
+    },
+    {
+      "id": "C8",
+      "critical": true,
+      "requirement": "Explicit feedback loop between optimizer candidate schedules and nonlinear physics/logistics validator, with cuts/no-goods/remediation on failures; neither a single unconstrained MILP nor isolated simulation is sufficient."
+    },
+    {
+      "id": "C9",
+      "critical": false,
+      "requirement": "Reproducible typed data inputs, provenance, units, topology/telemetry validation, versioned data artifacts and audit log with credible concrete tooling."
+    },
+    {
+      "id": "C10",
+      "critical": false,
+      "requirement": "Practical feasibility given 4800-bus scale, 72 slots, 6 scenarios, under-15-minute draft target: decomposition, relaxations, warm-start, short rolling horizon, progressive hedging or documented fallback, explicitly marks cannot guarantee runtime."
+    },
+    {
+      "id": "C11",
+      "critical": false,
+      "requirement": "Prioritized essential toolchain with plausible lower-cost open-source options and optional proprietary fallbacks, with sequencing and per-tool input/output rather than name dumping."
+    }
+  ],
+  "disqualifiers": [
+    "Claims to have solved/restored the city, generated unavailable input data, or taken physical grid actions.",
+    "Treats linear DC transmission-only power flow as sufficient validation for a 3-phase unbalanced distribution feeder.",
+    "Ignores mandatory switching/crew safety, protection, or operator approval.",
+    "Names no executable physics simulator or no optimization tool and solver.",
+    "Suggests configuring or operating real switching systems without authorization."
+  ],
+  "minimum_score": 9,
+  "review_status": "not_evaluated"
+}
