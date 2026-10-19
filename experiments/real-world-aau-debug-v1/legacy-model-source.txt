@@ -1,0 +1,61 @@
+async function model(stage,attempt,state,question,max_tokens){
+ if(state.providerCalls>=modelCap||state.providerTokens>=tokenCap)throw Error('MODEL_BUDGET_REACHED');
+ const messages=[{role:'system',content:SYSTEM},{role:'user',content:JSON.stringify(question)}];
+ const cfg=kimiStageRequest(stage,max_tokens);
+ // Mode choice is derived ONLY from the stage name; neither prompts nor
+ // arbitrary model output can enable thinking for routine cognition.
+ const body={model:cfg.model,thinking:cfg.thinking,temperature:cfg.temperature,
+   response_format:{type:'json_object'},max_tokens:cfg.max_tokens,stream:false,messages};
+ state.thinkingRouting??=[];
+ state.thinkingRouting.push({stage,attempt,mode:cfg.thinking.type,tokenCeiling:cfg.max_tokens});
+ report.thinkingRouting.push({stage,attempt,mode:cfg.thinking.type,tokenCeiling:cfg.max_tokens});
+ const reserve=Math.ceil(JSON.stringify(messages).length/2)+cfg.max_tokens;
+ if(outputReservations+reserve>outputReservationCap)throw Error('RESERVATION_CAP_REACHED');
+ // Presend durable journal: if uncertain, a replay is NOT permitted.
+ await db.beginCall(run,stage,attempt,digest(body));
+ state.providerCalls++;report.callCount=state.providerCalls;
+ outputReservations+=reserve;
+ const pause=Math.max(0,lastStart+23000-Date.now());if(pause)await wait(pause);
+ lastStart=Date.now();
+ const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),cfg.timeoutMs);
+ try{
+  const key=String(process.env.MOONSHOT_API_KEY||'').trim();
+  if(!key)throw Error('PROVIDER_SECRET_MISSING');
+  const res=await fetch('https://api.moonshot.ai/v1/chat/completions',{method:'POST',signal:ctrl.signal,
+    redirect:'manual',headers:{authorization:'Bearer '+key,'content-type':'application/json',accept:'application/json'},
+    body:JSON.stringify(body)});
+  const j=await res.json().catch(()=>({}));
+  const tokens=j?.usage?.total_tokens;
+  if(Number.isSafeInteger(tokens)&&tokens>=0){state.providerTokens+=tokens;report.providerTokens=state.providerTokens}
+  const choice=j?.choices?.[0],finish=choice?.finish_reason;
+  if(isKnownThinkingExhaustion(stage,choice,res.ok)){
+   // Explicit provider finish_reason=length is definite output-budget
+   // exhaustion, not a logical patch failure and not a transport retry.
+   const receipt={stage,attempt,mode:cfg.thinking.type,finishReason:finish,
+    tokenCeiling:cfg.max_tokens,providerTokens:tokens??null,
+    reportedReasoningTokens:j?.usage?.completion_tokens_details?.reasoning_tokens??null,
+    reasoningReturned:!!choice.message?.reasoning_content};
+   state.thinkingExhaustions??=[];
+   state.thinkingExhaustions.push(receipt);
+   report.thinkingExhaustions.push(receipt);
+   await db.finishCall(run,stage,attempt,'budget_exhausted',tokens??null,finish,
+    digest(choice.message?.content??''));
+   return THINKING_EXHAUSTED;
+  }
+  if(!res.ok||!kimiResponseAcceptable(stage,choice))
+   throw Error('PROVIDER_INCOMPLETE_OR_REJECTED');
+  let answer;try{answer=JSON.parse(choice?.message?.content??'')}catch{throw Error('BAD_MODEL_JSON')}
+  if(!answer||typeof answer!=='object'||Array.isArray(answer))throw Error('MODEL_RESPONSE_SHAPE');
+  // Store receipt metadata only; never persist or display raw internal reasoning.
+  state.thinkingReceipt??=[];
+  state.thinkingReceipt.push({stage,attempt,mode:cfg.thinking.type,
+    reasoningReturned:!!choice?.message?.reasoning_content,
+    completionTokens:j?.usage?.completion_tokens??null,
+    reportedReasoningTokens:j?.usage?.completion_tokens_details?.reasoning_tokens??null});
+  await db.finishCall(run,stage,attempt,'received',tokens??null,finish,digest(choice.message.content));
+  return answer;
+ }catch(e){
+  await db.finishCall(run,stage,attempt,'uncertain_or_rejected',null,null,null).catch(()=>{});
+  throw Error('MODEL_REQUEST_MANUAL_HOLD');
+ }finally{clearTimeout(timer)}
+}
