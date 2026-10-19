@@ -59,7 +59,7 @@ def networkx_radiality():
     import networkx as nx
     safe=nx.Graph([(0,1),(1,2),(2,3)])
     bad=nx.Graph([(0,1),(1,2),(2,0)])
-    if not nx.is_tree(safe) or nx.is_tree(bad) or nx.has_path(safe,0,99) if 99 in safe else False:
+    if not nx.is_tree(safe) or nx.is_tree(bad):
         raise AssertionError("Graph cycle detection failed")
     assert len(nx.cycle_basis(bad))==1
     return {"rejects_cycle":True,"accepts_tree":True,
