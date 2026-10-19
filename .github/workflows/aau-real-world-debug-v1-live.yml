@@ -1,4 +1,4 @@
-name: AAU Kimi Net3 Real Tool Execution Experiment
+name: AAU Net3 Fresh Kimi Hybrid OFF Solve ON Verify
 on:
   pull_request:
     types: [opened]
@@ -15,7 +15,7 @@ concurrency:
 jobs:
   real-tool-execution:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -25,17 +25,25 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check "wntr==1.3.2"
           python -c "import wntr, numpy, scipy; print('WNTR:',wntr.__version__)"
+      - name: Validate unchanged input, tool methods and sealed verifier
+        run: |
+          set -euo pipefail
+          test "$(git hash-object experiments/tool-orchestration-net3/Net3.inp)" = "1bfc21bc17d22c265727833885e1232e06012752"
+          test "$(git hash-object experiments/tool-orchestration-net3/prepare.py)" = "d47686b7da2ed0b4843957ee4004b3c5fa048762"
+          test "$(git hash-object experiments/tool-orchestration-net3/tools_runtime.py)" = "a30cb6668f75cec009a0bdef9598396bb6bf18a3"
+          test "$(git hash-object experiments/tool-orchestration-net3/verifier.py)" = "e3f006fd52cda35ef9ff0699e5420df60db385f6"
+          echo "Source, tools, synthetic observations and independent scoring are frozen."
       - name: Prepare public Net3 network and sealed synthetic observations
         run: |
-          python -m py_compile experiments/tool-orchestration-net3/{prepare,tools_runtime,live,verifier}.py
+          python -m py_compile experiments/tool-orchestration-net3/{prepare,tools_runtime,hybrid_live,verifier}.py
           python experiments/tool-orchestration-net3/prepare.py
           cd experiments/tool-orchestration-net3
           python -c "from tools_runtime import execute; a=execute('inspect_network',{}); assert a['junction_count']>20 and a['sensor_count']==14; b=execute('inspect_observations',{}); assert b['number_of_sensors']==14; print('NETWORK_TOOL_PREFLIGHT_OK')"
-      - name: One bounded live Kimi tool-orchestration sequence, no replay
+      - name: Fresh hybrid Kimi thinking OFF tool solving and triggered thinking ON verification
         working-directory: experiments/tool-orchestration-net3
         env:
           MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
-        run: python live.py
+        run: python hybrid_live.py
       - name: Independent sealed-answer and forensic-chain verification
         if: always()
         working-directory: experiments/tool-orchestration-net3
@@ -49,7 +57,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: aau-net3-real-kimi-tool-execution-and-independent-evidence
+          name: aau-net3-hybrid-off-solve-on-verify-forensic-evidence
           path: |
             experiments/tool-orchestration-net3/evidence/trial.json
             experiments/tool-orchestration-net3/evidence/independent-verdict.json
