@@ -1,0 +1,45 @@
+name: AAU hard stage1 K3 comparison with frozen K2.6 gate
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/kimi-v28-transport-cause-live-v2-20261018
+    paths:
+      - 'experiments/tool-selection-restoration/**'
+      - '.github/workflows/aau-real-world-debug-v1-live.yml'
+permissions:
+  contents: read
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+jobs:
+  stage1-tool-selection-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify PRE-REGISTERED challenge and independent grader remain frozen
+        run: |
+          set -euo pipefail
+          test "$(git hash-object experiments/tool-selection-restoration/challenge.json)" = "e51781a1a000f59f8c5ba508698c513d6c90bdb6"
+          test "$(git hash-object experiments/tool-selection-restoration/rubric.json)" = "e19e740ebbe52c8772faa34685ffb4165b3883ec"
+          test "$(git hash-object experiments/tool-selection-restoration/stage1_k3_stream.py)" = "d76a9995d74cfb001ffea0f538f4b459daa9e94e"
+          echo "STAGE1_INPUT_AND_RUBRIC_FROZEN; NO STAGE2"
+      - name: Live Kimi K3 - streamed first-stage tool selection only
+        env:
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: python experiments/tool-selection-restoration/stage1_k3_stream.py
+      - name: Preserve raw provider output for independent rubric scoring
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-hard-stage1-k3-proposal-and-rubric-evidence
+          path: |
+            experiments/tool-selection-restoration/challenge.json
+            experiments/tool-selection-restoration/rubric.json
+            experiments/tool-selection-restoration/evidence/stage1-provider-receipt.json
+          if-no-files-found: error
+          retention-days: 14
