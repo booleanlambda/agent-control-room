@@ -36,7 +36,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           run-id: 39186812705
-          name: aau-net3-kimi-preserved-15-turn-continuation-evidence
+          name: aau-net3-real-kimi-tool-execution-and-independent-evidence
           path: experiments/tool-orchestration-net3/evidence
           github-token: ${{ github.token }}
       - name: Validate prior receipt and continue Kimi without replaying paid calls
@@ -57,7 +57,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: aau-net3-real-kimi-tool-execution-and-independent-evidence
+          name: aau-net3-kimi-preserved-15-turn-continuation-evidence
           path: |
             experiments/tool-orchestration-net3/evidence/trial.json
             experiments/tool-orchestration-net3/evidence/trial-before-continuation.json
