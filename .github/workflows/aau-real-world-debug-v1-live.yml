@@ -1,4 +1,4 @@
-name: AAU hard task Kimi thinking ON - tool selection GATE ONLY
+name: AAU hard tool-selection thinking ON - streamed transport, same gate
 on:
   pull_request:
     types: [opened]
@@ -26,17 +26,17 @@ jobs:
           set -euo pipefail
           test "$(git hash-object experiments/tool-selection-restoration/challenge.json)" = "e51781a1a000f59f8c5ba508698c513d6c90bdb6"
           test "$(git hash-object experiments/tool-selection-restoration/rubric.json)" = "e19e740ebbe52c8772faa34685ffb4165b3883ec"
-          test "$(git hash-object experiments/tool-selection-restoration/stage1_live.py)" = "9af16f2c939de3f93ff4a203cbbfd0104b34f88f"
+          test "$(git hash-object experiments/tool-selection-restoration/stage1_stream.py)" = "38bcb3c7e386535629559b040b14d8c860160368"
           echo "STAGE1_INPUT_AND_RUBRIC_FROZEN; NO STAGE2"
-      - name: Live Kimi K2.6 thinking ON - propose toolchain WITHOUT using tools
+      - name: Live Kimi K2.6 thinking ON - STREAMED proposal without tool execution
         env:
           MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
-        run: python experiments/tool-selection-restoration/stage1_live.py
+        run: python experiments/tool-selection-restoration/stage1_stream.py
       - name: Preserve raw provider output for independent rubric scoring
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: aau-hard-task-stage1-tool-selection-raw-provider-evidence
+          name: aau-hard-stage1-streamed-tool-proposal-and-rubric-evidence
           path: |
             experiments/tool-selection-restoration/challenge.json
             experiments/tool-selection-restoration/rubric.json
