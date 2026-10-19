@@ -1,0 +1,68 @@
+name: AAU Kimi Net3 Thinking ON Full-Coverage Comparison
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/kimi-v28-transport-cause-live-v2-20261018
+    paths:
+      - 'experiments/tool-orchestration-net3/**'
+      - '.github/workflows/aau-real-world-debug-v1-live.yml'
+permissions:
+  contents: read
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+jobs:
+  real-tool-execution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install public WNTR and numerical analysis packages
+        run: |
+          python -m pip install --disable-pip-version-check "wntr==1.3.2"
+          python -c "import wntr, numpy, scipy; print('WNTR:',wntr.__version__)"
+      - name: Verify frozen EPA network and unchanged model-blind verifier
+        run: |
+          set -euo pipefail
+          test "$(git hash-object experiments/tool-orchestration-net3/Net3.inp)" = "1bfc21bc17d22c265727833885e1232e06012752"
+          test "$(git hash-object experiments/tool-orchestration-net3/prepare.py)" = "d47686b7da2ed0b4843957ee4004b3c5fa048762"
+          test "$(git hash-object experiments/tool-orchestration-net3/verifier.py)" = "e3f006fd52cda35ef9ff0699e5420df60db385f6"
+          test "$(git hash-object experiments/tool-orchestration-net3/tools_runtime.py)" = "a30cb6668f75cec009a0bdef9598396bb6bf18a3"
+          echo "Official benchmark source, synthetic truth generator, tool methods and independent judge are unchanged."
+      - name: Prepare public Net3 network and sealed synthetic observations
+        run: |
+          python -m py_compile experiments/tool-orchestration-net3/{prepare,tools_runtime,live,verifier}.py
+          python experiments/tool-orchestration-net3/prepare.py
+          cd experiments/tool-orchestration-net3
+          python -c "from tools_runtime import execute; a=execute('inspect_network',{}); assert a['junction_count']>20 and a['sensor_count']==14; b=execute('inspect_observations',{}); assert b['number_of_sensors']==14; print('NETWORK_TOOL_PREFLIGHT_OK')"
+      - name: Single thinking-ON Kimi trial until final answer or compute budget
+        working-directory: experiments/tool-orchestration-net3
+        env:
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: python live.py
+      - name: Independent sealed-answer and forensic-chain verification
+        if: always()
+        working-directory: experiments/tool-orchestration-net3
+        run: |
+          if test -f evidence/trial.json && test -f evidence/sealed_truth.json; then
+            python verifier.py
+          else
+            echo "NO_COMPLETED_LIVE_TRIAL"
+          fi
+      - name: Retain unedited Kimi tool calls, oracle verdict, and benchmark inputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-net3-kimi-thinking-on-100k-forensic-evidence
+          path: |
+            experiments/tool-orchestration-net3/evidence/trial.json
+            experiments/tool-orchestration-net3/evidence/independent-verdict.json
+            experiments/tool-orchestration-net3/evidence/observations.json
+            experiments/tool-orchestration-net3/evidence/sealed_truth.json
+            experiments/tool-orchestration-net3/evidence/input-sha256.txt
+          if-no-files-found: warn
+          retention-days: 14
