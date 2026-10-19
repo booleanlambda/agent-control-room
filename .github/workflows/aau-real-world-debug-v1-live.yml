@@ -1,4 +1,4 @@
-name: AAU K2.6 stage-one reusable toolchain sufficiency prompt v3
+name: AAU K2.6 v4 independent four-role tool selection
 on:
   pull_request:
     types: [opened]
@@ -15,7 +15,7 @@ concurrency:
 jobs:
   stage1-tool-selection-only:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,24 +26,25 @@ jobs:
           set -euo pipefail
           test "$(git hash-object experiments/tool-selection-restoration/challenge.json)" = "e51781a1a000f59f8c5ba508698c513d6c90bdb6"
           test "$(git hash-object experiments/tool-selection-restoration/rubric.json)" = "e19e740ebbe52c8772faa34685ffb4165b3883ec"
-          test "$(git hash-object experiments/tool-selection-restoration/stage1_v3_stream.py)" = "13dc26b463ee6926f71ad3d7d5fca91c1308de7f"
-          test "$(git hash-object experiments/tool-selection-restoration/TOOL_SELECTION_SYSTEM_PROMPT_V3.md)" = "380c8b4292c8f1889c85191e9bf4087825697e9d"
+          test "$(git hash-object experiments/tool-selection-restoration/stage1_v4_four_role.py)" = "6fa7715a63478787303e28c71a55a179556990d1"
+          python -m py_compile experiments/tool-selection-restoration/stage1_v4_four_role.py
+          test "$(git hash-object experiments/tool-selection-restoration/TOOL_SELECTION_PROMPT_V4_INDEPENDENT_AUDIT.md)" = "854ee53717b3e5627a97faaae72979847d647781"
           test "$(git hash-object experiments/tool-selection-restoration/appropriateness_rubric_v1.json)" = "2eab486b7a95ca635637769bf78a4da9a704e380"
           echo "STAGE1_INPUT_AND_RUBRIC_FROZEN; NO STAGE2"
-      - name: Live Kimi K2.6 thinking ON with v3 sufficiency and self-review prompt
+      - name: Four live Kimi K2.6 thinking-ON calls, blind independent audit and remediation
         env:
           MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
-        run: python experiments/tool-selection-restoration/stage1_v3_stream.py
+        run: python experiments/tool-selection-restoration/stage1_v4_four_role.py
       - name: Preserve raw provider output for independent rubric scoring
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: aau-hard-k26-stage1-tool-sufficiency-v3-provider-evidence
+          name: aau-k26-stage1-v4-four-role-forensic-evidence
           path: |
             experiments/tool-selection-restoration/challenge.json
             experiments/tool-selection-restoration/rubric.json
             experiments/tool-selection-restoration/appropriateness_rubric_v1.json
-            experiments/tool-selection-restoration/TOOL_SELECTION_SYSTEM_PROMPT_V3.md
-            experiments/tool-selection-restoration/evidence/stage1-provider-receipt.json
+            experiments/tool-selection-restoration/TOOL_SELECTION_PROMPT_V4_INDEPENDENT_AUDIT.md
+            experiments/tool-selection-restoration/evidence_v4/
           if-no-files-found: error
           retention-days: 14
