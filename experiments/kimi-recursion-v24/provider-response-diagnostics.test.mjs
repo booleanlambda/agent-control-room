@@ -107,3 +107,62 @@ test('runner binds elapsed clock, header observation and allowlisted code into d
  assert.match(src,/await db\.advance\(run,before\.seq,before\.next_phase,next\.phase,next\.status,next\.state,next\.event\)/);
  assert.doesNotMatch(src,/message:\s*e\.message\s*,\s*stack/);
 });
+
+test('thinking-ON separates private reasoning_content from final JSON',()=>{
+ const d=inspectV28ProviderResponse('repair_2',200,{
+  choices:[{finish_reason:'stop',message:{
+   reasoning_content:'PRIVATE_THOUGHTS_SECRET_CANARY',
+   content:'{"result":{"edits":[{"find":"original","replace":"fixed"}]},"status":"ok"}'
+  }}],
+  usage:{total_tokens:890,prompt_tokens:190,completion_tokens:700,
+   completion_tokens_details:{reasoning_tokens:610}}
+ });
+ assert.equal(d.category,'ACCEPTED');
+ assert.equal(d.receipt.thinkingOn,true);
+ assert.equal(d.receipt.reasoningPresent,true);
+ assert.equal(d.receipt.finalContentKind,'string');
+ assert.deepEqual(d.receipt.finalJsonKeys,['result','status']);
+ assert.equal(d.receipt.reasoningTokens,610);
+ assert.equal(JSON.stringify(d.receipt).includes('PRIVATE_THOUGHTS'),false);
+ assert.equal(JSON.stringify(d.answer).includes('PRIVATE_THOUGHTS'),false);
+});
+test('thinking-ON stop with missing final answer does not interpret reasoning as JSON',()=>{
+ const d=inspectV28ProviderResponse('repair_2',200,{
+  choices:[{finish_reason:'stop',message:{reasoning_content:'{"patch":"fake"}',content:null}}],
+  usage:{total_tokens:999}
+ });
+ assert.equal(d.category,'EMPTY_MODEL_CONTENT');
+ assert.equal(d.receipt.reasoningPresent,true);
+ assert.equal(d.receipt.finalContentKind,'null');
+ assert.deepEqual(d.receipt.finalJsonKeys,[]);
+ assert.equal(d.receipt.providerTokens,999);
+});
+test('thinking-ON length with malformed or absent final content is budget exhaustion, not JSON failure',()=>{
+ for(const content of [null,'{"unfinished":','']){
+  const d=inspectV28ProviderResponse('repair_2',200,{
+   choices:[{finish_reason:'length',message:{reasoning_content:'private trace',content}}],
+   usage:{total_tokens:32768,completion_tokens:32768}
+  });
+  assert.equal(d.category,'THINKING_BUDGET_EXHAUSTED');
+  assert.equal(d.receipt.finishReason,'length');
+  assert.equal(d.receipt.providerTokens,32768);
+  assert.equal(JSON.stringify(d.receipt).includes('private trace'),false);
+ }
+});
+test('thinking-ON nontext final content is distinguished from legitimate JSON object',()=>{
+ const d=inspectV28ProviderResponse('repair_2',200,{
+  choices:[{finish_reason:'stop',message:{reasoning_content:'secret',content:[{type:'text',text:'{"valid":true}'}]}}],
+  usage:{total_tokens:211}
+ });
+ assert.equal(d.category,'EMPTY_MODEL_CONTENT');
+ assert.equal(d.receipt.finalContentKind,'array');
+ assert.equal(d.receipt.providerTokens,211);
+});
+test('thinking-OFF receipts do not gain thinking-ON structural metadata',()=>{
+ const d=inspectV28ProviderResponse('level_0',200,choice());
+ assert.equal(d.category,'ACCEPTED');
+ assert.equal(d.receipt.thinkingOn,false);
+ assert.equal(d.receipt.reasoningPresent,false);
+ assert.equal(d.receipt.finalContentKind,null);
+ assert.deepEqual(d.receipt.finalJsonKeys,[]);
+});
