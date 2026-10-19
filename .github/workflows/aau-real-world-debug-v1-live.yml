@@ -30,7 +30,7 @@ jobs:
           test "$(git hash-object experiments/tool-selection-restoration/appropriateness_rubric_v1.json)" = "2eab486b7a95ca635637769bf78a4da9a704e380"
           test "$(git hash-object experiments/tool-selection-restoration/external_tool_proof_obligations_v1.json)" = "7438a9881d6791ecb7f1b45f9b103bcdecb510b2"
           test "$(git hash-object experiments/tool-selection-restoration/tool_selection_proof_gate.py)" = "cd4f5018741f1411f1d636502ab40fd34ee40511"
-          test "$(git hash-object experiments/tool-selection-restoration/tool_capability_smoke_probes.py)" = "7af1c0f909fdbed97f7e3c1456b6c6626355a5ba"
+          test "$(git hash-object experiments/tool-selection-restoration/tool_capability_smoke_probes.py)" = "425277b584366964ea8f444f7173fdbb4b301c26"
           test "$(git hash-object experiments/tool-selection-restoration/test_tool_selection_proof_gate.py)" = "fc85981436dbdd451356049b77ccc490ba0aa70d"
           python -m py_compile experiments/tool-selection-restoration/tool_selection_proof_gate.py experiments/tool-selection-restoration/tool_capability_smoke_probes.py experiments/tool-selection-restoration/test_tool_selection_proof_gate.py
           echo "PREEXISTING_CHALLENGE_AND_RUBRICS_FROZEN; NO_LLM_CALL; NO_STAGE2"
@@ -42,8 +42,12 @@ jobs:
           test -s experiments/tool-selection-restoration/proof_replay/v41_evidence/v41-composed-evidence-bundle.json
       - name: Install only libraries for small isolated capability probes
         run: |
-          python -m pip install --disable-pip-version-check "networkx>=3.3,<4" "ortools>=9.10,<10" "opendssdirect.py>=0.9,<1.0" "pyomo>=6.8,<7" "highspy>=1.7,<2" "scipy>=1.13,<2"
+          python -m pip install --disable-pip-version-check "networkx>=3.3,<4" "opendssdirect.py>=0.9,<1.0" "pyomo>=6.8,<7" "highspy>=1.7,<2" "scipy>=1.13,<2"
+          python -m venv --clear .aau-ortools-venv
+          .aau-ortools-venv/bin/python -m pip install --disable-pip-version-check "ortools==9.12.4544"
       - name: Execute actual tiny computational tool capability probes
+        env:
+          AAU_ORTOOLS_PYTHON: ${{ github.workspace }}/.aau-ortools-venv/bin/python
         run: |
           python experiments/tool-selection-restoration/tool_capability_smoke_probes.py experiments/tool-selection-restoration/proof_output/smoke-results.json
       - name: False-pass regression and adversarial interface mutation tests
