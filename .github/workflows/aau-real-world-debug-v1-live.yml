@@ -1,4 +1,4 @@
-name: AAU K2.6 v4 independent four-role tool selection
+name: AAU K2.6 v4.1 recover D delta from verified prior A B C
 on:
   pull_request:
     types: [opened]
@@ -9,13 +9,14 @@ on:
       - '.github/workflows/aau-real-world-debug-v1-live.yml'
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: aau-serial-logistics-model-slot
   cancel-in-progress: false
 jobs:
   stage1-tool-selection-only:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,25 +27,38 @@ jobs:
           set -euo pipefail
           test "$(git hash-object experiments/tool-selection-restoration/challenge.json)" = "e51781a1a000f59f8c5ba508698c513d6c90bdb6"
           test "$(git hash-object experiments/tool-selection-restoration/rubric.json)" = "e19e740ebbe52c8772faa34685ffb4165b3883ec"
-          test "$(git hash-object experiments/tool-selection-restoration/stage1_v4_four_role.py)" = "6fa7715a63478787303e28c71a55a179556990d1"
-          python -m py_compile experiments/tool-selection-restoration/stage1_v4_four_role.py
+          test "$(git hash-object experiments/tool-selection-restoration/stage1_v41_repair_delta.py)" = "9561d64fa591bd5dd2f3ec815f47637a02460b22"
+          python -m py_compile experiments/tool-selection-restoration/stage1_v41_repair_delta.py
           test "$(git hash-object experiments/tool-selection-restoration/TOOL_SELECTION_PROMPT_V4_INDEPENDENT_AUDIT.md)" = "854ee53717b3e5627a97faaae72979847d647781"
+          test "$(git hash-object experiments/tool-selection-restoration/TOOL_SELECTION_V41_DELTA_PROMPT.md)" = "5062b0969b174a8e6fbe6a1495e47160290d8d90"
           test "$(git hash-object experiments/tool-selection-restoration/appropriateness_rubric_v1.json)" = "2eab486b7a95ca635637769bf78a4da9a704e380"
           echo "STAGE1_INPUT_AND_RUBRIC_FROZEN; NO STAGE2"
-      - name: Four live Kimi K2.6 thinking-ON calls, blind independent audit and remediation
+      - name: Download immutable original A B C GitHub Actions artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 39285019757 -R booleanlambda/agent-control-room -n aau-k26-stage1-v4-four-role-forensic-evidence -D experiments/tool-selection-restoration/reused_v4_original
+          test -s experiments/tool-selection-restoration/reused_v4_original/evidence_v4/call-A-receipt.json
+          test -s experiments/tool-selection-restoration/reused_v4_original/evidence_v4/call-B-receipt.json
+          test -s experiments/tool-selection-restoration/reused_v4_original/evidence_v4/call-C-receipt.json
+      - name: One live Kimi K2.6 thinking-ON D repair-only request
         env:
           MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
-        run: python experiments/tool-selection-restoration/stage1_v4_four_role.py
+        run: python experiments/tool-selection-restoration/stage1_v41_repair_delta.py
       - name: Preserve raw provider output for independent rubric scoring
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: aau-k26-stage1-v4-four-role-forensic-evidence
+          name: aau-k26-stage1-v41-repair-delta-evidence
           path: |
             experiments/tool-selection-restoration/challenge.json
             experiments/tool-selection-restoration/rubric.json
             experiments/tool-selection-restoration/appropriateness_rubric_v1.json
             experiments/tool-selection-restoration/TOOL_SELECTION_PROMPT_V4_INDEPENDENT_AUDIT.md
-            experiments/tool-selection-restoration/evidence_v4/
+            experiments/tool-selection-restoration/TOOL_SELECTION_V41_DELTA_PROMPT.md
+            experiments/tool-selection-restoration/reused_v4_original/evidence_v4/call-A-receipt.json
+            experiments/tool-selection-restoration/reused_v4_original/evidence_v4/call-B-receipt.json
+            experiments/tool-selection-restoration/reused_v4_original/evidence_v4/call-C-receipt.json
+            experiments/tool-selection-restoration/v41_evidence/
           if-no-files-found: error
           retention-days: 14
