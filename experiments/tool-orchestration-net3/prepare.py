@@ -13,7 +13,7 @@ OUT.mkdir(parents=True, exist_ok=True)
 EMITTER=0.012
 
 def make_network(leaks=None):
-    network=wntr.network.WaterNetworkModel("Net3")
+    network=wntr.network.WaterNetworkModel(str(ROOT/"Net3.inp"))
     network.options.time.duration=0
     network.options.time.report_timestep=3600
     if leaks:
