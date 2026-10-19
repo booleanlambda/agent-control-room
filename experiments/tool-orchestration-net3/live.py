@@ -11,13 +11,13 @@ from prepare import OUT
 from tools_runtime import TOOLS, execute
 
 MODEL="kimi-k2.6"
-MAX_CALLS=10
-MAX_TOKENS=45000
+MAX_TOTAL_TOKENS=75000
+MAX_OUTPUT_TOKENS=4096
 TOKEN_COUNT=0
 events=[]
 previous="0"*64
-audit={"model":MODEL,"mode":"thinking_off","max_per_call_output_tokens":4096,
-       "tool_contract":TOOLS,"max_model_calls":MAX_CALLS,"calls":[],
+audit={"model":MODEL,"mode":"thinking_off","max_per_call_output_tokens":MAX_OUTPUT_TOKENS,
+       "tool_contract":TOOLS,"budget_provider_tokens":MAX_TOTAL_TOKENS,"max_model_calls":None,"calls":[],
        "tool_events":[],"status":"started","final":None}
 def sha(s):
     return hashlib.sha256(s.encode()).hexdigest()
@@ -36,8 +36,14 @@ def call_kimi(messages):
     key=os.environ.get("MOONSHOT_API_KEY","").strip()
     if not key:
         raise RuntimeError("PROVIDER_SECRET_MISSING")
+    # A financial compute cap, not a fixed model-turn count. Reserve context + output.
+    approx_input_tokens=(len(json.dumps(messages))+2)//3
+    available=MAX_TOTAL_TOKENS-TOKEN_COUNT-approx_input_tokens
+    if available<512:
+        raise RuntimeError("MODEL_TOKEN_BUDGET")
+    output_limit=min(MAX_OUTPUT_TOKENS,available)
     body=json.dumps({"model":MODEL,"thinking":{"type":"disabled"},"temperature":0.6,
-                     "response_format":{"type":"json_object"},"max_tokens":4096,
+                     "response_format":{"type":"json_object"},"max_tokens":output_limit,
                      "stream":False,"messages":messages}).encode()
     req=urllib.request.Request("https://api.moonshot.ai/v1/chat/completions",
          data=body,headers={"Authorization":"Bearer "+key,
@@ -71,8 +77,7 @@ def main():
        "Use tools to inspect real simulated observations, calculate hypotheses, verify "
        "your proposed pair with full EPANET hydraulics, and then submit. "
        "Do not claim to have conducted a real hospital safety test. "
-       "Decide which tools to use and in what order. You may use up to "
-       +str(MAX_CALLS)+" model turns. The answer is assessed independently after your final reply. "
+       "Decide which tools to use and in what order. No arbitrary model-turn ceiling; total provider compute budget is 75000 tokens. Submit your best-supported ranked result once evidence is sufficient, rather than indefinitely exploring. The answer is assessed independently after your final reply. "
        "On each turn produce JSON only. Tool call schema: "
        "{\"type\":\"tool\",\"name\":\"one listed tool name\",\"arguments\":{},\"why\":\"brief justification\"}. "
        "Finish schema: {\"type\":\"final\",\"ranked_pairs\":[{\"nodes\":[\"node1\",\"node2\"],"
@@ -87,15 +92,19 @@ def main():
          "public_file_hash":(OUT/"input-sha256.txt").read_text().strip()})}]
     record({"kind":"START","measurement_sha256":sha(json.dumps(visible,sort_keys=True)),"available_tools":[t["name"] for t in TOOLS]})
     persist()
-    for turn in range(1,MAX_CALLS+1):
-        if TOKEN_COUNT>=MAX_TOKENS:
-            audit["status"]="MODEL_TOKEN_BUDGET";break
+    turn=0
+    while True:
+        if TOKEN_COUNT>=MAX_TOTAL_TOKENS:
+            audit["status"]="MODEL_TOKEN_BUDGET"
+            record({"kind":"STOP","reason":audit["status"]})
+            break
+        turn+=1
         try:
             raw=call_kimi(messages)
             decision=json.loads(raw)
             if not isinstance(decision,dict): raise ValueError("INVALID_JSON_OBJECT")
         except Exception as e:
-            audit["status"]="MODEL_OR_JSON_FAILURE"
+            audit["status"]="MODEL_TOKEN_BUDGET" if str(e)=="MODEL_TOKEN_BUDGET" else "MODEL_OR_JSON_FAILURE"
             audit["error_kind"]=type(e).__name__
             record({"kind":"STOP","reason":audit["status"]});break
         messages.append({"role":"assistant","content":raw})
@@ -121,11 +130,8 @@ def main():
         persist()
         messages.append({"role":"user","content":json.dumps({"tool_name":name,
                "actual_tool_result":result,
-               "remaining_model_calls":MAX_CALLS-turn,
-               "instruction":"Choose your next action based on these results. Do not treat a hypothesis as verified."})})
-    else:
-        audit["status"]="MAX_CALLS_EXHAUSTED"
-        record({"kind":"STOP","reason":audit["status"]})
+               "remaining_provider_token_budget":max(0,MAX_TOTAL_TOKENS-TOKEN_COUNT),
+               "instruction":"Choose your next action based on these results. No fixed turn limit. Avoid redundant experiments, submit a ranked result when the evidence justifies one."})})
     audit["total_provider_tokens"]=TOKEN_COUNT
     persist()
     print("AAU_NET3_LIVE="+json.dumps({"status":audit["status"],
