@@ -28,7 +28,7 @@ jobs:
           test "$(git hash-object experiments/tool-selection-restoration/challenge.json)" = "e51781a1a000f59f8c5ba508698c513d6c90bdb6"
           test "$(git hash-object experiments/tool-selection-restoration/rubric.json)" = "e19e740ebbe52c8772faa34685ffb4165b3883ec"
           test "$(git hash-object experiments/tool-selection-restoration/appropriateness_rubric_v1.json)" = "2eab486b7a95ca635637769bf78a4da9a704e380"
-          test "$(git hash-object experiments/tool-selection-restoration/external_tool_proof_obligations_v1.json)" = "d159030b12d3210b62ea03fee11984f3414a793b"
+          test "$(git hash-object experiments/tool-selection-restoration/external_tool_proof_obligations_v1.json)" = "7438a9881d6791ecb7f1b45f9b103bcdecb510b2"
           test "$(git hash-object experiments/tool-selection-restoration/tool_selection_proof_gate.py)" = "cd4f5018741f1411f1d636502ab40fd34ee40511"
           test "$(git hash-object experiments/tool-selection-restoration/tool_capability_smoke_probes.py)" = "7af1c0f909fdbed97f7e3c1456b6c6626355a5ba"
           test "$(git hash-object experiments/tool-selection-restoration/test_tool_selection_proof_gate.py)" = "fc85981436dbdd451356049b77ccc490ba0aa70d"
