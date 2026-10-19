@@ -114,7 +114,7 @@ def validate_proposal(bundle,manifest,probes):
                                     if t not in tools})
     unknown_interfaces_in_repairs=sorted({i for x in repair_rows for i in x.get("interface_ids",[])
         if i not in {e.get("id") for e in interfaces}})
-    gaps=[row["id"] for row in cap.values() if row["capability_gap"]]
+    gaps=[identifier for identifier,row in cap.items() if row["capability_gap"]]
     bad_contracts=[x["id"] for x in contract_results if x["status"]=="MISSING_OR_INCOMPLETE_CONTRACT"]
     structural_issues={
         "duplicate_selected_tool_ids":duplicates,
