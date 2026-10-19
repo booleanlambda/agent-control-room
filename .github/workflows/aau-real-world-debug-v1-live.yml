@@ -1,7 +1,7 @@
 name: AAU stage-one external capability and interface proof gate
 on:
   pull_request:
-    types: [opened]
+    types: [opened, synchronize]
     branches:
       - experiment/kimi-v28-transport-cause-live-v2-20261018
     paths:
@@ -30,7 +30,7 @@ jobs:
           test "$(git hash-object experiments/tool-selection-restoration/appropriateness_rubric_v1.json)" = "2eab486b7a95ca635637769bf78a4da9a704e380"
           test "$(git hash-object experiments/tool-selection-restoration/external_tool_proof_obligations_v1.json)" = "d159030b12d3210b62ea03fee11984f3414a793b"
           test "$(git hash-object experiments/tool-selection-restoration/tool_selection_proof_gate.py)" = "cd4f5018741f1411f1d636502ab40fd34ee40511"
-          test "$(git hash-object experiments/tool-selection-restoration/tool_capability_smoke_probes.py)" = "8bd0db94445a8f5188746e00ba2f50a5c9f2d171"
+          test "$(git hash-object experiments/tool-selection-restoration/tool_capability_smoke_probes.py)" = "7af1c0f909fdbed97f7e3c1456b6c6626355a5ba"
           test "$(git hash-object experiments/tool-selection-restoration/test_tool_selection_proof_gate.py)" = "fc85981436dbdd451356049b77ccc490ba0aa70d"
           python -m py_compile experiments/tool-selection-restoration/tool_selection_proof_gate.py experiments/tool-selection-restoration/tool_capability_smoke_probes.py experiments/tool-selection-restoration/test_tool_selection_proof_gate.py
           echo "PREEXISTING_CHALLENGE_AND_RUBRICS_FROZEN; NO_LLM_CALL; NO_STAGE2"
