@@ -58,6 +58,24 @@
       "role": "audit_manifest",
       "test": "stdlib_manifest",
       "claim_scope": "manifest schema/hashes, not independent physics"
+    },
+    {
+      "tool_id": "NT4",
+      "role": "reconfigured_protection_coordination",
+      "test": null,
+      "claim_scope": "model proposes SciPy radial TCC, but no proven bidirectional DER-fed relay coordination method"
+    },
+    {
+      "tool_id": "NT6",
+      "role": "grid_forming_stability",
+      "test": null,
+      "claim_scope": "named Julia inverter dynamics engine; no isolated applicable capability proof or unbalanced model translation"
+    },
+    {
+      "tool_id": "NT6",
+      "role": "synchronism_reclose_checker",
+      "test": null,
+      "claim_scope": "model suggests frequency differences and snapshots; no demonstrated phase/frequency/voltage synchronism or reclose checker"
     }
   ],
   "mandatory_obligations": [
