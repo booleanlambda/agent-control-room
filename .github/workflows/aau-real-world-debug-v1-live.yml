@@ -1,0 +1,49 @@
+name: AAU K2.6 stage-one reusable toolchain sufficiency prompt v3
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/kimi-v28-transport-cause-live-v2-20261018
+    paths:
+      - 'experiments/tool-selection-restoration/**'
+      - '.github/workflows/aau-real-world-debug-v1-live.yml'
+permissions:
+  contents: read
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+jobs:
+  stage1-tool-selection-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify PRE-REGISTERED challenge and independent grader remain frozen
+        run: |
+          set -euo pipefail
+          test "$(git hash-object experiments/tool-selection-restoration/challenge.json)" = "e51781a1a000f59f8c5ba508698c513d6c90bdb6"
+          test "$(git hash-object experiments/tool-selection-restoration/rubric.json)" = "e19e740ebbe52c8772faa34685ffb4165b3883ec"
+          test "$(git hash-object experiments/tool-selection-restoration/stage1_v3_stream.py)" = "13dc26b463ee6926f71ad3d7d5fca91c1308de7f"
+          test "$(git hash-object experiments/tool-selection-restoration/TOOL_SELECTION_SYSTEM_PROMPT_V3.md)" = "380c8b4292c8f1889c85191e9bf4087825697e9d"
+          test "$(git hash-object experiments/tool-selection-restoration/appropriateness_rubric_v1.json)" = "2eab486b7a95ca635637769bf78a4da9a704e380"
+          echo "STAGE1_INPUT_AND_RUBRIC_FROZEN; NO STAGE2"
+      - name: Live Kimi K2.6 thinking ON with v3 sufficiency and self-review prompt
+        env:
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: python experiments/tool-selection-restoration/stage1_v3_stream.py
+      - name: Preserve raw provider output for independent rubric scoring
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-hard-k26-stage1-tool-sufficiency-v3-provider-evidence
+          path: |
+            experiments/tool-selection-restoration/challenge.json
+            experiments/tool-selection-restoration/rubric.json
+            experiments/tool-selection-restoration/appropriateness_rubric_v1.json
+            experiments/tool-selection-restoration/TOOL_SELECTION_SYSTEM_PROMPT_V3.md
+            experiments/tool-selection-restoration/evidence/stage1-provider-receipt.json
+          if-no-files-found: error
+          retention-days: 14
