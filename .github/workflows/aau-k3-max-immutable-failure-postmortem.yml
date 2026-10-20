@@ -1,0 +1,46 @@
+name: AAU K3 MAX Immutable Failure Postmortem
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/aau-k3-on-v6-parallel-max-20261020
+permissions:
+  contents: read
+  actions: read
+jobs:
+  recover-without-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify pinned immutable recovery script
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object experiments/tool-selection-restoration/recover_k3_max_immutable_v01.py)" = 'a3fd1aef1a27306fa7a474f91f7abdb598eee2b1'
+          python -m py_compile experiments/tool-selection-restoration/recover_k3_max_immutable_v01.py
+      - name: Download original failed GitHub Actions artifact only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p experiments/tool-selection-restoration/k3_on_v6_original_immutable /tmp/aau-on-v6-original
+          gh run download 39502332304 -n aau-k3-thinking-max-v6-parallel-full-evidence -D /tmp/aau-on-v6-original
+          cp /tmp/aau-on-v6-original/evidence_k3_on_v6_parallel_max_v01/summary.json experiments/tool-selection-restoration/k3_on_v6_original_immutable/summary.json
+          cp /tmp/aau-on-v6-original/evidence_k3_on_v6_parallel_max_v01/raw_final_response.json experiments/tool-selection-restoration/k3_on_v6_original_immutable/raw_final_response.json
+          sha256sum experiments/tool-selection-restoration/k3_on_v6_original_immutable/*
+      - name: Deterministic parse recovery and independent structural audit (NO model API)
+        run: python experiments/tool-selection-restoration/recover_k3_max_immutable_v01.py
+      - name: Archive full postmortem and recovered original response
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-k3-thinking-max-original-failure-deterministic-postmortem
+          path: experiments/tool-selection-restoration/evidence_k3_on_v6_recovered_forensics_v01/
+          retention-days: 30
+          if-no-files-found: warn
