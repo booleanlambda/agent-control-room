@@ -1,0 +1,76 @@
+name: AAU K2.6 V5 Generic Example Tool Selection
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/aau-v41-tool-proof-gate-20261019
+    paths:
+      - 'experiments/tool-selection-restoration/**'
+      - '.github/workflows/aau-k26-v5-example-selection.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  stage1-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify ORIGINAL question rubric independent obligations and versioned prompt
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object experiments/tool-selection-restoration/challenge.json)" = "e51781a1a000f59f8c5ba508698c513d6c90bdb6"
+          test "$(git hash-object experiments/tool-selection-restoration/rubric.json)" = "e19e740ebbe52c8772faa34685ffb4165b3883ec"
+          test "$(git hash-object experiments/tool-selection-restoration/appropriateness_rubric_v1.json)" = "2eab486b7a95ca635637769bf78a4da9a704e380"
+          test "$(git hash-object experiments/tool-selection-restoration/external_tool_proof_obligations_v1.json)" = "7438a9881d6791ecb7f1b45f9b103bcdecb510b2"
+          test "$(git hash-object experiments/tool-selection-restoration/TOOL_SELECTION_GENERIC_V5_SYSTEM.md)" = "e520242011970ad10338a9b764896db2ada38bd6"
+          test "$(git hash-object experiments/tool-selection-restoration/stage1_v5_generic.py)" = "da206b96a7060db15744f6346c5d903fc375f7ae"
+          test "$(git hash-object experiments/tool-selection-restoration/v5_independent_structure_gate.py)" = "01ee1ec3a8e8dc96adb44ceb100d26be37e1b75d"
+          python -m py_compile experiments/tool-selection-restoration/stage1_v5_generic.py experiments/tool-selection-restoration/v5_independent_structure_gate.py
+          echo "AAU_V5_FROZEN_QUESTION_AND_HIDDEN_RUBRICS_VERIFIED"
+      - name: One Kimi K2.6 thinking ON tool-selection response (SSE; JSON)
+        env:
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: |
+          python experiments/tool-selection-restoration/stage1_v5_generic.py
+      - name: Fail-closed independent structural check and external obligations
+        if: always()
+        run: |
+          python experiments/tool-selection-restoration/v5_independent_structure_gate.py
+      - name: Install only narrow smoke test libraries from previous independent gate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check "networkx>=3.3,<4" "opendssdirect.py>=0.9,<1.0" "pyomo>=6.8,<7" "highspy>=1.7,<2" "scipy>=1.13,<2"
+          python -m venv --clear .aau-v5-ortools-venv
+          .aau-v5-ortools-venv/bin/python -m pip install --disable-pip-version-check "ortools==9.12.4544"
+      - name: Repeat existing independently executable narrow capability probes
+        if: always()
+        env:
+          AAU_ORTOOLS_PYTHON: ${{ github.workspace }}/.aau-v5-ortools-venv/bin/python
+        run: |
+          python experiments/tool-selection-restoration/tool_capability_smoke_probes.py experiments/tool-selection-restoration/evidence_v5/narrow-probe-results.json
+      - name: Archive frozen question hidden rubrics prompt exact model receipt structural check and smoke probes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-k26-v5-blind-example-selection-full-evidence
+          path: |
+            experiments/tool-selection-restoration/challenge.json
+            experiments/tool-selection-restoration/rubric.json
+            experiments/tool-selection-restoration/appropriateness_rubric_v1.json
+            experiments/tool-selection-restoration/external_tool_proof_obligations_v1.json
+            experiments/tool-selection-restoration/TOOL_SELECTION_GENERIC_V5_SYSTEM.md
+            experiments/tool-selection-restoration/evidence_v5/
+          if-no-files-found: error
+          retention-days: 30
