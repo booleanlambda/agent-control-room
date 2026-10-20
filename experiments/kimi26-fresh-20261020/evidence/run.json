@@ -1,0 +1,22 @@
+{
+  "experiment": "kimi26-fresh-toolchain-20261020",
+  "model_requested": "kimi-k2.6",
+  "thinking_requested": {
+    "type": "enabled"
+  },
+  "prompt_sha256": "c030622cab004c5acb0e79c771b42bba5559b000e08e99289d5a87b4f4e3b473",
+  "prompt_verified": true,
+  "started_at": "2026-10-20T13:02:19.094954+00:00",
+  "runtime": {
+    "python": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+    "platform": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39"
+  },
+  "status": "FAILED_PROVIDER",
+  "stage1_verification": "UNVERIFIED",
+  "model_response_observed": false,
+  "endpoint_host": "api.moonshot.ai",
+  "error_category": "RemoteDisconnected",
+  "error_message": "Remote end closed connection without response",
+  "elapsed_seconds": 260.508,
+  "completed_at": "2026-10-20T13:06:39.605296+00:00"
+}
