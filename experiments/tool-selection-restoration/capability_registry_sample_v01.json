@@ -1,0 +1,318 @@
+{
+  "registry_id": "aau-uccr-sample-v0.1",
+  "registry_type": "ILLUSTRATIVE_VERIFIED_OPERATION_SNAPSHOT",
+  "generated_from": "Actual independent synthetic software capability probes; illustrative sample, not a universal database",
+  "not_an_answer_to_any_user_problem": true,
+  "policies": {
+    "meaning_of_verified": "Only listed operation with indicated version, fixture, environment and scope",
+    "negative_claim": "Missing catalog entry does NOT imply a computation is impossible; discover candidate tools and test separately",
+    "no_fabrication": "Never use this sample to claim full problem coverage, real-world validation, coupled interoperability, performance, or protection safety",
+    "lookup_rule": "Match exact mathematical operation, input semantics, output, constraints and verified scope; then independently evaluate uncovered requirements",
+    "comparison_rule": "Cite operation_id and evidence.probe_id when reusing. Mark registry absence or uncertain suitability UNVERIFIED, not PASS."
+  },
+  "capabilities": [
+    {
+      "id": "cap.unbalanced_powerflow_small",
+      "definition": "Compute phase-asymmetric per-unit bus voltages on a small fixed three-phase feeder",
+      "algorithm_class": "Quasi-static circuit load flow",
+      "not_equivalent_to": [
+        "transient motor-start dynamics",
+        "fault relay coordination",
+        "synchrocheck",
+        "large-scale performance"
+      ]
+    },
+    {
+      "id": "cap.mip_small",
+      "definition": "Find optimal small binary constrained mixed-integer decision",
+      "algorithm_class": "MILP",
+      "not_equivalent_to": [
+        "stochastic 72-hour large-instance runtime guarantee"
+      ]
+    },
+    {
+      "id": "cap.graph_tree",
+      "definition": "Test that an undirected connected graph is acyclic; report independent cycle basis",
+      "algorithm_class": "graph theory",
+      "not_equivalent_to": [
+        "energization authorization",
+        "phase-aware electrical feasibility"
+      ]
+    },
+    {
+      "id": "cap.routing_tiny",
+      "definition": "Route one vehicle from/to depot visiting all three nodes",
+      "algorithm_class": "combinatorial routing",
+      "not_equivalent_to": [
+        "flood-disrupted fleets",
+        "generator transport coupling"
+      ]
+    },
+    {
+      "id": "cap.interpolate_curve",
+      "definition": "Piecewise linear interpolation between scalar sample values",
+      "algorithm_class": "numerical interpolation",
+      "not_equivalent_to": [
+        "protective device selectivity proof"
+      ]
+    },
+    {
+      "id": "cap.hash_manifest",
+      "definition": "Compute deterministic digest for canonicalized JSON fixture",
+      "algorithm_class": "reproducibility cryptography",
+      "not_equivalent_to": [
+        "authenticated immutable audit trail"
+      ]
+    }
+  ],
+  "tool_operations": [
+    {
+      "operation_id": "op.opendss.phase_voltage.v0",
+      "capability_id": "cap.unbalanced_powerflow_small",
+      "tool": "OpenDSS via opendssdirect.py",
+      "tested_versions": {
+        "opendssdirect.py": "0.9.4",
+        "dss-python": "0.15.7"
+      },
+      "call": "dss.Text.Command('Solve'); dss.Solution.Converged(); dss.Circuit.SetActiveBus('loadbus'); dss.Bus.puVmagAngle()",
+      "inputs": [
+        {
+          "name": "feeder_commands",
+          "type": "OpenDSS DSL",
+          "units": "kV, ohm, kW, kvar",
+          "keys": "bus+phase"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "phase_voltage",
+          "type": "array<float>",
+          "units": "pu",
+          "keys": "bus+phase"
+        }
+      ],
+      "positive_test": "Synthetic unequal per-phase load voltages finite and distinct",
+      "negative_test": "Reject nonconvergence or invalid voltage outputs",
+      "limitations": [
+        "quasi-static only",
+        "tested on tiny 12.47-kV synthetic feeder"
+      ],
+      "evidence": {
+        "status": "PASS_NARROW_CAPABILITY_ONLY",
+        "source": "AAU independent GitHub Actions synthetic smoke 2026-10-20",
+        "artifact_url": "https://github.com/booleanlambda/agent-control-room/actions/runs/39451190485/artifacts/12278957600",
+        "probe_id": "opendss_unbalanced",
+        "scope": "Only the indicated tiny tested operation",
+        "task_level_verified": false
+      }
+    },
+    {
+      "operation_id": "op.pyomo.highs.binary_mip.v0",
+      "capability_id": "cap.mip_small",
+      "tool": "Pyomo plus HiGHS",
+      "tested_versions": {
+        "pyomo": "6.10.1",
+        "highspy": "1.15.1"
+      },
+      "call": "SolverFactory('appsi_highs').solve(model)",
+      "inputs": [
+        {
+          "name": "model",
+          "type": "Pyomo ConcreteModel",
+          "units": "objective-specific",
+          "keys": "decision variable IDs"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "optimal_objective",
+          "type": "float",
+          "units": "model objective units"
+        }
+      ],
+      "positive_test": "Maximize 3*x+2*y with x+y<=1 binary, expected x=1 y=0 objective=3",
+      "negative_test": "Reject missing solver or unexpected decision/objective",
+      "limitations": [
+        "tiny MIP only",
+        "large stochastic performance untested"
+      ],
+      "evidence": {
+        "status": "PASS_NARROW_CAPABILITY_ONLY",
+        "source": "AAU independent GitHub Actions synthetic smoke 2026-10-20",
+        "artifact_url": "https://github.com/booleanlambda/agent-control-room/actions/runs/39451190485/artifacts/12278957600",
+        "probe_id": "highs_mip",
+        "scope": "Only the indicated tiny tested operation",
+        "task_level_verified": false
+      }
+    },
+    {
+      "operation_id": "op.networkx.is_tree.v0",
+      "capability_id": "cap.graph_tree",
+      "tool": "NetworkX",
+      "tested_versions": {
+        "networkx": "3.6.1"
+      },
+      "call": "nx.is_tree(G); nx.cycle_basis(G)",
+      "inputs": [
+        {
+          "name": "graph",
+          "type": "nx.Graph",
+          "units": "dimensionless",
+          "keys": "node ID / edge endpoints"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "is_tree",
+          "type": "boolean",
+          "units": "boolean"
+        }
+      ],
+      "positive_test": "4-node path accepted",
+      "negative_test": "3-node ring rejected; cycle basis nonempty",
+      "limitations": [
+        "simple untyped graph topology",
+        "no electrical phase/switch safety"
+      ],
+      "evidence": {
+        "status": "PASS_NARROW_CAPABILITY_ONLY",
+        "source": "AAU independent GitHub Actions synthetic smoke 2026-10-20",
+        "artifact_url": "https://github.com/booleanlambda/agent-control-room/actions/runs/39451190485/artifacts/12278957600",
+        "probe_id": "networkx_radiality",
+        "scope": "Only the indicated tiny tested operation",
+        "task_level_verified": false
+      }
+    },
+    {
+      "operation_id": "op.ortools.routing_tiny.v0",
+      "capability_id": "cap.routing_tiny",
+      "tool": "OR-Tools RoutingModel",
+      "tested_versions": {
+        "ortools": "9.12.4544"
+      },
+      "call": "pywrapcp.RoutingIndexManager; pywrapcp.RoutingModel; router.SolveWithParameters()",
+      "inputs": [
+        {
+          "name": "travel_cost",
+          "type": "integer matrix",
+          "units": "arbitrary nonnegative costs",
+          "keys": "origin index / destination index"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "visit_order",
+          "type": "array<int>",
+          "units": "node IDs"
+        }
+      ],
+      "positive_test": "Depot + 3 nodes, each visited, route returns depot",
+      "negative_test": "Reject missing/duplicated nodes or missing solution",
+      "limitations": [
+        "one vehicle tiny synthetic graph",
+        "does not prove transport-to-restoration interface",
+        "run in isolated interpreter due to native dependency conflict"
+      ],
+      "evidence": {
+        "status": "PASS_NARROW_CAPABILITY_ONLY",
+        "source": "AAU independent GitHub Actions synthetic smoke 2026-10-20",
+        "artifact_url": "https://github.com/booleanlambda/agent-control-room/actions/runs/39451190485/artifacts/12278957600",
+        "probe_id": "ortools_vrp",
+        "scope": "Only the indicated tiny tested operation",
+        "task_level_verified": false
+      }
+    },
+    {
+      "operation_id": "op.scipy.linear_interp.v0",
+      "capability_id": "cap.interpolate_curve",
+      "tool": "SciPy",
+      "tested_versions": {
+        "scipy": "1.17.1"
+      },
+      "call": "scipy.interpolate.interp1d([1,2,4],[16,8,4],kind='linear')(3)",
+      "inputs": [
+        {
+          "name": "x",
+          "type": "array<float>",
+          "units": "application-specific"
+        },
+        {
+          "name": "y",
+          "type": "array<float>",
+          "units": "application-specific"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "y_at_3",
+          "type": "float",
+          "units": "same as y"
+        }
+      ],
+      "positive_test": "Value at x=3 equals 6",
+      "negative_test": "Reject deviation from expected value",
+      "limitations": [
+        "interpolation alone cannot prove application-specific physics"
+      ],
+      "evidence": {
+        "status": "PASS_NARROW_CAPABILITY_ONLY",
+        "source": "AAU independent GitHub Actions synthetic smoke 2026-10-20",
+        "artifact_url": "https://github.com/booleanlambda/agent-control-room/actions/runs/39451190485/artifacts/12278957600",
+        "probe_id": "scipy_interpolation",
+        "scope": "Only the indicated tiny tested operation",
+        "task_level_verified": false
+      }
+    },
+    {
+      "operation_id": "op.python.sha256_json.v0",
+      "capability_id": "cap.hash_manifest",
+      "tool": "Python hashlib + json",
+      "tested_versions": {
+        "python": "3.11.17"
+      },
+      "call": "hashlib.sha256(json.dumps(data,sort_keys=True).encode()).hexdigest()",
+      "inputs": [
+        {
+          "name": "data",
+          "type": "JSON object",
+          "units": "N/A",
+          "keys": "canonical sorted keys"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "digest",
+          "type": "SHA-256 hexadecimal string",
+          "units": "256 bits"
+        }
+      ],
+      "positive_test": "Repeated hash stable and 64 hex chars",
+      "negative_test": "Reject malformed digest or inconsistent repeat",
+      "limitations": [
+        "not externally anchored integrity or provenance proof"
+      ],
+      "evidence": {
+        "status": "PASS_NARROW_CAPABILITY_ONLY",
+        "source": "AAU independent GitHub Actions synthetic smoke 2026-10-20",
+        "artifact_url": "https://github.com/booleanlambda/agent-control-room/actions/runs/39451190485/artifacts/12278957600",
+        "probe_id": "stdlib_manifest",
+        "scope": "Only the indicated tiny tested operation",
+        "task_level_verified": false
+      }
+    }
+  ],
+  "interface_examples": [
+    {
+      "id": "edge.networkx_to_ortools.proposed",
+      "from_operation": "op.networkx.is_tree.v0",
+      "to_operation": "op.ortools.routing_tiny.v0",
+      "status": "PROPOSED_NOT_VERIFIED",
+      "warning": "nx.is_tree returns a boolean, not travel-time matrix; an additional shortest-path/time-matrix capability is required. No direct compatible interface shown."
+    }
+  ],
+  "known_general_limitations": [
+    "No evidence that these six operations compose into an integrated physical restoration solver.",
+    "Tool registry is incomplete; discover missing computational methods independently.",
+    "A package import or tiny synthetic test is NOT evidence of all versions, APIs, or tasks."
+  ]
+}
