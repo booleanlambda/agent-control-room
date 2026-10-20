@@ -5,9 +5,7 @@ on:
     branches:
       - experiment/kimi26-toolchain-fresh-20261020
     paths:
-      - experiments/kimi26-fresh-20261020/stage1-prompt.md
       - experiments/kimi26-fresh-20261020/run_stage1.py
-      - .github/workflows/kimi26-toolchain-fresh.yml
   workflow_dispatch:
 
 permissions:
@@ -15,7 +13,7 @@ permissions:
 
 jobs:
   stage1:
-    name: Clean-room Kimi K2.6 stage 1
+    name: Clean-room Kimi K2.6 stage 1 (SSE)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -26,35 +24,44 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: true
-      - name: Run frozen Stage-1 prompt with K2.6 thinking on
-        id: model
+      - name: Verify frozen experiment source and syntax
+        run: |
+          set -euo pipefail
+          test "$(git hash-object experiments/kimi26-fresh-20261020/stage1-prompt.md)" = "318e6b528808e120ca7c64f8bbdc5b8cd0d97c16"
+          python3 -m py_compile experiments/kimi26-fresh-20261020/run_stage1.py
+      - name: Run frozen Stage-1 prompt with K2.6 thinking ON over SSE
         shell: bash
         run: |
           set -o pipefail
           python3 experiments/kimi26-fresh-20261020/run_stage1.py
-      - name: Upload unaltered provider response and execution record
+      - name: Upload original and transport-corrected evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: kimi26-clean-stage1-evidence
-          path: experiments/kimi26-fresh-20261020/evidence/
+          name: kimi26-clean-stage1-transport-evidence
+          path: |
+            experiments/kimi26-fresh-20261020/stage1-prompt.md
+            experiments/kimi26-fresh-20261020/evidence/
+            experiments/kimi26-fresh-20261020/evidence_stream_v1/
           retention-days: 30
           if-no-files-found: warn
-      - name: Check evidence summary into isolated experiment branch
+      - name: Commit stream receipt to isolated experiment branch
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          cd experiments/kimi26-fresh-20261020
-          test -f evidence/run.json || printf '{"status":"BLOCKED","error_category":"RUNNER_NO_EVIDENCE"}\n' > evidence/run.json
-          cd ../..
+          mkdir -p experiments/kimi26-fresh-20261020/evidence_stream_v1
+          if [ ! -s experiments/kimi26-fresh-20261020/evidence_stream_v1/run.json ]; then
+            printf '{"status":"BLOCKED","error_category":"RUNNER_NO_EVIDENCE","stage1_verification":"UNVERIFIED"}\n' > experiments/kimi26-fresh-20261020/evidence_stream_v1/run.json
+          fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add experiments/kimi26-fresh-20261020/evidence/run.json
-          if [ -f experiments/kimi26-fresh-20261020/evidence/stage1-model-output.md ]; then
-            git add experiments/kimi26-fresh-20261020/evidence/stage1-model-output.md
-          fi
+          git add experiments/kimi26-fresh-20261020/evidence_stream_v1/run.json
+          for name in stage1-model-output.md stage1-partial-output.md request-metadata.json; do
+            p="experiments/kimi26-fresh-20261020/evidence_stream_v1/$name"
+            if [ -f "$p" ]; then git add "$p"; fi
+          done
           if ! git diff --cached --quiet; then
-            git commit -m 'Record isolated Kimi26 Stage-1 execution summary'
+            git commit -m 'Record isolated Kimi26 SSE execution evidence'
             git push origin HEAD:refs/heads/experiment/kimi26-toolchain-fresh-20261020
           fi
