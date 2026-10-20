@@ -1,0 +1,311 @@
+{
+  "scope": "Read-only export of six independently exercised narrow software capabilities; not an integrated toolchain",
+  "operations": [
+    {
+      "tests": [
+        {
+          "id": "test.op.networkx.is_tree.v0.negative",
+          "kind": "NEGATIVE",
+          "status": "EXECUTED"
+        },
+        {
+          "id": "test.op.networkx.is_tree.v0.positive",
+          "kind": "POSITIVE",
+          "status": "EXECUTED"
+        }
+      ],
+      "inputs": [
+        {
+          "keys": "node ID / edge endpoints",
+          "name": "graph",
+          "type": "nx.Graph",
+          "units": "dimensionless"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "is_tree",
+          "type": "boolean",
+          "units": "boolean"
+        }
+      ],
+      "tool_id": "tool.networkx",
+      "evidence": [
+        {
+          "test": "networkx_radiality",
+          "scope": "Only the indicated tiny tested operation",
+          "result": "PASS_NARROW_CAPABILITY_ONLY",
+          "sha256": "c195de073afa2d53b8ff0ebd871830f91dc5654b2cc352a0440d484f3bf5f4b5",
+          "source": "https://github.com/booleanlambda/agent-control-room/actions/runs/39455936347/artifacts/12280792701"
+        }
+      ],
+      "tool_name": "NetworkX",
+      "limitations": [
+        "simple untyped graph topology",
+        "no electrical phase/switch safety"
+      ],
+      "operation_id": "op.networkx.is_tree.v0",
+      "tool_version": "3.6.1",
+      "capability_id": "cap.graph_tree",
+      "evidence_level": "NARROW_API_PROVEN_ONLY",
+      "exact_invocation": "nx.is_tree(G); nx.cycle_basis(G)",
+      "capability_description": "Test that an undirected connected graph is acyclic; report independent cycle basis"
+    },
+    {
+      "tests": [
+        {
+          "id": "test.op.opendss.phase_voltage.v0.negative",
+          "kind": "NEGATIVE",
+          "status": "PROPOSED"
+        },
+        {
+          "id": "test.op.opendss.phase_voltage.v0.positive",
+          "kind": "POSITIVE",
+          "status": "EXECUTED"
+        }
+      ],
+      "inputs": [
+        {
+          "keys": "bus+phase",
+          "name": "feeder_commands",
+          "type": "OpenDSS DSL",
+          "units": "kV, ohm, kW, kvar"
+        }
+      ],
+      "outputs": [
+        {
+          "keys": "bus+phase",
+          "name": "phase_voltage",
+          "type": "array<float>",
+          "units": "pu"
+        }
+      ],
+      "tool_id": "tool.opendss",
+      "evidence": [
+        {
+          "test": "opendss_unbalanced",
+          "scope": "Only the indicated tiny tested operation",
+          "result": "PASS_NARROW_CAPABILITY_ONLY",
+          "sha256": "c195de073afa2d53b8ff0ebd871830f91dc5654b2cc352a0440d484f3bf5f4b5",
+          "source": "https://github.com/booleanlambda/agent-control-room/actions/runs/39455936347/artifacts/12280792701"
+        }
+      ],
+      "tool_name": "OpenDSSDirect",
+      "limitations": [
+        "quasi-static only",
+        "tested on tiny 12.47-kV synthetic feeder"
+      ],
+      "operation_id": "op.opendss.phase_voltage.v0",
+      "tool_version": "0.9.4+dss-python0.15.7",
+      "capability_id": "cap.unbalanced_powerflow_small",
+      "evidence_level": "NARROW_API_PROVEN_ONLY",
+      "exact_invocation": "dss.Text.Command('Solve'); dss.Solution.Converged(); dss.Circuit.SetActiveBus('loadbus'); dss.Bus.puVmagAngle()",
+      "capability_description": "Compute phase-asymmetric per-unit bus voltages on a small fixed three-phase feeder"
+    },
+    {
+      "tests": [
+        {
+          "id": "test.op.ortools.routing_tiny.v0.negative",
+          "kind": "NEGATIVE",
+          "status": "PROPOSED"
+        },
+        {
+          "id": "test.op.ortools.routing_tiny.v0.positive",
+          "kind": "POSITIVE",
+          "status": "EXECUTED"
+        }
+      ],
+      "inputs": [
+        {
+          "keys": "origin index / destination index",
+          "name": "travel_cost",
+          "type": "integer matrix",
+          "units": "arbitrary nonnegative costs"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "visit_order",
+          "type": "array<int>",
+          "units": "node IDs"
+        }
+      ],
+      "tool_id": "tool.ortools",
+      "evidence": [
+        {
+          "test": "ortools_vrp",
+          "scope": "Only the indicated tiny tested operation",
+          "result": "PASS_NARROW_CAPABILITY_ONLY",
+          "sha256": "c195de073afa2d53b8ff0ebd871830f91dc5654b2cc352a0440d484f3bf5f4b5",
+          "source": "https://github.com/booleanlambda/agent-control-room/actions/runs/39455936347/artifacts/12280792701"
+        }
+      ],
+      "tool_name": "Google OR-Tools",
+      "limitations": [
+        "one vehicle tiny synthetic graph",
+        "does not prove transport-to-restoration interface",
+        "run in isolated interpreter due to native dependency conflict"
+      ],
+      "operation_id": "op.ortools.routing_tiny.v0",
+      "tool_version": "9.12.4544",
+      "capability_id": "cap.routing_tiny",
+      "evidence_level": "NARROW_API_PROVEN_ONLY",
+      "exact_invocation": "pywrapcp.RoutingIndexManager; pywrapcp.RoutingModel; router.SolveWithParameters()",
+      "capability_description": "Route one vehicle from/to depot visiting all three nodes"
+    },
+    {
+      "tests": [
+        {
+          "id": "test.op.pyomo.highs.binary_mip.v0.negative",
+          "kind": "NEGATIVE",
+          "status": "PROPOSED"
+        },
+        {
+          "id": "test.op.pyomo.highs.binary_mip.v0.positive",
+          "kind": "POSITIVE",
+          "status": "EXECUTED"
+        }
+      ],
+      "inputs": [
+        {
+          "keys": "decision variable IDs",
+          "name": "model",
+          "type": "Pyomo ConcreteModel",
+          "units": "objective-specific"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "optimal_objective",
+          "type": "float",
+          "units": "model objective units"
+        }
+      ],
+      "tool_id": "tool.pyomo_highs",
+      "evidence": [
+        {
+          "test": "highs_mip",
+          "scope": "Only the indicated tiny tested operation",
+          "result": "PASS_NARROW_CAPABILITY_ONLY",
+          "sha256": "c195de073afa2d53b8ff0ebd871830f91dc5654b2cc352a0440d484f3bf5f4b5",
+          "source": "https://github.com/booleanlambda/agent-control-room/actions/runs/39455936347/artifacts/12280792701"
+        }
+      ],
+      "tool_name": "Pyomo + HiGHS",
+      "limitations": [
+        "tiny MIP only",
+        "large stochastic performance untested"
+      ],
+      "operation_id": "op.pyomo.highs.binary_mip.v0",
+      "tool_version": "pyomo6.10.1+highspy1.15.1",
+      "capability_id": "cap.mip_small",
+      "evidence_level": "NARROW_API_PROVEN_ONLY",
+      "exact_invocation": "SolverFactory('appsi_highs').solve(model)",
+      "capability_description": "Find optimal small binary constrained mixed-integer decision"
+    },
+    {
+      "tests": [
+        {
+          "id": "test.op.python.sha256_json.v0.negative",
+          "kind": "NEGATIVE",
+          "status": "PROPOSED"
+        },
+        {
+          "id": "test.op.python.sha256_json.v0.positive",
+          "kind": "POSITIVE",
+          "status": "EXECUTED"
+        }
+      ],
+      "inputs": [
+        {
+          "keys": "canonical sorted keys",
+          "name": "data",
+          "type": "JSON object",
+          "units": "N/A"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "digest",
+          "type": "SHA-256 hexadecimal string",
+          "units": "256 bits"
+        }
+      ],
+      "tool_id": "tool.python_stdlib",
+      "evidence": [
+        {
+          "test": "stdlib_manifest",
+          "scope": "Only the indicated tiny tested operation",
+          "result": "PASS_NARROW_CAPABILITY_ONLY",
+          "sha256": "c195de073afa2d53b8ff0ebd871830f91dc5654b2cc352a0440d484f3bf5f4b5",
+          "source": "https://github.com/booleanlambda/agent-control-room/actions/runs/39455936347/artifacts/12280792701"
+        }
+      ],
+      "tool_name": "Python standard library",
+      "limitations": [
+        "not externally anchored integrity or provenance proof"
+      ],
+      "operation_id": "op.python.sha256_json.v0",
+      "tool_version": "3.11.17",
+      "capability_id": "cap.hash_manifest",
+      "evidence_level": "NARROW_API_PROVEN_ONLY",
+      "exact_invocation": "hashlib.sha256(json.dumps(data,sort_keys=True).encode()).hexdigest()",
+      "capability_description": "Compute deterministic digest for canonicalized JSON fixture"
+    },
+    {
+      "tests": [
+        {
+          "id": "test.op.scipy.linear_interp.v0.negative",
+          "kind": "NEGATIVE",
+          "status": "PROPOSED"
+        },
+        {
+          "id": "test.op.scipy.linear_interp.v0.positive",
+          "kind": "POSITIVE",
+          "status": "EXECUTED"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "x",
+          "type": "array<float>",
+          "units": "application-specific"
+        },
+        {
+          "name": "y",
+          "type": "array<float>",
+          "units": "application-specific"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "y_at_3",
+          "type": "float",
+          "units": "same as y"
+        }
+      ],
+      "tool_id": "tool.scipy",
+      "evidence": [
+        {
+          "test": "scipy_interpolation",
+          "scope": "Only the indicated tiny tested operation",
+          "result": "PASS_NARROW_CAPABILITY_ONLY",
+          "sha256": "c195de073afa2d53b8ff0ebd871830f91dc5654b2cc352a0440d484f3bf5f4b5",
+          "source": "https://github.com/booleanlambda/agent-control-room/actions/runs/39455936347/artifacts/12280792701"
+        }
+      ],
+      "tool_name": "SciPy",
+      "limitations": [
+        "interpolation alone cannot prove application-specific physics"
+      ],
+      "operation_id": "op.scipy.linear_interp.v0",
+      "tool_version": "1.17.1",
+      "capability_id": "cap.interpolate_curve",
+      "evidence_level": "NARROW_API_PROVEN_ONLY",
+      "exact_invocation": "scipy.interpolate.interp1d([1,2,4],[16,8,4],kind='linear')(3)",
+      "capability_description": "Piecewise linear interpolation between scalar sample values"
+    }
+  ],
+  "registry_id": "aau-uccr-postgres-v01",
+  "source_schema": "aau_compute_registry"
+}
