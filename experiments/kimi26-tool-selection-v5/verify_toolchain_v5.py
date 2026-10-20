@@ -20,7 +20,9 @@ def main():
     review=json.loads(SAVED_REVIEW.read_text())
     manifest=json.loads(MANIFEST.read_text())
     smoke=json.loads((OUTPUT/"smoke-results.json").read_text())
-    assert manifest["challenge_sha256"]==review["evidence_sources"]["raw_model_content_sha256"] or manifest["challenge_sha256"]=="56321d16f88d1c46eec36a6c51a435a75cba6d72f55a824364a4dcf39a636c16"
+    run=json.loads((ROOT/"evidence/run.json").read_text())
+    assert manifest["challenge_sha256"]==run["challenge_sha256"],"CHALLENGE_HASH_DRIFT"
+    assert review["evidence_sources"]["raw_model_content_sha256"]==run["provider_receipt"]["raw_content_sha256"],"MODEL_EVIDENCE_DRIFT"
     assert review["binding_verdict"]["stage2_authorized"] is False
     assert p["stage2_authorized"] is False
     available={t.get("id") for t in p["selected_tools"]}
