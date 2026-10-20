@@ -1,0 +1,75 @@
+name: AAU K3 Thinking MAX V6 Parallel Controlled Retest
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/aau-k3-off-v6-parallel-self-audit-20261020
+permissions:
+  contents: read
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+jobs:
+  k3-on-v6:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify unchanged frozen challenge, rubric, V6 system prompt and registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=experiments/tool-selection-restoration
+          test "$(git hash-object "$root/challenge.json")" = "e51781a1a000f59f8c5ba508698c513d6c90bdb6"
+          test "$(git hash-object "$root/rubric.json")" = "e19e740ebbe52c8772faa34685ffb4165b3883ec"
+          test "$(git hash-object "$root/aau_registry_db_export_v01.json")" = "ac160bdf4eb0f1ea2d179a6ad355f8235fa19ec0"
+          test "$(git hash-object "$root/TOOL_SELECTION_GENERIC_V6_SYSTEM.md")" = "4746107111c7b6c99131396965db364016ae33f0"
+          test "$(git hash-object "$root/parallel_discovery_v01.py")" = "c2c037eb34d6f10c6c90be46f52219bda4154d94"
+          test "$(git hash-object "$root/k3_v6_thinking_max_live_v01.py")" = "a29ba92e7b482bb75a37343d551856bdca92f6f4"
+          test "$(git hash-object "$root/k3_v6_thinking_max_audit_v01.py")" = "220a496cf795d0394820c8d1a6bf0c27549181dd"
+          python -m py_compile "$root/k3_v6_thinking_max_live_v01.py" "$root/k3_v6_thinking_max_audit_v01.py"
+      - name: Test provider request uses max reasoning and same tools and prompt
+        shell: bash
+        run: |
+          python - <<'PY'
+          import sys, pathlib, inspect
+          sys.path.insert(0,'experiments/tool-selection-restoration')
+          import k3_v6_thinking_max_live_v01 as k
+          from parallel_discovery_v01 import Discovery
+          assert len(k.CAT['operations'])==6
+          assert [x['function']['name'] for x in k.TOOLS] == ['search_capabilities','inspect_operation','parallel_software_discovery']
+          src=inspect.getsource(k.api_call)
+          assert '"reasoning_effort":"max"' in src
+          assert '"thinking":{"type":"disabled"}' not in src
+          assert '"tool_choice"]="required" if turn==1' in src
+          src2=inspect.getsource(k.run)
+          assert 'assistant_message["reasoning_content"]=result["reasoning_content"]' in src2
+          d=Discovery()
+          assert d.search('', ['valid'])['error']=='INVALID_OBJECTIVE'
+          assert d.calls==0
+          print('AAU_K3_MAX_PROVIDER_CONFIG_AND_PRESERVED_THINKING_GUARDS_PASS')
+          PY
+      - name: One live K3 thinking MAX V6 inference with UCCR and capped Parallel
+        env:
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+          PARALLEL_API_KEY: ${{ secrets.PARALLEL_API_KEY }}
+        run: python experiments/tool-selection-restoration/k3_v6_thinking_max_live_v01.py
+      - name: Same independent deterministic structural and V5-regression audit
+        if: always()
+        run: python experiments/tool-selection-restoration/k3_v6_thinking_max_audit_v01.py
+      - name: Archive real provider receipts, tool results, final proposal, and audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-k3-thinking-max-v6-parallel-full-evidence
+          path: |
+            experiments/tool-selection-restoration/TOOL_SELECTION_GENERIC_V6_SYSTEM.md
+            experiments/tool-selection-restoration/challenge.json
+            experiments/tool-selection-restoration/rubric.json
+            experiments/tool-selection-restoration/aau_registry_db_export_v01.json
+            experiments/tool-selection-restoration/evidence_k3_on_v6_parallel_max_v01/
+          retention-days: 30
+          if-no-files-found: warn
