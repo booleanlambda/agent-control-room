@@ -1,0 +1,145 @@
+{
+  "stage": "STAGE1_EXTERNAL_PROOF_ONLY",
+  "status": "BLOCKED",
+  "stage1_pass": false,
+  "stage2_authorized": false,
+  "probe_scope": "Small synthetic API capability only, not protection or 4800-bus evidence",
+  "saved_model_proposal_sha256": "17b182d87e96205d489774230d7b42774a13e01dde6ad923c0a493f0fd8c5f3e",
+  "saved_external_review_sha256": "f1a4b948516b6cba51dbfe0373332e5335817d2a3de813e300db0e46a86deaed",
+  "mandatory_role_audit": [
+    {
+      "role": "unbalanced_powerflow",
+      "reviewer_bound_tool_id": "T2",
+      "tool_present": true,
+      "probe": "opendss_unbalanced",
+      "probe_status": "PASS_NARROW_CAPABILITY_ONLY",
+      "narrow_capability_observed": true,
+      "full_domain_suitability": "UNVERIFIED"
+    },
+    {
+      "role": "discrete_optimizer",
+      "reviewer_bound_tool_id": "T1",
+      "tool_present": true,
+      "probe": "highs_mip",
+      "probe_status": "PASS_NARROW_CAPABILITY_ONLY",
+      "narrow_capability_observed": true,
+      "full_domain_suitability": "UNVERIFIED"
+    },
+    {
+      "role": "topology_graph",
+      "reviewer_bound_tool_id": "T3",
+      "tool_present": true,
+      "probe": "networkx_radiality",
+      "probe_status": "PASS_NARROW_CAPABILITY_ONLY",
+      "narrow_capability_observed": true,
+      "full_domain_suitability": "UNVERIFIED"
+    },
+    {
+      "role": "crew_vehicle_routing",
+      "reviewer_bound_tool_id": "T4",
+      "tool_present": true,
+      "probe": "ortools_vrp",
+      "probe_status": "PASS_NARROW_CAPABILITY_ONLY",
+      "narrow_capability_observed": true,
+      "full_domain_suitability": "UNVERIFIED"
+    },
+    {
+      "role": "mobile_generator_road_transport",
+      "reviewer_bound_tool_id": null,
+      "tool_present": false,
+      "probe": null,
+      "probe_status": "NO_APPLICABLE_PROBE",
+      "narrow_capability_observed": false,
+      "full_domain_suitability": "UNVERIFIED"
+    },
+    {
+      "role": "reconfigured_protection_coordination",
+      "reviewer_bound_tool_id": null,
+      "tool_present": false,
+      "probe": null,
+      "probe_status": "NO_APPLICABLE_PROBE",
+      "narrow_capability_observed": false,
+      "full_domain_suitability": "UNVERIFIED"
+    },
+    {
+      "role": "synchronism_reclose_checker",
+      "reviewer_bound_tool_id": null,
+      "tool_present": false,
+      "probe": null,
+      "probe_status": "NO_APPLICABLE_PROBE",
+      "narrow_capability_observed": false,
+      "full_domain_suitability": "UNVERIFIED"
+    },
+    {
+      "role": "grid_forming_stability",
+      "reviewer_bound_tool_id": "T5",
+      "tool_present": true,
+      "probe": null,
+      "probe_status": "NO_APPLICABLE_PROBE",
+      "narrow_capability_observed": false,
+      "full_domain_suitability": "UNVERIFIED"
+    },
+    {
+      "role": "cold_load_dynamics",
+      "reviewer_bound_tool_id": null,
+      "tool_present": false,
+      "probe": null,
+      "probe_status": "NO_APPLICABLE_PROBE",
+      "narrow_capability_observed": false,
+      "full_domain_suitability": "UNVERIFIED"
+    }
+  ],
+  "critical_absent_reviewer_roles": [
+    "mobile_generator_road_transport",
+    "reconfigured_protection_coordination",
+    "synchronism_reclose_checker",
+    "cold_load_dynamics"
+  ],
+  "critical_interface_audit": [
+    {
+      "id": "GEN-ROUTE-TO-RESTORATION",
+      "required_fields": [
+        "arrival_time",
+        "generator_id",
+        "route",
+        "setup_time",
+        "travel_time"
+      ],
+      "status": "CRITICAL_INTERFACE_MISSING",
+      "candidate_edges": []
+    },
+    {
+      "id": "SYNC-MEASUREMENT-TO-CHECK",
+      "required_fields": [
+        "frequency",
+        "phase_angle",
+        "time",
+        "voltage"
+      ],
+      "status": "CRITICAL_INTERFACE_MISSING",
+      "candidate_edges": []
+    },
+    {
+      "id": "PROTECTION-TO-ACCEPTANCE",
+      "required_fields": [
+        "fault",
+        "relay",
+        "selectivity"
+      ],
+      "status": "CRITICAL_INTERFACE_MISSING",
+      "candidate_edges": []
+    }
+  ],
+  "missing_critical_interfaces": [
+    "GEN-ROUTE-TO-RESTORATION",
+    "SYNC-MEASUREMENT-TO-CHECK",
+    "PROTECTION-TO-ACCEPTANCE"
+  ],
+  "original_review_score": 8,
+  "original_review_mandatory_failures": [
+    "C4",
+    "C5"
+  ],
+  "independent_selected_tool_mapping_note": "Mappings are reviewer-authored from the archived candidate, not model self-grade.",
+  "why_blocked": "No mobile generator route->arrival/setup contract; no bidirectional protection or synchronism checker; these are not proved by narrow API smoke tests."
+}

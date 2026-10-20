@@ -1,0 +1,79 @@
+{
+  "isolation": "independent subprocess per package",
+  "probes": {
+    "highs_mip": {
+      "evidence": {
+        "scope": "Small two-binary MIP; NOT 72-hour six-scenario runtime proof",
+        "verified_objective": 3.0,
+        "versions": {
+          "highspy": "1.15.1",
+          "pyomo": "6.10.1"
+        }
+      },
+      "status": "PASS_NARROW_CAPABILITY_ONLY"
+    },
+    "networkx_radiality": {
+      "evidence": {
+        "accepts_tree": true,
+        "rejects_cycle": true,
+        "scope": "Tiny graph; does not prove correct phase or source eligibility",
+        "versions": {
+          "networkx": "3.6.1"
+        }
+      },
+      "status": "PASS_NARROW_CAPABILITY_ONLY"
+    },
+    "opendss_unbalanced": {
+      "evidence": {
+        "scope": "One manufactured unbalanced feeder; NOT 4800-bus or protection proof",
+        "small_case_phase_voltage_pu": [
+          0.99944,
+          0.999987,
+          0.99986
+        ],
+        "versions": {
+          "opendssdirect.py": "0.9.4"
+        }
+      },
+      "status": "PASS_NARROW_CAPABILITY_ONLY"
+    },
+    "ortools_vrp": {
+      "evidence": {
+        "scope": "Small routing-only smoke test; NOT mobile-generator assignment",
+        "versions": {
+          "ortools": "9.12.4544"
+        },
+        "visited": [
+          0,
+          1,
+          3,
+          2,
+          0
+        ]
+      },
+      "status": "PASS_NARROW_CAPABILITY_ONLY"
+    },
+    "scipy_interpolation": {
+      "evidence": {
+        "scope": "Interpolation API only; does NOT verify relay selectivity, bidirectional fault currents",
+        "value_at_3": 6.0,
+        "versions": {
+          "scipy": "1.17.1"
+        }
+      },
+      "status": "PASS_NARROW_CAPABILITY_ONLY"
+    },
+    "stdlib_manifest": {
+      "evidence": {
+        "scope": "Hashing only; NOT end-to-end telemetry provenance",
+        "sha256": "36af29842b79a0e993e143e0c025257c94873e31da834e2fdb00e498c2cef945",
+        "versions": {
+          "python": "3.11.17"
+        }
+      },
+      "status": "PASS_NARROW_CAPABILITY_ONLY"
+    }
+  },
+  "scope": "Narrow, non-domain-certifying executable capability probes",
+  "stage2_authorized": false
+}
