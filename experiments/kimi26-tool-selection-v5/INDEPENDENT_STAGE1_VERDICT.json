@@ -1,0 +1,158 @@
+{
+  "experiment": "AAU-K26-GENERAL-TOOLCHAIN-V5",
+  "evaluation": "REVIEWER_INDEPENDENT_OF_MODEL",
+  "evidence_sources": {
+    "saved_model_proposal_git_blob": "cafeedf69ddf4aa0c40c062c043c003edd8013cc",
+    "rubric_git_blob": "e19e740ebbe52c8772faa34685ffb4165b3883ec",
+    "appropriateness_rubric_git_blob": "2eab486b7a95ca635637769bf78a4da9a704e380",
+    "external_obligations_git_blob": "7438a9881d6791ecb7f1b45f9b103bcdecb510b2",
+    "raw_model_content_sha256": "8fd31df9b514df743a8e4a5031d7463777276444e47cf0631358e8bd263f49b1",
+    "model": "kimi-k2.6",
+    "provider_finish_reason": "stop",
+    "provider_reasoning_tokens": 18242
+  },
+  "evaluation_limits": "One independent evidence-grounded architectural review plus deterministic typed-interface search. No real-grid numerical safety proof. Prior narrow package smoke probes are not new v5 execution evidence.",
+  "original_rubric_result": {
+    "score": 8,
+    "max_score": 11,
+    "minimum_score": 9,
+    "mandatory_failures": [
+      "C4",
+      "C5"
+    ],
+    "criteria": [
+      {
+        "id": "C1",
+        "status": "PASS",
+        "evidence": "T2 OpenDSS unbalanced 3-phase QSTS, with per-phase voltage/thermal test."
+      },
+      {
+        "id": "C2",
+        "status": "PASS",
+        "evidence": "T1 Pyomo+HiGHS MILP, stochastic six-scenario/hourly variables; runtime untested."
+      },
+      {
+        "id": "C3",
+        "status": "PASS",
+        "evidence": "T3 NetworkX radiality/island/cycle checks; test_radiality_cycle."
+      },
+      {
+        "id": "C4",
+        "status": "FAIL",
+        "evidence": "T4 schedules crew routes only. No required generator_id->road route->travel time->arrival/setup->electrical placement chain. No generator vehicle/capacity/rejection test."
+      },
+      {
+        "id": "C5",
+        "status": "FAIL",
+        "evidence": "No selected relay fault-study, bidirectional protection selectivity engine or reclose synchronism checker. T2 QSTS and T5 GridLAB-D output freq nadir but no island-grid phase-angle/frequency/voltage comparison; no motor-start transient test."
+      },
+      {
+        "id": "C6",
+        "status": "PASS_WITH_LIMITATIONS",
+        "evidence": "Six scenarios, preliminary correlated joint distribution and probability perturbation via T6; conditional dependence model/stress not executed."
+      },
+      {
+        "id": "C7",
+        "status": "PASS",
+        "evidence": "Missing utility files and DER parameters explicitly identified; no fabricated restoration results; execution_status NOT_RUN."
+      },
+      {
+        "id": "C8",
+        "status": "PASS_WITH_LIMITATIONS",
+        "evidence": "S4/S5/S6/S7 feedback to S3 via cuts and constraints is described, though typed T2/T8->T1 acceptance contracts are absent."
+      },
+      {
+        "id": "C9",
+        "status": "FAIL",
+        "evidence": "T6/T8 specify tables and violation logs, but no versioned source manifest, origin hashes, durable replay/telemetry audit lineage or file provenance schema."
+      },
+      {
+        "id": "C10",
+        "status": "PASS_WITH_LIMITATIONS",
+        "evidence": "Explicitly UNVERIFIED 15-minute scale, proposes decomposition and benchmark; no demonstrated complexity or full-scale runtime."
+      },
+      {
+        "id": "C11",
+        "status": "PASS_WITH_LIMITATIONS",
+        "evidence": "Nine named tools (one optional), prioritized roles, interfaces, low-cost primary stack; substantive omissions elsewhere."
+      }
+    ]
+  },
+  "supplementary_result": {
+    "passed": 1,
+    "total": 5,
+    "criteria": [
+      {
+        "id": "A1",
+        "status": "FAIL",
+        "reason": "Critical operations have no substantiated executable protection, synchronism and generator mobility method."
+      },
+      {
+        "id": "A2",
+        "status": "FAIL",
+        "reason": "Named power-flow and crew engines do not by themselves cover bidirectional DER relay safety, reclose conditions or transport of mobile generators."
+      },
+      {
+        "id": "A3",
+        "status": "FAIL",
+        "reason": "The reviewer-owned three critical typed interface contracts are all missing in the actual output."
+      },
+      {
+        "id": "A4",
+        "status": "FAIL",
+        "reason": "Eight tests reject voltage, topology, crew, stability and probability issues but none reject bidirectional relay miscoordination, out-of-sync reclose, or generator arriving after energization."
+      },
+      {
+        "id": "A5",
+        "status": "PASS",
+        "reason": "Differentiates absent real-world data, unexecuted tests, unknown inverter models and unverified runtime; no fabricated measurements."
+      }
+    ]
+  },
+  "typed_contract_checks": [
+    {
+      "id": "GEN-ROUTE-TO-RESTORATION",
+      "required_fields": [
+        "generator_id",
+        "route",
+        "travel_time",
+        "arrival_time",
+        "setup_time"
+      ],
+      "result": "MISSING_CRITICAL_TYPED_INTERFACE",
+      "matching_edges": []
+    },
+    {
+      "id": "SYNC-MEASUREMENT-TO-CHECK",
+      "required_fields": [
+        "phase_angle",
+        "frequency",
+        "voltage",
+        "time"
+      ],
+      "result": "MISSING_CRITICAL_TYPED_INTERFACE",
+      "matching_edges": []
+    },
+    {
+      "id": "PROTECTION-TO-ACCEPTANCE",
+      "required_fields": [
+        "fault",
+        "relay",
+        "selectivity"
+      ],
+      "result": "MISSING_CRITICAL_TYPED_INTERFACE",
+      "matching_edges": []
+    }
+  ],
+  "model_claim": {
+    "status": "PROPOSED_FOR_EXTERNAL_VERIFICATION",
+    "mandatory_uncovered_computation_ids": [],
+    "justification": "Every mandatory computation maps to a specific installable tool with a defined interface and independent rejection test. The toolchain is preliminary because no code has been executed, input data are entirely missing, and the 15-minute runtime target for the full-scale stochastic MILP is unverified and likely requires decomposition heuristics not yet coded. No mandatory step is blocked by a missing tool; data gaps are enumerated separately."
+  },
+  "binding_verdict": {
+    "status": "BLOCKED",
+    "stage1_pass": false,
+    "stage2_authorized": false,
+    "reason": "Mandatory C4 and C5 and supplemental A1-A4 failed; 9/11 minimum not met."
+  }
+}
