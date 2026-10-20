@@ -1,0 +1,71 @@
+name: AAU K2.6 Registry Sample Consultation
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/aau-k26-v5-example-tool-selection-20261020
+    paths:
+      - 'experiments/tool-selection-restoration/**'
+      - '.github/workflows/aau-k26-registry-sample.yml'
+permissions:
+  contents: read
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+jobs:
+  consult-sample:
+    name: Kimi K2.6 chooses tools referring to sample capability registry
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Pin original question, v5 prompt, rubric, registry sample, and runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object experiments/tool-selection-restoration/challenge.json)" = "e51781a1a000f59f8c5ba508698c513d6c90bdb6"
+          test "$(git hash-object experiments/tool-selection-restoration/rubric.json)" = "e19e740ebbe52c8772faa34685ffb4165b3883ec"
+          test "$(git hash-object experiments/tool-selection-restoration/appropriateness_rubric_v1.json)" = "2eab486b7a95ca635637769bf78a4da9a704e380"
+          test "$(git hash-object experiments/tool-selection-restoration/external_tool_proof_obligations_v1.json)" = "7438a9881d6791ecb7f1b45f9b103bcdecb510b2"
+          test "$(git hash-object experiments/tool-selection-restoration/TOOL_SELECTION_GENERIC_V5_SYSTEM.md)" = "e520242011970ad10338a9b764896db2ada38bd6"
+          test "$(git hash-object experiments/tool-selection-restoration/capability_registry_sample_v01.json)" = "af277812ec2064d3a1456c199da7ae7beb8b07d1"
+          test "$(git hash-object experiments/tool-selection-restoration/stage1_registry_v01.py)" = "287989d5155347773cc753bf25d24528318f3def"
+          test "$(git hash-object experiments/tool-selection-restoration/registry_sample_independent_audit.py)" = "b98f93a850a76980ccd48081d3b8d76eeb6c3cb7"
+          python -m py_compile experiments/tool-selection-restoration/stage1_registry_v01.py experiments/tool-selection-restoration/registry_sample_independent_audit.py
+          python -m json.tool experiments/tool-selection-restoration/capability_registry_sample_v01.json >/dev/null
+      - name: One live Kimi K2.6 thinking ON SSE selection with registry sample as reference
+        env:
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: python experiments/tool-selection-restoration/stage1_registry_v01.py
+      - name: Independently check schema, hard constraints and registry citations
+        if: always()
+        run: python experiments/tool-selection-restoration/registry_sample_independent_audit.py
+      - name: Install isolated independent narrow capability probes
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check "networkx>=3.3,<4" "opendssdirect.py>=0.9,<1.0" "pyomo>=6.8,<7" "highspy>=1.7,<2" "scipy>=1.13,<2"
+          python -m venv --clear .aau-registry-ortools-venv
+          .aau-registry-ortools-venv/bin/python -m pip install --disable-pip-version-check "ortools==9.12.4544"
+      - name: Re-execute six narrow catalog evidence tests
+        if: always()
+        env:
+          AAU_ORTOOLS_PYTHON: ${{ github.workspace }}/.aau-registry-ortools-venv/bin/python
+        run: |
+          python experiments/tool-selection-restoration/tool_capability_smoke_probes.py experiments/tool-selection-restoration/evidence_registry_v01/registry-probe-results.json
+      - name: Archive question, sample, provider receipt, Kimi proposal and independent checks
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-k26-registry-sample-consultation-evidence
+          path: |
+            experiments/tool-selection-restoration/challenge.json
+            experiments/tool-selection-restoration/TOOL_SELECTION_GENERIC_V5_SYSTEM.md
+            experiments/tool-selection-restoration/capability_registry_sample_v01.json
+            experiments/tool-selection-restoration/evidence_registry_v01/
+          if-no-files-found: error
+          retention-days: 30
