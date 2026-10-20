@@ -1,0 +1,79 @@
+name: AAU Kimi 2.6 V5 Single Question Tool Selection
+
+on:
+  push:
+    branches:
+      - experiment/kimi26-tool-selection-v5-20261020
+    paths:
+      - experiments/kimi26-tool-selection-v5/EXECUTE_ONCE_TRIGGER.txt
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  fresh-stage1:
+    name: Single frozen Kimi K2.6 stage one
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout isolated research branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Frozen benchmark and strict input contract preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object experiments/tool-selection-restoration/challenge.json)" = "e51781a1a000f59f8c5ba508698c513d6c90bdb6"
+          test "$(git hash-object experiments/tool-selection-restoration/rubric.json)" = "e19e740ebbe52c8772faa34685ffb4165b3883ec"
+          test "$(git hash-object experiments/tool-selection-restoration/appropriateness_rubric_v1.json)" = "2eab486b7a95ca635637769bf78a4da9a704e380"
+          test "$(git hash-object experiments/kimi26-tool-selection-v5/system-prompt.txt)" = "d16098086f5a711d823acb1d808ad418ac037415"
+          test "$(git hash-object experiments/kimi26-tool-selection-v5/live.py)" = "999d4d4263dd94eb2b03482f46beeef78a737403"
+          python -m py_compile experiments/kimi26-tool-selection-v5/live.py
+          echo "SINGLE_FROZEN_QUESTION; HIDDEN_ORIGINAL_RUBRICS; STAGE2_DISABLED"
+      - name: Call Kimi K2.6 thinking ON over streaming SSE
+        shell: bash
+        env:
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+          MOONSHOT_APIKEY: ${{ secrets.MOONSHOT_APIKEY }}
+        run: |
+          set -o pipefail
+          python experiments/kimi26-tool-selection-v5/live.py
+      - name: Retain exact model response plus external grading inputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-k26-v5-tool-selection-frozen-receipt
+          path: |
+            experiments/kimi26-tool-selection-v5/system-prompt.txt
+            experiments/tool-selection-restoration/challenge.json
+            experiments/tool-selection-restoration/rubric.json
+            experiments/tool-selection-restoration/appropriateness_rubric_v1.json
+            experiments/kimi26-tool-selection-v5/evidence/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Publish evidence to isolated research branch
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p experiments/kimi26-tool-selection-v5/evidence
+          if [ ! -s experiments/kimi26-tool-selection-v5/evidence/run.json ]; then
+            printf '{"status":"BLOCKED","error_category":"PREFLIGHT_OR_RUNNER_FAILURE","stage1_external_verdict":"NOT_EVALUATED"}\n' > experiments/kimi26-tool-selection-v5/evidence/run.json
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add experiments/kimi26-tool-selection-v5/evidence/
+          if ! git diff --cached --quiet; then
+            git commit -m "Record immutable Kimi K2.6 V5 research execution evidence"
+            git push origin HEAD:refs/heads/experiment/kimi26-tool-selection-v5-20261020
+          fi
