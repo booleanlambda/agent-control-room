@@ -1,0 +1,16 @@
+{
+  "model": "kimi-k2.6",
+  "thinking": {
+    "type": "enabled"
+  },
+  "temperature": 1.0,
+  "max_tokens": 32768,
+  "response_format": {
+    "type": "json_object"
+  },
+  "stream": true,
+  "stream_options": {
+    "include_usage": true
+  },
+  "messages_sha256": "9262d5fc822b5c5172d76ad93c9bb1b7616aab02855996b4b32ee99503354384"
+}

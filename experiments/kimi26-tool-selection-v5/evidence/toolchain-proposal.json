@@ -1,0 +1,1281 @@
+{
+  "problem_formulation": {
+    "objectives": [
+      "Maximize cumulative critical load served (kW) over 72 hours across six scenarios",
+      "Minimize expected customer interruption duration (ECOST-weighted hours)",
+      "Minimize unsafe crew exposure by respecting site-specific safety clearances"
+    ],
+    "variables": [
+      "Binary switch state per device per hour",
+      "Binary crew-task assignment per crew per task",
+      "Continuous DER real/reactive power setpoint per unit per scenario per hour",
+      "Binary load pick-up state per non-critical bus per scenario per hour",
+      "Continuous mobile generator dispatch per unit per hour",
+      "Integer repair start time per damaged component",
+      "Binary grid-forming enable per DER candidate per microgrid"
+    ],
+    "constraints": [
+      "Unbalanced AC power flow (KCL/KVL) with ANSI voltage and thermal limits",
+      "Radial topology except permitted grid-forming microgrids",
+      "Substation capacity and transformer limits",
+      "Cold-load pickup inrush and motor-starting constraints",
+      "DER power, ramp, and eligibility limits",
+      "Crew skill matching, working-hour limits, and travel feasibility on uncertain road network",
+      "Lockout-tagout and permit precedence constraints",
+      "Microgrid black-start and transient stability limits",
+      "Critical load minimum service levels and fallback priorities"
+    ],
+    "uncertainty": [
+      "Six probabilistic storm/flood scenarios with joint distributions over road access, repair duration, and DER output",
+      "Scenario probabilities are preliminary, correlated, and must be stress-tested"
+    ],
+    "scale": {
+      "buses": 4800,
+      "switches": 620,
+      "substations": 6,
+      "critical_loads": 95,
+      "crews": 45,
+      "mobile_generators": 12,
+      "road_segments": 320,
+      "der_units": 250,
+      "scenarios": 6,
+      "horizon_hours": 72,
+      "replan_interval_hours": 6
+    },
+    "missing_inputs": [
+      "SCADA/GIS feeder topology and line impedance dataset",
+      "Relay coordination and as-built protection zone maps",
+      "DER telemetry and grid-forming inverter control parameters (droop, inertia, current limits)",
+      "Real-time flood depth per road segment and dynamic speed reduction curves",
+      "Crew availability, skill certification roster, and shift rules",
+      "Load composition data (motor vs resistive fractions) for cold-load pickup modeling",
+      "Critical load minimum service levels, backup fuel duration, and exact fallback priorities"
+    ]
+  },
+  "required_computations": [
+    {
+      "id": "comp_1",
+      "computation": "Stochastic_Restoration_Schedule_Optimization",
+      "mathematical_method": "Two-stage stochastic MILP with linearized unbalanced LinDist3Flow approximation; Benders decomposition or rolling-horizon partition if monolithic scale exceeds runtime target",
+      "critical": true,
+      "inputs": [
+        "LinDist3Flow reduced network parameters",
+        "scenario probabilities and damage lists",
+        "crew task durations and travel times",
+        "DER availability and eligible grid-forming set",
+        "critical load requirements"
+      ],
+      "outputs": [
+        "Candidate schedule: switch states hourly, crew-task matrix, DER setpoints, load pick-up trajectory"
+      ],
+      "independent_rejection_condition": "LP relaxation is infeasible or unbounded, or optimality gap exceeds 5% when a bound is available"
+    },
+    {
+      "id": "comp_2",
+      "computation": "AC_Power_Flow_Feasibility_Check",
+      "mathematical_method": "Three-phase unbalanced AC power flow via backward-forward sweep or nodal iterative Newton-Raphson for radial/weakly-meshed distribution",
+      "critical": true,
+      "inputs": [
+        "Full impedance model and line codes",
+        "switch states from schedule",
+        "DER dispatch and load shapes per scenario"
+      ],
+      "outputs": [
+        "Per-node per-phase voltage magnitudes/angles",
+        "branch currents and transformer loadings",
+        "convergence and violation flags"
+      ],
+      "independent_rejection_condition": "Any per-phase voltage outside ANSI C84.1 band (e.g., 0.95–1.05 pu) or any thermal loading >100% or non-convergence"
+    },
+    {
+      "id": "comp_3",
+      "computation": "Topology_Radiality_and_Island_Check",
+      "mathematical_method": "Graph depth-first search for cycle detection and connected component analysis on the switchable graph",
+      "critical": true,
+      "inputs": [
+        "Electrical graph (buses, switches, lines)",
+        "switch open/close states from schedule",
+        "permitted microgrid definitions"
+      ],
+      "outputs": [
+        "Radiality boolean per feeder",
+        "list of islands",
+        "cycle count"
+      ],
+      "independent_rejection_condition": "Any unintended cycle outside permitted microgrids or unintentional islanding of non-microgrid segments"
+    },
+    {
+      "id": "comp_4",
+      "computation": "Crew_Logistics_and_Routing_Feasibility",
+      "mathematical_method": "Vehicle routing with time windows and cumulative resource constraints encoded as CP-SAT or routing CP",
+      "critical": true,
+      "inputs": [
+        "Repair/switching task list with location, duration, skill",
+        "crew depots and availabilities",
+        "scenario travel time matrix",
+        "safety time windows"
+      ],
+      "outputs": [
+        "Crew routes, task start/end times, feasibility boolean"
+      ],
+      "independent_rejection_condition": "Any task assigned to unskilled crew, or started before safe clearance, or violating precedence"
+    },
+    {
+      "id": "comp_5",
+      "computation": "Microgrid_Dynamic_Stability_Validation",
+      "mathematical_method": "Dynamic/quasi-static simulation of inverter-based islands with grid-forming droop/VSI models",
+      "critical": true,
+      "inputs": [
+        "Island subnetwork model",
+        "grid-forming DER definitions and control parameters",
+        "load inrush characteristics"
+      ],
+      "outputs": [
+        "Stability boolean",
+        "frequency nadir (Hz)",
+        "voltage dip (pu)",
+        "settling time"
+      ],
+      "independent_rejection_condition": "Frequency nadir below 59.5 Hz or voltage below 0.88 pu or unstable flag"
+    },
+    {
+      "id": "comp_6",
+      "computation": "Road_Network_Accessibility_Update",
+      "mathematical_method": "Geospatial overlay and graph edge weight update based on flood scenario polygons",
+      "critical": true,
+      "inputs": [
+        "Road network geometry",
+        "flood extent per scenario",
+        "speed reduction lookup"
+      ],
+      "outputs": [
+        "Scenario-specific travel time matrices",
+        "blocked segment flags"
+      ],
+      "independent_rejection_condition": "Negative travel times or essential crew depots disconnected from required repair sites without alternative access mode"
+    },
+    {
+      "id": "comp_7",
+      "computation": "Critical_Load_Satisfaction_Check",
+      "mathematical_method": "Constraint satisfaction against minimum service levels and fallback priority rules",
+      "critical": true,
+      "inputs": [
+        "Scheduled load allocations per critical bus",
+        "critical load requirement table (min kW, duration)",
+        "backup fallback activation states"
+      ],
+      "outputs": [
+        "Critical load served fraction per facility",
+        "fallback activation flags"
+      ],
+      "independent_rejection_condition": "Any critical load served below its minimum kW for longer than its backup duration without active fallback"
+    },
+    {
+      "id": "comp_8",
+      "computation": "Scenario_Stress_Test_and_Expected_Value",
+      "mathematical_method": "Perturbation of scenario probabilities and recomputation of expected interruption metrics",
+      "critical": true,
+      "inputs": [
+        "Base scenario probabilities",
+        "schedule performance per scenario"
+      ],
+      "outputs": [
+        "Stress-tested expected interruption",
+        "regret distribution under probability perturbation"
+      ],
+      "independent_rejection_condition": "Regret or worst-case cost exceeds operator-defined risk threshold under plausible probability shift"
+    },
+    {
+      "id": "comp_9",
+      "computation": "Switching_Sequence_and_Safety_Lockout_Validation",
+      "mathematical_method": "Temporal precedence and topological ordering of LOTO steps modeled as disjunctive constraints",
+      "critical": true,
+      "inputs": [
+        "Switching actions from schedule",
+        "protection zone map",
+        "crew assignments"
+      ],
+      "outputs": [
+        "Safe switching sequence boolean",
+        "isolation confirmation timeline"
+      ],
+      "independent_rejection_condition": "Any energization or repair starts before confirmed isolation and completed LOTO"
+    },
+    {
+      "id": "comp_10",
+      "computation": "Independent_Aggregate_Audit",
+      "mathematical_method": "Automated unit-test harness applying quantitative pass/fail rules across all subsystem reports",
+      "critical": true,
+      "inputs": [
+        "All subsystem reports (electrical, topology, crew, stability, critical load)"
+      ],
+      "outputs": [
+        "Go/No-go decision",
+        "violation log with component IDs and timestamps"
+      ],
+      "independent_rejection_condition": "Any hard violation reported by subsystem checks"
+    }
+  ],
+  "selected_tools": [
+    {
+      "id": "T1",
+      "name": "Pyomo with HiGHS solver",
+      "package_or_api": "pyomo, highspy",
+      "version_or_version_range": "pyomo>=6.6.2, highspy>=1.5.3",
+      "essential": true,
+      "supported_operation": "Mixed-integer linear programming (MILP), algebraic modeling, stochastic extensive form, callback-based cut generation",
+      "computation_ids": [
+        "comp_1"
+      ],
+      "mathematical_fit": "Encodes linearized unbalanced DistFlow, switching, crew assignment, and load pick-up as a large sparse MILP; HiGHS solves LP relaxations and branch-and-bound via the APPSI interface.",
+      "limitations": "Linearized power flow is approximate; full 4800-bus/72-hour/6-scenario monolithic MILP likely exceeds the 15-minute target without decomposition, aggregation, or a commercial solver fallback.",
+      "inputs": "LinDist3Flow network parameters, scenario probabilities, damage list, crew task durations, travel times, DER limits, critical load requirements.",
+      "outputs": "Candidate schedule: switch states (hourly), crew-task matrix, DER setpoints, load pick-up binary trajectory.",
+      "installation": "pip install pyomo highspy",
+      "invocation": "Python: `from pyomo.environ import *; solver = SolverFactory('appsi_highs'); results = solver.solve(model)`",
+      "execution_evidence_status": "NOT_RUN"
+    },
+    {
+      "id": "T2",
+      "name": "OpenDSS distribution simulator",
+      "package_or_api": "dss-python (OpenDSS engine)",
+      "version_or_version_range": "OpenDSS engine >=9.6, dss-python >=0.14",
+      "essential": true,
+      "supported_operation": "Quasi-static time-series (QSTS) three-phase unbalanced AC power flow, voltage and thermal checking, DER dispatch simulation",
+      "computation_ids": [
+        "comp_2"
+      ],
+      "mathematical_fit": "Backward-forward sweep / iterative Newton solver for radial/weakly-meshed unbalanced distribution; natively handles 13.8 kV phase-specific regulators, capacitors, and DERs.",
+      "limitations": "Requires complete impedance and GIS data not yet supplied; steady-state/QSTS only—true electromechanical transients are not native; grid-forming inverter models are limited.",
+      "inputs": "Master file, line codes, switch statuses, time-series load shapes, DER kW/kvar profiles, control settings.",
+      "outputs": "Voltage (pu per phase), line/transformer loading (%), losses, convergence flag.",
+      "installation": "pip install dss-python",
+      "invocation": "Python: `import dss; dss.Text.Command('compile master.dss'); dss.Solution.Solve()`",
+      "execution_evidence_status": "NOT_RUN"
+    },
+    {
+      "id": "T3",
+      "name": "NetworkX graph analytics",
+      "package_or_api": "networkx",
+      "version_or_version_range": ">=3.2",
+      "essential": true,
+      "supported_operation": "Graph cycle detection, connected components, radiality verification, shortest paths on electrical and road graphs",
+      "computation_ids": [
+        "comp_3",
+        "comp_6"
+      ],
+      "mathematical_fit": "Topology constraints are purely combinatorial; DFS/BFS correctly detects cycles (non-radial) and islands on the switched graph.",
+      "limitations": "Electrical parameters ignored; cannot distinguish energized vs de-energized without external state.",
+      "inputs": "Graph (buses/roads as nodes, lines/segments as edges), switch open/close states, scenario blockages.",
+      "outputs": "Radiality boolean, list of islands, cycle edges, shortest-path distances.",
+      "installation": "pip install networkx",
+      "invocation": "Python: `import networkx as nx; nx.is_tree(G)` or `nx.cycle_basis(G)`",
+      "execution_evidence_status": "NOT_RUN"
+    },
+    {
+      "id": "T4",
+      "name": "Google OR-Tools CP-SAT and Routing",
+      "package_or_api": "ortools",
+      "version_or_version_range": ">=9.8",
+      "essential": true,
+      "supported_operation": "Constraint programming (CP-SAT) for scheduling with precedence and cumulative resources; Routing library for VRPTW",
+      "computation_ids": [
+        "comp_4",
+        "comp_9"
+      ],
+      "mathematical_fit": "Crew routing is VRPTW with time windows and skill matching; LOTO sequencing is a precedence constraint satisfaction problem, both map directly to CP-SAT.",
+      "limitations": "Large horizon (72 h) and many tasks may require model partitioning; stochastic travel is approximated by deterministic scenario separation.",
+      "inputs": "Tasks (location, duration, skill, precedence), crew roster, travel time matrix, safety windows.",
+      "outputs": "Crew routes, task start times, feasibility boolean, LOTO sequence compliance.",
+      "installation": "pip install ortools",
+      "invocation": "Python: `from ortools.sat.python import cp_model; model = cp_model.CpModel()`",
+      "execution_evidence_status": "NOT_RUN"
+    },
+    {
+      "id": "T5",
+      "name": "GridLAB-D agent-based distribution simulator",
+      "package_or_api": "gridlabd CLI",
+      "version_or_version_range": ">=4.3",
+      "essential": true,
+      "supported_operation": "Dynamic/quasi-static simulation of inverter-based DERs, microgrid stability, frequency-voltage transient analysis",
+      "computation_ids": [
+        "comp_5"
+      ],
+      "mathematical_fit": "Explicit grid-forming inverter models (droop, VSI) allow transient validation of intentional islands; three-phase unbalanced node solver.",
+      "limitations": "Steep model preparation (GLM format); not trivially interoperable with OpenDSS/CIM; requires DER control parameters absent from inputs; runtime for many islands may exceed 15 min if not parallelized.",
+      "inputs": "GLM model of island, inverter definitions (grid-forming mode), load inrush parameters.",
+      "outputs": "Stability boolean, frequency nadir (Hz), voltage dip (pu), settling time.",
+      "installation": "System package manager or build from source; CLI `gridlabd` must be on PATH",
+      "invocation": "`gridlabd island_validation.glm --output island.csv`",
+      "execution_evidence_status": "NOT_RUN"
+    },
+    {
+      "id": "T6",
+      "name": "Python Scientific Data Stack",
+      "package_or_api": "pandas, numpy, xarray",
+      "version_or_version_range": "pandas>=2.0, numpy>=1.24, xarray>=2023.09",
+      "essential": true,
+      "supported_operation": "Scenario I/O, probability stress-testing, time-series alignment, deterministic equivalent assembly",
+      "computation_ids": [
+        "comp_1",
+        "comp_8"
+      ],
+      "mathematical_fit": "Dataframe and labeled array operations support stochastic parameter construction and what-if perturbation of scenario weights.",
+      "limitations": "Not a solver; correctness depends on upstream data quality.",
+      "inputs": "Scenario tables, probabilities, damage forecasts, DER output samples.",
+      "outputs": "Stochastic parameter files, perturbed probability sets, expected value statistics.",
+      "installation": "pip install pandas numpy xarray",
+      "invocation": "Python standard imports",
+      "execution_evidence_status": "NOT_RUN"
+    },
+    {
+      "id": "T7",
+      "name": "GeoPandas geoprocessing",
+      "package_or_api": "geopandas",
+      "version_or_version_range": ">=0.13",
+      "essential": true,
+      "supported_operation": "Geospatial road network processing, flood polygon intersection, segment blockage flagging",
+      "computation_ids": [
+        "comp_6"
+      ],
+      "mathematical_fit": "Spatial joins and overlays map flood polygons to road segments; graph edges weighted by remaining capacity.",
+      "limitations": "Requires road geometry and flood shapefiles; static network assumed (no dynamic traffic feedback).",
+      "inputs": "Road segment shapefile/GeoJSON, flood extent polygons per scenario, speed reduction table.",
+      "outputs": "Blocked segment list, reduced speed attributes, updated travel time matrix.",
+      "installation": "pip install geopandas",
+      "invocation": "Python: `import geopandas as gpd; gpd.overlay(roads, floods, how='intersection')`",
+      "execution_evidence_status": "NOT_RUN"
+    },
+    {
+      "id": "T8",
+      "name": "pytest Independent Audit Harness",
+      "package_or_api": "pytest, custom Python validation module",
+      "version_or_version_range": "pytest>=7.4",
+      "essential": true,
+      "supported_operation": "Automated rejection testing of schedule artifacts against hard safety and electrical constraints",
+      "computation_ids": [
+        "comp_7",
+        "comp_9",
+        "comp_10"
+      ],
+      "mathematical_fit": "Unit-test framework allows quantitative pass/fail rules on voltage, radiality, stability, crew limits, and critical load coverage.",
+      "limitations": "Only validates encoded rules; cannot catch unmodeled failure modes.",
+      "inputs": "Schedule JSON, reports from OpenDSS, NetworkX, OR-Tools, GridLAB-D.",
+      "outputs": "Audit report with rejection booleans and violation logs.",
+      "installation": "pip install pytest",
+      "invocation": "`pytest tests/audit_schedule.py --tb=short`",
+      "execution_evidence_status": "NOT_RUN"
+    },
+    {
+      "id": "T9",
+      "name": "Gurobi Optimizer (optional fallback)",
+      "package_or_api": "gurobipy",
+      "version_or_version_range": ">=10.0",
+      "essential": false,
+      "supported_operation": "High-performance branch-and-bound and cutting planes for large-scale MILP",
+      "computation_ids": [
+        "comp_1"
+      ],
+      "mathematical_fit": "Same MILP encoding as HiGBS; significantly faster on large stochastic programs if a license is available.",
+      "limitations": "Proprietary license; not inexpensive; requires separate installation and license server.",
+      "inputs": "Same Pyomo model as T1.",
+      "outputs": "Same schedule artifacts as T1.",
+      "installation": "Academic/commercial license required; pip install gurobipy",
+      "invocation": "Python: `from pyomo.environ import SolverFactory; solver = SolverFactory('gurobi')`",
+      "execution_evidence_status": "NOT_RUN"
+    }
+  ],
+  "tool_selection_justification": [
+    {
+      "computation_id": "comp_1",
+      "selected_tool_ids": [
+        "T1",
+        "T6",
+        "T9"
+      ],
+      "why_sufficient_and_appropriate": "Pyomo+HiGHS provides the required open-source MILP framework; Pandas/NumPy assemble the stochastic extensive form. Gurobi is retained as an optional fallback if HiGHS cannot close the gap within 15 minutes. The linearized DistFlow approximation is the standard tractable surrogate for unbalanced AC scheduling at this scale."
+    },
+    {
+      "computation_id": "comp_2",
+      "selected_tool_ids": [
+        "T2"
+      ],
+      "why_sufficient_and_appropriate": "OpenDSS is the de-facto standard for three-phase unbalanced distribution QSTS; its backward-forward sweep matches the 13.8 kV physical layer and can ingest time-series schedules from the optimizer."
+    },
+    {
+      "computation_id": "comp_3",
+      "selected_tool_ids": [
+        "T3"
+      ],
+      "why_sufficient_and_appropriate": "NetworkX offers exact combinatorial cycle detection and component analysis for radiality verification on a 4800-node graph with 620 switches, which is trivial in runtime."
+    },
+    {
+      "computation_id": "comp_4",
+      "selected_tool_ids": [
+        "T4"
+      ],
+      "why_sufficient_and_appropriate": "OR-Tools CP-SAT natively handles cumulative crew constraints, travel times, and task precedence required for safe logistics without requiring a custom MIP formulation."
+    },
+    {
+      "computation_id": "comp_5",
+      "selected_tool_ids": [
+        "T5"
+      ],
+      "why_sufficient_and_appropriate": "GridLAB-D is an open-source simulator with explicit grid-forming inverter and microgrid dynamic models, required to validate black-start eligibility when OpenDSS’s steady-state assumption is insufficient."
+    },
+    {
+      "computation_id": "comp_6",
+      "selected_tool_ids": [
+        "T3",
+        "T7"
+      ],
+      "why_sufficient_and_appropriate": "GeoPandas intersects flood maps with road geometry; NetworkX computes shortest-path travel times on the updated graph. Together they cover geospatial preparation and graph analytics."
+    },
+    {
+      "computation_id": "comp_7",
+      "selected_tool_ids": [
+        "T8"
+      ],
+      "why_sufficient_and_appropriate": "The audit harness independently checks that critical load thresholds are met by cross-referencing the schedule against known requirements, preventing silent load-shedding violations."
+    },
+    {
+      "computation_id": "comp_8",
+      "selected_tool_ids": [
+        "T6"
+      ],
+      "why_sufficient_and_appropriate": "Pandas/NumPy enable stress-testing of scenario probabilities and recomputation of expected interruption metrics without requiring additional solver software."
+    },
+    {
+      "computation_id": "comp_9",
+      "selected_tool_ids": [
+        "T4",
+        "T8"
+      ],
+      "why_sufficient_and_appropriate": "OR-Tools CP-SAT encodes LOTO precedence constraints during scheduling; the audit harness independently verifies the final sequence, ensuring dual control."
+    },
+    {
+      "computation_id": "comp_10",
+      "selected_tool_ids": [
+        "T8"
+      ],
+      "why_sufficient_and_appropriate": "pytest aggregates all subsystem reports and applies quantitative rejection rules, producing a falsifiable go/no-go record for operator approval."
+    }
+  ],
+  "rejected_alternatives": [
+    {
+      "tool_name": "Julia/JuMP + Gurobi",
+      "rejected_for": "While mathematically powerful, introducing a Julia toolchain adds interoperability friction with Python-based OpenDSS and GridLAB-D APIs in a rapid-deployment context; the first implementation prioritizes a unified Python stack."
+    },
+    {
+      "tool_name": "MATPOWER",
+      "rejected_for": "Designed for balanced transmission-style systems; its positive-sequence assumption cannot model the 13.8 kV unbalanced single-phase laterals, open-wye transformers, and phase-specific voltage constraints present here."
+    },
+    {
+      "tool_name": "ETAP or DIgSILENT PowerFactory",
+      "rejected_for": "Commercial licensing and closed data formats are inconsistent with the 'inexpensive first implementation' requirement, and their APIs are less amenable to automated 72-hour rolling optimization loops."
+    },
+    {
+      "tool_name": "SUMO traffic microsimulator",
+      "rejected_for": "A 320-segment urban road network during post-storm conditions does not require agent-based traffic dynamics; static or quasi-static travel times are sufficient and orders of magnitude faster."
+    },
+    {
+      "tool_name": "Pure greedy constructive heuristic",
+      "rejected_for": "Cannot provide optimality gaps or stochastic guarantees needed for critical infrastructure; would still require the same validation toolchain but without a bound on solution quality."
+    }
+  ],
+  "execution_sequence": [
+    {
+      "step_id": "S1",
+      "tool_ids": [
+        "T6",
+        "T7",
+        "T3"
+      ],
+      "inputs": [
+        "raw_scenario_data",
+        "road_geospatial_data",
+        "electrical_connectivity_list"
+      ],
+      "outputs": [
+        "scenario_travel_matrices",
+        "electrical_graph",
+        "flood_blockage_flags"
+      ],
+      "failure_and_feedback": "If road graph is disconnected, flag unreachable sites and notify operator to add helicopter/watercraft access; halt until resolved."
+    },
+    {
+      "step_id": "S2",
+      "tool_ids": [
+        "T5"
+      ],
+      "inputs": [
+        "der_inventory",
+        "candidate_island_subgraphs"
+      ],
+      "outputs": [
+        "eligible_grid_forming_der_list"
+      ],
+      "failure_and_feedback": "If DER lacks droop/inertia data, mark BLOCKED for microgrid use; restrict to grid-following only and feed list back to T1."
+    },
+    {
+      "step_id": "S3",
+      "tool_ids": [
+        "T1",
+        "T6"
+      ],
+      "inputs": [
+        "electrical_graph",
+        "travel_matrices",
+        "eligible_der_list",
+        "critical_load_requirements",
+        "damage_lists"
+      ],
+      "outputs": [
+        "draft_schedule_mip"
+      ],
+      "failure_and_feedback": "If HiGHS fails to find a feasible integer solution within the time limit, relax less-critical load constraints, invoke T9 if licensed, or apply a rolling-horizon partition."
+    },
+    {
+      "step_id": "S4",
+      "tool_ids": [
+        "T3"
+      ],
+      "inputs": [
+        "draft_schedule_mip_switch_states"
+      ],
+      "outputs": [
+        "topology_radiality_report"
+      ],
+      "failure_and_feedback": "If non-radial, generate a no-good cut forbidding that switch combination and return to S3."
+    },
+    {
+      "step_id": "S5",
+      "tool_ids": [
+        "T2"
+      ],
+      "inputs": [
+        "full_network_model",
+        "draft_schedule_mip_der_setpoints",
+        "load_shapes"
+      ],
+      "outputs": [
+        "ac_power_flow_violation_report"
+      ],
+      "failure_and_feedback": "If voltage/thermal violations exist, return violated hours to T1 as hard constraints (forbid that topology or limit loading)."
+    },
+    {
+      "step_id": "S6",
+      "tool_ids": [
+        "T4"
+      ],
+      "inputs": [
+        "repair_tasks_from_schedule",
+        "travel_matrices",
+        "crew_roster"
+      ],
+      "outputs": [
+        "crew_routes",
+        "crew_feasibility_flag"
+      ],
+      "failure_and_feedback": "If infeasible, return adjusted earliest completion times or task-splitting requirements to T1."
+    },
+    {
+      "step_id": "S7",
+      "tool_ids": [
+        "T5"
+      ],
+      "inputs": [
+        "microgrid_formation_from_schedule"
+      ],
+      "outputs": [
+        "microgrid_stability_report"
+      ],
+      "failure_and_feedback": "If unstable, forbid that island configuration in T1 and revert to S3."
+    },
+    {
+      "step_id": "S8",
+      "tool_ids": [
+        "T4"
+      ],
+      "inputs": [
+        "switching_actions_from_schedule"
+      ],
+      "outputs": [
+        "loto_sequence_report"
+      ],
+      "failure_and_feedback": "If LOTO precedence violated, add sequencing constraints to T1 and revert to S3."
+    },
+    {
+      "step_id": "S9",
+      "tool_ids": [
+        "T6"
+      ],
+      "inputs": [
+        "draft_schedule_per_scenario",
+        "perturbed_probabilities"
+      ],
+      "outputs": [
+        "stress_test_regret_metrics"
+      ],
+      "failure_and_feedback": "If regret exceeds threshold, operator must review scenario weights; optionally add a robustness term to T1 objective."
+    },
+    {
+      "step_id": "S10",
+      "tool_ids": [
+        "T8"
+      ],
+      "inputs": [
+        "all_reports_from_S4_S5_S6_S7_S8_S9"
+      ],
+      "outputs": [
+        "final_audit_decision"
+      ],
+      "failure_and_feedback": "If any hard constraint violated, aggregate feedback and trigger S3 with tightened constraints; if passed, emit candidate schedule for operator approval."
+    }
+  ],
+  "interface_contracts": [
+    {
+      "from_tool_id": "T1",
+      "to_tool_id": "T2",
+      "artifact": "Hourly_Dispatch_Schedule",
+      "fields_with_types_and_units": [
+        {
+          "field": "bus_id",
+          "type": "string",
+          "unit": "none"
+        },
+        {
+          "field": "branch_id",
+          "type": "string",
+          "unit": "none"
+        },
+        {
+          "field": "switch_state",
+          "type": "integer",
+          "unit": "0=open,1=closed"
+        },
+        {
+          "field": "der_setpoint_kw",
+          "type": "float",
+          "unit": "kW"
+        },
+        {
+          "field": "der_setpoint_kvar",
+          "type": "float",
+          "unit": "kvar"
+        },
+        {
+          "field": "timestamp",
+          "type": "datetime64[h]",
+          "unit": "UTC"
+        },
+        {
+          "field": "scenario_id",
+          "type": "string",
+          "unit": "none"
+        }
+      ],
+      "identifier_and_time_alignment": "bus_id and branch_id must match OpenDSS element names; timestamp aligns with QSTS step.",
+      "invalid_data_rejection": "Reject if bus_id not found in OpenDSS circuit or switch_state not in {0,1}."
+    },
+    {
+      "from_tool_id": "T1",
+      "to_tool_id": "T3",
+      "artifact": "Switching_Vector",
+      "fields_with_types_and_units": [
+        {
+          "field": "switch_id",
+          "type": "string",
+          "unit": "none"
+        },
+        {
+          "field": "from_bus",
+          "type": "string",
+          "unit": "none"
+        },
+        {
+          "field": "to_bus",
+          "type": "string",
+          "unit": "none"
+        },
+        {
+          "field": "state",
+          "type": "integer",
+          "unit": "0=open,1=closed"
+        },
+        {
+          "field": "timestamp",
+          "type": "datetime64[h]",
+          "unit": "UTC"
+        }
+      ],
+      "identifier_and_time_alignment": "switch_id maps to NetworkX edge key derived from GIS feeder ID.",
+      "invalid_data_rejection": "Reject if edge (from_bus,to_bus) absent in graph or duplicate switch_id."
+    },
+    {
+      "from_tool_id": "T1",
+      "to_tool_id": "T4",
+      "artifact": "Work_Order_List",
+      "fields_with_types_and_units": [
+        {
+          "field": "task_id",
+          "type": "string",
+          "unit": "none"
+        },
+        {
+          "field": "component_id",
+          "type": "string",
+          "unit": "none"
+        },
+        {
+          "field": "location_node",
+          "type": "string",
+          "unit": "none"
+        },
+        {
+          "field": "skill_required",
+          "type": "string",
+          "unit": "none"
+        },
+        {
+          "field": "duration_h",
+          "type": "float",
+          "unit": "h"
+        },
+        {
+          "field": "earliest_start",
+          "type": "datetime64[h]",
+          "unit": "UTC"
+        },
+        {
+          "field": "precedence_tasks",
+          "type": "list[string]",
+          "unit": "none"
+        },
+        {
+          "field": "scenario_id",
+          "type": "string",
+          "unit": "none"
+        }
+      ],
+      "identifier_and_time_alignment": "location_node matches road graph node ID; component_id matches electrical device.",
+      "invalid_data_rejection": "Reject if location_node not in road graph or skill_required not in crew roster."
+    },
+    {
+      "from_tool_id": "T7",
+      "to_tool_id": "T4",
+      "artifact": "Travel_Time_Matrix",
+      "fields_with_types_and_units": [
+        {
+          "field": "from_node",
+          "type": "string",
+          "unit": "none"
+        },
+        {
+          "field": "to_node",
+          "type": "string",
+          "unit": "none"
+        },
+        {
+          "field": "scenario_id",
+          "type": "string",
+          "unit": "none"
+        },
+        {
+          "field": "travel_time_min",
+          "type": "float",
+          "unit": "min"
+        },
+        {
+          "field": "passable",
+          "type": "boolean",
+          "unit": "none"
+        }
+      ],
+      "identifier_and_time_alignment": "Nodes must be common road graph identifiers across GeoPandas and OR-Tools.",
+      "invalid_data_rejection": "Reject if travel_time_min < 0 or NaN, or if passable=False for essential depot-to-site links without alternative."
+    },
+    {
+      "from_tool_id": "T2",
+      "to_tool_id": "T8",
+      "artifact": "Electrical_Violation_Report",
+      "fields_with_types_and_units": [
+        {
+          "field": "timestamp",
+          "type": "datetime64[h]",
+          "unit": "UTC"
+        },
+        {
+          "field": "scenario_id",
+          "type": "string",
+          "unit": "none"
+        },
+        {
+          "field": "bus_id",
+          "type": "string",
+          "unit": "none"
+        },
+        {
+          "field": "quantity",
+          "type": "string",
+          "unit": "e.g. voltage_pu"
+        },
+        {
+          "field": "value",
+          "type": "float",
+          "unit": "per-unit or percent"
+        },
+        {
+          "field": "limit_lower",
+          "type": "float",
+          "unit": "per-unit or percent"
+        },
+        {
+          "field": "limit_upper",
+          "type": "float",
+          "unit": "per-unit or percent"
+        }
+      ],
+      "identifier_and_time_alignment": "timestamp and scenario_id align with schedule horizon.",
+      "invalid_data_rejection": "Reject if limit_lower >= limit_upper or missing scenario_id."
+    },
+    {
+      "from_tool_id": "T3",
+      "to_tool_id": "T8",
+      "artifact": "Topology_Report",
+      "fields_with_types_and_units": [
+        {
+          "field": "timestamp",
+          "type": "datetime64[h]",
+          "unit": "UTC"
+        },
+        {
+          "field": "scenario_id",
+          "type": "string",
+          "unit": "none"
+        },
+        {
+          "field": "radial",
+          "type": "boolean",
+          "unit": "none"
+        },
+        {
+          "field": "n_cycles",
+          "type": "integer",
+          "unit": "count"
+        },
+        {
+          "field": "n_islands",
+          "type": "integer",
+          "unit": "count"
+        }
+      ],
+      "identifier_and_time_alignment": "timestamp and scenario_id align with schedule.",
+      "invalid_data_rejection": "Reject if n_cycles < 0."
+    },
+    {
+      "from_tool_id": "T5",
+      "to_tool_id": "T8",
+      "artifact": "Stability_Report",
+      "fields_with_types_and_units": [
+        {
+          "field": "island_id",
+          "type": "string",
+          "unit": "none"
+        },
+        {
+          "field": "scenario_id",
+          "type": "string",
+          "unit": "none"
+        },
+        {
+          "field": "stable",
+          "type": "boolean",
+          "unit": "none"
+        },
+        {
+          "field": "freq_nadir_hz",
+          "type": "float",
+          "unit": "Hz"
+        },
+        {
+          "field": "volt_min_pu",
+          "type": "float",
+          "unit": "pu"
+        }
+      ],
+      "identifier_and_time_alignment": "island_id must match candidate microgrid label from schedule.",
+      "invalid_data_rejection": "Reject if freq_nadir_hz < 0 or volt_min_pu < 0."
+    },
+    {
+      "from_tool_id": "T4",
+      "to_tool_id": "T8",
+      "artifact": "Crew_Feasibility_Report",
+      "fields_with_types_and_units": [
+        {
+          "field": "task_id",
+          "type": "string",
+          "unit": "none"
+        },
+        {
+          "field": "crew_id",
+          "type": "string",
+          "unit": "none"
+        },
+        {
+          "field": "start_h",
+          "type": "float",
+          "unit": "h from t=0"
+        },
+        {
+          "field": "end_h",
+          "type": "float",
+          "unit": "h from t=0"
+        },
+        {
+          "field": "feasible",
+          "type": "boolean",
+          "unit": "none"
+        }
+      ],
+      "identifier_and_time_alignment": "task_id must match work order from T1.",
+      "invalid_data_rejection": "Reject if start_h > end_h or negative."
+    },
+    {
+      "from_tool_id": "T4",
+      "to_tool_id": "T1",
+      "artifact": "Crew_Feasibility_Cut",
+      "fields_with_types_and_units": [
+        {
+          "field": "task_id",
+          "type": "string",
+          "unit": "none"
+        },
+        {
+          "field": "scenario_id",
+          "type": "string",
+          "unit": "none"
+        },
+        {
+          "field": "feasible",
+          "type": "boolean",
+          "unit": "none"
+        },
+        {
+          "field": "adjusted_completion_h",
+          "type": "float",
+          "unit": "h from t=0"
+        }
+      ],
+      "identifier_and_time_alignment": "task_id and scenario_id must match T1 decision variables.",
+      "invalid_data_rejection": "Reject if adjusted_completion_h < 0."
+    }
+  ],
+  "requirement_to_tool_mapping": [
+    {
+      "computation_id": "comp_1",
+      "tool_ids": [
+        "T1",
+        "T6",
+        "T9"
+      ],
+      "validator_test_ids": [
+        "test_mip_structure_and_bounds"
+      ],
+      "coverage_status": "COVERED"
+    },
+    {
+      "computation_id": "comp_2",
+      "tool_ids": [
+        "T2"
+      ],
+      "validator_test_ids": [
+        "test_opendss_voltage_limits"
+      ],
+      "coverage_status": "COVERED"
+    },
+    {
+      "computation_id": "comp_3",
+      "tool_ids": [
+        "T3"
+      ],
+      "validator_test_ids": [
+        "test_radiality_cycle"
+      ],
+      "coverage_status": "COVERED"
+    },
+    {
+      "computation_id": "comp_4",
+      "tool_ids": [
+        "T4"
+      ],
+      "validator_test_ids": [
+        "test_crew_skill_precedence"
+      ],
+      "coverage_status": "COVERED"
+    },
+    {
+      "computation_id": "comp_5",
+      "tool_ids": [
+        "T5"
+      ],
+      "validator_test_ids": [
+        "test_microgrid_stability"
+      ],
+      "coverage_status": "COVERED"
+    },
+    {
+      "computation_id": "comp_6",
+      "tool_ids": [
+        "T3",
+        "T7"
+      ],
+      "validator_test_ids": [
+        "test_travel_time_nonnegativity"
+      ],
+      "coverage_status": "COVERED"
+    },
+    {
+      "computation_id": "comp_7",
+      "tool_ids": [
+        "T8"
+      ],
+      "validator_test_ids": [
+        "test_critical_load_coverage"
+      ],
+      "coverage_status": "COVERED"
+    },
+    {
+      "computation_id": "comp_8",
+      "tool_ids": [
+        "T6"
+      ],
+      "validator_test_ids": [
+        "test_probability_stress"
+      ],
+      "coverage_status": "COVERED"
+    },
+    {
+      "computation_id": "comp_9",
+      "tool_ids": [
+        "T4",
+        "T8"
+      ],
+      "validator_test_ids": [
+        "test_crew_skill_precedence"
+      ],
+      "coverage_status": "COVERED"
+    },
+    {
+      "computation_id": "comp_10",
+      "tool_ids": [
+        "T8"
+      ],
+      "validator_test_ids": [
+        "test_mip_structure_and_bounds",
+        "test_opendss_voltage_limits",
+        "test_radiality_cycle",
+        "test_crew_skill_precedence",
+        "test_microgrid_stability",
+        "test_travel_time_nonnegativity",
+        "test_critical_load_coverage",
+        "test_probability_stress"
+      ],
+      "coverage_status": "COVERED"
+    }
+  ],
+  "installation_and_test_commands": [
+    {
+      "command": "pip install pyomo highspy networkx ortools pandas numpy xarray geopandas pytest",
+      "purpose": "Install all core Python packages and solvers for the toolchain",
+      "expected_verifiable_artifact": "Package list shows installed versions without error",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "command": "python -c \"import pyomo; from pyomo.environ import SolverFactory; print(pyomo.__version__)\"",
+      "purpose": "Verify Pyomo import and solver factory availability",
+      "expected_verifiable_artifact": "Pyomo version string printed",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "command": "python -c \"import dss; print(dss.__version__)\"",
+      "purpose": "Verify OpenDSS Python bindings",
+      "expected_verifiable_artifact": "dss-python version string printed",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "command": "python -c \"import networkx as nx; print(nx.__version__)\"",
+      "purpose": "Verify NetworkX graph library",
+      "expected_verifiable_artifact": "NetworkX version string printed",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "command": "python -c \"from ortools.sat.python import cp_model; print('ortools OK')\"",
+      "purpose": "Verify OR-Tools CP-SAT import",
+      "expected_verifiable_artifact": "String 'ortools OK' printed",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "command": "python -c \"import geopandas; print(geopandas.__version__)\"",
+      "purpose": "Verify GeoPandas geospatial processing",
+      "expected_verifiable_artifact": "GeoPandas version string printed",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "command": "gridlabd --version",
+      "purpose": "Verify GridLAB-D CLI is on PATH",
+      "expected_verifiable_artifact": "GridLAB-D version string printed",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "command": "pytest --version",
+      "purpose": "Verify pytest test runner",
+      "expected_verifiable_artifact": "pytest version string printed",
+      "execution_status": "NOT_RUN"
+    }
+  ],
+  "independent_verification_tests": [
+    {
+      "id": "test_mip_structure_and_bounds",
+      "target_computation_ids": [
+        "comp_1",
+        "comp_10"
+      ],
+      "independently_run_by": "T8 using exported Pyomo model",
+      "positive_fixture": "2-bus 2-scenario deterministic equivalent with feasible crew and switch states",
+      "negative_fixture": "Same model with switch states forced to isolate critical load without alternative source",
+      "quantitative_rejection_rule": "LP relaxation infeasible or unbounded rejects model formulation",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "id": "test_opendss_voltage_limits",
+      "target_computation_ids": [
+        "comp_2",
+        "comp_10"
+      ],
+      "independently_run_by": "T8 using T2 output",
+      "positive_fixture": "3-bus unbalanced feeder with 50% loading and voltage within ANSI C84.1",
+      "negative_fixture": "Same feeder with overloaded transformer causing 0.90 pu voltage on phase C",
+      "quantitative_rejection_rule": "Any per-phase voltage outside [0.95, 1.05] pu or thermal loading >100% rejects schedule",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "id": "test_radiality_cycle",
+      "target_computation_ids": [
+        "comp_3",
+        "comp_10"
+      ],
+      "independently_run_by": "T8 using T3 output",
+      "positive_fixture": "5-bus radial tree with all tie switches open",
+      "negative_fixture": "Same tree with one tie switch closed creating a loop",
+      "quantitative_rejection_rule": "n_cycles > 0 rejects schedule for non-microgrid segments",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "id": "test_crew_skill_precedence",
+      "target_computation_ids": [
+        "comp_4",
+        "comp_9",
+        "comp_10"
+      ],
+      "independently_run_by": "T8 using T4 output",
+      "positive_fixture": "Two repair tasks requiring lineman skill with isolate-before-repair precedence, one available crew",
+      "negative_fixture": "Crew without lineman skill assigned, or repair scheduled before isolation",
+      "quantitative_rejection_rule": "Task assigned to crew lacking skill or start_time < precedence_completion_time rejects",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "id": "test_microgrid_stability",
+      "target_computation_ids": [
+        "comp_5",
+        "comp_10"
+      ],
+      "independently_run_by": "T8 using T5 output",
+      "positive_fixture": "Single 500 kVA battery grid-forming inverter energizing 200 kW balanced load",
+      "negative_fixture": "Same inverter with 600 kW step load exceeding rating",
+      "quantitative_rejection_rule": "stable == False or frequency nadir < 59.5 Hz or voltage dip < 0.88 pu rejects",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "id": "test_travel_time_nonnegativity",
+      "target_computation_ids": [
+        "comp_6",
+        "comp_10"
+      ],
+      "independently_run_by": "T8 using T7 output",
+      "positive_fixture": "Connected road graph with positive travel times",
+      "negative_fixture": "Corrupted edge with negative travel time",
+      "quantitative_rejection_rule": "Any travel_time_min < 0 or essential site unreachable rejects",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "id": "test_critical_load_coverage",
+      "target_computation_ids": [
+        "comp_7",
+        "comp_10"
+      ],
+      "independently_run_by": "T8",
+      "positive_fixture": "Hospital load of 500 kW scheduled for 24 contiguous hours",
+      "negative_fixture": "Hospital load scheduled 400 kW or with 2-hour gap",
+      "quantitative_rejection_rule": "Served kW < required minimum OR any gap > allowed backup duration rejects",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "id": "test_probability_stress",
+      "target_computation_ids": [
+        "comp_8",
+        "comp_10"
+      ],
+      "independently_run_by": "T6",
+      "positive_fixture": "Three scenarios with probabilities summing to 1.0",
+      "negative_fixture": "Perturbed probabilities causing expected value shift >20%",
+      "quantitative_rejection_rule": "Schedule regret exceeds operator-defined threshold under perturbed weights",
+      "execution_status": "NOT_RUN"
+    }
+  ],
+  "resource_and_performance_analysis": {
+    "input_scale": "4800 buses, 620 switches, 250 DERs, 45 crews, 320 road segments, 72 hours, 6 scenarios",
+    "time_and_memory_complexity_rationale": "OpenDSS QSTS scales roughly linearly O(N*T) per scenario (~4800*72 = 350k node-hours), manageable in minutes on a single core. The MILP master has ~620*72 switch binaries plus crew assignments; a monolithic extensive form with 6 scenarios is likely exponential for HiGHS. A decomposition (Benders or 6-hour rolling-horizon with scenario bundling) is required to meet the 15-minute target, but decomposition logic is not yet implemented or benchmarked. GridLAB-D dynamic runs are heavyweight and should be parallelized or pre-computed for candidate islands only.",
+    "implementation_budget": "Open-source software only; primary cost is engineering time and compute instances. Optional Gurobi license would add cost if HiGHS proves insufficient.",
+    "benchmark_plan": "Phase 1: OpenDSS QSTS benchmark on a 500-bus subset with 72-hour load shapes. Phase 2: HiGHS benchmark on a single-period deterministic restoration MILP with 620 switches. Phase 3: End-to-end integration on a synthetic 1000-bus network with 3 scenarios.",
+    "runtime_target_status": "UNVERIFIED. Sub-15-minute target for the full stochastic problem is speculative without decomposition heuristics and may require the optional commercial solver fallback."
+  },
+  "unresolved_gaps": [
+    {
+      "computation_id": "comp_2",
+      "gap": "No line impedance, GIS topology, or SCADA historian provided",
+      "consequence": "OpenDSS model cannot be compiled; AC power flow validation is BLOCKED until data arrives",
+      "exact_required_evidence": "Complete feeder map with line codes, lengths, phases, and switch controller assignments"
+    },
+    {
+      "computation_id": "comp_5",
+      "gap": "DER telemetry and grid-forming inverter control parameters (droop, inertia, current limits) are absent",
+      "consequence": "GridLAB-D dynamic models are under-specified; microgrid stability results are low-confidence",
+      "exact_required_evidence": "Manufacturer models or validated equivalent circuits for all 250 DERs claiming black-start capability"
+    },
+    {
+      "computation_id": "comp_9",
+      "gap": "As-built protection zone maps and relay settings are damaged/unknown",
+      "consequence": "LOTO boundaries may be conservative, leading to excessive isolation and delayed restoration",
+      "exact_required_evidence": "Post-storm updated protection one-line diagrams or infrared inspection reports confirming switchable zones"
+    },
+    {
+      "computation_id": "comp_1",
+      "gap": "Load composition (motor percentages, cold-load pickup curves) not supplied",
+      "consequence": "Inrush approximated as constant-power multiplier; schedule may violate transient startup constraints not captured by LinDist3Flow",
+      "exact_required_evidence": "Customer class load profiles and motor starting kVA by feeder segment"
+    },
+    {
+      "computation_id": "comp_6",
+      "gap": "Real-time flood depth per road segment unavailable; only scenario descriptions exist",
+      "consequence": "Travel times are scenario-based estimates, not ground-truth validated",
+      "exact_required_evidence": "GIS flood depth raster or field crew accessibility reports for each road segment"
+    }
+  ],
+  "self_assessment": {
+    "status": "PROPOSED_FOR_EXTERNAL_VERIFICATION",
+    "mandatory_uncovered_computation_ids": [],
+    "justification": "Every mandatory computation maps to a specific installable tool with a defined interface and independent rejection test. The toolchain is preliminary because no code has been executed, input data are entirely missing, and the 15-minute runtime target for the full-scale stochastic MILP is unverified and likely requires decomposition heuristics not yet coded. No mandatory step is blocked by a missing tool; data gaps are enumerated separately."
+  },
+  "stage2_authorized": false
+}

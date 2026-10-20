@@ -1,0 +1,6 @@
+{
+  "status": "STRUCTURAL_ONLY",
+  "failures": [],
+  "stage1_external_gate": "NOT_RUN",
+  "note": "Schema and cross-references do not verify whether named tools can solve the task."
+}
