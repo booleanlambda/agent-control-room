@@ -46,7 +46,11 @@ def validate(p,external_manifest):
         if not isinstance(trefs,list) or not trefs:errors.append("MISSING_VERIFIER_REFERENCES_FOR:"+str(r))
         elif any(t not in test_ids for t in trefs):errors.append("UNKNOWN_VERIFIER_ID_FOR:"+str(r))
         mapped.append(r)
-    hard={r.get("id") for r in requirements if isinstance(r,dict) and r.get("hard_requirement") is True}
+    # The v5 response contract permits descriptive hard_requirement strings
+    # as well as booleans. Neither must silently count as zero mandatory items.
+    hard={r.get("id") for r in requirements if isinstance(r,dict)
+          and (r.get("hard_requirement") is True or
+               (isinstance(r.get("hard_requirement"),str) and bool(r["hard_requirement"].strip())))}
     for r in sorted(hard-set(mapped)):errors.append("HARD_REQUIREMENT_UNMAPPED:"+str(r))
     if len(set(map_keys))!=len(map_keys):errors.append("DUPLICATE_REQUIREMENT_MAPPING")
     for t in tools:
