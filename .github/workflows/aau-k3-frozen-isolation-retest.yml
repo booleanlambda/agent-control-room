@@ -1,0 +1,54 @@
+name: AAU K3 Frozen Toolchain Isolated Runtime Retest
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/aau-k3-frozen-toolchain-independent-verifier-20261020
+permissions:
+  contents: read
+  actions: read
+jobs:
+  isolated-verification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Rehydrate and hash-check original Kimi proposal
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          mkdir -p /tmp/aau-frozen
+          gh run download 39478425234 -n aau-k3-off-parallel-required-tool-full-evidence -D /tmp/aau-frozen
+          cp /tmp/aau-frozen/evidence_k3_parallel_required_v02/summary.json experiments/tool-selection-restoration/frozen_original_summary.json
+          test "$(sha256sum experiments/tool-selection-restoration/frozen_original_summary.json | cut -d' ' -f1)" = '03fe111ccdf0f745257e747acae61565fb37f1111d389cd747a01b154bee8e26'
+      - name: Verify unchanged test code and install frozen as-selected Python packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object experiments/tool-selection-restoration/verify_frozen_k3_toolchain.py)" = '70a23a55bbf4bd367f11899d1533f8a32172fb9b'
+          test "$(git hash-object experiments/tool-selection-restoration/check_corrected_opendss_fixture.py)" = 'efadaddcf7ad3bbfe16040f562428b3c33eb5180'
+          python -m py_compile experiments/tool-selection-restoration/verify_frozen_k3_toolchain.py experiments/tool-selection-restoration/check_corrected_opendss_fixture.py
+          python -m pip install -q networkx==3.6.1 pyomo==6.10.1 highspy==1.15.1 ortools==9.12.4544 dss-python==0.15.7
+          python -m venv /tmp/ortools-isolated
+          /tmp/ortools-isolated/bin/python -m pip install -q ortools==9.12.4544
+      - name: Verify tools, isolate ORTools shared-object ABI conflict, and test interface handoffs
+        env:
+          AAU_ORTOOLS_PYTHON: /tmp/ortools-isolated/bin/python
+        run: python experiments/tool-selection-restoration/verify_frozen_k3_toolchain.py
+      - name: Re-test OpenDSS using explicitly corrected dependency separately
+        if: always()
+        run: |
+          python -m pip install -q opendssdirect.py==0.9.4
+          python experiments/tool-selection-restoration/check_corrected_opendss_fixture.py
+      - name: Archive deterministic receipts, including failed checks
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-k3-frozen-isolated-runtime-evidence
+          path: experiments/tool-selection-restoration/evidence_k3_independent_verifier_v01/
+          if-no-files-found: warn
+          retention-days: 30
