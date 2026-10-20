@@ -1,0 +1,71 @@
+name: AAU K2.6 Live Readonly Registry Tool Calling
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/aau-uccr-postgres-v01-20261020
+    paths:
+      - 'experiments/tool-selection-restoration/**'
+      - '.github/workflows/aau-uccr-k26-readonly-tools.yml'
+permissions:
+  contents: read
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+jobs:
+  tool-assisted:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Freeze original problem, prompt, external rubrics, database export and code
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object experiments/tool-selection-restoration/challenge.json)" = "e51781a1a000f59f8c5ba508698c513d6c90bdb6"
+          test "$(git hash-object experiments/tool-selection-restoration/rubric.json)" = "e19e740ebbe52c8772faa34685ffb4165b3883ec"
+          test "$(git hash-object experiments/tool-selection-restoration/TOOL_SELECTION_GENERIC_V5_SYSTEM.md)" = "e520242011970ad10338a9b764896db2ada38bd6"
+          test "$(git hash-object experiments/tool-selection-restoration/aau_registry_db_export_v01.json)" = "ac160bdf4eb0f1ea2d179a6ad355f8235fa19ec0"
+          test "$(git hash-object experiments/tool-selection-restoration/kimi_uccr_readonly_toolcall_v01.py)" = "218850934eea50739a9f8d254168e989168e47f9"
+          test "$(git hash-object experiments/tool-selection-restoration/kimi_uccr_readonly_audit_v01.py)" = "7286a7a861bfd4ec463e44236a78d0d690654524"
+          test "$(git hash-object experiments/tool-selection-restoration/v5_independent_structure_gate.py)" = "1208665efddc72090894abb184e74727faaed8d3"
+          python -m py_compile experiments/tool-selection-restoration/kimi_uccr_readonly_toolcall_v01.py experiments/tool-selection-restoration/kimi_uccr_readonly_audit_v01.py experiments/tool-selection-restoration/v5_independent_structure_gate.py
+      - name: Deterministic registered read-only tool smoke and negative tests
+        shell: bash
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path.insert(0,"experiments/tool-selection-restoration")
+          import kimi_uccr_readonly_toolcall_v01 as q
+          assert len(q.CAT["operations"])==6
+          assert q.search_capabilities("graph")["result_count"]>=1
+          assert q.search_capabilities("voltage")["result_count"]>=1
+          assert q.search_capabilities("relay synchronism")["result_count"]==0
+          assert q.inspect_operation("op.networkx.is_tree.v0")["record"]["tool_version"]=="3.6.1"
+          assert q.inspect_operation("op.fake.not_exists")["found"] is False
+          assert q.search_capabilities("")["error"]=="INVALID_QUERY"
+          assert "write" not in [x["function"]["name"] for x in q.TOOLS]
+          print("AAU_UCCR_READONLY_NEGATIVE_PROBES_PASS",flush=True)
+          PY
+      - name: One Kimi 2.6 reasoning-ON session with actual SSE function calls
+        env:
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: python experiments/tool-selection-restoration/kimi_uccr_readonly_toolcall_v01.py
+      - name: Independently audit provider, tool calls, IDs, selection and evidence boundaries
+        if: always()
+        run: python experiments/tool-selection-restoration/kimi_uccr_readonly_audit_v01.py
+      - name: Archive exact database export, prompt and complete function-call/provider evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-k26-uccr-live-toolcalls-full-evidence
+          path: |
+            experiments/tool-selection-restoration/challenge.json
+            experiments/tool-selection-restoration/TOOL_SELECTION_GENERIC_V5_SYSTEM.md
+            experiments/tool-selection-restoration/aau_registry_db_export_v01.json
+            experiments/tool-selection-restoration/evidence_readonly_tools_v01/
+          if-no-files-found: error
+          retention-days: 30
