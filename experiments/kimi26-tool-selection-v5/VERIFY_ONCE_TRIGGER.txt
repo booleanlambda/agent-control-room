@@ -1,0 +1,1 @@
+Independent tiny executable proof probes for the frozen Kimi K2.6 V5 response. No Moonshot API, no numerical restoration and no Stage 2.
