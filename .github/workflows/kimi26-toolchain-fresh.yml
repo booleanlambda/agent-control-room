@@ -5,12 +5,13 @@ on:
     branches:
       - experiment/kimi26-toolchain-fresh-20261020
     paths:
-      - experiments/kimi26-fresh-20261020/**
+      - experiments/kimi26-fresh-20261020/stage1-prompt.md
+      - experiments/kimi26-fresh-20261020/run_stage1.py
       - .github/workflows/kimi26-toolchain-fresh.yml
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   stage1:
@@ -23,6 +24,8 @@ jobs:
       MOONSHOT_ENDPOINT: ${{ secrets.MOONSHOT_ENDPOINT }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
       - name: Run frozen Stage-1 prompt with K2.6 thinking on
         id: model
         shell: bash
@@ -36,4 +39,22 @@ jobs:
           name: kimi26-clean-stage1-evidence
           path: experiments/kimi26-fresh-20261020/evidence/
           retention-days: 30
-          if-no-files-found: error
+          if-no-files-found: warn
+      - name: Check evidence summary into isolated experiment branch
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd experiments/kimi26-fresh-20261020
+          test -f evidence/run.json || printf '{"status":"BLOCKED","error_category":"RUNNER_NO_EVIDENCE"}\n' > evidence/run.json
+          cd ../..
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add experiments/kimi26-fresh-20261020/evidence/run.json
+          if [ -f experiments/kimi26-fresh-20261020/evidence/stage1-model-output.md ]; then
+            git add experiments/kimi26-fresh-20261020/evidence/stage1-model-output.md
+          fi
+          if ! git diff --cached --quiet; then
+            git commit -m 'Record isolated Kimi26 Stage-1 execution summary'
+            git push origin HEAD:refs/heads/experiment/kimi26-toolchain-fresh-20261020
+          fi
