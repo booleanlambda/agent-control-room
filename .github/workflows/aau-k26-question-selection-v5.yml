@@ -1,0 +1,73 @@
+name: AAU K2.6 question-first tool selection v5
+
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/aau-v41-tool-proof-gate-20261019
+    paths:
+      - 'experiments/tool-selection-question-v5/**'
+      - '.github/workflows/aau-k26-question-selection-v5.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+
+jobs:
+  question-first-stage1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify old challenge and external rubrics unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object experiments/tool-selection-restoration/challenge.json)" = 'e51781a1a000f59f8c5ba508698c513d6c90bdb6'
+          test "$(git hash-object experiments/tool-selection-restoration/rubric.json)" = 'e19e740ebbe52c8772faa34685ffb4165b3883ec'
+          test "$(git hash-object experiments/tool-selection-restoration/appropriateness_rubric_v1.json)" = '2eab486b7a95ca635637769bf78a4da9a704e380'
+          test "$(git hash-object experiments/tool-selection-question-v5/system-prompt.md)" = 'c26817e308ee4dfb36c98e188e3ff8cbae527163'
+          python -m py_compile experiments/tool-selection-question-v5/run_stage1.py experiments/tool-selection-question-v5/external_structure_gate.py
+          echo 'ORIGINAL_QUESTION_RUBRICS_PROMPT_FROZEN=true; NO_STAGE2=true'
+      - name: ONE live streamed Kimi K2.6 thinking-on tool-selection answer
+        id: model
+        env:
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: python experiments/tool-selection-question-v5/run_stage1.py
+      - name: Independent deterministic schema and traceability gate
+        if: always()
+        run: python experiments/tool-selection-question-v5/external_structure_gate.py
+      - name: Install narrow reference tool capability smoke dependencies
+        if: steps.model.outcome == 'success'
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check "networkx>=3.3,<4" "opendssdirect.py>=0.9,<1.0" "pyomo>=6.8,<7" "highspy>=1.7,<2" "scipy>=1.13,<2"
+          python -m venv --clear .aau-v5-ortools-venv
+          .aau-v5-ortools-venv/bin/python -m pip install --disable-pip-version-check "ortools==9.12.4544"
+      - name: Execute real narrow software capability smoke checks
+        if: steps.model.outcome == 'success'
+        env:
+          AAU_ORTOOLS_PYTHON: ${{ github.workspace }}/.aau-v5-ortools-venv/bin/python
+        run: |
+          mkdir -p experiments/tool-selection-question-v5/evidence
+          python experiments/tool-selection-restoration/tool_capability_smoke_probes.py experiments/tool-selection-question-v5/evidence/reference-smoke-results.json
+      - name: Preserve frozen question, original response and independent evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-k26-v5-question-first-frozen-raw-evidence
+          path: |
+            experiments/tool-selection-restoration/challenge.json
+            experiments/tool-selection-restoration/rubric.json
+            experiments/tool-selection-restoration/appropriateness_rubric_v1.json
+            experiments/tool-selection-question-v5/system-prompt.md
+            experiments/tool-selection-question-v5/evidence/
+          if-no-files-found: error
+          retention-days: 30
