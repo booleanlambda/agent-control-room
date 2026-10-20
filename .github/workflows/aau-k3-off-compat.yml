@@ -1,0 +1,47 @@
+name: AAU Kimi K3 Thinking Off Compatibility
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/aau-uccr-k26-readonly-tools-v01-20261020
+    paths:
+      - 'experiments/tool-selection-restoration/**'
+      - '.github/workflows/aau-k3-off-compat.yml'
+permissions:
+  contents: read
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+jobs:
+  k3-off-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate frozen off probe and unchanged original problem
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object experiments/tool-selection-restoration/k3_off_compat_probe.py)" = "7db639734b9f8d044634e3fd2c550d2064869677"
+          test "$(git hash-object experiments/tool-selection-restoration/challenge.json)" = "e51781a1a000f59f8c5ba508698c513d6c90bdb6"
+          python -m py_compile experiments/tool-selection-restoration/k3_off_compat_probe.py
+      - name: Probe Moonshot K3 thinking disabled and configured Bedrock if present
+        env:
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_BEDROCK_API_KEY: ${{ secrets.AWS_BEDROCK_API_KEY }}
+        run: |
+          python -m pip -q install boto3
+          python experiments/tool-selection-restoration/k3_off_compat_probe.py
+      - name: Archive K3 off-mode compatibility verdict
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-k3-thinking-off-compatibility-evidence
+          path: experiments/tool-selection-restoration/evidence_k3_off/
+          if-no-files-found: warn
+          retention-days: 30
