@@ -1,0 +1,39 @@
+name: Kimi 2.6 Clean Toolchain Selection
+
+on:
+  push:
+    branches:
+      - experiment/kimi26-toolchain-fresh-20261020
+    paths:
+      - experiments/kimi26-fresh-20261020/**
+      - .github/workflows/kimi26-toolchain-fresh.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage1:
+    name: Clean-room Kimi K2.6 stage 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      MOONSHOT_APIKEY: ${{ secrets.MOONSHOT_APIKEY }}
+      MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+      MOONSHOT_ENDPOINT: ${{ secrets.MOONSHOT_ENDPOINT }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run frozen Stage-1 prompt with K2.6 thinking on
+        id: model
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 experiments/kimi26-fresh-20261020/run_stage1.py
+      - name: Upload unaltered provider response and execution record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kimi26-clean-stage1-evidence
+          path: experiments/kimi26-fresh-20261020/evidence/
+          retention-days: 30
+          if-no-files-found: error
