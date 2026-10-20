@@ -1,0 +1,66 @@
+name: AAU K3 Thinking Off Readonly Registry Tool Selection
+on:
+  pull_request:
+    types: [opened]
+    branches:
+      - experiment/aau-k3-thinking-off-compat-20261020
+    paths:
+      - 'experiments/tool-selection-restoration/**'
+      - '.github/workflows/aau-k3-off-registry-selection.yml'
+permissions:
+  contents: read
+concurrency:
+  group: aau-serial-logistics-model-slot
+  cancel-in-progress: false
+jobs:
+  k3-thinking-off:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify same frozen benchmark, registry and model code
+        run: |
+          set -euo pipefail
+          test "$(git hash-object experiments/tool-selection-restoration/challenge.json)" = "e51781a1a000f59f8c5ba508698c513d6c90bdb6"
+          test "$(git hash-object experiments/tool-selection-restoration/TOOL_SELECTION_GENERIC_V5_SYSTEM.md)" = "e520242011970ad10338a9b764896db2ada38bd6"
+          test "$(git hash-object experiments/tool-selection-restoration/rubric.json)" = "e19e740ebbe52c8772faa34685ffb4165b3883ec"
+          test "$(git hash-object experiments/tool-selection-restoration/aau_registry_db_export_v01.json)" = "ac160bdf4eb0f1ea2d179a6ad355f8235fa19ec0"
+          test "$(git hash-object experiments/tool-selection-restoration/k3_off_uccr_toolcall_v01.py)" = "8e4077f0ad2acb94696c1cff1722d07644d977db"
+          test "$(git hash-object experiments/tool-selection-restoration/k3_off_uccr_audit_v01.py)" = "4af2875c8b2846416563e30a5a70782638f53e2d"
+          python -m py_compile experiments/tool-selection-restoration/k3_off_uccr_toolcall_v01.py experiments/tool-selection-restoration/k3_off_uccr_audit_v01.py
+      - name: Verify read-only registry adapter deterministic availability
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path.insert(0,'experiments/tool-selection-restoration')
+          import k3_off_uccr_toolcall_v01 as q
+          assert len(q.CAT['operations'])==6
+          assert q.search_capabilities('graph')['result_count']>=1
+          assert q.search_capabilities('relay synchronism')['result_count']==0
+          assert q.inspect_operation('op.networkx.is_tree.v0')['found']
+          assert not q.inspect_operation('nonexistent')['found']
+          assert [t['function']['name'] for t in q.TOOLS]==['search_capabilities','inspect_operation']
+          print('K3_OFF_READONLY_ADAPTER_PASS')
+          PY
+      - name: Live Kimi K3 thinking-disabled tool-selection and actual function calls
+        env:
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: python experiments/tool-selection-restoration/k3_off_uccr_toolcall_v01.py
+      - name: Independent typed ID, registry and thinking OFF gate
+        if: always()
+        run: python experiments/tool-selection-restoration/k3_off_uccr_audit_v01.py
+      - name: Archive unchanged prompt, registry, provider messages and exact tool receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-k3-thinking-off-registry-selection-evidence
+          path: |
+            experiments/tool-selection-restoration/challenge.json
+            experiments/tool-selection-restoration/TOOL_SELECTION_GENERIC_V5_SYSTEM.md
+            experiments/tool-selection-restoration/aau_registry_db_export_v01.json
+            experiments/tool-selection-restoration/evidence_k3_off_toolcalls_v01/
+          if-no-files-found: error
+          retention-days: 30
