@@ -1,0 +1,73 @@
+name: AAU Kimi 2.6 V5 Independent Executable Proof
+
+on:
+  push:
+    branches:
+      - experiment/kimi26-tool-selection-v5-20261020
+    paths:
+      - experiments/kimi26-tool-selection-v5/VERIFY_ONCE_TRIGGER.txt
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  narrow-capability-proof:
+    name: Kimi V5 package execution and fail-closed independent gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate unchanged model response independent rubric and proof code
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object experiments/tool-selection-restoration/external_tool_proof_obligations_v1.json)" = "7438a9881d6791ecb7f1b45f9b103bcdecb510b2"
+          test "$(git hash-object experiments/tool-selection-restoration/tool_capability_smoke_probes.py)" = "425277b584366964ea8f444f7173fdbb4b301c26"
+          python -m py_compile experiments/kimi26-tool-selection-v5/verify_toolchain_v5.py
+          test -s experiments/kimi26-tool-selection-v5/evidence/toolchain-proposal.json
+          test -s experiments/kimi26-tool-selection-v5/INDEPENDENT_STAGE1_VERDICT.json
+      - name: Install small proof engines independently of Kimi
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check "networkx>=3.3,<4" "opendssdirect.py>=0.9,<1.0" "pyomo>=6.8,<7" "highspy>=1.7,<2" "scipy>=1.13,<2"
+          python -m venv --clear .aau-ortools-venv
+          .aau-ortools-venv/bin/python -m pip install --disable-pip-version-check "ortools==9.12.4544"
+      - name: Execute real synthetic small capability probes
+        env:
+          AAU_ORTOOLS_PYTHON: ${{ github.workspace }}/.aau-ortools-venv/bin/python
+        run: |
+          python experiments/tool-selection-restoration/tool_capability_smoke_probes.py experiments/kimi26-tool-selection-v5/proof_output/smoke-results.json
+      - name: Execute reviewer-owned critical obligation and typed contract gate
+        run: |
+          python experiments/kimi26-tool-selection-v5/verify_toolchain_v5.py
+      - name: Preserve probe outputs independently of model evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-k26-v5-independent-tool-capability-probes
+          path: |
+            experiments/kimi26-tool-selection-v5/INDEPENDENT_STAGE1_VERDICT.json
+            experiments/kimi26-tool-selection-v5/proof_output/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Publish only proof evidence to isolated research branch
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p experiments/kimi26-tool-selection-v5/proof_output
+          if [ ! -f experiments/kimi26-tool-selection-v5/proof_output/v5-executable-proof-verdict.json ]; then
+            printf '{"status":"NOT_EXECUTED","stage2_authorized":false}\n' > experiments/kimi26-tool-selection-v5/proof_output/v5-executable-proof-verdict.json
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add experiments/kimi26-tool-selection-v5/proof_output/
+          if ! git diff --cached --quiet; then
+            git commit -m "Record independent Kimi26 V5 capability test results"
+            git push origin HEAD:refs/heads/experiment/kimi26-tool-selection-v5-20261020
+          fi
