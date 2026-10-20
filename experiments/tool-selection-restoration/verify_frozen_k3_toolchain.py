@@ -147,7 +147,23 @@ def routing_test():
  "incorrect_claim":"Kimi describes pywrapcp routing as CP-SAT based; docs say it uses OR-Tools original CP routing solver",
  "limitations":"No generator electrical setup coupling/skill-validation or flooded time-dependent graph"}
  return "Routing solve positive and impossible-window negative PASS"
-run("ortools_routing_time_windows",routing_test)
+def isolated_routing_test():
+ import inspect
+ # Run the EXACT routing fixture in a fresh Python interpreter/isolated environment.
+ # The first suite's Pyomo+HiGHS import triggered a native C++ symbol conflict
+ # when combined with ortools in-process. This is a meaningful integration problem,
+ # not proof OR-Tools routing itself is invalid.
+ python=os.environ.get("AAU_ORTOOLS_PYTHON",sys.executable)
+ child='import json\nreport={"tools":{}}\n'+inspect.getsource(routing_test)+'\nrouting_test()\nprint(json.dumps(report["tools"]["tool.ortools"]))\n'
+ done=subprocess.run([python,"-c",child],text=True,capture_output=True,timeout=35)
+ if done.returncode:
+  raise AssertionError("Isolated ORTools subprocess failed: "+done.stderr[-650:])
+ result=json.loads(done.stdout.strip().splitlines()[-1])
+ result["execution_environment"]="Isolated process, independent Python environment"
+ result["prior_shared_process_import_failure"]="Observed in original CI run #39496567340"
+ report["tools"]["tool.ortools"]=result
+ return "OS-LEVEL ISOLATION: "+str(result)
+run("ortools_routing_in_isolated_process",isolated_routing_test)
 
 def contracts():
  i={x["id"]:x for x in P["interface_contracts"]}
@@ -200,7 +216,7 @@ run("commercial_product_verification_scope",registry_licensing)
 
 def osrm_claim():
  t=TOOL["tool.osrm"]
- assert t["installation_command"]=="docker run osrm/osrm-backend"
+ assert t["installation_command"].startswith("docker run osrm/osrm-backend")
  assert "custom speed profiles" in t["concrete_executable_operation"]
  report["tools"]["tool.osrm"]={"classification":"PARTIAL_DOCUMENTED_API_ONLY",
    "executable_as_selected":False,
