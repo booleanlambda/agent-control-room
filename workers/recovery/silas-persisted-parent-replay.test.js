@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {replayPersistedSilasParent,unwrapStoredArtifact} from './silas-persisted-parent-replay.js';
+import {makeCanonicalSemanticCandidate} from './semantic-consistency-gate.js';
 const P='R.002.003.002';
 const E='curriculum/qda601-exercise-packs-v0.1.json#QDA601-M10-U2';
 const digest=s=>createHash('sha256').update(s).digest('hex');
@@ -146,4 +147,34 @@ test('changing a calculated number while retaining the old passing check is caug
   const r=run(f);
   assert.equal(r.status,'BLOCKED');
   assert(r.errors.includes('CHECK_TO_CALC_BINDING_UNRESOLVED:'+P+'.002'));
+});
+
+test('absent semantic candidate returns unresolved gate and no live completion',()=>{
+  const result=run(input());
+  assert.equal(result.semantic_gate.status,'UNRESOLVED');
+  assert.equal(result.live_node_completed,false);
+});
+test('parent semantic gate accepts only a canonical numeric candidate, not live completion',()=>{
+  const f=input(),baseline=run(f);
+  assert.equal(baseline.status,'VERIFIED_NUMERIC_PROJECTION_ONLY');
+  const c=makeCanonicalSemanticCandidate({
+    projection:{...baseline,status:'PROJECTION_READY'},openingCash:f.contract.openingCash
+  });
+  const result=run({...f,parentCandidate:c});
+  assert.equal(result.status,'VERIFIED_NUMERIC_PROJECTION_ONLY');
+  assert.equal(result.semantic_gate.status,'PASS');
+  assert.equal(result.live_node_completed,false);
+  assert.equal(result.model_calls,0);
+});
+test('contradictory parent interpretation produces explicit mismatch',()=>{
+  const f=input(),baseline=run(f);
+  const c=makeCanonicalSemanticCandidate({
+    projection:{...baseline,status:'PROJECTION_READY'},openingCash:f.contract.openingCash
+  });
+  c.interpretation='Ending cash balance declined by month 12.';
+  const result=run({...f,parentCandidate:c});
+  assert.equal(result.status,'SEMANTIC_MISMATCH');
+  assert.equal(result.semantic_gate.status,'SEMANTIC_MISMATCH');
+  assert.equal(result.mandatory_next_action,'REMEDIATE_SEMANTIC_MISMATCH');
+  assert.equal(result.live_node_completed,false);
 });
