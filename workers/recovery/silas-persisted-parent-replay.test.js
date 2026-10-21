@@ -16,9 +16,14 @@ function input(){
       calculation,
       // Synthetic tests: each check is independently executed by the
       // production safe-Python runner; it does not prove coverage of numeric rows.
-      python_checks:Array.from({length:count},(_,i)=>({
-        label:suffix+'_check_'+i,expression:'2 + 2',claimed_result:4
-      })),
+      python_checks:Array.from({length:count},(_,i)=>{
+        const field=suffix==='.001'?'net_burn':'ending_cash';
+        const cell=calculation[i%12];
+        return i<12
+          ?{label:'calculation['+i+'].'+field,
+            expression:String(cell[field]),claimed_result:cell[field]}
+          :{label:suffix+'_extra_check_'+i,expression:'2 + 2',claimed_result:4};
+      }),
       interpretation:'Synthetic example only',sanity_check:'Synthetic example'
     };
     return {node_path:P+suffix,status:'completed',
@@ -94,6 +99,10 @@ test('source with correct checks but changed cash value rejects by cross-child e
   const f=input(),outer=JSON.parse(f.records[1].result_artifact);
   const inner=JSON.parse(outer.artifact);
   inner.calculation[10].ending_cash+=250;
+  // Repair the bound check so that this test reaches the cross-child
+  // reconciliation gate rather than failing the check-to-row binding gate.
+  inner.python_checks[10].claimed_result=inner.calculation[10].ending_cash;
+  inner.python_checks[10].expression=String(inner.calculation[10].ending_cash);
   outer.artifact=JSON.stringify(inner);
   f.records[1].result_artifact=JSON.stringify(outer);
   f.sourceManifest[f.records[1].node_path].envelope_sha256=digest(f.records[1].result_artifact);
@@ -125,4 +134,16 @@ test('zero model calls do not claim the live parent is finished',()=>{
   assert.equal(x.model_calls,0);
   assert.equal(x.mandatory_next_action,'COMPLETE_SEMANTIC_AND_PROVENANCE_OBLIGATIONS');
   assert.equal(x.live_node_completed,false);
+});
+
+test('changing a calculated number while retaining the old passing check is caught',()=>{
+  const f=input(),outer=JSON.parse(f.records[1].result_artifact);
+  const body=JSON.parse(outer.artifact);
+  body.calculation[5].ending_cash+=1;
+  outer.artifact=JSON.stringify(body);
+  f.records[1].result_artifact=JSON.stringify(outer);
+  f.sourceManifest[f.records[1].node_path].envelope_sha256=digest(f.records[1].result_artifact);
+  const r=run(f);
+  assert.equal(r.status,'BLOCKED');
+  assert(r.errors.includes('CHECK_TO_CALC_BINDING_UNRESOLVED:'+P+'.002'));
 });
