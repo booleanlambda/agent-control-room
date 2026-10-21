@@ -22,6 +22,8 @@ export function classifyFailure(fault = {}) {
     return 'PROVIDER_TRANSPORT';
   if (finish === 'length' || /TRUNCATED_RESPONSE|INCOMPLETE_RESPONSE/.test(text))
     return 'TRUNCATED_RESPONSE';
+  if (/SEMANTIC_MISMATCH|CONTRADICTS_CASH|CLAIM_CONTRADICTS_VERIFIED_RESULT/.test(text))
+    return 'SEMANTIC_MISMATCH';
   if (/python_checks_must_be_array|MATERIALIZATION_INVALID|SCHEMA_MISMATCH/.test(text))
     return 'SCHEMA_MISMATCH';
   if (/cardinality|provenance|wrong_hash|missing_source|evidence_conflict/i.test(text))
@@ -202,6 +204,12 @@ export function planRecovery({
     rollovers_used:runtime?.rollovers_used??null,
     rollover_limit:runtime?.rollover_limit??null,
   };
+  // Semantic contradictions are higher-priority than numeric readiness.
+  // They must not fall through into mechanical completion or retry.
+  if (failureClass==='SEMANTIC_MISMATCH')
+    return {...base,action:'HOLD_SEMANTIC_MISMATCH',
+      reason:'SEMANTIC_EVIDENCE_CONTRADICTION',
+      projection_status:projection.status,errors:projection.errors??[]};
   if (projection.status==='PROJECTION_READY') {
     if (identicalFailureCount >= 2 && failureClass==='NO_PROGRESS')
       return {...base,action:'HOLD_NO_PROGRESS',reason:'REPEATED_IDENTICAL_FAILURE',projection};
