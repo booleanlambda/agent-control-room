@@ -9,7 +9,7 @@ function input(){
   const burn=Array.from({length:12},(_,i)=>Math.round((120000-i*10000)*100)/100);
   let balance=5200000;
   const net=burn.map((v,i)=>({month:i+1,net_burn:v}));
-  const cash=burn.map((v,i)=>({month:i+1,ending_cash:(balance=Math.round((balance-v)*100)/100)}));
+  const cash=burn.map((v,i)=>({month:i+1,ending_cash_balance:(balance=Math.round((balance-v)*100)/100)}));
   const build=(suffix,calculation,count)=>{
     const artifact={
       exercise_pack_ref:E,
@@ -17,7 +17,7 @@ function input(){
       // Synthetic tests: each check is independently executed by the
       // production safe-Python runner; it does not prove coverage of numeric rows.
       python_checks:Array.from({length:count},(_,i)=>{
-        const field=suffix==='.001'?'net_burn':'ending_cash';
+        const field=suffix==='.001'?'net_burn':'ending_cash_balance';
         const cell=calculation[i%12];
         return i<12
           ?{label:'calculation['+i+'].'+field,
@@ -98,11 +98,11 @@ test('bad nested artifact JSON rejects even with repinned envelope',()=>{
 test('source with correct checks but changed cash value rejects by cross-child equation',()=>{
   const f=input(),outer=JSON.parse(f.records[1].result_artifact);
   const inner=JSON.parse(outer.artifact);
-  inner.calculation[10].ending_cash+=250;
+  inner.calculation[10].ending_cash_balance+=250;
   // Repair the bound check so that this test reaches the cross-child
   // reconciliation gate rather than failing the check-to-row binding gate.
-  inner.python_checks[10].claimed_result=inner.calculation[10].ending_cash;
-  inner.python_checks[10].expression=String(inner.calculation[10].ending_cash);
+  inner.python_checks[10].claimed_result=inner.calculation[10].ending_cash_balance;
+  inner.python_checks[10].expression=String(inner.calculation[10].ending_cash_balance);
   outer.artifact=JSON.stringify(inner);
   f.records[1].result_artifact=JSON.stringify(outer);
   f.sourceManifest[f.records[1].node_path].envelope_sha256=digest(f.records[1].result_artifact);
@@ -139,7 +139,7 @@ test('zero model calls do not claim the live parent is finished',()=>{
 test('changing a calculated number while retaining the old passing check is caught',()=>{
   const f=input(),outer=JSON.parse(f.records[1].result_artifact);
   const body=JSON.parse(outer.artifact);
-  body.calculation[5].ending_cash+=1;
+  body.calculation[5].ending_cash_balance+=1;
   outer.artifact=JSON.stringify(body);
   f.records[1].result_artifact=JSON.stringify(outer);
   f.sourceManifest[f.records[1].node_path].envelope_sha256=digest(f.records[1].result_artifact);
