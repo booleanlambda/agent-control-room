@@ -146,12 +146,17 @@ export function assembleVerifiedProjection({parentPath, contract, children, trus
       source_result_hash:child.resultHash
     });
   }
-  if (Number.isFinite(contract.openingCash) &&
-      projected.every(p=>Number.isFinite(p.net_burn)&&Number.isFinite(p.ending_cash))) {
+  if (Number.isFinite(contract.openingCash)) {
+    // Never silently skip cash verification when the schema/field changed.
+    const cashField=contract.cashBalanceField;
+    if (!['ending_cash','ending_cash_balance'].includes(cashField) ||
+        !projected.every(p=>Number.isFinite(p.net_burn)&&Number.isFinite(p[cashField]))) {
+      return {status:'BLOCKED',reason:'DECLARED_CASH_FIELD_MISSING'};
+    }
     let balance=contract.openingCash;
     for(const item of projected) {
       balance-=item.net_burn;
-      if (Math.abs(balance-item.ending_cash)>0.011)
+      if (Math.abs(balance-item[cashField])>0.011)
         return {status:'BLOCKED',reason:'CASH_RECONCILIATION_FAILED',month:item.month};
     }
   }
