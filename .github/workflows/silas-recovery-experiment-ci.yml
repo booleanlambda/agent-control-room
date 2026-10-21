@@ -31,5 +31,7 @@ jobs:
           node --check workers/recovery/experimental-controller.test.js
           node --check workers/recovery/silas-persisted-parent-replay.js
           node --check workers/recovery/silas-persisted-parent-replay.test.js
+          node --check workers/recovery/semantic-consistency-gate.js
+          node --check workers/recovery/semantic-consistency-gate.test.js
       - name: Run offline deterministic recovery tests
         run: node --test workers/recovery/*.test.js
