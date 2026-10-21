@@ -1,0 +1,75 @@
+name: AAU Provider Response SQL Journal Failure Safety
+
+on:
+  push:
+    branches: [experiment/recursive-tree-nemotron-v0]
+    paths:
+      - 'experiments/recursion-tree-v0/provider-uncertain-*.mjs'
+      - '.github/workflows/experimental-provider-uncertain-journal.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'experiments/recursion-tree-v0/provider-uncertain-*.mjs'
+      - '.github/workflows/experimental-provider-uncertain-journal.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  outage-after-provider-response:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: recursion
+          POSTGRES_PASSWORD: recursion
+          POSTGRES_DB: recursion_lab
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U recursion -d recursion_lab"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+      rabbitmq:
+        image: rabbitmq:3.13-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: aau_ci
+          RABBITMQ_DEFAULT_PASS: aau_ci
+        ports: ['5672:5672']
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 25
+    env:
+      AAU_DISPOSABLE_CI_DB: 'yes'
+      TEST_PG_URL: postgres://recursion:recursion@127.0.0.1:5432/recursion_lab
+      TEST_RABBIT_URL: amqp://aau_ci:aau_ci@127.0.0.1:5672
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install test-only PostgreSQL and RabbitMQ packages
+        run: npm install --prefix experiments/recursion-tree-v0 --no-save --ignore-scripts --no-audit --no-fund pg@8.16.3 amqplib@0.10.9
+      - name: Syntax and disposable Postgres container identity
+        run: |
+          set -euo pipefail
+          node --check experiments/recursion-tree-v0/provider-uncertain-http.mjs
+          node --check experiments/recursion-tree-v0/provider-uncertain-worker.mjs
+          node --check experiments/recursion-tree-v0/provider-uncertain-recovery.mjs
+          postgres="$(docker ps --filter 'ancestor=postgres:16-alpine' --format '{{.ID}}' | head -n 1)"
+          test -n "$postgres"
+          echo "AAU_POSTGRES_CONTAINER=$postgres" >> "$GITHUB_ENV"
+      - name: Real HTTP answer before DB outage; reconcile by request ID or durable manual hold
+        working-directory: experiments/recursion-tree-v0
+        run: node provider-uncertain-recovery.mjs
+      - name: Archive provider-call count and SQL journal uncertainty evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-provider-response-journal-gap-evidence
+          path: experiments/recursion-tree-v0/provider-uncertain-recovery-report.json
+          if-no-files-found: ignore

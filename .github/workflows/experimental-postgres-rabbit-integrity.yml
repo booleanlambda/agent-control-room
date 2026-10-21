@@ -1,0 +1,73 @@
+name: AAU Isolated Postgres RabbitMQ Two-Worker Integrity
+
+on:
+  push:
+    branches: [experiment/recursive-tree-nemotron-v0]
+    paths:
+      - 'experiments/recursion-tree-v0/pg-rabbit-*.mjs'
+      - 'experiments/recursion-tree-v0/kimi-k26-recorded-replay.mjs'
+      - '.github/workflows/experimental-postgres-rabbit-integrity.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'experiments/recursion-tree-v0/pg-rabbit-*.mjs'
+      - '.github/workflows/experimental-postgres-rabbit-integrity.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  concurrent-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: recursion
+          POSTGRES_PASSWORD: recursion
+          POSTGRES_DB: recursion_lab
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U recursion -d recursion_lab"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+      rabbitmq:
+        image: rabbitmq:3.13-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: aau_ci
+          RABBITMQ_DEFAULT_PASS: aau_ci
+        ports: ['5672:5672']
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 25
+    env:
+      AAU_DISPOSABLE_CI_DB: 'yes'
+      TEST_PG_URL: postgres://recursion:recursion@127.0.0.1:5432/recursion_lab
+      TEST_RABBIT_URL: amqp://aau_ci:aau_ci@127.0.0.1:5672
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install experiment-only database and broker drivers
+        run: |
+          npm install --prefix experiments/recursion-tree-v0 --no-save --ignore-scripts --no-audit --no-fund pg@8.16.3 amqplib@0.10.9
+      - name: Syntax and strict disposable-resource guard
+        run: |
+          node --check experiments/recursion-tree-v0/pg-rabbit-contract.mjs
+          node --check experiments/recursion-tree-v0/pg-rabbit-worker.mjs
+          node --check experiments/recursion-tree-v0/pg-rabbit-integration.mjs
+      - name: Competing workers, at-least-once messages, PostgreSQL rollback, fenced leases and Kimi root
+        working-directory: experiments/recursion-tree-v0
+        run: node pg-rabbit-integration.mjs
+      - name: Preserve transactional crash and concurrency audit
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aau-real-two-worker-transaction-integrity
+          path: experiments/recursion-tree-v0/pg-rabbit-transaction-report.json
+          if-no-files-found: ignore

@@ -1,0 +1,81 @@
+name: AAU Isolated Broker Restart DB Outage Network Cut
+
+on:
+  push:
+    branches: [experiment/recursive-tree-nemotron-v0]
+    paths:
+      - 'experiments/recursion-tree-v0/pg-rabbit-resilience.mjs'
+      - 'experiments/recursion-tree-v0/pg-rabbit-worker.mjs'
+      - 'experiments/recursion-tree-v0/pg-rabbit-contract.mjs'
+      - '.github/workflows/experimental-postgres-rabbit-resilience.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'experiments/recursion-tree-v0/pg-rabbit-resilience.mjs'
+      - 'experiments/recursion-tree-v0/pg-rabbit-worker.mjs'
+      - 'experiments/recursion-tree-v0/pg-rabbit-contract.mjs'
+      - '.github/workflows/experimental-postgres-rabbit-resilience.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  transient-service-outage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: recursion
+          POSTGRES_PASSWORD: recursion
+          POSTGRES_DB: recursion_lab
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U recursion -d recursion_lab"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+      rabbitmq:
+        image: rabbitmq:3.13-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: aau_ci
+          RABBITMQ_DEFAULT_PASS: aau_ci
+        ports: ['5672:5672']
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 25
+    env:
+      AAU_DISPOSABLE_CI_DB: 'yes'
+      TEST_PG_URL: postgres://recursion:recursion@127.0.0.1:5432/recursion_lab
+      TEST_RABBIT_URL: amqp://aau_ci:aau_ci@127.0.0.1:5672
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Install disposable test drivers
+        run: npm install --prefix experiments/recursion-tree-v0 --no-save --ignore-scripts --no-audit --no-fund pg@8.16.3 amqplib@0.10.9
+      - name: Validate safe target containers and test syntax
+        run: |
+          set -euo pipefail
+          node --check experiments/recursion-tree-v0/pg-rabbit-resilience.mjs
+          node --check experiments/recursion-tree-v0/pg-rabbit-worker.mjs
+          rabbit="$(docker ps --filter 'ancestor=rabbitmq:3.13-alpine' --format '{{.ID}}' | head -n 1)"
+          postgres="$(docker ps --filter 'ancestor=postgres:16-alpine' --format '{{.ID}}' | head -n 1)"
+          test -n "$rabbit"
+          test -n "$postgres"
+          test "$rabbit" != "$postgres"
+          echo "AAU_RABBIT_CONTAINER=$rabbit" >> "$GITHUB_ENV"
+          echo "AAU_POSTGRES_CONTAINER=$postgres" >> "$GITHUB_ENV"
+      - name: Restart broker with persistent message, cut worker network, stop DB and restore Kimi tree
+        working-directory: experiments/recursion-tree-v0
+        run: node pg-rabbit-resilience.mjs
+      - name: Preserve real service-outage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aau-broker-restart-postgres-outage-tcp-partition
+          path: experiments/recursion-tree-v0/pg-rabbit-resilience-report.json
+          if-no-files-found: ignore
