@@ -35,7 +35,7 @@ function fixture({semanticRequirements=[]}={}) {
       {path:NET,field:'net_burn',expectedMonths:12,expectedCheckCount:48},
       {path:CASH,field:'ending_cash',expectedMonths:12,expectedCheckCount:36}
     ],
-    openingCash:OPENING,semanticRequirements
+    openingCash:OPENING,cashBalanceField:'ending_cash',semanticRequirements
   };
   const runtime={
     lifecycle_status:'paused',assignment_budget_remaining:289,
