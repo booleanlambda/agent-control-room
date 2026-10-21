@@ -154,7 +154,7 @@ Create the following in a dedicated **recovery experiment branch** first; do not
 
 ## 6. Operational state and next action
 
-**CURRENT POLICY: HOLD SILAS.** No restart, wake, credit grant, model/provider change, schema repair in live production, or new semantic epoch merely because this record exists.
+**POLICY AT THE TIME OF 2026-10-20 DIAGNOSIS: HOLD SILAS.** (Superseded by explicit operator restart recorded below.) No restart, wake, credit grant, model/provider change, schema repair in live production, or new semantic epoch merely because this record exists.
 
 Recommended order: **freeze forensic fixture → implement deterministic checkpoint and schema replay → inject all three main errors plus budget constraints → collect verdict → canary → separately seek explicit live-recovery authorization.**
 
@@ -179,3 +179,5 @@ Do not replace a historical diagnosis with an unverified claim of repair.
 ### Update log
 
 - **2026-10-20:** Root continuity file created with Silas forensic findings, existing protections, proposed recovery-controller formula, artifact plan, replay tests and hold/restart gates. **Documentation only — no recovery fix or live replay claimed.**
+
+- **2026-10-20 22:55 EDT (2026-10-21 02:55 UTC):** User explicitly authorized restart. Canonical `public.aau_control_room_admin_unpause(uuid)` returned `status=running` and wake ID `9525ebf4-0522-487b-849c-8bd26a6319b9`. Subsequent Supabase reads confirmed `autonomous_lifecycle_runs.status=running`, wake `status=running`, `attempts=1`, `started_at=2026-10-21 02:55:30 UTC`, provider/model unchanged (`google/gemma-4-31b-it`). Admin restart cleared the recorded `repair_required` lifecycle metadata and resumed existence levy (`levy_enabled=true`). Economic compute balance remained 0; assignment epoch 13 remained active with 289 total budget units and automatic rollover count 2/2. **Actual work completion, restoration of compute solvency and repair of parent `R.002.003.002` are NOT verified.** The experimental recovery controller was not deployed/invoked. Live agent is running as of the last verification query; this is not a guarantee that subsequent wakes will succeed.
