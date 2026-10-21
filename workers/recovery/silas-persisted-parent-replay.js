@@ -9,7 +9,7 @@ import {verifyPythonMathChecksChunked} from '../python-math.js';
 const PARENT='R.002.003.002';
 const HEADERS=Object.freeze([
   {path:PARENT+'.001',field:'net_burn',expectedCheckCount:48,expectedMonths:12},
-  {path:PARENT+'.002',field:'ending_cash',expectedCheckCount:36,expectedMonths:12}
+  {path:PARENT+'.002',field:'ending_cash_balance',expectedCheckCount:36,expectedMonths:12}
 ]);
 const hashBytes=s=>createHash('sha256').update(s,'utf8').digest('hex');
 const obj=o=>!!o&&typeof o==='object'&&!Array.isArray(o);
