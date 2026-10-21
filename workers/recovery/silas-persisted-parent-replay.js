@@ -88,6 +88,29 @@ export function replayPersistedSilasParent({records,sourceManifest,contract}={})
        verified.all_valid!==true||verified.check_count!==spec.expectedCheckCount){
       errors.push('INDEPENDENT_PYTHON_CHECK_FAILURE:'+spec.path);continue;
     }
+    // A successful expression alone is not evidence that it verifies a value
+    // in the published calculation. Require an explicit check label for each
+    // of the 12 authoritative month/field cells, and compare claimed_result
+    // to the actual presented cell value. Unknown mappings fail closed.
+    const claimErrors=[];
+    for(let i=0;i<spec.expectedMonths;i++){
+      const row=item.calculation?.[i];
+      const tag='calculation['+i+'].'+spec.field;
+      const matches=item.python_checks.filter(check=>
+        typeof check?.label==='string' &&
+        (check.label===tag || check.label.startsWith(tag+' :: ')));
+      if(matches.length!==1 || !row || row.month!==i+1 ||
+         !Number.isFinite(row[spec.field]) ||
+         !Number.isFinite(matches[0]?.claimed_result) ||
+         Math.abs(matches[0].claimed_result-row[spec.field])>0.005) {
+        claimErrors.push(tag);
+      }
+    }
+    if(claimErrors.length){
+      errors.push('CHECK_TO_CALC_BINDING_UNRESOLVED:'+spec.path);
+      audited.push({node_path:spec.path,missing_or_invalid_bindings:claimErrors});
+      continue;
+    }
     children.push({node_path:record.node_path,status:record.status,
       result_hash:record.result_hash,artifact:item});
     receipts[spec.path]={
