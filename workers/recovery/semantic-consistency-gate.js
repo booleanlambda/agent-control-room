@@ -57,7 +57,7 @@ export function makeCanonicalSemanticCandidate({projection,openingCash}={}){
       ', this is '+article+' '+f.cash_change_from_opening+
       ' of USD '+m(Math.abs(f.cash_delta))+
       '. Monthly cash changes are '+f.cash_monotonicity+'.',
-    sanity_check:'For each of the 12 months, net burn is total operating expenses minus gross profit, and ending cash is opening cash minus cumulative net burn.',
+    sanity_check:'For all 12 months, ending cash equals opening cash minus cumulative net burn; this numeric consistency check does not establish correctness of the broader operating model.',
     semantic_claims:ids.map(id=>({id,value:f[id]})),
     source_manifest:f.sources.map(x=>({...x})),
     generation:'DETERMINISTIC_TEMPLATE_ONLY'
