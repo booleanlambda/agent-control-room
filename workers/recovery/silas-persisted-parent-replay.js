@@ -124,6 +124,6 @@ export function replayPersistedSilasParent({records,sourceManifest,contract}={})
     audited,source_snapshot_hash:hashBytes(records
       .map(x=>x.node_path+':'+sourceManifest[x.node_path].envelope_sha256).sort().join('\n')),
     mandatory_next_action:'COMPLETE_SEMANTIC_AND_PROVENANCE_OBLIGATIONS',
-    runtime_budget_rollover_required:false,
+    numeric_projection_requires_reasoning_rollover:false,
     live_node_completed:false,model_calls:0};
 }
