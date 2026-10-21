@@ -190,3 +190,24 @@ test('a replay does not alter the paused economic state or create wake actions',
   assert.equal(JSON.stringify(f),before);
   assert.equal('wake_id' in plan,false);
 });
+
+test('semantic mismatch has its own deterministic failure classification',()=>{
+  assert.equal(classifyFailure({code:'SEMANTIC_MISMATCH'}),'SEMANTIC_MISMATCH');
+  assert.equal(classifyFailure({message:'CLAIM_CONTRADICTS_VERIFIED_RESULT'}),
+    'SEMANTIC_MISMATCH');
+});
+test('semantic mismatch blocks even when numeric parent projection is ready',()=>{
+  const f=fixture();
+  f.fault={code:'SEMANTIC_MISMATCH'};
+  const p=planRecovery(f);
+  assert.equal(p.action,'HOLD_SEMANTIC_MISMATCH');
+  assert.equal(p.projection_status,'PROJECTION_READY');
+  assert.equal(p.live_execution_allowed,false);
+  assert.equal(p.model_calls_executed,0);
+});
+test('semantic mismatch does not retry when numeric child evidence is unavailable',()=>{
+  const f=fixture();
+  f.fault={message:'SEMANTIC_MISMATCH'};
+  f.children[0].status='pending';
+  assert.equal(planRecovery(f).action,'HOLD_SEMANTIC_MISMATCH');
+});
