@@ -29,5 +29,7 @@ jobs:
         run: |
           node --check workers/recovery/experimental-controller.js
           node --check workers/recovery/experimental-controller.test.js
+          node --check workers/recovery/silas-persisted-parent-replay.js
+          node --check workers/recovery/silas-persisted-parent-replay.test.js
       - name: Run offline deterministic recovery tests
-        run: node --test workers/recovery/experimental-controller.test.js
+        run: node --test workers/recovery/*.test.js
