@@ -1,0 +1,85 @@
+{
+  "contract": "aau.experimental.recovery.diagnostic_fixture.v0.1",
+  "fixture_type": "READ_ONLY_METADATA_FROM_LIVE_2026_10_20",
+  "confidentiality": "No raw agent thoughts, full artifacts, tokens, credentials, or private account records.",
+  "source": {
+    "database": "Supabase AAU agent_lab",
+    "audited_on": "2026-10-20",
+    "checked_against": "CONTINUITY.md",
+    "is_live_execution": false
+  },
+  "assignment": {
+    "name": "QDA601-M10-U2 — Integrated Model",
+    "key": "req:ba9cb9d92627de141f8abbfdbe5594938654841b2d856274",
+    "parent": "R.002.003.002",
+    "parent_status": "split",
+    "complete_nodes": 25,
+    "split_nodes": 4
+  },
+  "children": [
+    {
+      "node_path": "R.002.003.002.001",
+      "category": "net_burn",
+      "status": "completed",
+      "result_hash": "c54084bf57a7c49c939ce33240cd8e0345a753b41260a60a1561f0f86cae5067",
+      "source_check_count": 48,
+      "source_calculation_type": "array",
+      "artifact_present": true
+    },
+    {
+      "node_path": "R.002.003.002.002",
+      "category": "ending_cash",
+      "status": "completed",
+      "result_hash": "3ce809d48e6ee19edc95cdce80f298b9999de5d82a4fab3dac584195487b2f01",
+      "source_check_count": 36,
+      "source_calculation_type": "array",
+      "artifact_present": true
+    }
+  ],
+  "runtime": {
+    "epoch": 13,
+    "epoch_status": "active",
+    "outer_lifecycle": "paused",
+    "remaining_assignment_units": 289,
+    "initial_assignment_units": 918,
+    "reasoning_rollover_index": 2,
+    "max_automatic_rollovers": 2
+  },
+  "faults": [
+    {
+      "type": "PROVIDER_TRANSPORT",
+      "code": "NVIDIA_HTTP_504",
+      "stage": "synthesis_final"
+    },
+    {
+      "type": "TRUNCATED_RESPONSE",
+      "code": "TRUNCATED_RESPONSE",
+      "finish_reason": "length",
+      "completion_tokens": 7000,
+      "reasoning_tokens": 6997,
+      "usable_output_chars": 0,
+      "stage": "synthesis_final"
+    },
+    {
+      "type": "SCHEMA_MISMATCH",
+      "code": "qda_recursive_verified_descendant_materialization_invalid:R.002.003.002:calculation.python_checks_must_be_array",
+      "stage": "verified_descendant_materialization"
+    },
+    {
+      "type": "BUDGET_EXHAUSTED",
+      "code": "semantic_bucket_rollover_denied:semantic_budget_bucket_exhausted:reasoning:bucket_limit_exhausted",
+      "stage": "final_failure"
+    }
+  ],
+  "last_failed_wake": {
+    "id": "437a1487-c648-41f0-b249-6a7cf0864759",
+    "ended_at_utc": "2026-10-11T20:21:48Z",
+    "status": "failed"
+  },
+  "warnings": [
+    "The recorded result_hash values are source references, not offline SHA-256 receipts for the original artifact envelope.",
+    "Full original child artifacts and independently executed math-verification records are NOT embedded here.",
+    "Synthetic test children are intentionally unrelated to original financial values. Passing tests does NOT show the live parent was recovered.",
+    "No live bridge RPC, model provider, Neon or Supabase write is invoked by the test."
+  ]
+}
