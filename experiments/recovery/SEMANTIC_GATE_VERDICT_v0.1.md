@@ -38,3 +38,7 @@ Additional persisted-replay integration tests cover absent candidate, narrow can
 2. Extract independently pinned original verifier metadata and replay full authentic Silas envelopes through the integrated gate.
 3. Add task-aware interpretation and self-audit validation (not merely numerical semantics), with explicit positive/negative evidence links.
 4. Only after full QDA contract is verified, consider an explicitly authorized live recovery path. No automatic rollover or live writes.
+
+## Recovery planner no-bypass rule
+
+The general `experimental-controller.js` now classifies `SEMANTIC_MISMATCH` separately from schema, transport and arithmetic errors. It returns **`HOLD_SEMANTIC_MISMATCH` even if the child numerical projection is already ready**; no mechanical completion, inference retry or budget rollover follows from a semantic contradiction. Three additional planner tests were added. These newer integration tests require a fresh independent test run before the branch can be promoted.
