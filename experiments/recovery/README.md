@@ -55,3 +55,9 @@ A parent whose \`semanticRequirements\` remain open is reported as \`PRESERVE_PR
 - Seek explicit authorization separately before any live wake, credit update, model swap or production cutover.
 
 See root \`CONTINUITY.md\` for the broader recovery plan, including outstanding state reconciliation (\`lifecycle=paused\`, \`semantic_epoch=active\`).
+
+## Semantic consistency experiment (2026-10-20)
+
+New files: `workers/recovery/semantic-consistency-gate.js`, `workers/recovery/semantic-consistency-gate.test.js`, and [semantic verdict](SEMANTIC_GATE_VERDICT_v0.1.md). The persisted-parent replay now calls the semantic gate for any supplied `parentCandidate`, preserves `SEMANTIC_MISMATCH` as a typed hold, and treats missing or ambiguous interpretation as `UNRESOLVED`. Only exact deterministic, source-pinned numeric statements qualify for a *narrow* semantic PASS; parent completion remains false. Local semantic tests: 21/21 pass; the latest integrated GitHub CI run remains unverified.
+
+Run: `node --test workers/recovery/*.test.js` (and check each file with `node --check`). This is still an offline-only artifact, not a production runtime hook.
