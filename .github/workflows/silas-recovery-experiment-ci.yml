@@ -1,0 +1,33 @@
+name: Silas Recovery Experiment CI
+
+on:
+  push:
+    branches:
+      - experiment/aau-silas-recovery-v0-1-20261020
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'workers/recovery/**'
+      - 'experiments/recovery/**'
+      - '.github/workflows/silas-recovery-experiment-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-recovery-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Confirm syntax
+        run: |
+          node --check workers/recovery/experimental-controller.js
+          node --check workers/recovery/experimental-controller.test.js
+      - name: Run offline deterministic recovery tests
+        run: node --test workers/recovery/experimental-controller.test.js
