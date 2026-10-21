@@ -179,3 +179,5 @@ Do not replace a historical diagnosis with an unverified claim of repair.
 ### Update log
 
 - **2026-10-20:** Root continuity file created with Silas forensic findings, existing protections, proposed recovery-controller formula, artifact plan, replay tests and hold/restart gates. **Documentation only — no recovery fix or live replay claimed.**
+
+- **2026-10-20 (experimental branch only):** Implemented offline-only `workers/recovery/experimental-controller.js`, added sanitized read-only metadata fixture and 21 adversarial replay tests on `experiment/aau-silas-recovery-v0-1-20261020` (draft PR #140). GitHub Actions `39527869954` passed **21/21 synthetic tests**, no model calls, no live writes. [Recovery verdict](experiments/recovery/RECOVERY_VERDICT.md). **Real Silas child-data replay and live recovery remain NOT DONE; original production/main continuity status remains valid.**
