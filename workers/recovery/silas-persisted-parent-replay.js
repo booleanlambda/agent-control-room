@@ -130,6 +130,7 @@ export function replayPersistedSilasParent({records,sourceManifest,contract}={})
     contract:{
       requiredChildren:HEADERS,
       openingCash:contract.openingCash,
+      cashBalanceField:'ending_cash_balance',
       // Explicitly NEVER claim the parent is complete until interpretation,
       // audit/provenance and exact parent-schema obligations are discharged.
       semanticRequirements:[
