@@ -4,6 +4,7 @@
 // agent-authored semantic requirements; it returns a partial projection.
 import {createHash} from 'node:crypto';
 import {artifactHash,assembleVerifiedProjection} from './experimental-controller.js';
+import {verifySemanticConsistency} from './semantic-consistency-gate.js';
 import {verifyPythonMathChecksChunked} from '../python-math.js';
 
 const PARENT='R.002.003.002';
@@ -42,7 +43,7 @@ function trustedCognitionReceipt(record) {
     && decision.deterministic_math_verification?.ok===true
     && decision.deterministic_math_verification?.all_match===true;
 }
-export function replayPersistedSilasParent({records,sourceManifest,contract}={}) {
+export function replayPersistedSilasParent({records,sourceManifest,contract,parentCandidate}={}) {
   const errors=[], audited=[];
   if(!Array.isArray(records)||!obj(sourceManifest)||!obj(contract)) {
     return {status:'BLOCKED',reason:'INCOMPLETE_SNAPSHOT_INPUT'};
@@ -144,10 +145,18 @@ export function replayPersistedSilasParent({records,sourceManifest,contract}={})
   if(projected.status!=='PROJECTION_READY')return {
     ...projected,model_calls:0,live_node_completed:false,audited
   };
-  return {...projected,status:'VERIFIED_NUMERIC_PROJECTION_ONLY',
+  const semanticGate=verifySemanticConsistency({
+    parentCandidate,verifiedProjection:projected,openingCash:contract.openingCash
+  });
+  return {...projected,
+    status:semanticGate.status==='SEMANTIC_MISMATCH'
+      ?'SEMANTIC_MISMATCH':'VERIFIED_NUMERIC_PROJECTION_ONLY',
+    semantic_gate:semanticGate,
     audited,source_snapshot_hash:hashBytes(records
       .map(x=>x.node_path+':'+sourceManifest[x.node_path].envelope_sha256).sort().join('\n')),
-    mandatory_next_action:'COMPLETE_SEMANTIC_AND_PROVENANCE_OBLIGATIONS',
+    mandatory_next_action:semanticGate.status==='SEMANTIC_MISMATCH'
+      ?'REMEDIATE_SEMANTIC_MISMATCH'
+      :'COMPLETE_SEMANTIC_AND_PROVENANCE_OBLIGATIONS',
     numeric_projection_requires_reasoning_rollover:false,
     live_node_completed:false,model_calls:0};
 }
